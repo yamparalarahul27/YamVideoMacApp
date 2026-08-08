@@ -1,0 +1,5 @@
+# Build output — regenerate with ./build.sh
+build/
+
+# macOS
+.DS_Store
