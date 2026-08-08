@@ -256,6 +256,116 @@ final class AppModel: ObservableObject {
         refreshPreview()
     }
 
+    // MARK: - Zoom shots
+
+    @Published var selectedShotID: ZoomShot.ID?
+    /// Level used for the next zoom you add.
+    @Published var defaultZoomLevel: Double = 2
+
+    var selectedShot: ZoomShot? {
+        guard let selectedShotID else { return nil }
+        return selectedItem?.zoomShots.first { $0.id == selectedShotID }
+    }
+
+    /// Current scrubber position in seconds.
+    var previewTime: Double {
+        guard let item = selectedItem, let info = item.info else { return 0 }
+        return info.duration * item.previewFraction
+    }
+
+    /// Adds a zoom starting at the scrubber, targeting `point` (full-frame pixels).
+    @discardableResult
+    func addZoom(at point: CGPoint) -> Bool {
+        guard let index = selectedIndex, let info = items[index].info else { return false }
+        let shot = ZoomShot(start: previewTime, level: defaultZoomLevel, target: point)
+
+        guard shot.end <= info.duration + 0.01 else {
+            statusMessage = "Not enough clip left for a \(formatDuration(shot.duration)) zoom."
+            return false
+        }
+        guard !items[index].zoomShots.contains(where: { $0.overlaps(shot) }) else {
+            statusMessage = "That overlaps an existing zoom — move the playhead clear of it."
+            return false
+        }
+
+        items[index].zoomShots.append(shot)
+        items[index].zoomShots.sort { $0.start < $1.start }
+        selectedShotID = shot.id
+        statusMessage = "Zoom \(shot.levelLabel) at \(formatDuration(shot.start))."
+        return true
+    }
+
+    /// Adds a zoom aimed at the middle of the framing, for keyboard use or when the
+    /// exact spot does not matter.
+    func addZoomAtCentre() {
+        guard let item = selectedItem, let info = item.info else { return }
+        let frame = item.crop ?? info.fullFrame
+        addZoom(at: CGPoint(x: frame.midX, y: frame.midY))
+    }
+
+    /// Applies an edit only if it keeps the shot inside the clip and clear of the others.
+    private func mutateShot(_ id: ZoomShot.ID, _ transform: (inout ZoomShot) -> Void) {
+        guard let index = selectedIndex, let info = items[index].info,
+              let shotIndex = items[index].zoomShots.firstIndex(where: { $0.id == id })
+        else { return }
+
+        var shot = items[index].zoomShots[shotIndex]
+        transform(&shot)
+        shot.start = max(0, min(shot.start, max(0, info.duration - shot.duration)))
+        shot.hold = max(0.2, shot.hold)
+        shot.target.x = min(max(0, shot.target.x), info.fullFrame.maxX)
+        shot.target.y = min(max(0, shot.target.y), info.fullFrame.maxY)
+
+        let others = items[index].zoomShots.filter { $0.id != id }
+        guard !others.contains(where: { $0.overlaps(shot) }) else {
+            statusMessage = "That would overlap another zoom."
+            return
+        }
+        items[index].zoomShots[shotIndex] = shot
+        items[index].zoomShots.sort { $0.start < $1.start }
+    }
+
+    func moveZoomTarget(_ id: ZoomShot.ID, to point: CGPoint) {
+        mutateShot(id) { $0.target = point }
+    }
+
+    func setZoomLevel(_ id: ZoomShot.ID, _ level: Double) {
+        mutateShot(id) { $0.level = level }
+        defaultZoomLevel = level
+    }
+
+    func setZoomHold(_ id: ZoomShot.ID, _ hold: Double) {
+        mutateShot(id) { $0.hold = hold }
+    }
+
+    func setZoomStart(_ id: ZoomShot.ID, _ start: Double) {
+        mutateShot(id) { $0.start = start }
+    }
+
+    /// Moves the shot's start to wherever the playhead is.
+    func retimeSelectedZoomToPlayhead() {
+        guard let id = selectedShotID else { return }
+        setZoomStart(id, previewTime)
+    }
+
+    func removeSelectedZoom() {
+        guard let index = selectedIndex, let id = selectedShotID else { return }
+        items[index].zoomShots.removeAll { $0.id == id }
+        selectedShotID = items[index].zoomShots.last?.id
+    }
+
+    func clearZooms() {
+        guard let index = selectedIndex else { return }
+        items[index].zoomShots.removeAll()
+        selectedShotID = nil
+    }
+
+    /// Jumps the preview to the middle of a shot's hold, so its framing can be checked.
+    func scrubToShot(_ shot: ZoomShot) {
+        guard let info = selectedItem?.info, info.duration > 0 else { return }
+        setPreviewFraction((shot.start + ZoomShot.ease + shot.hold / 2) / info.duration)
+    }
+
     func setPreviewFraction(_ fraction: Double) {
         guard let index = selectedIndex else { return }
         items[index].previewFraction = min(max(fraction, 0), 1)
@@ -275,6 +385,9 @@ final class AppModel: ObservableObject {
             items[index].aspectLabel = source.aspectLabel
             // Fresh ids so each clip owns its own regions.
             items[index].blurRegions = source.blurRegions.map { BlurRegion(rect: $0.rect) }
+            items[index].zoomShots = source.zoomShots.map {
+                ZoomShot(start: $0.start, hold: $0.hold, level: $0.level, target: $0.target)
+            }
             applied += 1
         }
         let what = source.blurRegions.isEmpty ? "crop" : "crop and blur areas"
@@ -393,6 +506,7 @@ final class AppModel: ObservableObject {
                         info: info,
                         crop: crop,
                         regions: item.blurRegions.map { $0.rect },
+                        zoomShots: item.zoomShots,
                         settings: settings
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
@@ -446,7 +560,8 @@ final class AppModel: ObservableObject {
         let output = FFmpeg.outputURL(for: item.url, settings: settings)
         let args = FFmpeg.exportArguments(
             input: item.url, output: output, info: info, crop: crop,
-            regions: item.blurRegions.map { $0.rect }, settings: settings
+            regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
+            settings: settings
         ).filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
         return (["ffmpeg"] + args).map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
     }

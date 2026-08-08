@@ -10,6 +10,9 @@ struct MediaInfo: Equatable {
     var videoCodec: String
     var audioCodec: String?
     var fps: Double
+    /// Exact frame rate as ffprobe reports it, e.g. "30000/1001". Rounding this to 30
+    /// makes zoompan resample and drifts audio out of sync on long clips.
+    var fpsExpression: String
     var rotation: Int
 
     var hasAudio: Bool { audioCodec != nil }
@@ -62,9 +65,51 @@ enum BlurStyle: String, CaseIterable, Identifiable {
 }
 
 enum EditorMode: String, CaseIterable, Identifiable {
-    case crop, blur
+    case crop, blur, zoom
     var id: String { rawValue }
-    var label: String { self == .crop ? "Crop" : "Blur Areas" }
+    var label: String {
+        switch self {
+        case .crop: return "Crop"
+        case .blur: return "Blur"
+        case .zoom: return "Zoom"
+        }
+    }
+}
+
+// MARK: - Zoom shots
+
+/// A push-in on one spot: ease in, hold still, ease back out.
+struct ZoomShot: Identifiable, Equatable {
+    let id: UUID
+    /// When the ease-in begins, in seconds.
+    var start: Double
+    /// How long the view holds at full zoom, in seconds.
+    var hold: Double
+    /// Magnification at the peak of the shot.
+    var level: Double
+    /// Where to zoom, in full-frame source pixels (same space as crop and blur).
+    var target: CGPoint
+
+    /// Fixed on purpose: a consistent ease is most of what makes these look deliberate.
+    static let ease: Double = 0.5
+    static let levels: [Double] = [1.5, 2, 3]
+
+    init(id: UUID = UUID(), start: Double, hold: Double = 2, level: Double = 2, target: CGPoint) {
+        self.id = id
+        self.start = start
+        self.hold = hold
+        self.level = level
+        self.target = target
+    }
+
+    /// Total time on screen, including both eases.
+    var duration: Double { Self.ease * 2 + hold }
+    var end: Double { start + duration }
+    var levelLabel: String { level == level.rounded() ? "\(Int(level))×" : String(format: "%.1f×", level) }
+
+    func overlaps(_ other: ZoomShot) -> Bool {
+        start < other.end && other.start < end
+    }
 }
 
 // MARK: - Queue item
@@ -95,6 +140,8 @@ struct VideoItem: Identifiable {
     var aspectLabel: String = "Free"
     /// Areas to obscure, applied before the crop.
     var blurRegions: [BlurRegion] = []
+    /// Push-ins, applied after the crop. Kept sorted and non-overlapping.
+    var zoomShots: [ZoomShot] = []
     var status: Status = .probing
     /// Preview scrub position, 0...1.
     var previewFraction: Double = 0.15

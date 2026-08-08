@@ -330,10 +330,15 @@ struct CropEditorPane: View {
                 mode: model.editorMode,
                 regions: item.blurRegions,
                 selectedRegionID: model.selectedRegionID,
+                shots: item.zoomShots,
+                selectedShotID: model.selectedShotID,
                 onChange: { model.updateCrop($0) },
                 onSelectRegion: { model.selectedRegionID = $0 },
                 onChangeRegion: { model.updateRegion($0, rect: $1, live: $2) },
-                onAddRegion: { model.addRegion($0); model.refreshPreview() }
+                onAddRegion: { model.addRegion($0); model.refreshPreview() },
+                onSelectShot: { model.selectedShotID = $0 },
+                onMoveShot: { model.moveZoomTarget($0, to: $1) },
+                onAddShot: { model.addZoom(at: $0) }
             )
             .frame(maxHeight: .infinity)
 
@@ -342,10 +347,17 @@ struct CropEditorPane: View {
             switch model.editorMode {
             case .crop: cropControls
             case .blur: blurControls
+            case .zoom: zoomControls
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onDeleteCommand { if model.editorMode == .blur { model.removeSelectedRegion() } }
+        .onDeleteCommand {
+            switch model.editorMode {
+            case .blur: model.removeSelectedRegion()
+            case .zoom: model.removeSelectedZoom()
+            case .crop: break
+            }
+        }
     }
 
     private var header: some View {
@@ -359,7 +371,7 @@ struct CropEditorPane: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 210)
+            .frame(width: 230)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name).font(.headline).lineLimit(1).truncationMode(.middle)
@@ -391,6 +403,23 @@ struct CropEditorPane: View {
                 ),
                 in: 0...1
             )
+            .overlay(alignment: .bottomLeading) {
+                // Where the zooms sit along the clip.
+                if model.editorMode == .zoom, info.duration > 0, !item.zoomShots.isEmpty {
+                    GeometryReader { geo in
+                        ForEach(item.zoomShots) { shot in
+                            Capsule()
+                                .fill(Color.cyan.opacity(shot.id == model.selectedShotID ? 0.9 : 0.45))
+                                .frame(
+                                    width: max(3, geo.size.width * shot.duration / info.duration),
+                                    height: 3
+                                )
+                                .offset(x: geo.size.width * shot.start / info.duration, y: geo.size.height - 1)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
             Text(formatDuration(info.duration * item.previewFraction))
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
@@ -527,6 +556,94 @@ struct CropEditorPane: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var zoomControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "cursorarrow.click")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(item.zoomShots.isEmpty
+                     ? "Scrub to the moment, then click the spot you want to zoom into."
+                     : "Click to add another zoom, or drag a marker to move it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Add Zoom") { model.addZoomAtCentre() }
+                    .controlSize(.small)
+                    .help("Add a zoom at the playhead, aimed at the middle of the frame")
+                Button("Delete") { model.removeSelectedZoom() }
+                    .controlSize(.small)
+                    .disabled(model.selectedShotID == nil)
+                Button("Clear All") { model.clearZooms() }
+                    .controlSize(.small)
+                    .disabled(item.zoomShots.isEmpty)
+            }
+
+            if let shot = model.selectedShot {
+                HStack(spacing: 10) {
+                    Picker("", selection: Binding(
+                        get: { shot.level },
+                        set: { model.setZoomLevel(shot.id, $0) }
+                    )) {
+                        ForEach(ZoomShot.levels, id: \.self) { level in
+                            Text(level == level.rounded() ? "\(Int(level))×" : String(format: "%.1f×", level))
+                                .tag(level)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 130)
+                    .accessibilityLabel("Zoom level")
+
+                    Text("at \(formatDuration(shot.start))")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    Button("Move to Playhead") { model.retimeSelectedZoomToPlayhead() }
+                        .controlSize(.small)
+                        .help("Start this zoom at the current scrubber position")
+
+                    Divider().frame(height: 18)
+
+                    Text("Hold").font(.caption).foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { shot.hold },
+                            set: { model.setZoomHold(shot.id, $0) }
+                        ),
+                        in: 0.5...8, step: 0.5
+                    )
+                    .frame(width: 110)
+                    .accessibilityLabel("Zoom hold length")
+                    Text(String(format: "%.1fs", shot.hold))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, alignment: .leading)
+
+                    Spacer()
+
+                    Button("Jump to It") { model.scrubToShot(shot) }
+                        .controlSize(.small)
+                }
+            } else {
+                HStack {
+                    Text(item.zoomShots.isEmpty
+                         ? "No zooms yet."
+                         : "Select a zoom marker to adjust it.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("\(item.zoomShots.count) zoom\(item.zoomShots.count == 1 ? "" : "s")")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(minHeight: 62, alignment: .top)
     }
 
     private var outputSummary: String {

@@ -229,6 +229,42 @@ if let pix = FFmpeg.filterGraph(regions: [r1], style: .pixelate, strength: 20, t
           "pixelate computes exact block dimensions", pix.spec)
 }
 
+// MARK: - Zoom
+
+print("\nZoom filter")
+let shot = ZoomShot(start: 0.5, hold: 1.0, level: 2, target: CGPoint(x: 930, y: 530))
+equal(shot.duration, 2.0, "duration is hold plus both eases")
+equal(shot.end, 2.5, "end time")
+check(shot.overlaps(ZoomShot(start: 2.0, hold: 1, level: 2, target: .zero)),
+      "overlapping shots are detected")
+check(!shot.overlaps(ZoomShot(start: 2.6, hold: 1, level: 2, target: .zero)),
+      "adjacent shots do not count as overlapping")
+
+check(FFmpeg.zoomFilter(shots: [], frame: CGSize(width: 1280, height: 720),
+                        cropOrigin: .zero, fpsExpression: "30") == nil,
+      "no shots means no zoom filter")
+check(FFmpeg.zoomFilter(shots: [ZoomShot(start: 0, hold: 1, level: 1, target: .zero)],
+                        frame: CGSize(width: 1280, height: 720),
+                        cropOrigin: .zero, fpsExpression: "30") == nil,
+      "a 1x zoom is not a zoom")
+
+if let zf = FFmpeg.zoomFilter(shots: [shot], frame: CGSize(width: 1280, height: 720),
+                              cropOrigin: .zero, fpsExpression: "30000/1001") {
+    check(zf.contains("fps=30000/1001"), "the exact frame rate is passed through", zf)
+    check(zf.contains("s=1280x720"), "output size matches the input size")
+    check(zf.contains("d=1"), "one output frame per input frame")
+    check(zf.contains("in_time"), "the ramp is driven by presentation time")
+}
+
+// Targets are stored full-frame, so a crop has to shift them.
+if let zf = FFmpeg.zoomFilter(shots: [shot], frame: CGSize(width: 640, height: 480),
+                              cropOrigin: CGPoint(x: 100, y: 50),
+                              fpsExpression: "30") {
+    // target 930,530 - crop origin 100,50 = 830,480; centre of a 640x480 frame is 320,240.
+    check(zf.contains("510.0000"), "x target is offset by the crop origin", zf)
+    check(zf.contains("240.0000"), "y target is offset by the crop origin", zf)
+}
+
 // MARK: - Output naming
 
 print("\nOutput naming")
@@ -454,6 +490,160 @@ let blurredThumb = try await FFmpeg.thumbnail(url: landscape, at: 1.0, duration:
                                               regions: [r1], style: .black, strength: 24)
 check(blurredThumb.count > 1000, "preview frame renders with blur applied")
 check(Array(blurredThumb.prefix(4)) == [0x89, 0x50, 0x4E, 0x47], "preview frame is still PNG")
+
+// MARK: - Zoom encodes
+
+print("\nZoom encodes")
+
+// A clip with a small red marker, so the zoom can be measured rather than eyeballed.
+let markerClip = scratch.appendingPathComponent("marker.mov")
+_ = try await Shell.run(ffmpeg, [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "color=gray:s=1280x720:r=30", "-t", "3",
+    "-vf", "drawbox=900:500:60:60:red@1:t=fill",
+    "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", markerClip.path,
+])
+let markerInfo = try await FFmpeg.probe(url: markerClip)
+equal(markerInfo.fpsExpression, "30/1", "frame rate is captured verbatim")
+
+/// Bounding box of the red marker in one frame, or nil when it is off screen.
+func markerBox(_ url: URL, at time: Double, size: CGSize) async throws -> CGRect? {
+    let result = try await Shell.run(ffmpeg, [
+        "-hide_banner", "-loglevel", "error",
+        "-ss", String(format: "%.3f", time), "-i", url.path, "-frames:v", "1",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+    ])
+    let bytes = [UInt8](result.stdout)
+    let w = Int(size.width), h = Int(size.height)
+    guard bytes.count >= w * h * 3 else { return nil }
+    var minX = w, maxX = -1, minY = h, maxY = -1
+    for y in stride(from: 0, to: h, by: 2) {
+        for x in stride(from: 0, to: w, by: 2) {
+            let i = (y * w + x) * 3
+            if bytes[i] > 150, bytes[i + 1] < 90, bytes[i + 2] < 90 {
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+    }
+    guard maxX >= 0 else { return nil }
+    return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+}
+
+var zoomSettings = ExportSettings()
+zoomSettings.suffix = "-zoom"
+let zoomShot = ZoomShot(start: 0.5, hold: 1.0, level: 2, target: CGPoint(x: 930, y: 530))
+let zoomOut = FFmpeg.outputURL(for: markerClip, settings: zoomSettings)
+try await FFmpeg.export(input: markerClip, output: zoomOut, info: markerInfo,
+                        crop: markerInfo.fullFrame, zoomShots: [zoomShot],
+                        settings: zoomSettings) { _ in }
+
+let zoomInfo = try await FFmpeg.probe(url: zoomOut)
+equal(zoomInfo.width, 1280, "zoom keeps the frame size")
+equal(zoomInfo.height, 720, "zoom keeps the frame height")
+check(abs(zoomInfo.duration - markerInfo.duration) < 0.1, "zoom preserves duration",
+      "\(markerInfo.duration) -> \(zoomInfo.duration)")
+
+let frameSize = CGSize(width: 1280, height: 720)
+let before = try await markerBox(zoomOut, at: 0.2, size: frameSize)
+let held = try await markerBox(zoomOut, at: 1.5, size: frameSize)
+let after = try await markerBox(zoomOut, at: 2.8, size: frameSize)
+
+if let before, let held, let after {
+    check(abs(before.width - 58) < 6, "before the shot the frame is untouched", "\(before)")
+    check(held.width > before.width * 1.8,
+          "the marker is magnified during the hold",
+          String(format: "%.0f -> %.0f px", before.width, held.width))
+    check(abs(held.midX - 640) < 12 && abs(held.midY - 360) < 12,
+          "the target sits in the centre of frame while held",
+          String(format: "centre (%.0f, %.0f)", held.midX, held.midY))
+    check(abs(after.width - before.width) < 6, "the shot eases back out to normal",
+          "\(after)")
+} else {
+    check(false, "marker was visible before, during and after the zoom")
+}
+
+// The hold must be perfectly still — any wobble here is visible on playback.
+let holdA = try await markerBox(zoomOut, at: 1.1, size: frameSize)
+let holdB = try await markerBox(zoomOut, at: 1.9, size: frameSize)
+if let holdA, let holdB {
+    check(abs(holdA.midX - holdB.midX) < 2 && abs(holdA.midY - holdB.midY) < 2,
+          "the view does not drift during the hold",
+          "\(holdA.origin) vs \(holdB.origin)")
+    check(abs(holdA.width - holdB.width) < 2, "the zoom level is steady during the hold")
+}
+
+// The ease must be monotonic — no stutter or overshoot on the way in.
+var sizes: [CGFloat] = []
+for step in 0...5 {
+    let t = 0.5 + Double(step) * 0.1
+    if let boxAtT = try await markerBox(zoomOut, at: t, size: frameSize) { sizes.append(boxAtT.width) }
+}
+check(sizes.count >= 5 && zip(sizes, sizes.dropFirst()).allSatisfy { $1 >= $0 - 1 },
+      "the zoom grows monotonically through the ease-in",
+      sizes.map { String(format: "%.0f", $0) }.joined(separator: " → "))
+
+// Zoom composed with a crop: the target must still land centre-frame, in *cropped*
+// coordinates. Crop chosen so the target is far enough from the edges to actually centre.
+var comboSettings = ExportSettings()
+comboSettings.suffix = "-zoomcrop"
+let comboOut = FFmpeg.outputURL(for: markerClip, settings: comboSettings)
+let comboCrop = CGRect(x: 400, y: 250, width: 800, height: 440)
+try await FFmpeg.export(input: markerClip, output: comboOut, info: markerInfo,
+                        crop: comboCrop, zoomShots: [zoomShot],
+                        settings: comboSettings) { _ in }
+let comboInfo = try await FFmpeg.probe(url: comboOut)
+equal(comboInfo.width, 800, "crop still applies with a zoom")
+let comboSize = CGSize(width: 800, height: 440)
+if let boxed = try await markerBox(comboOut, at: 1.5, size: comboSize) {
+    check(abs(boxed.midX - 400) < 14 && abs(boxed.midY - 220) < 14,
+          "the target centres correctly inside a cropped frame",
+          String(format: "centre (%.0f, %.0f) want (400, 220)", boxed.midX, boxed.midY))
+}
+
+// A target near the edge cannot be centred without showing outside the frame, so the
+// view clamps to the edge instead. The corners must stay real picture, never black bars.
+var edgeSettings = ExportSettings()
+edgeSettings.suffix = "-zoomedge"
+let edgeOut = FFmpeg.outputURL(for: markerClip, settings: edgeSettings)
+let edgeShot = ZoomShot(start: 0.5, hold: 1.0, level: 3, target: CGPoint(x: 1270, y: 715))
+try await FFmpeg.export(input: markerClip, output: edgeOut, info: markerInfo,
+                        crop: markerInfo.fullFrame, zoomShots: [edgeShot],
+                        settings: edgeSettings) { _ in }
+var cornersAreLive = true
+for (cx, cy) in [(4, 4), (1270, 4), (4, 710), (1270, 710)] {
+    let corner = try await pixel(edgeOut, x: cx, y: cy, at: 1.5)
+    // Source background is mid-grey; a letterboxed edge would read near-black.
+    if corner.0 < 40 && corner.1 < 40 && corner.2 < 40 { cornersAreLive = false }
+}
+check(cornersAreLive, "a zoom near the edge clamps inside the frame instead of showing bars")
+
+// Two shots in one clip, plus audio, through the full pipeline.
+var multiSettings = ExportSettings()
+multiSettings.suffix = "-multizoom"
+let multiOut = FFmpeg.outputURL(for: landscape, settings: multiSettings)
+let shots = [
+    ZoomShot(start: 0.2, hold: 0.5, level: 2, target: CGPoint(x: 400, y: 300)),
+    ZoomShot(start: 1.6, hold: 0.5, level: 3, target: CGPoint(x: 900, y: 400)),
+]
+try await FFmpeg.export(input: landscape, output: multiOut, info: info,
+                        crop: info.fullFrame, zoomShots: shots,
+                        settings: multiSettings) { _ in }
+let multiInfo = try await FFmpeg.probe(url: multiOut)
+equal(multiInfo.audioCodec, "aac", "audio survives a zoom render")
+check(abs(multiInfo.duration - info.duration) < 0.15, "two zooms preserve duration",
+      "\(info.duration) -> \(multiInfo.duration)")
+
+// Blur + crop + zoom together.
+var allSettings = ExportSettings()
+allSettings.blurStyle = .black
+allSettings.suffix = "-everything"
+let allOut = FFmpeg.outputURL(for: markerClip, settings: allSettings)
+try await FFmpeg.export(input: markerClip, output: allOut, info: markerInfo,
+                        crop: CGRect(x: 100, y: 50, width: 1000, height: 600),
+                        regions: [CGRect(x: 200, y: 200, width: 100, height: 100)],
+                        zoomShots: [zoomShot], settings: allSettings) { _ in }
+equal(try await FFmpeg.probe(url: allOut).width, 1000, "blur, crop and zoom compose")
 
 // Audio compatibility: ffmpeg 8 *will* copy PCM into MP4 (as `ipcm`), but QuickTime
 // cannot decode it — so the app flags it rather than relying on an ffmpeg error.

@@ -98,6 +98,7 @@ enum FFmpeg {
             videoCodec: (video["codec_name"] as? String) ?? "unknown",
             audioCodec: audio?["codec_name"] as? String,
             fps: parseRate(video["avg_frame_rate"]) ?? parseRate(video["r_frame_rate"]) ?? 0,
+            fpsExpression: frameRateExpression(video),
             rotation: rotation
         )
     }
@@ -121,6 +122,16 @@ enum FFmpeg {
         if let i = any as? Int { return Double(i) }
         if let s = any as? String { return Double(s) }
         return nil
+    }
+
+    /// The frame rate verbatim ("30000/1001"), so it can be handed back to ffmpeg exactly.
+    private static func frameRateExpression(_ stream: [String: Any]) -> String {
+        for key in ["avg_frame_rate", "r_frame_rate"] {
+            if let text = stream[key] as? String, let rate = parseRate(text), rate > 0 {
+                return text
+            }
+        }
+        return "30"
     }
 
     private static func parseRate(_ any: Any?) -> Double? {
@@ -273,6 +284,64 @@ enum FFmpeg {
         return FilterGraph(spec: parts.joined(separator: ";"), isComplex: true, outputLabel: "vout")
     }
 
+    // MARK: - Zoom
+
+    private static func num(_ value: Double) -> String { String(format: "%.4f", value) }
+
+    /// 0 before the shot, eased up to 1 across the ease-in, 1 through the hold, eased back
+    /// down, 0 after. Smoothstep (3u² − 2u³) so the motion starts and stops gently.
+    private static func rampExpression(_ shot: ZoomShot) -> String {
+        let ease = ZoomShot.ease
+        let t0 = shot.start
+        let t1 = t0 + ease
+        let t2 = t1 + shot.hold
+        let t3 = t2 + ease
+        let up = "(3*pow((in_time-\(num(t0)))/\(num(ease)),2)-2*pow((in_time-\(num(t0)))/\(num(ease)),3))"
+        let down = "(3*pow((\(num(t3))-in_time)/\(num(ease)),2)-2*pow((\(num(t3))-in_time)/\(num(ease)),3))"
+        return "if(lt(in_time,\(num(t0))),0,"
+            + "if(lt(in_time,\(num(t1))),\(up),"
+            + "if(lt(in_time,\(num(t2))),1,"
+            + "if(lt(in_time,\(num(t3))),\(down),0))))"
+    }
+
+    /// Animated push-in built as a single zoompan filter.
+    ///
+    /// `frame` is the size *after* cropping and `cropOrigin` its offset, since shot targets
+    /// are stored against the full frame. Output size stays equal to the input size so the
+    /// window maths cannot be thrown off by a simultaneous rescale — the size limit is a
+    /// separate scale step afterwards.
+    static func zoomFilter(
+        shots: [ZoomShot],
+        frame: CGSize,
+        cropOrigin: CGPoint,
+        fpsExpression: String
+    ) -> String? {
+        let active = shots.filter { $0.level > 1 && $0.hold >= 0 }
+        guard !active.isEmpty, frame.width > 0, frame.height > 0 else { return nil }
+
+        var zoomTerms = ["1"]
+        var centreX = [num(frame.width / 2)]
+        var centreY = [num(frame.height / 2)]
+
+        for shot in active.sorted(by: { $0.start < $1.start }) {
+            let ramp = rampExpression(shot)
+            // Targets are stored in full-frame coordinates; convert to the cropped frame.
+            let targetX = shot.target.x - cropOrigin.x
+            let targetY = shot.target.y - cropOrigin.y
+            zoomTerms.append("(\(num(shot.level - 1)))*(\(ramp))")
+            centreX.append("(\(num(targetX - frame.width / 2)))*(\(ramp))")
+            centreY.append("(\(num(targetY - frame.height / 2)))*(\(ramp))")
+        }
+
+        // Shots never overlap, so summing the ramps leaves exactly one active at a time.
+        let z = zoomTerms.joined(separator: "+")
+        let x = "max(0,min((\(centreX.joined(separator: "+")))-iw/(2*zoom),iw-iw/zoom))"
+        let y = "max(0,min((\(centreY.joined(separator: "+")))-ih/(2*zoom),ih-ih/zoom))"
+
+        return "zoompan=z='\(z)':x='\(x)':y='\(y)':d=1"
+            + ":s=\(Int(frame.width))x\(Int(frame.height)):fps=\(fpsExpression)"
+    }
+
     // MARK: - Export
 
     /// Builds the ffmpeg argument list. Exposed so the UI can show the exact command.
@@ -282,6 +351,7 @@ enum FFmpeg {
         info: MediaInfo,
         crop: CGRect,
         regions: [CGRect] = [],
+        zoomShots: [ZoomShot] = [],
         settings: ExportSettings
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
@@ -289,6 +359,12 @@ enum FFmpeg {
 
         if cropRect.integral != info.fullFrame.integral {
             tail.append("crop=\(Int(cropRect.width)):\(Int(cropRect.height)):\(Int(cropRect.minX)):\(Int(cropRect.minY))")
+        }
+
+        // Zoom runs on the cropped frame, before any downscale.
+        if let zoom = zoomFilter(shots: zoomShots, frame: cropRect.size,
+                                 cropOrigin: cropRect.origin, fpsExpression: info.fpsExpression) {
+            tail.append(zoom)
         }
 
         if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
@@ -358,14 +434,15 @@ enum FFmpeg {
         info: MediaInfo,
         crop: CGRect,
         regions: [CGRect] = [],
+        zoomShots: [ZoomShot] = [],
         settings: ExportSettings,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
         guard let ffmpeg = ffmpegPath else {
             throw FFmpegError(message: "ffmpeg was not found.")
         }
-        let args = exportArguments(input: input, output: output, info: info,
-                                   crop: crop, regions: regions, settings: settings)
+        let args = exportArguments(input: input, output: output, info: info, crop: crop,
+                                   regions: regions, zoomShots: zoomShots, settings: settings)
         let duration = info.duration
 
         let result = try await Shell.run(ffmpeg, args) { line in

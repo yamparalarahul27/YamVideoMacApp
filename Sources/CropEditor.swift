@@ -363,6 +363,99 @@ struct BlurOverlay: View {
     }
 }
 
+// MARK: - Zoom overlay
+
+struct ZoomOverlay: View {
+    let shots: [ZoomShot]
+    let selectedID: ZoomShot.ID?
+    let crop: CGRect
+    let bounds: CGRect
+    let displaySize: CGSize
+    let onSelect: (ZoomShot.ID) -> Void
+    let onMove: (ZoomShot.ID, CGPoint) -> Void
+    let onAdd: (CGPoint) -> Void
+
+    private var scale: CGFloat { displaySize.width / max(bounds.width, 1) }
+    private let tint = Color.cyan
+
+    /// What stays visible at the peak of a shot: the crop shrunk by the zoom level,
+    /// centred on the target and kept inside the frame.
+    private func viewport(_ shot: ZoomShot) -> CGRect {
+        let w = crop.width / shot.level
+        let h = crop.height / shot.level
+        let x = min(max(crop.minX, shot.target.x - w / 2), crop.maxX - w)
+        let y = min(max(crop.minY, shot.target.y - h / 2), crop.maxY - h)
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            DimMask(hole: crop, bounds: bounds, scale: scale, opacity: 0.4)
+
+            // Click anywhere to drop a zoom at the playhead.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { location in
+                    onAdd(CGPoint(x: location.x / scale, y: location.y / scale))
+                }
+
+            ForEach(shots) { shot in
+                let selected = shot.id == selectedID
+                let box = viewport(shot)
+
+                Rectangle()
+                    .strokeBorder(tint.opacity(selected ? 0.95 : 0.4),
+                                  style: StrokeStyle(lineWidth: selected ? 1.5 : 1, dash: [6, 3]))
+                    .frame(width: box.width * scale, height: box.height * scale)
+                    .offset(x: box.minX * scale, y: box.minY * scale)
+                    .allowsHitTesting(false)
+
+                ZoomTarget(shot: shot, selected: selected, scale: scale, tint: tint)
+                    .position(x: shot.target.x * scale, y: shot.target.y * scale)
+                    .gesture(
+                        DragGesture(minimumDistance: 1)
+                            .onChanged { value in
+                                onSelect(shot.id)
+                                onMove(shot.id, CGPoint(x: value.location.x / scale,
+                                                        y: value.location.y / scale))
+                            }
+                    )
+                    .onTapGesture { onSelect(shot.id) }
+            }
+        }
+        .frame(width: displaySize.width, height: displaySize.height)
+        .clipped()
+    }
+}
+
+private struct ZoomTarget: View {
+    let shot: ZoomShot
+    let selected: Bool
+    let scale: CGFloat
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(tint.opacity(selected ? 1 : 0.55), lineWidth: selected ? 2 : 1.5)
+                .background(Circle().fill(tint.opacity(selected ? 0.22 : 0.10)))
+                .frame(width: 30, height: 30)
+            Circle()
+                .fill(tint.opacity(selected ? 1 : 0.6))
+                .frame(width: 5, height: 5)
+            Text(shot.levelLabel)
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(tint.opacity(selected ? 0.95 : 0.6)))
+                .offset(y: 24)
+                .fixedSize()
+        }
+        .contentShape(Circle().size(width: 34, height: 34).offset(x: -17, y: -17))
+    }
+}
+
 // MARK: - Canvas (frame + overlay)
 
 struct CropCanvas: View {
@@ -374,10 +467,15 @@ struct CropCanvas: View {
     let mode: EditorMode
     let regions: [BlurRegion]
     let selectedRegionID: BlurRegion.ID?
+    let shots: [ZoomShot]
+    let selectedShotID: ZoomShot.ID?
     let onChange: (CGRect) -> Void
     let onSelectRegion: (BlurRegion.ID) -> Void
     let onChangeRegion: (BlurRegion.ID, CGRect, Bool) -> Void
     let onAddRegion: (CGRect) -> Void
+    let onSelectShot: (ZoomShot.ID) -> Void
+    let onMoveShot: (ZoomShot.ID, CGPoint) -> Void
+    let onAddShot: (CGPoint) -> Void
 
     var body: some View {
         GeometryReader { geo in
@@ -424,6 +522,17 @@ struct CropCanvas: View {
                             onSelect: onSelectRegion,
                             onChange: onChangeRegion,
                             onAdd: onAddRegion
+                        )
+                    case .zoom:
+                        ZoomOverlay(
+                            shots: shots,
+                            selectedID: selectedShotID,
+                            crop: crop,
+                            bounds: info.fullFrame,
+                            displaySize: fitted,
+                            onSelect: onSelectShot,
+                            onMove: onMoveShot,
+                            onAdd: onAddShot
                         )
                     }
                 }
