@@ -93,7 +93,7 @@ struct ContentView: View {
             centeredMessage(
                 icon: "film.stack",
                 title: "Drop MOV files here",
-                detail: "Or press ⌘O to choose files. Crop visually, then convert to MP4.",
+                detail: "Or press ⌘O to choose files. Crop visually, then convert to MP4, GIF or WebP.",
                 action: ("Add Videos…", { model.promptForFiles() })
             )
         }
@@ -171,7 +171,11 @@ struct ContentView: View {
     private var defaultStatus: String {
         if model.items.isEmpty { return "No videos queued." }
         let count = model.items.count
-        return "\(count) video\(count == 1 ? "" : "s") queued · \(model.settings.encoder.label) · \(model.settings.qualityDescription)"
+        let settings = model.settings
+        let detail = settings.format == .mp4
+            ? settings.encoder.label
+            : "\(settings.format.label) · \(settings.frameRate.label)"
+        return "\(count) video\(count == 1 ? "" : "s") queued · \(detail) · \(settings.qualityDescription)"
     }
 
     private func loadDroppedURLs(
@@ -664,39 +668,33 @@ struct SettingsPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                section("Video") {
-                    Picker("Encoder", selection: $model.settings.encoder) {
-                        ForEach(VideoEncoder.allCases) { Text($0.label).tag($0) }
+                section("Format") {
+                    Picker("Format", selection: $model.settings.format) {
+                        ForEach(OutputFormat.allCases) { Text($0.label).tag($0) }
                     }
                     .labelsHidden()
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text("Quality").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(model.settings.qualityDescription)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(value: $model.settings.quality, in: 0...100, step: 5) {
-                            EmptyView()
-                        } minimumValueLabel: {
-                            Text("small").font(.caption2).foregroundStyle(.tertiary)
-                        } maximumValueLabel: {
-                            Text("best").font(.caption2).foregroundStyle(.tertiary)
-                        }
-                    }
+                    Text(model.settings.format.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
 
-                    if !model.settings.encoder.isHardware {
-                        Picker("Speed", selection: $model.settings.preset) {
-                            ForEach(ExportSettings.presets, id: \.self) { Text($0).tag($0) }
+                    if model.settings.format == .webp, !model.webpAvailable {
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("This ffmpeg was built without libwebp and cannot write WebP. "
+                                 + "Homebrew's plain ffmpeg is a slim build — run "
+                                 + "brew install ffmpeg-full and relaunch, or export a GIF instead.")
                         }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
+                }
 
-                    Picker("Scale", selection: $model.settings.sizeLimit) {
-                        ForEach(SizeLimit.allCases) { Text($0.label).tag($0) }
-                    }
-                    .labelsHidden()
+                if model.settings.format.isAnimation {
+                    animationSection
+                } else {
+                    videoSection
                 }
 
                 section("Blur Areas") {
@@ -734,25 +732,8 @@ struct SettingsPane: View {
                     }
                 }
 
-                section("Audio") {
-                    Picker("Audio", selection: $model.settings.audio) {
-                        ForEach(AudioMode.allCases) { Text($0.label).tag($0) }
-                    }
-                    .labelsHidden()
-                    if model.settings.audio == .copy, let info = model.selectedItem?.info,
-                       info.hasAudio, !info.audioIsMP4Compatible {
-                        HStack(alignment: .top, spacing: 5) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            Text("This clip's audio is \(info.audioCodec ?? "uncompressed"). Copying it into MP4 produces a file QuickTime and Safari cannot play — choose AAC instead.")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    } else if model.settings.audio == .copy {
-                        Text("Skips audio re-encoding when the source track is already MP4-compatible.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                if model.settings.format == .mp4 {
+                    audioSection
                 }
 
                 section("Destination") {
@@ -802,6 +783,139 @@ struct SettingsPane: View {
             .padding(14)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: Per-format sections
+
+    private var videoSection: some View {
+        section("Video") {
+            Picker("Encoder", selection: $model.settings.encoder) {
+                ForEach(VideoEncoder.allCases) { Text($0.label).tag($0) }
+            }
+            .labelsHidden()
+
+            qualitySlider
+
+            if !model.settings.encoder.isHardware {
+                Picker("Speed", selection: $model.settings.preset) {
+                    ForEach(ExportSettings.presets, id: \.self) { Text($0).tag($0) }
+                }
+            }
+
+            scalePicker
+        }
+    }
+
+    private var animationSection: some View {
+        section(model.settings.format == .gif ? "GIF" : "WebP") {
+            Picker("Frame rate", selection: $model.settings.frameRate) {
+                ForEach(AnimationFrameRate.allCases) { Text($0.label).tag($0) }
+            }
+            .labelsHidden()
+
+            scalePicker
+
+            if let hint = animationSizeHint {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if model.settings.format == .gif {
+                Picker("Colours", selection: $model.settings.gifColors) {
+                    ForEach(GIFColors.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+
+                Picker("Dither", selection: $model.settings.gifDither) {
+                    ForEach(GIFDither.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+
+                Text(model.settings.gifDither.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                if !model.settings.webpLossless { qualitySlider }
+
+                Toggle("Lossless", isOn: $model.settings.webpLossless)
+                    .controlSize(.small)
+                Text(model.settings.webpLossless
+                     ? "Pixel-exact, and much bigger. Worth it for text and flat UI."
+                     : "Lossy, like a JPEG per frame. Right for anything photographic.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Toggle("Loop forever", isOn: $model.settings.loopForever)
+                .controlSize(.small)
+
+            Text("Neither format carries audio, so the sound is dropped.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var audioSection: some View {
+        section("Audio") {
+            Picker("Audio", selection: $model.settings.audio) {
+                ForEach(AudioMode.allCases) { Text($0.label).tag($0) }
+            }
+            .labelsHidden()
+            if model.settings.audio == .copy, let info = model.selectedItem?.info,
+               info.hasAudio, !info.audioIsMP4Compatible {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("This clip's audio is \(info.audioCodec ?? "uncompressed"). Copying it into MP4 produces a file QuickTime and Safari cannot play — choose AAC instead.")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            } else if model.settings.audio == .copy {
+                Text("Skips audio re-encoding when the source track is already MP4-compatible.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var qualitySlider: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Quality").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(model.settings.qualityDescription)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $model.settings.quality, in: 0...100, step: 5) {
+                EmptyView()
+            } minimumValueLabel: {
+                Text("small").font(.caption2).foregroundStyle(.tertiary)
+            } maximumValueLabel: {
+                Text("best").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var scalePicker: some View {
+        Picker("Scale", selection: $model.settings.sizeLimit) {
+            ForEach(SizeLimit.allCases) { Text($0.label).tag($0) }
+        }
+        .labelsHidden()
+    }
+
+    /// Nudge when the frame is big enough that the animation will be unwieldy — the usual
+    /// mistake is exporting a 1080p GIF and wondering why it is 60 MB.
+    private var animationSizeHint: String? {
+        guard model.settings.format.isAnimation,
+              let item = model.selectedItem, let info = item.info
+        else { return nil }
+        let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        let size = FFmpeg.scaledSize(for: crop.size, limit: model.settings.sizeLimit) ?? crop.size
+        guard max(size.width, size.height) > 800 else { return nil }
+        return "\(Int(size.width))×\(Int(size.height)) is large for a \(model.settings.format.label.lowercased())"
+            + " — capping the long side at 640 px or less keeps the file manageable."
     }
 
     private func section<Content: View>(

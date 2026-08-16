@@ -1,8 +1,8 @@
 # YamVideo
 
 A small native macOS app for cropping video, blurring out parts of it, adding Screen
-Studio-style zooms, and converting it to MP4. Drop in a `.mov` (or almost anything else
-ffmpeg reads), edit on the frame, hit Convert.
+Studio-style zooms, and converting it to MP4, animated GIF or animated WebP. Drop in a
+`.mov` (or almost anything else ffmpeg reads), edit on the frame, hit Convert.
 
 Built as a plain SwiftUI app that drives `ffmpeg` — no Xcode project, no dependencies to
 vendor, and the exact command it runs is always visible in the sidebar.
@@ -15,6 +15,21 @@ vendor, and the exact command it runs is always visible in the sidebar.
 The app looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin` and `/usr/bin`
 (a GUI app doesn't inherit your shell `PATH`). If yours lives somewhere else, the banner
 at the top of the window has a **Locate ffmpeg…** button.
+
+WebP export additionally needs an ffmpeg built with `libwebp`, and Homebrew's plain
+`ffmpeg` is now a slim build without it — the everything-included one is a separate
+formula:
+
+```sh
+brew install ffmpeg-full
+```
+
+It is keg-only, so it stays out of `bin`; the app looks in
+`/opt/homebrew/opt/ffmpeg-full/bin` (and the `/usr/local` equivalent) before the usual
+places and picks it up on its own. Check what yours has with
+`ffmpeg -encoders | grep libwebp`. The app runs that check itself on launch and says so in
+the Format section rather than failing at the end of an export. GIF and MP4 need nothing
+extra.
 
 ## Build and run
 
@@ -29,7 +44,7 @@ To keep it around, drag `build/YamVideo.app` to `/Applications` — or:
 cp -R build/YamVideo.app /Applications/
 ```
 
-Run the checks with `./test.sh` (152 assertions, including real encodes and frame-by-frame
+Run the checks with `./test.sh` (200 assertions, including real encodes and frame-by-frame
 verification that blurs actually remove detail and zooms land where they should).
 
 ## Using it
@@ -43,26 +58,45 @@ verification that blurs actually remove detail and zooms land where they should)
 | **Zoom in** | Switch to **Zoom**, scrub to the moment, then click the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds; drag the marker to re-aim it |
 | **Pick the frame you work against** | Drag the scrubber under the preview |
 | **Reuse your work** | **Apply to All** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
+| **Make a GIF or WebP** | Pick the format in the settings pane. Everything else — crop, blur, zoom — works exactly the same |
 | **Convert** | ⌘R for the whole queue, or **Convert Selected** in the toolbar. ⌘. stops |
 
-Output lands next to each source file as `<name>-converted.mp4` unless you choose another
-folder. Existing files are never overwritten and the source is never clobbered.
+Output lands next to each source file as `<name>-converted.<ext>` (`.mp4`, `.gif` or
+`.webp`, following the format) unless you choose another folder. Existing files are never
+overwritten and the source is never clobbered.
 
 ### Settings
 
-- **Encoder** — H.264 via x264 (best quality per byte), H.264 via VideoToolbox (much
+- **Format** — **MP4 video**, **Animated GIF**, or **Animated WebP**. GIF and WebP are
+  silent and looping; the encoder, speed and audio controls are replaced by the options
+  that actually apply to them
+- **Encoder** (MP4) — H.264 via x264 (best quality per byte), H.264 via VideoToolbox (much
   faster, hardware), or HEVC via VideoToolbox (smallest, tagged `hvc1` so QuickTime plays it)
-- **Quality** — one slider; the CRF or VideoToolbox `q` value it maps to is shown next to it
-- **Scale** — optionally cap the long side (4K/2560/1080p/720p/480p). Never upscales
+- **Quality** — one slider; the CRF, VideoToolbox `q` or libwebp quality it maps to is
+  shown next to it
+- **Scale** — optionally cap the long side (4K/2560/1080p/720p/480p/640/480). Never upscales
 - **Blur areas** — **Blur** (soft gaussian), **Pixelate** (chunky mosaic), or **Black box**
   (solid fill, nothing recoverable), plus a strength/block-size slider
-- **Audio** — re-encode to AAC 192k (default), copy the original stream, or drop it
+- **Audio** (MP4) — re-encode to AAC 192k (default), copy the original stream, or drop it
+
+For GIF and WebP:
+
+- **Frame rate** — 24/20/15/12/10 fps, or leave the source rate alone. 15 fps is the
+  default and halves the file against 30 fps for very little visible cost. It never pads a
+  slow source *up* to a higher rate
+- **Loop** — forever (default) or play once
+- **Colours** (GIF) — 256/128/64/32. Screen recordings are mostly flat UI colour and
+  usually survive 64 with no visible difference
+- **Dither** (GIF) — **Ordered** (a fixed pattern, so it compresses well between frames),
+  **Diffusion** (best gradients, noisier and bigger), or **None** (hard edges, ideal for
+  text and flat UI)
+- **Lossless** (WebP) — pixel-exact and much larger; worth it for text-heavy captures
 
 Zooms are per-clip and set in the editor rather than here: level, start and hold length.
 The ease is fixed at 0.5s in and out — a consistent ease is most of what makes these look
 deliberate rather than homemade.
 
-Every output gets `+faststart` so it streams and scrubs properly on the web.
+Every MP4 gets `+faststart` so it streams and scrubs properly on the web.
 
 ## Notes on correctness
 
@@ -91,6 +125,20 @@ A few things this handles that are easy to get wrong:
   it looks softer. Record at 4K (or Retina) and export to 1080p and zooms cost nothing.
 - **Zooms near an edge clamp inward** rather than showing black bars, so the target may not
   end up dead centre when it sits close to the frame edge.
+- **GIF is exported in two passes.** One `palettegen` pass over the whole clip, then an
+  encode through that palette (`stats_mode=diff` + `paletteuse=diff_mode=rectangle`, which
+  is what makes a screen recording compress at all). The one-command version of this trick
+  makes ffmpeg buffer every frame in memory before it can emit any; two passes cost a
+  decode and stay flat regardless of clip length. The palette lands in the temp folder and
+  is deleted afterwards, including when the encode fails.
+- **Frame thinning happens after the zoom.** `zoompan` re-times to whatever rate it is
+  given, so an `fps` filter placed before it would simply be undone.
+- **The two formats spell "play once" differently.** GIF wants `-loop -1`, WebP wants
+  `-loop 1`, and both use `0` for forever. Getting this backwards silently produces a
+  one-shot animation.
+- **WebP needs libwebp.** It is an optional ffmpeg build flag, so the app checks
+  `ffmpeg -encoders` up front and explains itself instead of surfacing ffmpeg's
+  "Unknown encoder 'libwebp'" after the export has already started.
 
 ## Layout
 

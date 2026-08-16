@@ -193,6 +193,8 @@ enum SizeLimit: Int, CaseIterable, Identifiable {
     case fhd = 1920
     case hd = 1280
     case sd = 854
+    case vga = 640
+    case small = 480
 
     var id: Int { rawValue }
     var label: String {
@@ -203,11 +205,125 @@ enum SizeLimit: Int, CaseIterable, Identifiable {
         case .fhd: return "Max 1920 px (1080p)"
         case .hd: return "Max 1280 px (720p)"
         case .sd: return "Max 854 px (480p)"
+        case .vga: return "Max 640 px"
+        case .small: return "Max 480 px"
+        }
+    }
+}
+
+// MARK: - Output format
+
+enum OutputFormat: String, CaseIterable, Identifiable {
+    case mp4, gif, webp
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .mp4: return "MP4 video"
+        case .gif: return "Animated GIF"
+        case .webp: return "Animated WebP"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .mp4: return "H.264 or HEVC with sound. Plays everywhere."
+        case .gif: return "Plays in anything — email, wikis, ancient chat apps — but the files are big."
+        case .webp: return "The same silent loop as a GIF at a fraction of the size. Every current browser plays it."
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .mp4: return "mp4"
+        case .gif: return "gif"
+        case .webp: return "webp"
+        }
+    }
+
+    /// Silent looping image formats: no audio track, and no encoder or preset to pick.
+    var isAnimation: Bool { self != .mp4 }
+
+    /// The muxer's `-loop` value. The two formats disagree about what "play once" is:
+    /// GIF spells it -1, WebP spells it 1. Nil where looping means nothing.
+    func loopValue(forever: Bool) -> String? {
+        switch self {
+        case .mp4: return nil
+        case .gif: return forever ? "0" : "-1"
+        case .webp: return forever ? "0" : "1"
+        }
+    }
+}
+
+/// Frame rate for GIF/WebP. Dropping frames is the single biggest saving available —
+/// a 30 fps GIF is twice the file of a 15 fps one and rarely looks better.
+enum AnimationFrameRate: Int, CaseIterable, Identifiable {
+    case source = 0
+    case fps24 = 24
+    case fps20 = 20
+    case fps15 = 15
+    case fps12 = 12
+    case fps10 = 10
+
+    var id: Int { rawValue }
+    var label: String { self == .source ? "Source frame rate" : "\(rawValue) fps" }
+    /// Nil means "leave the frame rate alone".
+    var value: Double? { self == .source ? nil : Double(rawValue) }
+}
+
+/// Palette size for GIF. Fewer colours is a smaller file and, on screen recordings
+/// (flat UI colours), usually indistinguishable.
+enum GIFColors: Int, CaseIterable, Identifiable {
+    case full = 256
+    case half = 128
+    case quarter = 64
+    case minimal = 32
+
+    var id: Int { rawValue }
+    var label: String {
+        switch self {
+        case .full: return "256 colours (best)"
+        case .half: return "128 colours"
+        case .quarter: return "64 colours"
+        case .minimal: return "32 colours (smallest)"
+        }
+    }
+}
+
+enum GIFDither: String, CaseIterable, Identifiable {
+    case bayer, diffusion, none
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .bayer: return "Ordered (smallest file)"
+        case .diffusion: return "Diffusion (smoothest)"
+        case .none: return "None (flat colour)"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .bayer: return "A fixed pattern, so it compresses well between frames."
+        case .diffusion: return "Best gradients, but the noise it adds inflates the file."
+        case .none: return "Hard edges between colours. Ideal for flat UI and text."
+        }
+    }
+
+    /// The value handed to `paletteuse=dither=`.
+    var filterValue: String {
+        switch self {
+        case .bayer: return "bayer:bayer_scale=5"
+        case .diffusion: return "sierra2_4a"
+        case .none: return "none"
         }
     }
 }
 
 struct ExportSettings: Equatable {
+    var format: OutputFormat = .mp4
     var encoder: VideoEncoder = .x264
     /// 0 = smallest file, 100 = best quality.
     var quality: Double = 70
@@ -217,6 +333,13 @@ struct ExportSettings: Equatable {
     var blurStyle: BlurStyle = .blur
     /// How hard to obscure: gaussian sigma, or the mosaic block size.
     var blurStrength: Double = 24
+    /// GIF and WebP only, from here down.
+    var frameRate: AnimationFrameRate = .fps15
+    var loopForever: Bool = true
+    var gifColors: GIFColors = .full
+    var gifDither: GIFDither = .bayer
+    /// Pixel-exact WebP. Much larger, but the right choice for text and flat UI.
+    var webpLossless: Bool = false
     /// Nil means "next to the source file".
     var outputFolder: URL?
     var suffix: String = "-converted"
@@ -227,9 +350,15 @@ struct ExportSettings: Equatable {
     var crf: Int { Int((30 - (quality / 100) * 16).rounded()) }
     /// VideoToolbox constant-quality value (1...100).
     var vtQuality: Int { max(1, min(100, Int((20 + quality * 0.62).rounded()))) }
+    /// libwebp quality (0...100) — the same slider the video encoders use.
+    var webpQuality: Int { max(0, min(100, Int(quality.rounded()))) }
 
     var qualityDescription: String {
-        encoder.isHardware ? "q \(vtQuality)" : "CRF \(crf)"
+        switch format {
+        case .mp4: return encoder.isHardware ? "q \(vtQuality)" : "CRF \(crf)"
+        case .gif: return "\(gifColors.rawValue) colours"
+        case .webp: return webpLossless ? "lossless" : "q \(webpQuality)"
+        }
     }
 }
 

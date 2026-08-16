@@ -645,6 +645,268 @@ try await FFmpeg.export(input: markerClip, output: allOut, info: markerInfo,
                         zoomShots: [zoomShot], settings: allSettings) { _ in }
 equal(try await FFmpeg.probe(url: allOut).width, 1000, "blur, crop and zoom compose")
 
+// MARK: - GIF and WebP
+
+print("\nGIF and WebP arguments")
+
+var gif = ExportSettings()
+gif.format = .gif
+gif.suffix = "-gif"
+
+equal(FFmpeg.outputURL(for: landscape, settings: gif).pathExtension, "gif",
+      "GIF export writes a .gif")
+var webp = ExportSettings()
+webp.format = .webp
+webp.suffix = "-webp"
+equal(FFmpeg.outputURL(for: landscape, settings: webp).pathExtension, "webp",
+      "WebP export writes a .webp")
+
+let gifTarget = scratch.appendingPathComponent("args.gif")
+let gifCommands = FFmpeg.exportCommands(input: landscape, output: gifTarget, info: info,
+                                        crop: info.fullFrame, settings: gif)
+equal(gifCommands.count, 2, "GIF runs a palette pass and an encode pass")
+equal(FFmpeg.exportCommands(input: landscape, output: scratch.appendingPathComponent("a.mp4"),
+                            info: info, crop: info.fullFrame, settings: ExportSettings()).count, 1,
+      "MP4 runs a single command")
+
+let paletteArgs = gifCommands[0]
+check(paletteArgs.contains { $0.contains("palettegen=max_colors=256:stats_mode=diff") },
+      "the palette pass builds a diff-weighted palette", paletteArgs.joined(separator: " "))
+check(paletteArgs.contains { $0.contains("fps=15") }, "the palette pass thins the frame rate")
+equal(paletteArgs.last ?? "", FFmpeg.paletteURL(for: gifTarget).path,
+      "the palette pass writes the palette")
+
+let gifArgs = gifCommands[1]
+check(gifArgs.contains(FFmpeg.paletteURL(for: gifTarget).path),
+      "the encode pass reads the palette back in")
+check(gifArgs.contains { $0.contains("paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle") },
+      "the encode pass maps frames through the palette", gifArgs.joined(separator: " "))
+check(gifArgs.contains("[gif]"), "the palette graph output is mapped explicitly")
+check(gifArgs.contains("-an"), "GIF drops audio")
+if let loopIndex = gifArgs.firstIndex(of: "-loop") {
+    equal(gifArgs[loopIndex + 1], "0", "looping GIF passes -loop 0")
+} else {
+    check(false, "GIF sets a loop count")
+}
+check(!gifArgs.contains("-movflags"), "GIF skips the MP4-only muxer flags")
+
+// The two formats disagree about how to spell "play once".
+var once = gif
+once.loopForever = false
+let onceArgs = FFmpeg.exportArguments(input: landscape, output: gifTarget, info: info,
+                                      crop: info.fullFrame, settings: once,
+                                      palette: FFmpeg.paletteURL(for: gifTarget))
+if let i = onceArgs.firstIndex(of: "-loop") { equal(onceArgs[i + 1], "-1", "a one-shot GIF passes -loop -1") }
+var webpOnce = webp
+webpOnce.loopForever = false
+let webpOnceArgs = FFmpeg.exportArguments(input: landscape, output: scratch.appendingPathComponent("a.webp"),
+                                          info: info, crop: info.fullFrame, settings: webpOnce)
+if let i = webpOnceArgs.firstIndex(of: "-loop") { equal(webpOnceArgs[i + 1], "1", "a one-shot WebP passes -loop 1") }
+
+let webpArgs = FFmpeg.exportArguments(input: landscape, output: scratch.appendingPathComponent("a.webp"),
+                                      info: info, crop: info.fullFrame, settings: webp)
+check(webpArgs.contains("libwebp"), "WebP uses the libwebp encoder")
+check(webpArgs.contains("-compression_level"), "WebP asks libwebp for its best compression")
+if let i = webpArgs.firstIndex(of: "-quality") { equal(webpArgs[i + 1], "70", "WebP quality comes off the slider") }
+check(webpArgs.contains("-an"), "WebP drops audio")
+var lossless = webp
+lossless.webpLossless = true
+let losslessArgs = FFmpeg.exportArguments(input: landscape, output: scratch.appendingPathComponent("a.webp"),
+                                          info: info, crop: info.fullFrame, settings: lossless)
+if let i = losslessArgs.firstIndex(of: "-pix_fmt") {
+    equal(losslessArgs[i + 1], "bgra", "lossless WebP keeps RGB rather than going through yuv420p")
+}
+if let i = losslessArgs.firstIndex(of: "-lossless") {
+    equal(losslessArgs[i + 1], "1", "lossless WebP sets -lossless 1")
+} else {
+    check(false, "lossless WebP sets -lossless")
+}
+
+// Frame rate: never above the source, and never on MP4.
+var sourceRate = gif
+sourceRate.frameRate = .source
+check(!FFmpeg.exportCommands(input: landscape, output: gifTarget, info: info,
+                             crop: info.fullFrame, settings: sourceRate)
+        .joined().contains { $0.contains("fps=") },
+      "the source frame rate adds no fps filter")
+var slowClip = info
+slowClip.fps = 12
+var fastRate = gif
+fastRate.frameRate = .fps24
+check(!FFmpeg.exportCommands(input: landscape, output: gifTarget, info: slowClip,
+                             crop: slowClip.fullFrame, settings: fastRate)
+        .joined().contains { $0.contains("fps=24") },
+      "a 12 fps source is never padded up to 24")
+var mp4Rate = ExportSettings()
+mp4Rate.frameRate = .fps10
+check(!FFmpeg.exportArguments(input: landscape, output: scratch.appendingPathComponent("a.mp4"),
+                              info: info, crop: info.fullFrame, settings: mp4Rate)
+        .contains { $0.contains("fps=") },
+      "the animation frame rate does not leak into MP4 exports")
+
+// The palette graph has to splice onto whatever the blur left behind.
+let plainGraph = FFmpeg.exportArguments(input: landscape, output: gifTarget, info: info,
+                                        crop: info.fullFrame, settings: sourceRate,
+                                        palette: FFmpeg.paletteURL(for: gifTarget))
+check(plainGraph.contains("[0:v][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle[gif]"),
+      "an untouched frame feeds paletteuse directly", plainGraph.joined(separator: " "))
+let croppedGraph = FFmpeg.exportArguments(input: landscape, output: gifTarget, info: info,
+                                          crop: CGRect(x: 0, y: 0, width: 640, height: 360),
+                                          settings: sourceRate,
+                                          palette: FFmpeg.paletteURL(for: gifTarget))
+check(croppedGraph.contains { $0.hasPrefix("[0:v]crop=640:360:0:0[pre];[pre][1:v]paletteuse") },
+      "a simple chain is relabelled before paletteuse", croppedGraph.joined(separator: " "))
+let blurredGraph = FFmpeg.exportArguments(input: landscape, output: gifTarget, info: info,
+                                          crop: info.fullFrame, regions: [r1],
+                                          settings: sourceRate,
+                                          palette: FFmpeg.paletteURL(for: gifTarget))
+check(blurredGraph.contains { $0.contains("[vout][1:v]paletteuse") },
+      "a blur graph feeds its output pad into paletteuse", blurredGraph.joined(separator: " "))
+
+print("\nGIF encodes")
+
+/// Number of frames actually stored in a file.
+func frameCount(_ url: URL) async throws -> Int {
+    guard let ffprobe = FFmpeg.ffprobePath else { return 0 }
+    let result = try await Shell.run(ffprobe, [
+        "-v", "error", "-select_streams", "v:0", "-count_packets",
+        "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", url.path,
+    ])
+    return Int(result.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+}
+
+var gifProgress: [Double] = []
+let gifOut = FFmpeg.outputURL(for: landscape, settings: gif)
+try await FFmpeg.export(input: landscape, output: gifOut, info: info,
+                        crop: info.fullFrame, settings: gif) { gifProgress.append($0) }
+
+let gifInfo = try await FFmpeg.probe(url: gifOut)
+equal(gifInfo.videoCodec, "gif", "output really is a GIF")
+equal(gifInfo.width, 1280, "GIF keeps the frame size")
+check(gifInfo.audioCodec == nil, "GIF has no audio track")
+let gifFrames = try await frameCount(gifOut)
+check(abs(gifFrames - 45) <= 3, "3s at 15 fps lands on ~45 frames", "got \(gifFrames)")
+check(gifProgress.count > 1 && gifProgress == gifProgress.sorted(),
+      "progress climbs across both passes", "\(gifProgress.count) updates")
+check(!FileManager.default.fileExists(atPath: FFmpeg.paletteURL(for: gifOut).path),
+      "the palette is cleaned up afterwards")
+
+// A smaller palette and a lower frame rate must actually produce a smaller file.
+var lean = gif
+lean.gifColors = .minimal
+lean.frameRate = .fps10
+lean.sizeLimit = .vga
+lean.suffix = "-gif-lean"
+let leanOut = FFmpeg.outputURL(for: landscape, settings: lean)
+try await FFmpeg.export(input: landscape, output: leanOut, info: info,
+                        crop: info.fullFrame, settings: lean) { _ in }
+let leanInfo = try await FFmpeg.probe(url: leanOut)
+equal(leanInfo.width, 640, "the size cap applies to GIFs")
+func fileSize(_ url: URL) -> Int {
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    return (attributes?[.size] as? NSNumber)?.intValue ?? 0
+}
+check(fileSize(leanOut) < fileSize(gifOut),
+      "fewer colours, frames and pixels make a smaller file",
+      "\(fileSize(gifOut)) -> \(fileSize(leanOut)) bytes")
+
+// Crop, blur and zoom have to survive the palette detour intact.
+var richGif = gif
+richGif.blurStyle = .black
+richGif.suffix = "-gif-everything"
+let richOut = FFmpeg.outputURL(for: markerClip, settings: richGif)
+try await FFmpeg.export(input: markerClip, output: richOut, info: markerInfo,
+                        crop: CGRect(x: 100, y: 50, width: 640, height: 480),
+                        regions: [CGRect(x: 200, y: 100, width: 160, height: 120)],
+                        zoomShots: [zoomShot], settings: richGif) { _ in }
+let richInfo = try await FFmpeg.probe(url: richOut)
+equal(richInfo.width, 640, "crop applies to a GIF")
+let gifBox = try await pixel(richOut, x: 150, y: 100, at: 0.2)
+check(gifBox.0 < 40 && gifBox.1 < 40 && gifBox.2 < 40,
+      "the blur box lands in the right place in a GIF", "rgb\(gifBox)")
+
+var gifOnce = gif
+gifOnce.loopForever = false
+gifOnce.suffix = "-gif-once"
+let gifOnceOut = FFmpeg.outputURL(for: landscape, settings: gifOnce)
+try await FFmpeg.export(input: landscape, output: gifOnceOut, info: info,
+                        crop: info.fullFrame, settings: gifOnce) { _ in }
+check(try await frameCount(gifOnceOut) > 1, "a play-once GIF is still a valid animation")
+
+// A failed second pass must report the error and take the palette with it.
+var doomed = gif
+doomed.suffix = "-doomed"
+let doomedOut = URL(fileURLWithPath: "/no-such-directory-xyz/out.gif")
+do {
+    try await FFmpeg.export(input: landscape, output: doomedOut, info: info,
+                            crop: info.fullFrame, settings: doomed) { _ in }
+    check(false, "a failing GIF encode reports an error")
+} catch {
+    check(!error.localizedDescription.isEmpty, "a failing GIF encode reports an error")
+    check(!FileManager.default.fileExists(atPath: FFmpeg.paletteURL(for: doomedOut).path),
+          "a failed GIF encode leaves no palette behind")
+}
+
+print("\nWebP encodes")
+if await FFmpeg.supportsWebP() {
+    let webpOut = FFmpeg.outputURL(for: landscape, settings: webp)
+    var webpProgress: [Double] = []
+    try await FFmpeg.export(input: landscape, output: webpOut, info: info,
+                            crop: CGRect(x: 0, y: 0, width: 640, height: 360),
+                            settings: webp) { webpProgress.append($0) }
+    let webpInfo = try await FFmpeg.probe(url: webpOut)
+    equal(webpInfo.width, 640, "WebP honours the crop")
+    check(webpInfo.audioCodec == nil, "WebP has no audio track")
+    let webpFrames = try await frameCount(webpOut)
+    check(webpFrames > 1, "WebP output is animated, not a single frame", "\(webpFrames) frames")
+    check(webpProgress.last == 1.0, "WebP progress finishes at 100%")
+
+    // Lossless feeds libwebp a different pixel format; make sure it accepts it.
+    var losslessOut = webp
+    losslessOut.webpLossless = true
+    losslessOut.suffix = "-webp-lossless"
+    let losslessFile = FFmpeg.outputURL(for: landscape, settings: losslessOut)
+    try await FFmpeg.export(input: landscape, output: losslessFile, info: info,
+                            crop: CGRect(x: 0, y: 0, width: 640, height: 360),
+                            settings: losslessOut) { _ in }
+    check(try await frameCount(losslessFile) > 1, "lossless WebP encodes and animates")
+    check(fileSize(losslessFile) > fileSize(webpOut), "lossless WebP is the bigger one",
+          "lossy \(fileSize(webpOut)) vs lossless \(fileSize(losslessFile)) bytes")
+
+    // Play-once is a different muxer value on both formats, and easy to get backwards.
+    var webpOnceOut = webp
+    webpOnceOut.loopForever = false
+    webpOnceOut.suffix = "-webp-once"
+    let webpOnceFile = FFmpeg.outputURL(for: landscape, settings: webpOnceOut)
+    try await FFmpeg.export(input: landscape, output: webpOnceFile, info: info,
+                            crop: CGRect(x: 0, y: 0, width: 640, height: 360),
+                            settings: webpOnceOut) { _ in }
+    check(try await frameCount(webpOnceFile) > 1, "a play-once WebP is still a valid animation")
+
+    // The whole point of the format: the same loop, much smaller.
+    var matched = gif
+    matched.suffix = "-gif-match"
+    let matchOut = FFmpeg.outputURL(for: landscape, settings: matched)
+    try await FFmpeg.export(input: landscape, output: matchOut, info: info,
+                            crop: CGRect(x: 0, y: 0, width: 640, height: 360),
+                            settings: matched) { _ in }
+    check(fileSize(webpOut) < fileSize(matchOut),
+          "WebP beats the equivalent GIF on size",
+          "gif \(fileSize(matchOut)) vs webp \(fileSize(webpOut)) bytes")
+} else {
+    // Homebrew's stock ffmpeg has libwebp; plenty of custom builds do not.
+    print("  skip this ffmpeg has no libwebp — checking the error instead")
+    do {
+        try await FFmpeg.export(input: landscape, output: scratch.appendingPathComponent("nope.webp"),
+                                info: info, crop: info.fullFrame, settings: webp) { _ in }
+        check(false, "a WebP export without libwebp fails up front")
+    } catch {
+        check(error.localizedDescription.contains("libwebp"),
+              "a WebP export without libwebp explains itself",
+              error.localizedDescription)
+    }
+}
+
 // Audio compatibility: ffmpeg 8 *will* copy PCM into MP4 (as `ipcm`), but QuickTime
 // cannot decode it — so the app flags it rather than relying on an ffmpeg error.
 print("\nAudio compatibility")

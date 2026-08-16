@@ -27,7 +27,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Local utility — crop and convert video to MP4.</string>
+	<string>Local utility — crop and convert video to MP4, GIF or WebP.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
