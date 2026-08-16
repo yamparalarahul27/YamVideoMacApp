@@ -15,6 +15,8 @@ final class AppModel: ObservableObject {
     @Published var previewIsLoading = false
     @Published var isConverting = false
     @Published var toolsAvailable = FFmpeg.isAvailable
+    /// Whether the located ffmpeg can write WebP at all — libwebp is an optional build flag.
+    @Published var webpAvailable = true
     @Published var statusMessage: String?
     @Published var editorMode: EditorMode = .crop
     @Published var selectedRegionID: BlurRegion.ID?
@@ -30,6 +32,17 @@ final class AppModel: ObservableObject {
     private static let acceptedExtensions: Set<String> = [
         "mov", "mp4", "m4v", "avi", "mkv", "webm", "mpg", "mpeg", "wmv", "flv", "mts", "m2ts", "3gp", "hevc",
     ]
+
+    init() {
+        refreshCapabilities()
+    }
+
+    /// Asks ffmpeg what it was built with, so the format picker can say up front that a
+    /// WebP export is not going to work rather than failing at the end of one.
+    private func refreshCapabilities() {
+        guard toolsAvailable else { return }
+        Task { webpAvailable = await FFmpeg.supportsWebP() }
+    }
 
     var selectedItem: VideoItem? {
         guard let selection else { return nil }
@@ -433,6 +446,7 @@ final class AppModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             FFmpeg.setOverrideFolder(url)
             toolsAvailable = FFmpeg.isAvailable
+            refreshCapabilities()
             if toolsAvailable {
                 statusMessage = "Found ffmpeg."
                 for item in items where item.info == nil { probe(item.id) }
@@ -553,16 +567,20 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    /// The exact ffmpeg invocation for the selected clip — handy for sanity-checking or scripting.
+    /// The exact ffmpeg invocation for the selected clip — handy for sanity-checking or
+    /// scripting. A GIF export runs two: the palette, then the encode against it.
     var previewCommand: String? {
         guard let item = selectedItem, let info = item.info else { return nil }
         let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
         let output = FFmpeg.outputURL(for: item.url, settings: settings)
-        let args = FFmpeg.exportArguments(
+        return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
             settings: settings
-        ).filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
-        return (["ffmpeg"] + args).map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
+        ).map { command in
+            let args = command.filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
+            return (["ffmpeg"] + args).map { $0.contains(" ") ? "\"\($0)\"" : $0 }
+                .joined(separator: " ")
+        }.joined(separator: "\n\n")
     }
 }

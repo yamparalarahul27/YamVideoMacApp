@@ -20,6 +20,11 @@ enum FFmpeg {
         if let override = UserDefaults.standard.string(forKey: overrideKey) {
             folders.append(override)
         }
+        // Homebrew's plain `ffmpeg` is now a slim build with no libwebp; the full one lives
+        // in `ffmpeg-full`, which is keg-only and so never appears in bin. Prefer it when
+        // it is installed — same ffmpeg, strictly more encoders — but never over an
+        // explicit override.
+        folders += ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"]
         folders += ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin"]
         return folders
     }
@@ -39,6 +44,7 @@ enum FFmpeg {
     /// Remembers a user-chosen folder containing ffmpeg (used by the "Locate…" button).
     static func setOverrideFolder(_ url: URL) {
         UserDefaults.standard.set(url.path, forKey: overrideKey)
+        encoderCache.clear()
     }
 
     static func version() async -> String? {
@@ -46,6 +52,55 @@ enum FFmpeg {
         guard let result = try? await Shell.run(ffmpeg, ["-hide_banner", "-version"]) else { return nil }
         return result.stdoutText.split(separator: "\n").first.map(String.init)
     }
+
+    // MARK: - Build capabilities
+
+    /// Keeps the lock inside synchronous methods, the way Shell's boxes do — taking one
+    /// directly in an async function is an error under the Swift 6 language mode.
+    private final class EncoderCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var names: Set<String>?
+
+        var value: Set<String>? {
+            lock.lock(); defer { lock.unlock() }
+            return names
+        }
+        func store(_ value: Set<String>) { lock.lock(); names = value; lock.unlock() }
+        func clear() { lock.lock(); names = nil; lock.unlock() }
+    }
+
+    private static let encoderCache = EncoderCache()
+
+    /// Encoder names this ffmpeg was built with. Nothing can be assumed here: Homebrew's
+    /// stock bottle has libwebp, but slimmed-down and hand-rolled builds often do not, and
+    /// asking for a missing encoder only fails once the export is already under way.
+    static func encoders() async -> Set<String> {
+        if let cached = encoderCache.value { return cached }
+
+        guard let ffmpeg = ffmpegPath,
+              let result = try? await Shell.run(ffmpeg, ["-hide_banner", "-encoders"]),
+              result.status == 0
+        else { return [] }  // Not cached: a later lookup should get a second chance.
+
+        // Rows read "  V....D gif   GIF (Graphics Interchange Format)"; the legend above
+        // them uses the same shape but with "=" as the second field.
+        var names: Set<String> = []
+        for line in result.stdoutText.split(separator: "\n") {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard fields.count >= 2, fields[0].count == 6, fields[1] != "=" else { continue }
+            names.insert(String(fields[1]))
+        }
+
+        encoderCache.store(names)
+        return names
+    }
+
+    static func supports(_ encoder: String) async -> Bool {
+        await encoders().contains(encoder)
+    }
+
+    /// Animated WebP needs libwebp, which is an optional ffmpeg build flag.
+    static func supportsWebP() async -> Bool { await supports("libwebp") }
 
     // MARK: - Probing
 
@@ -344,17 +399,13 @@ enum FFmpeg {
 
     // MARK: - Export
 
-    /// Builds the ffmpeg argument list. Exposed so the UI can show the exact command.
-    static func exportArguments(
-        input: URL,
-        output: URL,
+    /// Everything applied after the blur regions: crop, zoom, frame-rate cut, downscale.
+    private static func videoTail(
         info: MediaInfo,
-        crop: CGRect,
-        regions: [CGRect] = [],
-        zoomShots: [ZoomShot] = [],
+        crop cropRect: CGRect,
+        zoomShots: [ZoomShot],
         settings: ExportSettings
     ) -> [String] {
-        let cropRect = crop.evenClamped(in: info.fullFrame)
         var tail: [String] = []
 
         if cropRect.integral != info.fullFrame.integral {
@@ -367,11 +418,53 @@ enum FFmpeg {
             tail.append(zoom)
         }
 
+        // Thinning frames out is the biggest saving a GIF or WebP has. It goes after the
+        // zoom (zoompan re-times to the source rate, so an earlier fps would be undone)
+        // and before the scale, so fewer frames need resampling. Never above the source
+        // rate — duplicated frames only add bytes.
+        if settings.format.isAnimation, let rate = settings.frameRate.value,
+           info.fps <= 0 || rate < info.fps {
+            tail.append("fps=\(Int(rate))")
+        }
+
         if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
             tail.append("scale=\(Int(scaled.width)):\(Int(scaled.height)):flags=lanczos")
         }
+        return tail
+    }
+
+    /// Wraps `graph` in the input/output maps ffmpeg needs, honouring whether it turned out
+    /// simple enough for `-vf`.
+    private static func mapped(_ graph: FilterGraph?, audio: Bool) -> [String] {
+        guard let graph else { return [] }
+        if graph.isComplex, let label = graph.outputLabel {
+            // Explicit maps: -filter_complex disables ffmpeg's automatic stream selection.
+            var args = ["-filter_complex", graph.spec, "-map", "[\(label)]"]
+            if audio { args += ["-map", "0:a:0"] }
+            return args
+        }
+        return ["-vf", graph.spec]
+    }
+
+    /// Builds the ffmpeg argument list. Exposed so the UI can show the exact command.
+    ///
+    /// `palette` is the GIF second pass: the frames are mapped through the palette PNG
+    /// written by `paletteArguments` instead of ffmpeg picking colours frame by frame.
+    static func exportArguments(
+        input: URL,
+        output: URL,
+        info: MediaInfo,
+        crop: CGRect,
+        regions: [CGRect] = [],
+        zoomShots: [ZoomShot] = [],
+        settings: ExportSettings,
+        palette: URL? = nil
+    ) -> [String] {
+        let cropRect = crop.evenClamped(in: info.fullFrame)
+        let tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots, settings: settings)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
+        if let palette { args += ["-i", palette.path] }
 
         let graph = filterGraph(
             regions: regions.map { $0.evenClamped(in: info.fullFrame) },
@@ -380,41 +473,139 @@ enum FFmpeg {
             tail: tail
         )
 
-        if let graph {
-            if graph.isComplex, let label = graph.outputLabel {
-                // Explicit maps: -filter_complex disables ffmpeg's automatic stream selection.
-                args += ["-filter_complex", graph.spec, "-map", "[\(label)]"]
-                if info.hasAudio, settings.audio != .none {
-                    args += ["-map", "0:a:0"]
-                }
+        if palette != nil {
+            // diff_mode=rectangle leaves untouched areas of the frame alone, which is
+            // what makes a screen-recording GIF compress at all.
+            let use = "paletteuse=dither=\(settings.gifDither.filterValue):diff_mode=rectangle"
+            let spec: String
+            if let graph, graph.isComplex, let label = graph.outputLabel {
+                spec = "\(graph.spec);[\(label)][1:v]\(use)[gif]"
+            } else if let graph {
+                spec = "[0:v]\(graph.spec)[pre];[pre][1:v]\(use)[gif]"
             } else {
-                args += ["-vf", graph.spec]
+                spec = "[0:v][1:v]\(use)[gif]"
+            }
+            args += ["-filter_complex", spec, "-map", "[gif]"]
+        } else {
+            args += mapped(graph, audio: info.hasAudio && settings.audio != .none
+                           && !settings.format.isAnimation)
+        }
+
+        switch settings.format {
+        case .mp4:
+            switch settings.encoder {
+            case .x264:
+                args += ["-c:v", "libx264", "-crf", String(settings.crf), "-preset", settings.preset]
+            case .h264VT:
+                args += ["-c:v", "h264_videotoolbox", "-q:v", String(settings.vtQuality)]
+            case .hevcVT:
+                args += ["-c:v", "hevc_videotoolbox", "-q:v", String(settings.vtQuality), "-tag:v", "hvc1"]
+            }
+            args += ["-pix_fmt", "yuv420p"]
+
+            switch settings.audio {
+            case .aac:
+                if info.hasAudio { args += ["-c:a", "aac", "-b:a", "192k"] } else { args += ["-an"] }
+            case .copy:
+                if info.hasAudio { args += ["-c:a", "copy"] } else { args += ["-an"] }
+            case .none:
+                args += ["-an"]
+            }
+
+            args += ["-movflags", "+faststart", "-map_metadata", "0"]
+
+        case .gif:
+            // The gif encoder comes from the extension; -loop is a muxer option.
+            args += ["-an"]
+
+        case .webp:
+            // compression_level is libwebp's "method": 6 is the most effort it will spend
+            // looking for a smaller file, which is the whole point of choosing WebP.
+            args += ["-c:v", "libwebp", "-compression_level", "6",
+                     "-quality", String(settings.webpQuality), "-an"]
+            if settings.webpLossless {
+                // Lossless works in RGB; handing it yuv420p would throw away the colour
+                // detail first and then store the result exactly.
+                args += ["-lossless", "1", "-pix_fmt", "bgra"]
+            } else {
+                args += ["-lossless", "0", "-pix_fmt", "yuv420p"]
             }
         }
 
-        switch settings.encoder {
-        case .x264:
-            args += ["-c:v", "libx264", "-crf", String(settings.crf), "-preset", settings.preset]
-        case .h264VT:
-            args += ["-c:v", "h264_videotoolbox", "-q:v", String(settings.vtQuality)]
-        case .hevcVT:
-            args += ["-c:v", "hevc_videotoolbox", "-q:v", String(settings.vtQuality), "-tag:v", "hvc1"]
-        }
-        args += ["-pix_fmt", "yuv420p"]
-
-        switch settings.audio {
-        case .aac:
-            if info.hasAudio { args += ["-c:a", "aac", "-b:a", "192k"] } else { args += ["-an"] }
-        case .copy:
-            if info.hasAudio { args += ["-c:a", "copy"] } else { args += ["-an"] }
-        case .none:
-            args += ["-an"]
+        if let loop = settings.format.loopValue(forever: settings.loopForever) {
+            args += ["-loop", loop]
         }
 
-        args += ["-movflags", "+faststart", "-map_metadata", "0"]
         args += ["-progress", "pipe:1", "-nostats"]
         args.append(output.path)
         return args
+    }
+
+    /// GIF first pass: study the whole clip and write one palette for it.
+    ///
+    /// Doing this in a single graph (`split` → `palettegen` → `paletteuse`) also works, but
+    /// palettegen has to see every frame before paletteuse can emit one, so ffmpeg buffers
+    /// the entire clip in memory. Two passes cost a decode and stay flat.
+    static func paletteArguments(
+        input: URL,
+        palette: URL,
+        info: MediaInfo,
+        crop: CGRect,
+        regions: [CGRect] = [],
+        zoomShots: [ZoomShot] = [],
+        settings: ExportSettings
+    ) -> [String] {
+        let cropRect = crop.evenClamped(in: info.fullFrame)
+        var tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots, settings: settings)
+        // stats_mode=diff weights the palette towards whatever moves — the part anyone
+        // actually looks at. A still background can afford to band a little.
+        tail.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
+
+        var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
+        args += mapped(
+            filterGraph(
+                regions: regions.map { $0.evenClamped(in: info.fullFrame) },
+                style: settings.blurStyle,
+                strength: settings.blurStrength,
+                tail: tail
+            ),
+            audio: false
+        )
+        args += ["-an", "-progress", "pipe:1", "-nostats"]
+        args.append(palette.path)
+        return args
+    }
+
+    /// Where the GIF palette for `output` is staged. Derived from the output name rather
+    /// than random, so the command shown in the sidebar is exactly the one that runs.
+    static func paletteURL(for output: URL) -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yamvideo-palette-" + output.deletingPathExtension().lastPathComponent)
+            .appendingPathExtension("png")
+    }
+
+    /// Every ffmpeg invocation an export will make, in order. GIF needs two; everything
+    /// else is a single command.
+    static func exportCommands(
+        input: URL,
+        output: URL,
+        info: MediaInfo,
+        crop: CGRect,
+        regions: [CGRect] = [],
+        zoomShots: [ZoomShot] = [],
+        settings: ExportSettings
+    ) -> [[String]] {
+        let palette = settings.format == .gif ? paletteURL(for: output) : nil
+        var commands: [[String]] = []
+        if let palette {
+            commands.append(paletteArguments(input: input, palette: palette, info: info,
+                                             crop: crop, regions: regions,
+                                             zoomShots: zoomShots, settings: settings))
+        }
+        commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
+                                        regions: regions, zoomShots: zoomShots,
+                                        settings: settings, palette: palette))
+        return commands
     }
 
     /// Output size after applying the long-side limit. Nil when no rescale is needed.
@@ -441,9 +632,45 @@ enum FFmpeg {
         guard let ffmpeg = ffmpegPath else {
             throw FFmpegError(message: "ffmpeg was not found.")
         }
-        let args = exportArguments(input: input, output: output, info: info, crop: crop,
-                                   regions: regions, zoomShots: zoomShots, settings: settings)
-        let duration = info.duration
+        // Fail with something actionable instead of ffmpeg's "Unknown encoder 'libwebp'"
+        // four passes into the error log.
+        if settings.format == .webp, await !supportsWebP() {
+            throw FFmpegError(message: "This copy of ffmpeg was built without libwebp, so it "
+                + "cannot write WebP. Homebrew's plain ffmpeg is a slim build — install "
+                + "ffmpeg-full (brew install ffmpeg-full) and relaunch, or export a GIF instead.")
+        }
+        defer {
+            if settings.format == .gif {
+                try? FileManager.default.removeItem(at: paletteURL(for: output))
+            }
+        }
+
+        let commands = exportCommands(input: input, output: output, info: info, crop: crop,
+                                      regions: regions, zoomShots: zoomShots, settings: settings)
+        // The palette pass only decodes, so it finishes well before the encode that follows.
+        let bounds: [Double] = commands.count > 1 ? [0, 0.3, 1] : [0, 1]
+
+        for (index, args) in commands.enumerated() {
+            // Each command writes its last argument — the palette, then the real output.
+            let target = URL(fileURLWithPath: args[args.count - 1])
+            try await runPass(ffmpeg, args, writing: target, duration: info.duration,
+                              from: bounds[index], to: bounds[index + 1], onProgress: onProgress)
+        }
+        onProgress(1)
+    }
+
+    /// Runs one ffmpeg pass, reporting its progress into the `from...to` slice of the whole
+    /// job and cleaning up after itself if it fails or is cancelled.
+    private static func runPass(
+        _ ffmpeg: String,
+        _ args: [String],
+        writing target: URL,
+        duration: Double,
+        from: Double,
+        to: Double,
+        onProgress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        let span = to - from
 
         let result = try await Shell.run(ffmpeg, args) { line in
             guard duration > 0 else { return }
@@ -454,30 +681,31 @@ enum FFmpeg {
             if parts[0] == "out_time_us" || parts[0] == "out_time_ms" {
                 // Both keys report microseconds in current ffmpeg builds.
                 guard let micros = Double(parts[1]), micros >= 0 else { return }
-                onProgress(min(0.999, micros / 1_000_000 / duration))
+                let fraction = min(1, micros / 1_000_000 / duration)
+                onProgress(min(0.999, from + fraction * span))
             }
         }
 
         if Task.isCancelled {
-            try? FileManager.default.removeItem(at: output)
+            try? FileManager.default.removeItem(at: target)
             throw CancellationError()
         }
 
         guard result.status == 0 else {
-            try? FileManager.default.removeItem(at: output)
+            try? FileManager.default.removeItem(at: target)
             let stderr = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
             let tail = stderr.split(separator: "\n").suffix(4).joined(separator: "\n")
             throw FFmpegError(message: tail.isEmpty ? "ffmpeg exited with code \(result.status)." : tail)
         }
-        onProgress(1)
     }
 
-    /// A non-colliding `.mp4` path for the given source file.
+    /// A non-colliding path for the given source file, in the chosen output format.
     static func outputURL(for input: URL, settings: ExportSettings) -> URL {
         let folder = settings.outputFolder ?? input.deletingLastPathComponent()
         let stem = input.deletingPathExtension().lastPathComponent
         let suffix = settings.suffix
-        var candidate = folder.appendingPathComponent(stem + suffix).appendingPathExtension("mp4")
+        let ext = settings.format.fileExtension
+        var candidate = folder.appendingPathComponent(stem + suffix).appendingPathExtension(ext)
 
         if candidate.path.compare(input.path, options: .caseInsensitive) != .orderedSame,
            !FileManager.default.fileExists(atPath: candidate.path) {
@@ -487,7 +715,7 @@ enum FFmpeg {
         repeat {
             candidate = folder
                 .appendingPathComponent("\(stem)\(suffix)-\(counter)")
-                .appendingPathExtension("mp4")
+                .appendingPathExtension(ext)
             counter += 1
         } while FileManager.default.fileExists(atPath: candidate.path) && counter < 1000
         return candidate
