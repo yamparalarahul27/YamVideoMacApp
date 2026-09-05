@@ -14,8 +14,29 @@ struct MediaInfo: Equatable {
     /// makes zoompan resample and drifts audio out of sync on long clips.
     var fpsExpression: String
     var rotation: Int
+    /// ffprobe's `color_transfer`, verbatim. Nil when the file does not say.
+    var colorTransfer: String?
 
     var hasAudio: Bool { audioCodec != nil }
+
+    /// True for PQ (HDR10) and HLG sources. Both need tone mapping on the way to SDR:
+    /// converting one to 8-bit yuv420p without it produces a file that is still tagged
+    /// HDR, and every player that honours the tag stretches it back out and shows it
+    /// blown out. QuickTime on the recording Mac can hide this; nothing else does.
+    var isHDR: Bool {
+        guard let colorTransfer else { return false }
+        return colorTransfer == "smpte2084" || colorTransfer == "arib-std-b67"
+    }
+
+    /// What to call the source's HDR flavour in the UI.
+    var hdrLabel: String? {
+        guard let colorTransfer else { return nil }
+        switch colorTransfer {
+        case "smpte2084": return "HDR10 (PQ)"
+        case "arib-std-b67": return "HLG"
+        default: return nil
+        }
+    }
 
     /// Whether the source audio can be copied into an MP4 and still play everywhere.
     /// ffmpeg will happily copy PCM in as `ipcm`, but QuickTime and Safari cannot decode it.
@@ -175,14 +196,44 @@ enum VideoEncoder: String, CaseIterable, Identifiable {
 }
 
 enum AudioMode: String, CaseIterable, Identifiable {
-    case aac, copy, none
+    case aac, normalised, copy, none
     var id: String { rawValue }
     var label: String {
         switch self {
         case .aac: return "Re-encode to AAC 192k"
+        case .normalised: return "Normalise loudness (AAC 192k)"
         case .copy: return "Copy original stream"
         case .none: return "Remove audio"
         }
+    }
+}
+
+/// The loudness every major platform normalises toward: -14 LUFS integrated, -1 dBTP
+/// true peak, 11 LU range. Hitting it means YouTube, Instagram, TikTok and LinkedIn
+/// leave the audio alone instead of turning it down on the way in.
+enum Loudness {
+    static let filterTargets = "I=-14:TP=-1:LRA=11"
+    static let summary = "-14 LUFS, -1 dBTP"
+}
+
+/// What `loudnorm`'s analysis pass measured about a clip.
+///
+/// The values are kept as the strings ffmpeg printed rather than parsed into Doubles,
+/// for the same reason the frame rate is: they go straight back to ffmpeg, and a
+/// round trip through a Double only invents rounding.
+struct LoudnessMeasurement: Equatable {
+    var inputI: String
+    var inputTP: String
+    var inputLRA: String
+    var inputThresh: String
+    var targetOffset: String
+
+    /// Appended to the second pass's `loudnorm`. Without these the filter still runs,
+    /// but as a dynamic-range compressor rather than the straight gain match that two
+    /// passes buy; `linear=true` is what asks for the gain match.
+    var filterArguments: String {
+        "measured_I=\(inputI):measured_TP=\(inputTP):measured_LRA=\(inputLRA)"
+            + ":measured_thresh=\(inputThresh):offset=\(targetOffset):linear=true"
     }
 }
 
@@ -330,6 +381,8 @@ struct ExportSettings: Equatable {
     var preset: String = "medium"
     var sizeLimit: SizeLimit = .original
     var audio: AudioMode = .aac
+    /// Tone-map HLG/PQ sources down to Rec.709. Only consulted when the clip is HDR.
+    var toneMapHDR: Bool = true
     var blurStyle: BlurStyle = .blur
     /// How hard to obscure: gaussian sigma, or the mosaic block size.
     var blurStrength: Double = 24

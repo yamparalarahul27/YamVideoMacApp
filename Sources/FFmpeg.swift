@@ -45,6 +45,7 @@ enum FFmpeg {
     static func setOverrideFolder(_ url: URL) {
         UserDefaults.standard.set(url.path, forKey: overrideKey)
         encoderCache.clear()
+        filterCache.clear()
     }
 
     static func version() async -> String? {
@@ -57,7 +58,7 @@ enum FFmpeg {
 
     /// Keeps the lock inside synchronous methods, the way Shell's boxes do — taking one
     /// directly in an async function is an error under the Swift 6 language mode.
-    private final class EncoderCache: @unchecked Sendable {
+    private final class NameCache: @unchecked Sendable {
         private let lock = NSLock()
         private var names: Set<String>?
 
@@ -69,7 +70,8 @@ enum FFmpeg {
         func clear() { lock.lock(); names = nil; lock.unlock() }
     }
 
-    private static let encoderCache = EncoderCache()
+    private static let encoderCache = NameCache()
+    private static let filterCache = NameCache()
 
     /// Encoder names this ffmpeg was built with. Nothing can be assumed here: Homebrew's
     /// stock bottle has libwebp, but slimmed-down and hand-rolled builds often do not, and
@@ -101,6 +103,37 @@ enum FFmpeg {
 
     /// Animated WebP needs libwebp, which is an optional ffmpeg build flag.
     static func supportsWebP() async -> Bool { await supports("libwebp") }
+
+    /// Filter names this ffmpeg was built with. Same story as the encoders: `zscale`
+    /// only exists when the build enabled libzimg, and there is no way to know but ask.
+    static func filters() async -> Set<String> {
+        if let cached = filterCache.value { return cached }
+
+        guard let ffmpeg = ffmpegPath,
+              let result = try? await Shell.run(ffmpeg, ["-hide_banner", "-filters"]),
+              result.status == 0
+        else { return [] }  // Not cached: a later lookup should get a second chance.
+
+        // Rows read "  ... zscale            V->V       Apply resizing…"; the legend above
+        // them has "=" in the second field, and no "->" arrow in the third.
+        var names: Set<String> = []
+        for line in result.stdoutText.split(separator: "\n") {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard fields.count >= 3, fields[0].count == 3,
+                  fields[1] != "=", fields[2].contains("->") else { continue }
+            names.insert(fields[1])
+        }
+
+        filterCache.store(names)
+        return names
+    }
+
+    /// Tone mapping needs zimg for the colourspace conversions either side of it.
+    /// Homebrew's stock ffmpeg usually has it; slim and hand-rolled builds often do not.
+    static func supportsToneMapping() async -> Bool {
+        let names = await filters()
+        return names.contains("zscale") && names.contains("tonemap")
+    }
 
     // MARK: - Probing
 
@@ -154,7 +187,8 @@ enum FFmpeg {
             audioCodec: audio?["codec_name"] as? String,
             fps: parseRate(video["avg_frame_rate"]) ?? parseRate(video["r_frame_rate"]) ?? 0,
             fpsExpression: frameRateExpression(video),
-            rotation: rotation
+            rotation: rotation,
+            colorTransfer: video["color_transfer"] as? String
         )
     }
 
@@ -209,6 +243,7 @@ enum FFmpeg {
         regions: [CGRect] = [],
         style: BlurStyle = .blur,
         strength: Double = 24,
+        toneMap: Bool = false,
         maxWidth: Int = 1400
     ) async throws -> Data {
         guard let ffmpeg = ffmpegPath else {
@@ -222,8 +257,10 @@ enum FFmpeg {
         }
 
         // The preview shows the whole frame (the crop is drawn as an overlay), but blur
-        // regions are baked in by the same graph builder the export uses.
+        // regions and tone mapping are baked in by the same graph builder the export uses,
+        // so the two cannot drift apart.
         let graph = filterGraph(
+            head: toneMap ? [toneMapChain] : [],
             regions: regions,
             style: style,
             strength: strength,
@@ -273,6 +310,25 @@ enum FFmpeg {
         var outputLabel: String?
     }
 
+    /// HLG or PQ down to Rec.709 SDR.
+    ///
+    /// Tone mapping is only meaningful in linear light, so the chain linearises, works in
+    /// float RGB, maps, and converts back. The float RGB step is not decoration: doing this
+    /// in subsampled YUV would resample chroma twice and shift colour.
+    ///
+    /// This runs at the *head* of the graph, before the blur regions, so every later stage
+    /// — and the preview, which shares this builder — sees the same SDR frame the export
+    /// writes.
+    static let toneMapChain =
+        "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+        + "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+
+    /// Filters that have to run before anything else. Empty for an ordinary SDR clip.
+    static func videoHead(info: MediaInfo, settings: ExportSettings) -> [String] {
+        guard info.isHDR, settings.toneMapHDR else { return [] }
+        return [toneMapChain]
+    }
+
     /// The filter that obscures one already-cropped region.
     private static func obscureFilter(style: BlurStyle, strength: Double, size: CGSize) -> String {
         switch style {
@@ -293,15 +349,17 @@ enum FFmpeg {
     /// Builds the video filter graph: obscured regions first (so their coordinates stay in
     /// full-frame space), then `tail` — the crop and scale steps.
     static func filterGraph(
+        head: [String] = [],
         regions: [CGRect],
         style: BlurStyle,
         strength: Double,
         tail: [String]
     ) -> FilterGraph? {
         guard !regions.isEmpty else {
-            return tail.isEmpty
+            let chain = head + tail
+            return chain.isEmpty
                 ? nil
-                : FilterGraph(spec: tail.joined(separator: ","), isComplex: false, outputLabel: nil)
+                : FilterGraph(spec: chain.joined(separator: ","), isComplex: false, outputLabel: nil)
         }
 
         // A solid fill needs no second copy of the frame — drawbox paints in place.
@@ -309,14 +367,17 @@ enum FFmpeg {
             let boxes = regions.map {
                 "drawbox=\(Int($0.minX)):\(Int($0.minY)):\(Int($0.width)):\(Int($0.height)):color=black:t=fill"
             }
-            return FilterGraph(spec: (boxes + tail).joined(separator: ","),
+            return FilterGraph(spec: (head + boxes + tail).joined(separator: ","),
                                isComplex: false, outputLabel: nil)
         }
 
         // Split the frame, blur a copy of each region, and composite them back on top.
         var parts: [String] = []
         let taps = regions.indices.map { "t\($0)" }
-        parts.append("[0:v]split=\(regions.count + 1)[base]" + taps.map { "[\($0)]" }.joined())
+        // The head runs once, before the split, so every copy of the frame shares it.
+        let headChain = head.isEmpty ? "" : head.joined(separator: ",") + ","
+        parts.append("[0:v]\(headChain)split=\(regions.count + 1)[base]"
+                     + taps.map { "[\($0)]" }.joined())
 
         for (index, region) in regions.enumerated() {
             let crop = "crop=\(Int(region.width)):\(Int(region.height)):\(Int(region.minX)):\(Int(region.minY))"
@@ -458,7 +519,8 @@ enum FFmpeg {
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
         settings: ExportSettings,
-        palette: URL? = nil
+        palette: URL? = nil,
+        loudness: LoudnessMeasurement? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots, settings: settings)
@@ -467,6 +529,7 @@ enum FFmpeg {
         if let palette { args += ["-i", palette.path] }
 
         let graph = filterGraph(
+            head: videoHead(info: info, settings: settings),
             regions: regions.map { $0.evenClamped(in: info.fullFrame) },
             style: settings.blurStyle,
             strength: settings.blurStrength,
@@ -503,9 +566,25 @@ enum FFmpeg {
             }
             args += ["-pix_fmt", "yuv420p"]
 
+            // The frames are Rec.709 now. Saying so matters: without these the muxer
+            // copies the source's HDR tags onto SDR pixels and players stretch them back.
+            if !videoHead(info: info, settings: settings).isEmpty {
+                args += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+            }
+
             switch settings.audio {
             case .aac:
                 if info.hasAudio { args += ["-c:a", "aac", "-b:a", "192k"] } else { args += ["-an"] }
+            case .normalised:
+                if info.hasAudio {
+                    var filter = "loudnorm=\(Loudness.filterTargets)"
+                    if let loudness { filter += ":" + loudness.filterArguments }
+                    // loudnorm resamples to 192 kHz internally and will happily hand that
+                    // rate to the encoder, so the output rate is pinned back explicitly.
+                    args += ["-af", filter, "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+                } else {
+                    args += ["-an"]
+                }
             case .copy:
                 if info.hasAudio { args += ["-c:a", "copy"] } else { args += ["-an"] }
             case .none:
@@ -564,6 +643,7 @@ enum FFmpeg {
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         args += mapped(
             filterGraph(
+                head: videoHead(info: info, settings: settings),
                 regions: regions.map { $0.evenClamped(in: info.fullFrame) },
                 style: settings.blurStyle,
                 strength: settings.blurStrength,
@@ -574,6 +654,62 @@ enum FFmpeg {
         args += ["-an", "-progress", "pipe:1", "-nostats"]
         args.append(palette.path)
         return args
+    }
+
+    /// Whether this export needs a loudness analysis pass before the encode.
+    static func needsLoudnessPass(info: MediaInfo, settings: ExportSettings) -> Bool {
+        settings.format == .mp4 && settings.audio == .normalised && info.hasAudio
+    }
+
+    /// Loudness first pass: decode the audio, measure it, print the numbers, write nothing.
+    ///
+    /// One pass on its own would also "work", but `loudnorm` without measurements is a
+    /// dynamic-range compressor — it moves quiet and loud parts relative to each other.
+    /// Measuring first and feeding the numbers back makes the second pass a single gain
+    /// change, which is what "normalise" ought to mean.
+    static func loudnessArguments(input: URL) -> [String] {
+        [
+            "-hide_banner", "-nostdin", "-y", "-i", input.path,
+            "-map", "0:a:0",
+            "-af", "loudnorm=\(Loudness.filterTargets):print_format=json",
+            "-vn", "-f", "null",
+            "-progress", "pipe:1", "-nostats",
+            "-",
+        ]
+    }
+
+    /// Pulls the analysis pass's numbers out of ffmpeg's stderr.
+    ///
+    /// `loudnorm` prints a JSON object after everything else it has to say, so the last
+    /// braces in the log are the measurement. Digitally silent audio measures as `-inf`,
+    /// which ffmpeg will not accept back; that returns nil and the encode falls through to
+    /// the unmeasured filter, which is harmless on silence.
+    static func parseLoudness(_ stderr: String) -> LoudnessMeasurement? {
+        guard let open = stderr.lastIndex(of: "{"),
+              let close = stderr.lastIndex(of: "}"),
+              open < close,
+              let data = String(stderr[open...close]).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let root = object as? [String: Any]
+        else { return nil }
+
+        func measured(_ key: String) -> String? {
+            let text: String
+            if let s = root[key] as? String { text = s }
+            else if let d = root[key] as? Double { text = String(d) }
+            else { return nil }
+            // Reject -inf/nan rather than handing ffmpeg something it will reject louder.
+            guard let value = Double(text), value.isFinite else { return nil }
+            return text
+        }
+
+        guard let i = measured("input_i"), let tp = measured("input_tp"),
+              let lra = measured("input_lra"), let thresh = measured("input_thresh"),
+              let offset = measured("target_offset")
+        else { return nil }
+
+        return LoudnessMeasurement(inputI: i, inputTP: tp, inputLRA: lra,
+                                   inputThresh: thresh, targetOffset: offset)
     }
 
     /// Where the GIF palette for `output` is staged. Derived from the output name rather
@@ -597,6 +733,9 @@ enum FFmpeg {
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
+        if needsLoudnessPass(info: info, settings: settings) {
+            commands.append(loudnessArguments(input: input))
+        }
         if let palette {
             commands.append(paletteArguments(input: input, palette: palette, info: info,
                                              crop: crop, regions: regions,
@@ -639,6 +778,14 @@ enum FFmpeg {
                 + "cannot write WebP. Homebrew's plain ffmpeg is a slim build — install "
                 + "ffmpeg-full (brew install ffmpeg-full) and relaunch, or export a GIF instead.")
         }
+        // Silently skipping the tone map would write a file that is wrong in a way the
+        // user cannot see until they open it somewhere else, so refuse instead.
+        if info.isHDR, settings.toneMapHDR, await !supportsToneMapping() {
+            throw FFmpegError(message: "This clip is \(info.hdrLabel ?? "HDR") and this copy of "
+                + "ffmpeg has no zscale filter, so it cannot tone-map to SDR. Install "
+                + "ffmpeg-full (brew install ffmpeg-full) and relaunch, or turn off "
+                + "Convert HDR to SDR to export the source colours unchanged.")
+        }
         defer {
             if settings.format == .gif {
                 try? FileManager.default.removeItem(at: paletteURL(for: output))
@@ -647,29 +794,61 @@ enum FFmpeg {
 
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, settings: settings)
-        // The palette pass only decodes, so it finishes well before the encode that follows.
-        let bounds: [Double] = commands.count > 1 ? [0, 0.3, 1] : [0, 1]
+        let measuring = needsLoudnessPass(info: info, settings: settings)
 
-        for (index, args) in commands.enumerated() {
-            // Each command writes its last argument — the palette, then the real output.
-            let target = URL(fileURLWithPath: args[args.count - 1])
-            try await runPass(ffmpeg, args, writing: target, duration: info.duration,
-                              from: bounds[index], to: bounds[index + 1], onProgress: onProgress)
+        // A preparatory pass only decodes, so it finishes well before the encode that
+        // follows. The loudness pass reads audio alone and is quicker still. One boundary
+        // per pass, whatever the combination turns out to be.
+        var bounds: [Double] = [0]
+        for index in 0..<max(0, commands.count - 1) {
+            let share = (measuring && index == 0) ? 0.1 : 0.3
+            bounds.append(min(0.9, bounds[bounds.count - 1] + share))
+        }
+        bounds.append(1)
+
+        var measurement: LoudnessMeasurement?
+
+        for (index, command) in commands.enumerated() {
+            let isEncode = index == commands.count - 1
+            var args = command
+            // The encode's loudnorm cannot be written until the pass above has measured,
+            // so it is rebuilt here rather than reusing the placeholder from the list.
+            if isEncode, measuring {
+                args = exportArguments(
+                    input: input, output: output, info: info, crop: crop,
+                    regions: regions, zoomShots: zoomShots, settings: settings,
+                    palette: settings.format == .gif ? paletteURL(for: output) : nil,
+                    loudness: measurement
+                )
+            }
+
+            // Each command writes its last argument — except the measurement pass, whose
+            // "-" is the null muxer and must not be treated as a file to clean up.
+            let last = args[args.count - 1]
+            let target = last == "-" ? nil : URL(fileURLWithPath: last)
+            let result = try await runPass(ffmpeg, args, writing: target,
+                                           duration: info.duration,
+                                           from: bounds[index], to: bounds[index + 1],
+                                           onProgress: onProgress)
+            if measuring, index == 0 {
+                measurement = parseLoudness(result.stderrText)
+            }
         }
         onProgress(1)
     }
 
     /// Runs one ffmpeg pass, reporting its progress into the `from...to` slice of the whole
     /// job and cleaning up after itself if it fails or is cancelled.
+    @discardableResult
     private static func runPass(
         _ ffmpeg: String,
         _ args: [String],
-        writing target: URL,
+        writing target: URL?,
         duration: Double,
         from: Double,
         to: Double,
         onProgress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+    ) async throws -> ShellResult {
         let span = to - from
 
         let result = try await Shell.run(ffmpeg, args) { line in
@@ -687,16 +866,17 @@ enum FFmpeg {
         }
 
         if Task.isCancelled {
-            try? FileManager.default.removeItem(at: target)
+            if let target { try? FileManager.default.removeItem(at: target) }
             throw CancellationError()
         }
 
         guard result.status == 0 else {
-            try? FileManager.default.removeItem(at: target)
+            if let target { try? FileManager.default.removeItem(at: target) }
             let stderr = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
             let tail = stderr.split(separator: "\n").suffix(4).joined(separator: "\n")
             throw FFmpegError(message: tail.isEmpty ? "ffmpeg exited with code \(result.status)." : tail)
         }
+        return result
     }
 
     /// A non-colliding path for the given source file, in the chosen output format.

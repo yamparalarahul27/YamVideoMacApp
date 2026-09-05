@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
     @Published var toolsAvailable = FFmpeg.isAvailable
     /// Whether the located ffmpeg can write WebP at all — libwebp is an optional build flag.
     @Published var webpAvailable = true
+    /// Whether it has zscale, without which HDR clips cannot be tone-mapped to SDR.
+    @Published var toneMappingAvailable = true
     @Published var statusMessage: String?
     @Published var editorMode: EditorMode = .crop
     @Published var selectedRegionID: BlurRegion.ID?
@@ -42,6 +44,7 @@ final class AppModel: ObservableObject {
     private func refreshCapabilities() {
         guard toolsAvailable else { return }
         Task { webpAvailable = await FFmpeg.supportsWebP() }
+        Task { toneMappingAvailable = await FFmpeg.supportsToneMapping() }
     }
 
     var selectedItem: VideoItem? {
@@ -163,7 +166,9 @@ final class AppModel: ObservableObject {
             : "\(settings.blurStyle.rawValue)-\(Int(settings.blurStrength))-"
                 + regions.map { "\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))" }
                     .joined(separator: "|")
-        let key = "\(item.id)-\(Int(seconds * 4))-\(blurKey)"
+        // Tone mapping changes every pixel, so it belongs in the key too.
+        let toneMap = info.isHDR && settings.toneMapHDR
+        let key = "\(item.id)-\(Int(seconds * 4))-\(blurKey)-\(toneMap)"
         if let cached = thumbnailCache[key] {
             previewImage = cached
             previewIsLoading = false
@@ -182,7 +187,7 @@ final class AppModel: ObservableObject {
             do {
                 let data = try await FFmpeg.thumbnail(
                     url: url, at: seconds, duration: duration,
-                    regions: regions, style: style, strength: strength
+                    regions: regions, style: style, strength: strength, toneMap: toneMap
                 )
                 if Task.isCancelled { return }
                 guard let image = NSImage(data: data) else { return }

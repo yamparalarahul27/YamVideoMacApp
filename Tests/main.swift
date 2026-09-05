@@ -992,6 +992,235 @@ if let portraitThumb, let rep = NSBitmapImageRep(data: portraitThumb), rotated !
           "\(rep.pixelsWide)x\(rep.pixelsHigh)")
 }
 
+// MARK: - HDR tone mapping
+
+print("\nHDR tone mapping")
+
+check(!info.isHDR, "the plain fixture is SDR", info.colorTransfer ?? "no transfer tag")
+
+// The same clip as an HLG source, the way iPhone footage and HDR screen recordings arrive.
+var hlg: URL?
+do {
+    let url = scratch.appendingPathComponent("hlg.mov")
+    let result = try await Shell.run(ffmpeg, [
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "2",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-color_primaries", "bt2020",
+        url.path,
+    ])
+    if result.status == 0 { hlg = url }
+}
+check(hlg != nil, "created an HLG-tagged clip")
+
+var hlgInfo: MediaInfo?
+if let hlg {
+    let probed = try await FFmpeg.probe(url: hlg)
+    check(probed.isHDR, "an HLG source is detected as HDR", probed.colorTransfer ?? "nil")
+    equal(probed.hdrLabel, "HLG", "HLG is named for the UI")
+    if probed.isHDR { hlgInfo = probed }
+}
+
+// Detection and the head of the graph, independent of what ffmpeg happened to tag.
+var hdrInfo = info
+hdrInfo.colorTransfer = "arib-std-b67"
+var pqInfo = info
+pqInfo.colorTransfer = "smpte2084"
+check(hdrInfo.isHDR, "HLG counts as HDR")
+check(pqInfo.isHDR, "PQ counts as HDR")
+equal(pqInfo.hdrLabel, "HDR10 (PQ)", "PQ is named for the UI")
+
+var toneSettings = ExportSettings()
+check(FFmpeg.videoHead(info: info, settings: toneSettings).isEmpty, "an SDR clip gets no tone map")
+check(!FFmpeg.videoHead(info: hdrInfo, settings: toneSettings).isEmpty, "an HDR clip gets one")
+toneSettings.toneMapHDR = false
+check(FFmpeg.videoHead(info: hdrInfo, settings: toneSettings).isEmpty,
+      "turning the toggle off removes it")
+
+if let headOnly = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [],
+                                     style: .blur, strength: 20, tail: []) {
+    check(!headOnly.isComplex, "a head with no regions stays a simple -vf chain")
+    equal(headOnly.spec, "zscale=t=linear", "the head alone is the whole chain")
+} else {
+    check(false, "a head alone still produces a filter chain")
+}
+
+if let headed = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [r1],
+                                   style: .blur, strength: 20, tail: []) {
+    check(headed.spec.hasPrefix("[0:v]zscale=t=linear,split=2"),
+          "the head runs once, before the split", headed.spec)
+}
+
+if let headedBoxes = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [r1],
+                                        style: .black, strength: 20, tail: ["crop=2:2:0:0"]) {
+    check(headedBoxes.spec.hasPrefix("zscale=t=linear,drawbox="),
+          "black boxes keep the head in front", headedBoxes.spec)
+}
+
+let hdrArgs = FFmpeg.exportArguments(
+    input: landscape, output: scratch.appendingPathComponent("hdr.mp4"),
+    info: hdrInfo, crop: hdrInfo.fullFrame, settings: ExportSettings())
+check(hdrArgs.joined(separator: " ").contains("tonemap="),
+      "an HDR export tone-maps in the filter chain")
+if let index = hdrArgs.firstIndex(of: "-color_trc") {
+    equal(hdrArgs[index + 1], "bt709", "the tone-mapped output is tagged Rec.709")
+} else {
+    check(false, "the tone-mapped output is tagged Rec.709")
+}
+
+let sdrArgs = FFmpeg.exportArguments(
+    input: landscape, output: scratch.appendingPathComponent("sdr.mp4"),
+    info: info, crop: info.fullFrame, settings: ExportSettings())
+check(!sdrArgs.contains("-color_trc"), "an SDR export is not re-tagged")
+check(!sdrArgs.joined(separator: " ").contains("tonemap="), "an SDR export has no tone map")
+
+// Preview and export share the graph builder, so the preview must tone-map too.
+let canToneMap = await FFmpeg.supportsToneMapping()
+if let hlg, let hlgInfo, canToneMap {
+    let mapped = try? await FFmpeg.thumbnail(url: hlg, at: 0.5, duration: hlgInfo.duration,
+                                             toneMap: true)
+    check(mapped != nil, "the preview can tone-map a frame")
+
+    let hlgOut = scratch.appendingPathComponent("hlg-converted.mp4")
+    try await FFmpeg.export(input: hlg, output: hlgOut, info: hlgInfo,
+                            crop: hlgInfo.fullFrame, settings: ExportSettings()) { _ in }
+    let hlgOutInfo = try await FFmpeg.probe(url: hlgOut)
+    equal(hlgOutInfo.colorTransfer, "bt709", "the exported file says it is Rec.709")
+    check(!hlgOutInfo.isHDR, "the exported file is no longer flagged HDR")
+
+    // With the toggle off nothing is relabelled — the export is left as ffmpeg found it.
+    var untouched = ExportSettings()
+    untouched.toneMapHDR = false
+    let asIsOut = scratch.appendingPathComponent("hlg-as-is.mp4")
+    try await FFmpeg.export(input: hlg, output: asIsOut, info: hlgInfo,
+                            crop: hlgInfo.fullFrame, settings: untouched) { _ in }
+    let asIsInfo = try await FFmpeg.probe(url: asIsOut)
+    check(asIsInfo.colorTransfer != "bt709", "turning the toggle off does not relabel Rec.709",
+          asIsInfo.colorTransfer ?? "nil")
+} else if hlg != nil {
+    print("  --   tone-map encodes skipped (no zscale, or the fixture is not tagged HLG)")
+}
+
+// MARK: - Loudness normalisation
+
+print("\nLoudness")
+
+var loud = ExportSettings()
+loud.audio = .normalised
+check(FFmpeg.needsLoudnessPass(info: info, settings: loud), "MP4 with audio needs a measuring pass")
+
+var mute = info
+mute.audioCodec = nil
+check(!FFmpeg.needsLoudnessPass(info: mute, settings: loud), "a silent clip needs no pass")
+
+var gifLoud = loud
+gifLoud.format = .gif
+check(!FFmpeg.needsLoudnessPass(info: info, settings: gifLoud), "GIF has no audio to normalise")
+
+var plainAudio = ExportSettings()
+plainAudio.audio = .aac
+check(!FFmpeg.needsLoudnessPass(info: info, settings: plainAudio), "plain AAC needs no pass")
+
+let loudTarget = scratch.appendingPathComponent("loud.mp4")
+let loudCommands = FFmpeg.exportCommands(input: landscape, output: loudTarget, info: info,
+                                         crop: info.fullFrame, settings: loud)
+equal(loudCommands.count, 2, "normalising runs a measuring pass and an encode")
+check(loudCommands[0].joined(separator: " ").contains("print_format=json"),
+      "the first pass asks for the measurement")
+equal(loudCommands[0].last, "-", "the measuring pass writes nothing")
+check(loudCommands[0].contains("-vn"), "the measuring pass skips the video")
+let encodeText = loudCommands[1].joined(separator: " ")
+check(encodeText.contains("loudnorm=I=-14:TP=-1:LRA=11"), "the encode carries the target", encodeText)
+check(loudCommands[1].contains("48000"),
+      "the output rate is pinned, since loudnorm works at 192 kHz internally")
+
+// A silent clip skips the whole thing rather than measuring nothing.
+equal(FFmpeg.exportCommands(input: landscape, output: loudTarget, info: mute,
+                            crop: mute.fullFrame, settings: loud).count, 1,
+      "a silent clip runs one command")
+
+// Parsing what the measuring pass prints.
+let sampleLog = """
+[Parsed_loudnorm_0 @ 0x7fd] some other chatter
+{
+    "input_i" : "-23.45",
+    "input_tp" : "-5.20",
+    "input_lra" : "7.30",
+    "input_thresh" : "-33.61",
+    "output_i" : "-14.01",
+    "target_offset" : "0.21"
+}
+"""
+if let measured = FFmpeg.parseLoudness(sampleLog) {
+    equal(measured.inputI, "-23.45", "reads the integrated loudness")
+    equal(measured.targetOffset, "0.21", "reads the target offset")
+    check(measured.filterArguments.contains("measured_I=-23.45"),
+          "hands the measurement back to the second pass")
+    check(measured.filterArguments.contains("linear=true"),
+          "asks for a gain match rather than compression")
+} else {
+    check(false, "parses a loudnorm measurement block")
+}
+
+check(FFmpeg.parseLoudness("nothing to see here") == nil, "a log with no measurement is nil")
+check(FFmpeg.parseLoudness("{ not json ]") == nil, "a malformed block is nil")
+
+// Digital silence measures as -inf, which ffmpeg will not take back.
+let silentLog = """
+{
+    "input_i" : "-inf",
+    "input_tp" : "-inf",
+    "input_lra" : "0.00",
+    "input_thresh" : "-inf",
+    "target_offset" : "0.00"
+}
+"""
+check(FFmpeg.parseLoudness(silentLog) == nil, "an -inf measurement is refused")
+
+// An unmeasured encode still has a usable filter, so the fallback is safe.
+let unmeasured = FFmpeg.exportArguments(input: landscape, output: loudTarget, info: info,
+                                        crop: info.fullFrame, settings: loud, loudness: nil)
+check(unmeasured.joined(separator: " ").contains("loudnorm=I=-14"),
+      "an unmeasured encode still normalises")
+check(!unmeasured.joined(separator: " ").contains("measured_I"),
+      "an unmeasured encode carries no measurements")
+
+// The real thing: a full-scale sine is far too loud, and should come back near target.
+func integratedLoudness(_ url: URL) async throws -> Double? {
+    let result = try await Shell.run(ffmpeg, [
+        "-hide_banner", "-nostdin", "-i", url.path,
+        "-af", "loudnorm=\(Loudness.filterTargets):print_format=json",
+        "-vn", "-f", "null", "-",
+    ])
+    guard let measured = FFmpeg.parseLoudness(result.stderrText) else { return nil }
+    return Double(measured.inputI)
+}
+
+// Small frame so the encode is quick, but comfortably longer than the three seconds
+// loudnorm wants before its integrated measurement settles.
+let loudSource = try await makeClip("loud-source.mov", size: "320x180", seconds: 6, audio: "aac")
+let loudSourceInfo = try await FFmpeg.probe(url: loudSource)
+let loudOut = scratch.appendingPathComponent("loud-converted.mp4")
+try await FFmpeg.export(input: loudSource, output: loudOut, info: loudSourceInfo,
+                        crop: loudSourceInfo.fullFrame, settings: loud) { _ in }
+check(FileManager.default.fileExists(atPath: loudOut.path), "the normalised export produced a file")
+
+let loudOutInfo = try await FFmpeg.probe(url: loudOut)
+equal(loudOutInfo.audioCodec, "aac", "the normalised output still carries an AAC track")
+check(abs(loudOutInfo.duration - loudSourceInfo.duration) < 0.25,
+      "normalising does not change the duration",
+      "\(loudOutInfo.duration) vs \(loudSourceInfo.duration)")
+
+if let before = try await integratedLoudness(loudSource),
+   let after = try await integratedLoudness(loudOut) {
+    check(abs(after + 14) < abs(before + 14), "normalising moves loudness toward -14 LUFS",
+          "before \(before), after \(after)")
+    check(abs(after + 14) < 2.0, "the normalised output lands within 2 LU of the target",
+          "\(after) LUFS")
+} else {
+    check(false, "could measure the loudness either side of the export")
+}
+
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)
 exit(failures == 0 ? 0 : 1)
