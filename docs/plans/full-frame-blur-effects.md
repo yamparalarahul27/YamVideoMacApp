@@ -7,6 +7,11 @@
 This PR adds this document only. It does not implement an effect or change the app.
 The defaults and interaction rules below are implementation proposals for review.
 
+**See also:** [`video-use-enhancements.md`](./video-use-enhancements.md) proposes amendments
+to sections 5, 7 and 8 of this plan (renderer parity, effect-stage pixel format, `blend`
+cost, HDR sources) and a follow-on feature list. It is an addendum for review, not an
+approved change to this document.
+
 ## 1. Prerequisite and repository baseline
 
 The published `main` baseline inspected for this plan is `6cd0440`. It contains the
