@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     @Published var webpAvailable = true
     /// Whether it has zscale, without which HDR clips cannot be tone-mapped to SDR.
     @Published var toneMappingAvailable = true
+    /// Whether it has libass, without which subtitles cannot be burned in.
+    @Published var subtitlesAvailable = true
     @Published var statusMessage: String?
     @Published var editorMode: EditorMode = .crop
     @Published var selectedRegionID: BlurRegion.ID?
@@ -45,6 +47,7 @@ final class AppModel: ObservableObject {
         guard toolsAvailable else { return }
         Task { webpAvailable = await FFmpeg.supportsWebP() }
         Task { toneMappingAvailable = await FFmpeg.supportsToneMapping() }
+        Task { subtitlesAvailable = await FFmpeg.supportsSubtitles() }
     }
 
     var selectedItem: VideoItem? {
@@ -138,6 +141,7 @@ final class AppModel: ObservableObject {
                 guard let index = items.firstIndex(where: { $0.id == id }) else { return }
                 items[index].info = info
                 items[index].crop = info.fullFrame
+                items[index].subtitles = Self.siblingSubtitles(for: url)
                 items[index].status = .ready
                 ensureSelection()
                 if selection == id { refreshPreview() }
@@ -146,6 +150,41 @@ final class AppModel: ObservableObject {
                 items[index].status = .failed(error.localizedDescription)
             }
         }
+    }
+
+    /// A subtitle file sitting next to the video under the same name — the shape every
+    /// transcription tool writes, so it is worth finding rather than making the user do it.
+    static func siblingSubtitles(for video: URL) -> URL? {
+        let base = video.deletingPathExtension()
+        for ext in FFmpeg.subtitleExtensions {
+            let candidate = base.appendingPathExtension(ext)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    func chooseSubtitles() {
+        guard let id = selection else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        let types = FFmpeg.subtitleExtensions.compactMap { UTType(filenameExtension: $0) }
+        if !types.isEmpty { panel.allowedContentTypes = types }
+        panel.message = "Choose a subtitle file to burn into this clip."
+        panel.prompt = "Use"
+        panel.directoryURL = selectedItem?.url.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url,
+              let index = items.firstIndex(where: { $0.id == id })
+        else { return }
+        items[index].subtitles = url
+        refreshPreview()
+    }
+
+    func clearSubtitles() {
+        guard let id = selection, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].subtitles = nil
+        refreshPreview()
     }
 
     // MARK: - Preview
@@ -166,9 +205,13 @@ final class AppModel: ObservableObject {
             : "\(settings.blurStyle.rawValue)-\(Int(settings.blurStrength))-"
                 + regions.map { "\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))" }
                     .joined(separator: "|")
-        // Tone mapping changes every pixel, so it belongs in the key too.
+        // Tone mapping changes every pixel, so it belongs in the key too, and so does
+        // anything that changes how the captions are drawn.
         let toneMap = info.isHDR && settings.toneMapHDR
-        let key = "\(item.id)-\(Int(seconds * 4))-\(blurKey)-\(toneMap)"
+        let subtitles = item.subtitles
+        let subtitleStyle = settings.subtitleForceStyle
+        let subtitleKey = subtitles.map { "\($0.path)-\(subtitleStyle)" } ?? "none"
+        let key = "\(item.id)-\(Int(seconds * 4))-\(blurKey)-\(toneMap)-\(subtitleKey)"
         if let cached = thumbnailCache[key] {
             previewImage = cached
             previewIsLoading = false
@@ -187,7 +230,8 @@ final class AppModel: ObservableObject {
             do {
                 let data = try await FFmpeg.thumbnail(
                     url: url, at: seconds, duration: duration,
-                    regions: regions, style: style, strength: strength, toneMap: toneMap
+                    regions: regions, style: style, strength: strength, toneMap: toneMap,
+                    subtitles: subtitles, subtitleStyle: subtitleStyle
                 )
                 if Task.isCancelled { return }
                 guard let image = NSImage(data: data) else { return }
@@ -526,7 +570,8 @@ final class AppModel: ObservableObject {
                         crop: crop,
                         regions: item.blurRegions.map { $0.rect },
                         zoomShots: item.zoomShots,
-                        settings: settings
+                        settings: settings,
+                        subtitles: item.subtitles
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -581,7 +626,7 @@ final class AppModel: ObservableObject {
         return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
-            settings: settings
+            settings: settings, subtitles: item.subtitles
         ).map { command in
             let args = command.filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
             return (["ffmpeg"] + args).map { $0.contains(" ") ? "\"\($0)\"" : $0 }

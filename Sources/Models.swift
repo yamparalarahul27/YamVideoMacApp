@@ -163,6 +163,8 @@ struct VideoItem: Identifiable {
     var blurRegions: [BlurRegion] = []
     /// Push-ins, applied after the crop. Kept sorted and non-overlapping.
     var zoomShots: [ZoomShot] = []
+    /// A subtitle file to burn in, picked by the user or found next to the source.
+    var subtitles: URL?
     var status: Status = .probing
     /// Preview scrub position, 0...1.
     var previewFraction: Double = 0.15
@@ -258,6 +260,60 @@ enum SizeLimit: Int, CaseIterable, Identifiable {
         case .sd: return "Max 854 px (480p)"
         case .vga: return "Max 640 px"
         case .small: return "Max 480 px"
+        }
+    }
+}
+
+// MARK: - Subtitles
+
+/// Where burned-in captions sit.
+///
+/// The safe-area value is not taste. TikTok, Reels and Shorts draw their own caption,
+/// username and button rail over roughly the bottom quarter of a vertical frame, and
+/// anything near the bottom edge disappears behind it. libass measures margins against a
+/// fixed 288-tall reference canvas whatever the real frame size is, so one number clears
+/// that furniture at any aspect ratio.
+enum SubtitlePlacement: String, CaseIterable, Identifiable {
+    case bottom, safeArea
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .bottom: return "Bottom edge"
+        case .safeArea: return "Clear of social UI"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .bottom: return "Sits low in the frame — right for anything played in an ordinary video player."
+        case .safeArea: return "Lifted above the caption and buttons TikTok, Reels and Shorts draw over the bottom of the screen."
+        }
+    }
+
+    /// libass `MarginV`, against its 288-tall reference canvas.
+    var marginV: Int {
+        switch self {
+        case .bottom: return 35
+        case .safeArea: return 90
+        }
+    }
+}
+
+/// Caption size, as a libass `FontSize` against the same 288-tall canvas.
+enum SubtitleSize: Int, CaseIterable, Identifiable {
+    case small = 16
+    case medium = 20
+    case large = 26
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
         }
     }
 }
@@ -393,6 +449,9 @@ struct ExportSettings: Equatable {
     var gifDither: GIFDither = .bayer
     /// Pixel-exact WebP. Much larger, but the right choice for text and flat UI.
     var webpLossless: Bool = false
+    /// Burned-in subtitle styling. The file itself is per-clip, on `VideoItem`.
+    var subtitlePlacement: SubtitlePlacement = .bottom
+    var subtitleSize: SubtitleSize = .medium
     /// Nil means "next to the source file".
     var outputFolder: URL?
     var suffix: String = "-converted"
@@ -405,6 +464,19 @@ struct ExportSettings: Equatable {
     var vtQuality: Int { max(1, min(100, Int((20 + quality * 0.62).rounded()))) }
     /// libwebp quality (0...100) — the same slider the video encoders use.
     var webpQuality: Int { max(0, min(100, Int(quality.rounded()))) }
+
+    /// The ASS style override handed to the `subtitles` filter.
+    ///
+    /// White with a hard black outline and no shadow: a drop shadow reads as mush over
+    /// flat UI colour, which is most of what this app is pointed at, while an outline
+    /// survives any background. Commas separate the fields, so the whole thing has to be
+    /// quoted where it is used or it splits the filter graph instead.
+    var subtitleForceStyle: String {
+        "FontName=Helvetica,FontSize=\(subtitleSize.rawValue),Bold=1,"
+            + "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,"
+            + "BorderStyle=1,Outline=2,Shadow=0,"
+            + "Alignment=2,MarginV=\(subtitlePlacement.marginV)"
+    }
 
     var qualityDescription: String {
         switch format {

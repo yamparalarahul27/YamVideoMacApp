@@ -1221,6 +1221,208 @@ if let before = try await integratedLoudness(loudSource),
     check(false, "could measure the loudness either side of the export")
 }
 
+// MARK: - Subtitles
+
+print("\nSubtitles")
+
+// A path full of everything the filter parsers treat as special.
+let awkward = URL(fileURLWithPath: "/tmp/a:b,c;d'e\\f/My Captions.SRT")
+let stagedAwkward = FFmpeg.stagedSubtitlesURL(for: awkward)
+let hostile = Set(":,;'\\[]")
+check(!stagedAwkward.path.contains(where: { hostile.contains($0) }),
+      "the staged path carries nothing the filter parser would choke on", stagedAwkward.path)
+equal(stagedAwkward.pathExtension, "srt", "the extension is normalised to lower case")
+check(stagedAwkward.lastPathComponent.contains("MyCaptions"),
+      "the staged name still hints at the original", stagedAwkward.lastPathComponent)
+equal(FFmpeg.stagedSubtitlesURL(for: awkward), stagedAwkward,
+      "the staged path is the same every time, so the shown command is the one that runs")
+check(FFmpeg.stagedSubtitlesURL(for: URL(fileURLWithPath: "/tmp/a-b,c;d'e\\f/My Captions.SRT"))
+        != stagedAwkward,
+      "two different sources never share a staged copy")
+
+// A name with nothing safe left in it still produces a usable path.
+let unnameable = FFmpeg.stagedSubtitlesURL(for: URL(fileURLWithPath: "/tmp/:::.vtt"))
+check(unnameable.lastPathComponent.hasPrefix("yamvideo-subs-"), "an unnameable file still stages",
+      unnameable.lastPathComponent)
+equal(unnameable.pathExtension, "vtt", "a VTT keeps its extension")
+
+// Staging itself.
+let srt = scratch.appendingPathComponent("captions.srt")
+try """
+1
+00:00:00,200 --> 00:00:02,800
+BURNED IN
+
+""".write(to: srt, atomically: true, encoding: .utf8)
+
+let staged = try FFmpeg.stageSubtitles(srt)
+check(FileManager.default.fileExists(atPath: staged.path), "staging copies the file")
+equal(try String(contentsOf: staged, encoding: .utf8),
+      try String(contentsOf: srt, encoding: .utf8), "the staged copy matches the original")
+equal(try FFmpeg.stageSubtitles(srt), staged, "staging again returns the same path")
+
+do {
+    _ = try FFmpeg.stageSubtitles(scratch.appendingPathComponent("not-there.srt"))
+    check(false, "staging a missing file reports an error")
+} catch {
+    check(error.localizedDescription.contains("no longer there"),
+          "staging a missing file reports an error", error.localizedDescription)
+}
+
+// The filter itself.
+var subSettings = ExportSettings()
+let bottomFilter = FFmpeg.subtitlesFilter(staged: staged, forceStyle: subSettings.subtitleForceStyle)
+check(bottomFilter.hasPrefix("subtitles=\(staged.path):force_style='"),
+      "the filter names the staged file", bottomFilter)
+check(bottomFilter.hasSuffix("'"), "the style is quoted, or its commas would end the filter")
+check(bottomFilter.contains("MarginV=35"), "bottom placement uses the low margin")
+
+subSettings.subtitlePlacement = .safeArea
+check(FFmpeg.subtitlesFilter(staged: staged, forceStyle: subSettings.subtitleForceStyle)
+        .contains("MarginV=90"),
+      "the safe area lifts captions clear of the platform UI")
+
+subSettings.subtitleSize = .large
+check(subSettings.subtitleForceStyle.contains("FontSize=26"), "size feeds through to the style")
+
+// Ordering: captions are burned after everything that would otherwise move them.
+var orderSettings = ExportSettings()
+orderSettings.sizeLimit = .small
+let orderArgs = FFmpeg.exportArguments(
+    input: landscape, output: scratch.appendingPathComponent("subs.mp4"),
+    info: info, crop: CGRect(x: 0, y: 0, width: 640, height: 360),
+    zoomShots: [ZoomShot(start: 0.2, hold: 0.5, level: 2, target: CGPoint(x: 320, y: 180))],
+    settings: orderSettings, subtitles: srt)
+if let index = orderArgs.firstIndex(of: "-vf") {
+    let chain = orderArgs[index + 1]
+    check(chain.contains("subtitles="), "the chain burns the captions in", chain)
+    if let subs = chain.range(of: "subtitles="), let scale = chain.range(of: "scale=") {
+        check(subs.lowerBound > scale.lowerBound, "captions come after the scale", chain)
+    }
+    if let subs = chain.range(of: "subtitles="), let zoom = chain.range(of: "zoompan=") {
+        check(subs.lowerBound > zoom.lowerBound, "captions come after the zoom", chain)
+    }
+    if let subs = chain.range(of: "subtitles="), let crop = chain.range(of: "crop=") {
+        check(subs.lowerBound > crop.lowerBound, "captions come after the crop", chain)
+    }
+} else {
+    check(false, "an export with captions has a filter chain")
+}
+
+check(!FFmpeg.exportArguments(input: landscape, output: scratch.appendingPathComponent("nosubs.mp4"),
+                              info: info, crop: info.fullFrame, settings: ExportSettings())
+        .joined(separator: " ").contains("subtitles="),
+      "no subtitle file means no subtitle filter")
+
+// Both GIF passes have to see the same frames, captions included.
+var gifSubs = ExportSettings()
+gifSubs.format = .gif
+let gifSubCommands = FFmpeg.exportCommands(
+    input: landscape, output: scratch.appendingPathComponent("subs.gif"), info: info,
+    crop: info.fullFrame, settings: gifSubs, subtitles: srt)
+equal(gifSubCommands.count, 2, "a captioned GIF still runs the palette pass and the encode")
+check(gifSubCommands[0].joined(separator: " ").contains("subtitles="),
+      "the palette pass sees the captions")
+check(gifSubCommands[1].joined(separator: " ").contains("subtitles="),
+      "the encode sees them too")
+
+// Real rendering, if this ffmpeg can do it at all.
+let canBurn = await FFmpeg.supportsSubtitles()
+if canBurn {
+    /// Raw luma for a band of one already-rendered frame.
+    func bandLuma(_ url: URL, y: Int, height: Int, width: Int) async throws -> [UInt8] {
+        let result = try await Shell.run(ffmpeg, [
+            "-hide_banner", "-loglevel", "error",
+            "-i", url.path, "-frames:v", "1",
+            "-vf", "crop=\(width):\(height):0:\(y)",
+            "-f", "rawvideo", "-pix_fmt", "gray", "-",
+        ])
+        return [UInt8](result.stdout)
+    }
+
+    func meanDifference(_ a: [UInt8], _ b: [UInt8]) -> Double? {
+        guard a.count == b.count, !a.isEmpty else { return nil }
+        var total = 0
+        for index in a.indices { total += abs(Int(a[index]) - Int(b[index])) }
+        return Double(total) / Double(a.count)
+    }
+
+    // Three frames from the same source: no captions, captions at the bottom, and
+    // captions lifted into the safe area. Thumbnails are lossless PNG, so outside the
+    // text the pixels are identical and any difference really is the caption.
+    let bottomStyle = ExportSettings()
+    var liftedStyle = ExportSettings()
+    liftedStyle.subtitlePlacement = .safeArea
+
+    let plainPNG = try await FFmpeg.thumbnail(url: landscape, at: 1.0, duration: info.duration)
+    let bottomPNG = try await FFmpeg.thumbnail(
+        url: landscape, at: 1.0, duration: info.duration,
+        subtitles: srt, subtitleStyle: bottomStyle.subtitleForceStyle)
+    let liftedPNG = try await FFmpeg.thumbnail(
+        url: landscape, at: 1.0, duration: info.duration,
+        subtitles: srt, subtitleStyle: liftedStyle.subtitleForceStyle)
+
+    check(plainPNG != bottomPNG, "burning a caption changes the frame")
+    check(bottomPNG != liftedPNG, "moving the caption changes the frame")
+
+    let plainFile = scratch.appendingPathComponent("frame-plain.png")
+    let bottomFile = scratch.appendingPathComponent("frame-bottom.png")
+    let liftedFile = scratch.appendingPathComponent("frame-lifted.png")
+    try plainPNG.write(to: plainFile)
+    try bottomPNG.write(to: bottomFile)
+    try liftedPNG.write(to: liftedFile)
+
+    let frame = try await FFmpeg.probe(url: plainFile)
+    let width = frame.width
+    let lowBand = (y: frame.height * 3 / 4, height: frame.height / 4)
+    let topBand = (y: 0, height: frame.height / 4)
+    let footBand = (y: frame.height * 7 / 8, height: frame.height / 8)
+
+    let plainLow = try await bandLuma(plainFile, y: lowBand.y, height: lowBand.height, width: width)
+    let bottomLow = try await bandLuma(bottomFile, y: lowBand.y, height: lowBand.height, width: width)
+    let plainTop = try await bandLuma(plainFile, y: topBand.y, height: topBand.height, width: width)
+    let bottomTop = try await bandLuma(bottomFile, y: topBand.y, height: topBand.height, width: width)
+
+    if let lowDelta = meanDifference(plainLow, bottomLow),
+       let topDelta = meanDifference(plainTop, bottomTop) {
+        check(lowDelta > 1.0, "the caption really is drawn in the lower quarter",
+              "mean delta \(lowDelta)")
+        check(lowDelta > topDelta * 5, "and nowhere else in the frame",
+              "low \(lowDelta) vs top \(topDelta)")
+    } else {
+        check(false, "could compare the captioned and plain frames")
+    }
+
+    // Lifting the caption should leave the very bottom of the frame alone. The bottom
+    // eighth is used rather than the quarter so the check holds whichever reference
+    // height libass ends up scaling the margin against.
+    let plainFoot = try await bandLuma(plainFile, y: footBand.y, height: footBand.height, width: width)
+    let bottomFoot = try await bandLuma(bottomFile, y: footBand.y, height: footBand.height, width: width)
+    let liftedFoot = try await bandLuma(liftedFile, y: footBand.y, height: footBand.height, width: width)
+    if let seated = meanDifference(plainFoot, bottomFoot),
+       let lifted = meanDifference(plainFoot, liftedFoot) {
+        check(lifted < seated,
+              "the safe area lifts the caption out of the bottom of the frame",
+              "bottom \(seated) vs lifted \(lifted)")
+    } else {
+        check(false, "could compare the two caption placements")
+    }
+
+    // And a real encode end to end.
+    var burnSettings = ExportSettings()
+    burnSettings.suffix = "-captioned"
+    let burnOut = FFmpeg.outputURL(for: landscape, settings: burnSettings)
+    try await FFmpeg.export(input: landscape, output: burnOut, info: info,
+                            crop: info.fullFrame, settings: burnSettings,
+                            subtitles: srt) { _ in }
+    let burnInfo = try await FFmpeg.probe(url: burnOut)
+    equal(burnInfo.width, info.width, "a captioned export keeps its dimensions")
+    check(abs(burnInfo.duration - info.duration) < 0.25, "and its duration",
+          "\(burnInfo.duration) vs \(info.duration)")
+} else {
+    print("  --   caption rendering skipped (this ffmpeg has no libass)")
+}
+
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)
 exit(failures == 0 ? 0 : 1)

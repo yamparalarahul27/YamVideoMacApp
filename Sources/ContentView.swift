@@ -734,6 +734,8 @@ struct SettingsPane: View {
                     }
                 }
 
+                subtitleSection
+
                 if model.settings.format == .mp4 {
                     audioSection
                 }
@@ -883,6 +885,78 @@ struct SettingsPane: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 }
+            }
+        }
+    }
+
+    /// The file is per-clip; the styling is shared, like the blur areas and their style.
+    private var subtitleSection: some View {
+        section("Subtitles") {
+            if let subtitles = model.selectedItem?.subtitles {
+                HStack(spacing: 6) {
+                    Image(systemName: "captions.bubble")
+                        .foregroundStyle(.secondary)
+                    Text(subtitles.lastPathComponent)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(subtitles.path)
+                    Spacer()
+                    Button("Change…") { model.chooseSubtitles() }
+                        .controlSize(.small)
+                    Button {
+                        model.clearSubtitles()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Export without captions")
+                }
+
+                Picker("Placement", selection: $model.settings.subtitlePlacement) {
+                    ForEach(SubtitlePlacement.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+                .onChange(of: model.settings.subtitlePlacement) { _, _ in model.refreshPreview() }
+
+                Text(model.settings.subtitlePlacement.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Picker("Size", selection: $model.settings.subtitleSize) {
+                    ForEach(SubtitleSize.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: model.settings.subtitleSize) { _, _ in model.refreshPreview() }
+
+                if !model.subtitlesAvailable {
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("This ffmpeg was built without libass and cannot burn subtitles "
+                             + "in. Run brew install ffmpeg-full and relaunch, or clear the "
+                             + "file to export without them.")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Text(model.selectedItem == nil
+                         ? "Select a clip to add captions."
+                         : "No subtitle file.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Choose…") { model.chooseSubtitles() }
+                        .controlSize(.small)
+                        .disabled(model.selectedItem == nil)
+                }
+                Text("Burns an .srt, .vtt or .ass file into the picture. One sitting next to "
+                     + "the video under the same name is picked up on its own.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }

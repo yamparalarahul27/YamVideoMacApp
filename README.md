@@ -31,9 +31,10 @@ places and picks it up on its own. Check what yours has with
 the Format section rather than failing at the end of an export. GIF and MP4 need nothing
 extra.
 
-Converting an HDR clip to SDR needs `zscale`, which comes from libzimg — another optional
-build flag (`ffmpeg -filters | grep zscale`). The app checks for it the same way, and only
-mentions it when the clip you have selected is actually HDR.
+Converting an HDR clip to SDR needs `zscale`, which comes from libzimg, and burning
+subtitles in needs `subtitles`, which comes from libass — both optional build flags
+(`ffmpeg -filters | grep -E 'zscale|subtitles'`). The app checks for each the same way and
+only mentions them when the clip you have selected actually needs them.
 
 ## Build and run
 
@@ -48,9 +49,10 @@ To keep it around, drag `build/YamVideo.app` to `/Applications` — or:
 cp -R build/YamVideo.app /Applications/
 ```
 
-Run the checks with `./test.sh` (roughly 250 assertions, including real encodes and
+Run the checks with `./test.sh` (roughly 285 assertions, including real encodes and
 frame-by-frame verification that blurs actually remove detail, zooms land where they
-should, HDR clips come back tagged Rec.709, and normalised audio lands on target).
+should, burned-in captions land in the band they were aimed at, HDR clips come back
+tagged Rec.709, and normalised audio lands on target).
 
 ## Using it
 
@@ -63,6 +65,7 @@ should, HDR clips come back tagged Rec.709, and normalised audio lands on target
 | **Zoom in** | Switch to **Zoom**, scrub to the moment, then click the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds; drag the marker to re-aim it |
 | **Pick the frame you work against** | Drag the scrubber under the preview |
 | **Reuse your work** | **Apply to All** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
+| **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one in the **Subtitles** section. Choose where it sits and how big it is |
 | **Make a GIF or WebP** | Pick the format in the settings pane. Everything else — crop, blur, zoom — works exactly the same |
 | **Convert** | ⌘R for the whole queue, or **Convert Selected** in the toolbar. ⌘. stops |
 
@@ -82,6 +85,11 @@ overwritten and the source is never clobbered.
 - **Scale** — optionally cap the long side (4K/2560/1080p/720p/480p/640/480). Never upscales
 - **Blur areas** — **Blur** (soft gaussian), **Pixelate** (chunky mosaic), or **Black box**
   (solid fill, nothing recoverable), plus a strength/block-size slider
+- **Subtitles** — burns a subtitle file into the picture. The file is per clip; the
+  styling is shared. **Placement** is either **Bottom edge** or **Clear of social UI** —
+  the second lifts captions above the caption, username and button rail that TikTok, Reels
+  and Shorts draw over the bottom quarter of a vertical frame, where anything low in the
+  frame is simply covered up. **Size** is Small, Medium or Large
 - **Audio** (MP4) — re-encode to AAC 192k (default), normalise the loudness, copy the
   original stream, or drop it. **Normalise** targets -14 LUFS / -1 dBTP, which is what
   YouTube, Instagram, TikTok and LinkedIn all normalise toward: hit it and they leave your
@@ -139,6 +147,18 @@ A few things this handles that are easy to get wrong:
 - **Digital silence measures as `-inf`,** which ffmpeg will not accept back as a
   measurement. That case falls through to the unmeasured filter rather than failing the
   export — normalising silence is a no-op either way.
+- **Subtitles are burned last.** After the crop, after the zoom, after the scale, after
+  the blur areas. Ahead of the scale the text would be resampled with the picture; ahead
+  of the zoom it would be magnified along with it; ahead of a blur area it could be
+  smeared by one. Both GIF passes get the same treatment, or the palette would be built
+  for a picture the encode never renders.
+- **The subtitle file is copied somewhere safe before it is named in a filter.** The
+  `subtitles` filter takes its filename as a filter argument, where `:` separates options,
+  `,` and `;` separate the graph, and `'` and `\` quote — all of which are perfectly legal
+  in a macOS filename. Rather than escape three parser levels by hand, the file is copied
+  to a temporary name built only from characters none of them care about. The name comes
+  from a hash of the original path, so it is stable between runs (the command in the
+  sidebar is the one that runs) and two different files can never share a copy.
 - **Blur runs before the crop.** Blur areas live in full-frame coordinates, so moving the
   crop doesn't drag them along with it. The preview bakes the blur in using the same graph
   builder the export uses, so preview and output can't drift apart.

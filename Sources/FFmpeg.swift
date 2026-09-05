@@ -135,6 +135,11 @@ enum FFmpeg {
         return names.contains("zscale") && names.contains("tonemap")
     }
 
+    /// Burning subtitles in needs libass, which is another optional build flag.
+    static func supportsSubtitles() async -> Bool {
+        await filters().contains("subtitles")
+    }
+
     // MARK: - Probing
 
     static func probe(url: URL) async throws -> MediaInfo {
@@ -244,6 +249,8 @@ enum FFmpeg {
         style: BlurStyle = .blur,
         strength: Double = 24,
         toneMap: Bool = false,
+        subtitles: URL? = nil,
+        subtitleStyle: String = ExportSettings().subtitleForceStyle,
         maxWidth: Int = 1400
     ) async throws -> Data {
         guard let ffmpeg = ffmpegPath else {
@@ -257,14 +264,19 @@ enum FFmpeg {
         }
 
         // The preview shows the whole frame (the crop is drawn as an overlay), but blur
-        // regions and tone mapping are baked in by the same graph builder the export uses,
-        // so the two cannot drift apart.
+        // regions, tone mapping and captions are baked in by the same graph builder the
+        // export uses, in the same order, so the two cannot drift apart.
+        var tail = ["scale='min(\(maxWidth),iw)':-2:flags=bilinear"]
+        if let subtitles, let staged = try? stageSubtitles(subtitles) {
+            tail.append(subtitlesFilter(staged: staged, forceStyle: subtitleStyle))
+        }
+
         let graph = filterGraph(
             head: toneMap ? [toneMapChain] : [],
             regions: regions,
             style: style,
             strength: strength,
-            tail: ["scale='min(\(maxWidth),iw)':-2:flags=bilinear"]
+            tail: tail
         )
 
         func grab(_ time: Double) async throws -> Data {
@@ -458,6 +470,84 @@ enum FFmpeg {
             + ":s=\(Int(frame.width))x\(Int(frame.height)):fps=\(fpsExpression)"
     }
 
+    // MARK: - Subtitles
+
+    /// Subtitle files the `subtitles` filter can burn in as they are.
+    static let subtitleExtensions = ["srt", "vtt", "ass", "ssa"]
+
+    private static let safeNameCharacters = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+    private static let safeExtensionCharacters = Set("abcdefghijklmnopqrstuvwxyz")
+
+    /// A filter-safe path for a subtitle file.
+    ///
+    /// `subtitles=` takes its filename as a filter argument, and the parsers between here
+    /// and libass treat `:` as an option separator, `,` and `;` as graph separators, and
+    /// `'` and `\\` as quoting — every one of which is a legal character in a macOS
+    /// filename. Escaping three parser levels by hand is a bug waiting to happen, so the
+    /// file is copied to a name built only from characters none of them care about.
+    ///
+    /// The name is derived from the source path rather than random, so the command shown
+    /// in the sidebar is the one that actually runs — the same reason `paletteURL` is.
+    static func stagedSubtitlesURL(for url: URL) -> URL {
+        // FNV-1a over the full path. Swift's own hashValue is seeded per process, so it
+        // would give a different name every launch and let two different files collide
+        // across runs; this does not.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in url.path.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3
+        }
+
+        let stem = String(url.deletingPathExtension().lastPathComponent
+            .filter { safeNameCharacters.contains($0) }
+            .prefix(40))
+        let ext = url.pathExtension.lowercased().filter { safeExtensionCharacters.contains($0) }
+
+        var name = "yamvideo-subs-" + String(hash, radix: 16)
+        if !stem.isEmpty { name += "-" + stem }
+        return URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(name)
+            .appendingPathExtension(ext.isEmpty ? "srt" : ext)
+    }
+
+    /// Copies a subtitle file to its staged path, skipping the copy when it is current.
+    ///
+    /// The staged copy is deliberately not deleted afterwards: it is a few kilobytes, the
+    /// preview re-reads it on every refresh, and the temporary directory is the system's
+    /// to reclaim. The GIF palette is deleted because it is large and rebuilt every time.
+    @discardableResult
+    static func stageSubtitles(_ url: URL) throws -> URL {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: url.path) else {
+            throw FFmpegError(message: "The subtitle file \(url.lastPathComponent) is no longer there. "
+                + "Choose it again, or clear it in the Subtitles section.")
+        }
+
+        let staged = stagedSubtitlesURL(for: url)
+        let modified = { (candidate: URL) -> Date? in
+            try? candidate.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }
+        if let source = modified(url), let copy = modified(staged), copy >= source {
+            return staged
+        }
+
+        try? manager.removeItem(at: staged)
+        do {
+            try manager.copyItem(at: url, to: staged)
+        } catch {
+            throw FFmpegError(message: "Could not read \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+        return staged
+    }
+
+    /// The burn-in step, given an already-staged file.
+    ///
+    /// `force_style` is quoted because its fields are comma-separated, and an unquoted
+    /// comma ends the filter rather than the style. The filename needs no quoting because
+    /// staging already removed everything that would have needed it.
+    static func subtitlesFilter(staged: URL, forceStyle: String) -> String {
+        "subtitles=\(staged.path):force_style='\(forceStyle)'"
+    }
+
     // MARK: - Export
 
     /// Everything applied after the blur regions: crop, zoom, frame-rate cut, downscale.
@@ -465,7 +555,8 @@ enum FFmpeg {
         info: MediaInfo,
         crop cropRect: CGRect,
         zoomShots: [ZoomShot],
-        settings: ExportSettings
+        settings: ExportSettings,
+        subtitles: URL? = nil
     ) -> [String] {
         var tail: [String] = []
 
@@ -490,6 +581,14 @@ enum FFmpeg {
 
         if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
             tail.append("scale=\(Int(scaled.width)):\(Int(scaled.height)):flags=lanczos")
+        }
+
+        // Subtitles are burned last, on purpose. Ahead of the scale the text would be
+        // resampled along with the picture; ahead of the zoom it would be magnified with
+        // it; ahead of the blur areas it could be obscured by one.
+        if let subtitles {
+            tail.append(subtitlesFilter(staged: stagedSubtitlesURL(for: subtitles),
+                                        forceStyle: settings.subtitleForceStyle))
         }
         return tail
     }
@@ -519,11 +618,13 @@ enum FFmpeg {
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
         settings: ExportSettings,
+        subtitles: URL? = nil,
         palette: URL? = nil,
         loudness: LoudnessMeasurement? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
-        let tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots, settings: settings)
+        let tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots,
+                             settings: settings, subtitles: subtitles)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
@@ -632,10 +733,14 @@ enum FFmpeg {
         crop: CGRect,
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
-        settings: ExportSettings
+        settings: ExportSettings,
+        subtitles: URL? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
-        var tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots, settings: settings)
+        // Both GIF passes must see exactly the same frames, captions included, or the
+        // palette is built for a picture the encode never renders.
+        var tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots,
+                             settings: settings, subtitles: subtitles)
         // stats_mode=diff weights the palette towards whatever moves — the part anyone
         // actually looks at. A still background can afford to band a little.
         tail.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
@@ -729,7 +834,8 @@ enum FFmpeg {
         crop: CGRect,
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
-        settings: ExportSettings
+        settings: ExportSettings,
+        subtitles: URL? = nil
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
@@ -739,11 +845,13 @@ enum FFmpeg {
         if let palette {
             commands.append(paletteArguments(input: input, palette: palette, info: info,
                                              crop: crop, regions: regions,
-                                             zoomShots: zoomShots, settings: settings))
+                                             zoomShots: zoomShots, settings: settings,
+                                             subtitles: subtitles))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
-                                        settings: settings, palette: palette))
+                                        settings: settings, subtitles: subtitles,
+                                        palette: palette))
         return commands
     }
 
@@ -766,6 +874,7 @@ enum FFmpeg {
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
         settings: ExportSettings,
+        subtitles: URL? = nil,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
         guard let ffmpeg = ffmpegPath else {
@@ -786,6 +895,17 @@ enum FFmpeg {
                 + "ffmpeg-full (brew install ffmpeg-full) and relaunch, or turn off "
                 + "Convert HDR to SDR to export the source colours unchanged.")
         }
+        // Fail here, before the first pass, rather than letting ffmpeg complain about a
+        // filename halfway through an encode.
+        if let subtitles {
+            if await !supportsSubtitles() {
+                throw FFmpegError(message: "This copy of ffmpeg was built without libass, so it "
+                    + "cannot burn subtitles in. Install ffmpeg-full (brew install ffmpeg-full) "
+                    + "and relaunch, or clear the subtitle file in the Subtitles section.")
+            }
+            try stageSubtitles(subtitles)
+        }
+
         defer {
             if settings.format == .gif {
                 try? FileManager.default.removeItem(at: paletteURL(for: output))
@@ -793,7 +913,8 @@ enum FFmpeg {
         }
 
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
-                                      regions: regions, zoomShots: zoomShots, settings: settings)
+                                      regions: regions, zoomShots: zoomShots,
+                                      settings: settings, subtitles: subtitles)
         let measuring = needsLoudnessPass(info: info, settings: settings)
 
         // A preparatory pass only decodes, so it finishes well before the encode that
@@ -817,6 +938,7 @@ enum FFmpeg {
                 args = exportArguments(
                     input: input, output: output, info: info, crop: crop,
                     regions: regions, zoomShots: zoomShots, settings: settings,
+                    subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
                     loudness: measurement
                 )
