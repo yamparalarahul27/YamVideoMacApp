@@ -75,6 +75,16 @@ struct YamVideoApp: App {
                 Button("Trim Section End to Playhead") { model.trimToPlayhead(start: false) }.keyboardShortcut("]", modifiers: [.command, .shift])
                 Button("Delete Selected Section") { model.deleteSegment() }.keyboardShortcut(.delete)
                     .disabled(model.selectedSegmentID == nil)
+                Divider()
+                Button("Zoom In") { model.zoomTimeline(in: true) }
+                    .keyboardShortcut("=", modifiers: .command)
+                    .disabled(model.viewport.scale >= TimelineViewport.maximumScale - 0.0001)
+                Button("Zoom Out") { model.zoomTimeline(in: false) }
+                    .keyboardShortcut("-", modifiers: .command)
+                    .disabled(model.viewport.scale <= 1.0001)
+                Button("Zoom to Fit") { model.zoomTimelineToFit() }
+                    .keyboardShortcut("z", modifiers: .shift)
+                    .disabled(model.viewport.scale <= 1.0001)
                 }.disabled(model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
             }
             CommandGroup(after: .newItem) {

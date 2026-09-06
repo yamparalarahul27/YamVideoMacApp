@@ -4,71 +4,77 @@ struct TimelineView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var playback: PlaybackController
     let item: VideoItem
-    @State private var scale = 1.0
     @State private var overview: AudioOverview?
     @State private var audioError: String?
     @State private var reviewingSilence = false
+
+    // Lane geometry. Every height below derives from these, so adding a lane is one
+    // entry rather than five magic numbers that have to be kept in step.
+    private static let rulerHeight = 22.0
+    private static let sectionHeight = 48.0
+    private static let waveformHeight = 28.0
+    private static let zoomHeight = 28.0
+    private static let laneSpacing = 5.0
+
+    private var laneHeights: [Double] {
+        var lanes = [Self.rulerHeight, Self.sectionHeight]
+        if overview != nil { lanes.append(Self.waveformHeight) }
+        lanes.append(Self.zoomHeight)
+        return lanes
+    }
+
+    private var contentHeight: Double {
+        laneHeights.reduce(0, +) + Self.laneSpacing * Double(laneHeights.count - 1)
+    }
+
+    private var total: Double { max(0.001, item.editedDuration) }
+
+    /// Each section with the offset it starts at, summed once rather than asking the
+    /// timeline for every section's offset in turn.
+    private var placedSegments: [(index: Int, segment: TimelineSegment, offset: Double)] {
+        var offset = 0.0
+        return item.timeline.segments.enumerated().map { index, segment in
+            defer { offset += segment.duration }
+            return (index, segment, offset)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 8) {
             transport
             GeometryReader { geo in
-                let width = max(1, geo.size.width - 2) * scale
-                let pixels = width / max(0.001, item.editedDuration)
-                ScrollView(.horizontal) {
-                    ZStack(alignment: .topLeading) {
-                        VStack(spacing: 5) {
-                            ruler(width: width)
-                            HStack(spacing: 0) {
-                                ForEach(Array(item.timeline.segments.enumerated()), id: \.element.id) { index, segment in
-                                    SegmentBlock(segment: segment, number: index + 1, name: item.name,
-                                                 selected: model.selectedSegmentID == segment.id,
-                                                 pixels: pixels,
-                                                 onSelect: { fraction in
-                                                     model.selectedSegmentID = segment.id
-                                                     playback.pause()
-                                                     model.setPreviewFraction((item.timeline.offset(of: segment.id) + segment.duration * fraction) / item.editedDuration)
-                                                 }, onTrim: { start, end in model.trimSegment(segment.id, start: start, end: end) },
-                                                 onMove: { delta in
-                                                     let time = item.timeline.offset(of: segment.id) + segment.duration / 2 + delta / pixels
-                                                     if let destination = item.timeline.location(at: time)?.index {
-                                                         model.moveSegment(segment.id, to: destination)
-                                                     }
-                                                 })
-                                        .frame(width: max(1, segment.duration * pixels), height: 48)
-                                }
-                            }
-                            if let overview {
-                                WaveformView(overview: overview, timeline: item.timeline)
-                                    .frame(height: 28)
-                                    .contentShape(Rectangle())
-                                    .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                                        playback.pause(); model.setPreviewFraction(value.location.x / width)
-                                    })
-                            }
-                            ZStack(alignment: .topLeading) {
-                                RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
-                                if item.zoomShots.isEmpty {
-                                    Text("Zoom track · add a zoom at the playhead")
-                                        .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
-                                }
-                                ForEach(item.zoomShots) { shot in
-                                    ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id, pixels: pixels,
-                                              onSelect: { model.selectedShotID = shot.id; model.editorMode = .zoom },
-                                              onMove: { model.setZoomStart(shot.id, $0) },
-                                              onResize: { model.setZoomHold(shot.id, $0) })
-                                        .frame(width: max(3, shot.duration * pixels), height: 28)
-                                        .offset(x: shot.start * pixels)
-                                }
-                            }.frame(height: 28)
+                let width = max(1, geo.size.width - 2)
+                let pixels = model.viewport.pixels(across: width)
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: Self.laneSpacing) {
+                        ruler(width: width)
+                        sectionLane(width: width, pixels: pixels)
+                        if let overview {
+                            WaveformView(overview: overview, timeline: item.timeline, window: model.viewport)
+                                .frame(width: width, height: Self.waveformHeight)
+                                .contentShape(Rectangle())
+                                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                                    playback.pause(); scrub(toX: value.location.x, across: width)
+                                })
                         }
-                        Rectangle().fill(Color.primary).frame(width: 1.5, height: overview == nil ? 104 : 137)
-                            .offset(x: min(width - 1, max(0, item.previewFraction * width)))
-                            .allowsHitTesting(false)
+                        zoomLane(width: width, pixels: pixels)
                     }
-                    .frame(width: width, height: overview == nil ? 108 : 141)
+                    playhead(width: width)
                 }
-            }.frame(height: overview == nil ? 120 : 153)
+                .frame(width: width, height: contentHeight)
+                .overlay(
+                    TimelineGestures(
+                        onPan: { points in model.viewport.pan(by: points / pixels) },
+                        onZoom: { factor, x in
+                            // Hold whatever is under the pointer, so a pinch magnifies
+                            // the part of the timeline being pointed at.
+                            model.viewport.zoom(by: factor, keeping: model.viewport.time(atX: x, across: width))
+                        }
+                    )
+                )
+                .clipped()
+            }
+            .frame(height: contentHeight + 12)
             sectionControls
             HStack(spacing: 10) {
                 if let segment = model.selectedSegment {
@@ -92,8 +98,16 @@ struct TimelineView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.background.opacity(0.5))
+        .onAppear { model.syncViewport() }
+        .onChange(of: item.editedDuration) { _ in model.syncViewport() }
+        .onChange(of: model.previewTime) { time in
+            // Only chase the playhead while it is running away on its own; dragging it
+            // should not tug the view out from under the pointer.
+            if playback.isPlaying { model.viewport.reveal(time) }
+        }
         .task(id: item.url) {
             overview = nil; audioError = nil
+            model.zoomTimelineToFit()
             guard item.info?.hasAudio == true else { return }
             do {
                 let result = try await AudioAnalyzer.analyze(item.url)
@@ -105,6 +119,10 @@ struct TimelineView: View {
         .sheet(isPresented: $reviewingSilence) {
             if let overview { SilenceReviewView(clip: item, overview: overview).environmentObject(model) }
         }
+    }
+
+    private func scrub(toX x: Double, across width: Double) {
+        model.setPreviewFraction(model.viewport.time(atX: x, across: width) / total)
     }
 
     private var transport: some View {
@@ -120,19 +138,40 @@ struct TimelineView: View {
             Spacer(minLength: 4)
             Button { model.splitAtPlayhead() } label: { Label("Split", systemImage: "scissors") }
                 .help("Split at the playhead (⌘B)")
-            Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-            Slider(value: $scale, in: 1...8).frame(width: 68).accessibilityLabel("Timeline magnification")
+            zoomControls
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
     }
 
+    private var zoomControls: some View {
+        HStack(spacing: 6) {
+            Button { model.zoomTimeline(in: false) } label: { Image(systemName: "minus.magnifyingglass") }
+                .help("Zoom out (⌘−)").accessibilityLabel("Zoom out")
+                .disabled(model.viewport.scale <= 1.0001)
+            // The slider is logarithmic: the useful detail is in the first few times
+            // magnified, and a linear one spends most of its travel above 30×.
+            Slider(value: Binding(
+                get: { log(max(1, model.viewport.scale)) / log(TimelineViewport.maximumScale) },
+                set: { model.viewport.zoom(to: pow(TimelineViewport.maximumScale, $0), keeping: model.viewportAnchor) }
+            ), in: 0...1)
+                .frame(width: 68).accessibilityLabel("Timeline magnification")
+                .accessibilityValue("\(Int(model.viewport.scale.rounded()))×")
+            Button { model.zoomTimeline(in: true) } label: { Image(systemName: "plus.magnifyingglass") }
+                .help("Zoom in (⌘=)").accessibilityLabel("Zoom in")
+                .disabled(model.viewport.scale >= TimelineViewport.maximumScale - 0.0001)
+            Button { model.zoomTimelineToFit() } label: { Image(systemName: "arrow.left.and.right") }
+                .help("Zoom to fit (⇧Z)").accessibilityLabel("Zoom to fit")
+                .disabled(model.viewport.scale <= 1.0001)
+        }
+    }
+
     private func ruler(width: Double) -> some View {
-        let duration = max(0.001, item.editedDuration)
-        let pixels = width / duration
-        let interval = TimelineRuler.interval(pixelsPerSecond: pixels)
-        let minor = TimelineRuler.minorInterval(interval, pixelsPerSecond: pixels)
+        let viewport = model.viewport
+        let pixels = viewport.pixels(across: width)
         let fps = item.info?.fps ?? 30
+        let interval = TimelineRuler.interval(pixelsPerSecond: pixels, fps: fps)
+        let minor = TimelineRuler.minorInterval(interval, pixelsPerSecond: pixels)
         // Enough room for "12:34" or "12:34.29" at 9pt monospace. The last label on the
         // ruler is the only one that can reach past the end, and it loses its text
         // rather than its tick.
@@ -140,16 +179,16 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             Color.primary.opacity(0.001)
             if let minor {
-                ForEach(TimelineRuler.ticks(every: minor, in: 0...duration), id: \.self) { tick in
+                ForEach(TimelineRuler.ticks(every: minor, in: viewport.start...viewport.end), id: \.self) { tick in
                     Rectangle()
                         .fill(.quaternary)
                         .frame(width: 1, height: 3)
-                        .offset(x: tick * pixels, y: 15)
+                        .offset(x: viewport.x(of: tick, across: width), y: 15)
                 }
             }
-            ForEach(TimelineRuler.ticks(every: interval, in: 0...duration), id: \.self) { tick in
+            ForEach(TimelineRuler.ticks(every: interval, in: viewport.start...viewport.end), id: \.self) { tick in
                 VStack(alignment: .leading, spacing: 3) {
-                    if tick * pixels + labelWidth <= width {
+                    if viewport.x(of: tick, across: width) + labelWidth <= width {
                         Text(TimelineRuler.label(tick, interval: interval, fps: fps))
                             .font(.system(size: 9, design: .monospaced))
                             .fixedSize()
@@ -159,19 +198,77 @@ struct TimelineView: View {
                     Rectangle().frame(width: 1, height: 4)
                 }
                 .foregroundStyle(.secondary)
-                .offset(x: tick * pixels)
+                .offset(x: viewport.x(of: tick, across: width))
             }
         }
-        .frame(height: 22)
+        .frame(width: width, height: Self.rulerHeight, alignment: .leading)
+        .clipped()
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-            playback.pause()
-            model.setPreviewFraction(value.location.x / width)
+            playback.pause(); scrub(toX: value.location.x, across: width)
         })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Timeline playhead")
         .accessibilityValue(timelineTime(model.previewTime))
         .accessibilityAdjustableAction { direction in model.stepFrame(direction == .increment ? 1 : -1) }
+    }
+
+    private func sectionLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        return ZStack(alignment: .topLeading) {
+            Color.clear
+            ForEach(placedSegments.filter { viewport.intersects($0.offset, $0.offset + $0.segment.duration) },
+                    id: \.segment.id) { placed in
+                SegmentBlock(segment: placed.segment, number: placed.index + 1, name: item.name,
+                             selected: model.selectedSegmentID == placed.segment.id,
+                             pixels: pixels,
+                             onSelect: { fraction in
+                                 model.selectedSegmentID = placed.segment.id
+                                 playback.pause()
+                                 model.setPreviewFraction((placed.offset + placed.segment.duration * fraction) / total)
+                             }, onTrim: { start, end in model.trimSegment(placed.segment.id, start: start, end: end) },
+                             onMove: { delta in
+                                 let time = placed.offset + placed.segment.duration / 2 + delta / pixels
+                                 if let destination = item.timeline.location(at: time)?.index {
+                                     model.moveSegment(placed.segment.id, to: destination)
+                                 }
+                             })
+                    .frame(width: max(1, placed.segment.duration * pixels), height: Self.sectionHeight)
+                    .offset(x: viewport.x(of: placed.offset, across: width))
+            }
+        }
+        .frame(width: width, height: Self.sectionHeight, alignment: .leading)
+        .clipped()
+    }
+
+    private func zoomLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
+            if item.zoomShots.isEmpty {
+                Text("Zoom track · add a zoom at the playhead")
+                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
+            }
+            ForEach(item.zoomShots.filter { viewport.intersects($0.start, $0.start + $0.duration) }) { shot in
+                ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id, pixels: pixels,
+                          onSelect: { model.selectedShotID = shot.id; model.editorMode = .zoom },
+                          onMove: { model.setZoomStart(shot.id, $0) },
+                          onResize: { model.setZoomHold(shot.id, $0) })
+                    .frame(width: max(3, shot.duration * pixels), height: Self.zoomHeight)
+                    .offset(x: viewport.x(of: shot.start, across: width))
+            }
+        }
+        .frame(width: width, height: Self.zoomHeight, alignment: .leading)
+        .clipped()
+    }
+
+    private func playhead(width: Double) -> some View {
+        let time = model.previewTime
+        return Rectangle().fill(Color.primary)
+            .frame(width: 1.5, height: contentHeight - 4)
+            .offset(x: model.viewport.x(of: time, across: width))
+            .opacity(model.viewport.contains(time) ? 1 : 0)
+            .allowsHitTesting(false)
     }
 
     private var sectionControls: some View {
@@ -334,5 +431,79 @@ private struct TimelineTimeField: View {
             committed = onCommit(seconds)
         } else { committed = value }
         text = String(format: "%.3f", committed)
+    }
+}
+
+// MARK: - Trackpad
+
+/// Two-finger scroll and pinch over the timeline.
+///
+/// SwiftUI on macOS 14 surfaces neither, and a timeline needs both: two fingers travel
+/// along the recording, a pinch magnifies it. The view never takes part in hit testing,
+/// so clicks, drags and trims underneath behave exactly as they did; it watches for the
+/// two event kinds it wants and lets everything else past.
+private struct TimelineGestures: NSViewRepresentable {
+    /// Points to travel; positive moves the view later in the recording.
+    var onPan: (Double) -> Void
+    /// A magnification factor, and the x in view coordinates to hold still.
+    var onZoom: (Double, Double) -> Void
+
+    final class Catcher: NSView {
+        var onPan: ((Double) -> Void)?
+        var onZoom: ((Double, Double) -> Void)?
+        private var monitor: Any?
+
+        /// Never intercept the mouse: the sections below are still the things being
+        /// clicked, dragged and trimmed.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
+                guard let self, let window = self.window, event.window === window else { return event }
+                let local = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(local) else { return event }
+                switch event.type {
+                case .magnify:
+                    self.onZoom?(1 + Double(event.magnification), Double(local.x))
+                case .scrollWheel:
+                    if event.modifierFlags.contains(.command) {
+                        // A trackpad reports many small deltas and a wheel a few large
+                        // ones; an exponent turns both into a smooth factor.
+                        self.onZoom?(pow(1.01, Double(event.scrollingDeltaY)), Double(local.x))
+                    } else {
+                        // Horizontal intent wins, but a plain wheel with only a vertical
+                        // delta should still travel along an axis that is the only one
+                        // there is.
+                        let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
+                        self.onPan?(-Double(delta))
+                    }
+                default:
+                    return event
+                }
+                return nil
+            }
+        }
+
+        private func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        deinit { stop() }
+    }
+
+    func makeNSView(context: Context) -> Catcher {
+        let view = Catcher()
+        view.onPan = onPan
+        view.onZoom = onZoom
+        return view
+    }
+
+    func updateNSView(_ view: Catcher, context: Context) {
+        view.onPan = onPan
+        view.onZoom = onZoom
     }
 }

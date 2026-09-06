@@ -1437,19 +1437,19 @@ if canBurn {
 print("\nTimeline ruler")
 
 // The ladder must stay sorted, or `interval` cannot pick the finest fit by scanning it.
-check(zip(TimelineRuler.intervals, TimelineRuler.intervals.dropFirst()).allSatisfy { $0 < $1 },
-      "the interval ladder is sorted finest first")
+let ladder = TimelineRuler.intervals(fps: 30)
+check(zip(ladder, ladder.dropFirst()).allSatisfy { $0 < $1 }, "the interval ladder is sorted finest first")
 
 // The defect this replaces: a fixed tick count spreads labels further apart the further
 // you zoom, so most of the timeline carried no time reference. Across four decades of
 // magnification every chosen interval must stay legible and must come from the ladder.
-let coarsest = TimelineRuler.intervals[TimelineRuler.intervals.count - 1]
+let coarsest = ladder[ladder.count - 1]
 let scales = stride(from: -1.0, through: 3.0, by: 0.1).map { pow(10, $0) }
 var spacings: [Double] = []
 var offLadder: Double?
 for pixelsPerSecond in scales {
-    let interval = TimelineRuler.interval(pixelsPerSecond: pixelsPerSecond)
-    if !TimelineRuler.intervals.contains(interval) { offLadder = pixelsPerSecond }
+    let interval = TimelineRuler.interval(pixelsPerSecond: pixelsPerSecond, fps: 30)
+    if !ladder.contains(interval) { offLadder = pixelsPerSecond }
     // The coarsest interval is a floor: past it there is nothing wider to choose.
     if interval != coarsest { spacings.append(interval * pixelsPerSecond) }
 }
@@ -1464,15 +1464,15 @@ check(spacings.allSatisfy { $0 < 210 }, "and never spread further than the ladde
 var previous = coarsest
 var coarsened: Double?
 for pixelsPerSecond in scales {
-    let interval = TimelineRuler.interval(pixelsPerSecond: pixelsPerSecond)
+    let interval = TimelineRuler.interval(pixelsPerSecond: pixelsPerSecond, fps: 30)
     if interval > previous { coarsened = pixelsPerSecond }
     previous = interval
 }
 check(coarsened == nil, "the ruler only ever gets finer as it is zoomed in",
       coarsened.map { "coarsened at \(Int($0))px/s" } ?? "monotonic")
 
-equal(TimelineRuler.interval(pixelsPerSecond: 0), coarsest, "a degenerate scale falls back to the coarsest interval")
-equal(TimelineRuler.interval(pixelsPerSecond: .nan), coarsest, "and so does a non-finite one")
+equal(TimelineRuler.interval(pixelsPerSecond: 0, fps: 30), coarsest, "a degenerate scale falls back to the coarsest interval")
+equal(TimelineRuler.interval(pixelsPerSecond: .nan, fps: 30), coarsest, "and so does a non-finite one")
 
 // Minor ticks are dropped rather than drawn as a smear.
 check(TimelineRuler.minorInterval(1, pixelsPerSecond: 100) != nil, "minor ticks appear when there is room")
@@ -1490,6 +1490,98 @@ equal(TimelineRuler.label(0, interval: 1, fps: 30), "0:00", "zero formats cleanl
 equal(TimelineRuler.label(-4, interval: 1, fps: 30), "0:00", "and so does a negative time")
 equal(TimelineRuler.label(1, interval: 0.5, fps: 0), "0:01.00", "a missing frame rate falls back instead of dividing by zero")
 
+
+print("\nTimeline viewport")
+
+// The defect this replaces: zoom used to scale a canvas inside a scroll view, so the
+// moment you were looking at slid away as you magnified. Whatever the anchor, it must
+// stay at the same point across the width.
+let anchorWidth = 900.0
+var anchorDrift = 0.0
+for anchorFraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+    for factor in [1.5, 4.0, 0.5, 1 / 3.0] {
+        var port = TimelineViewport(total: 600)
+        port.zoom(to: 6, keeping: 300)          // start part-way in, away from either end
+        let anchor = port.start + port.visible * anchorFraction
+        let before = port.x(of: anchor, across: anchorWidth)
+        port.zoom(by: factor, keeping: anchor)
+        anchorDrift = max(anchorDrift, abs(port.x(of: anchor, across: anchorWidth) - before))
+    }
+}
+check(anchorDrift < 0.001, "zooming holds the anchored moment still",
+      String(format: "worst drift %.4fpt", anchorDrift))
+
+// x and time must be exact inverses, or scrubbing lands somewhere other than the click.
+var port = TimelineViewport(total: 600)
+port.zoom(to: 12, keeping: 200)
+var roundTrip = 0.0
+for x in [0.0, 1.0, 450.0, 899.0, 900.0] {
+    roundTrip = max(roundTrip, abs(port.x(of: port.time(atX: x, across: anchorWidth), across: anchorWidth) - x))
+}
+check(roundTrip < 0.000001, "a point converts to a time and back unchanged",
+      String(format: "worst %.8f", roundTrip))
+
+// The window may never leave the recording, however hard it is pushed.
+var edge = TimelineViewport(total: 600)
+edge.zoom(to: 10, keeping: 0)
+edge.pan(by: -10_000)
+equal(edge.start, 0, "panning stops at the beginning")
+edge.pan(by: 10_000)
+check(abs(edge.end - 600) < 0.000001, "and at the end", "\(edge.end)")
+check(edge.start >= 0 && edge.end <= 600.000001, "the window stays inside the recording")
+
+// Zoom limits.
+var limit = TimelineViewport(total: 600)
+limit.zoom(to: 1000, keeping: 300)
+equal(limit.scale, TimelineViewport.maximumScale, "zoom stops at the finest scale")
+limit.zoom(to: 0.01, keeping: 300)
+equal(limit.scale, 1, "and zooming out stops at the whole recording")
+equal(limit.visible, 600, "which is the whole timeline across the width")
+equal(limit.start, 0, "anchored back at the beginning")
+
+var degenerate = TimelineViewport(total: 600)
+degenerate.zoom(to: .nan, keeping: .nan)
+check(degenerate.visible.isFinite && degenerate.start.isFinite, "a non-finite zoom cannot corrupt the viewport")
+degenerate.pan(by: .infinity)
+check(degenerate.start.isFinite && degenerate.start >= 0, "nor can a non-finite pan")
+
+// Following the playhead: only when it leaves the margin, and never past the ends.
+var follow = TimelineViewport(total: 600)
+follow.zoom(to: 10, keeping: 300)   // 60s visible around 300
+let settled = follow.start
+follow.reveal(follow.start + follow.visible / 2)
+equal(follow.start, settled, "a playhead in clear view does not move the timeline")
+follow.reveal(follow.end + 5)
+check(follow.contains(follow.end - follow.visible * 0.12 + 0.001), "a playhead that runs off the end pulls the view along")
+check(follow.start >= 0 && follow.end <= 600.000001, "and following still cannot leave the recording")
+follow.reveal(0)
+equal(follow.start, 0, "revealing the very start sits flush against it")
+
+// An edit that changes the timeline's length must not strand the window past the end.
+var resized = TimelineViewport(total: 600)
+resized.zoom(to: 20, keeping: 590)
+resized.resize(total: 100)
+check(resized.end <= 100.000001, "shortening the timeline pulls the window back inside", "\(resized.end)")
+check(resized.visible <= 100.000001, "and never shows more than there is")
+resized.resize(total: 0)
+check(resized.visible > 0 && resized.scale >= 1, "an empty timeline still leaves a usable viewport")
+
+// Culling: only what is on screen is worth building.
+var culling = TimelineViewport(total: 600)
+culling.zoom(to: 60, keeping: 300)
+check(culling.intersects(culling.start - 1, culling.start + 1), "a section straddling the left edge is drawn")
+check(culling.intersects(culling.end - 1, culling.end + 1), "and one straddling the right edge")
+check(!culling.intersects(0, culling.start - 0.001), "but one entirely before the window is not")
+check(!culling.intersects(culling.end + 0.001, 600), "nor one entirely after it")
+check(culling.visible < 600 / 59, "sixty times is genuinely sixty times")
+
+// The ruler ladder is frame-derived below half a second, so fine labels land on whole
+// frames rather than rounding two ticks onto the same one.
+for fps in [24.0, 25.0, 30.0, 60.0] {
+    let fine = TimelineRuler.intervals(fps: fps).filter { $0 < 0.5 }
+    let whole = fine.allSatisfy { abs(($0 * fps).rounded() - $0 * fps) < 0.000001 }
+    check(whole, "every sub-second rung is a whole number of frames at \(Int(fps))fps")
+}
 
 print("\nTimeline and projects")
 let wholeTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 10)])

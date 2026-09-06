@@ -111,15 +111,20 @@ extension ClipTimeline {
 struct WaveformView: View {
     let overview: AudioOverview
     let timeline: ClipTimeline
+    /// The slice of the edited timeline drawn across this view's width. Nil draws all
+    /// of it, which is what the silence review sheet wants.
+    var window: TimelineViewport?
     var body: some View {
         Canvas { context, size in
             let count = max(1, Int(size.width / 2))
             let levels = overview.levels
             guard !levels.isEmpty else { return }
+            let from = window?.start ?? 0
+            let span = max(0.000001, (window?.visible ?? timeline.duration))
             var bars = Path()
             for column in 0..<count {
-                let a = timeline.duration * Double(column) / Double(count)
-                let b = timeline.duration * Double(column + 1) / Double(count)
+                let a = from + span * Double(column) / Double(count)
+                let b = from + span * Double(column + 1) / Double(count)
                 var loudest = -120.0
                 // Sample the whole pixel's time span, including both sides of edit boundaries.
                 for t in [a, (a + b) / 2, max(a, b - 0.00001)] {

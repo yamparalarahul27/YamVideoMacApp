@@ -169,6 +169,27 @@ width and culling was not needed. Both deferrals bite only when the ceiling rise
   the horizontal offset explicitly — a `ScrollViewReader`, or replacing the `ScrollView`
   with a manually offset content view. The current implementation cannot express it.
 
+**Implemented 2026-09-06.** The `ScrollView` is gone. `TimelineViewport` holds the slice
+on screen (`start`, `visible`, `total`) and every lane draws exactly that slice across
+the width it is given, so there is no scroll offset to chase after a zoom and off-screen
+footage is never built. The viewport lives on `AppModel` so the menu commands reach it.
+Trackpad scroll and pinch arrive through a small `NSViewRepresentable` that installs a
+local event monitor and never takes part in hit testing; SwiftUI on macOS 14 surfaces
+neither event. This also settled both 4.1 deferrals: culling is inherent, and the ruler
+ladder is now frame-derived below half a second.
+
+**A layout trap worth knowing before adding a lane.** A lane positions its contents with
+`.offset()`, but sizes them with `.frame(width:)` — and once zoomed in, a section is far
+wider than the viewport. SwiftUI sizes a `ZStack` to its widest child, so that one wide
+child sized the whole lane stack, and the outer `.frame(width:)` then *centred* it: with
+a 25-second clip the ruler measured 14,250,000 points wide and its ticks were positioned
+around x = −7,000,000. The flexible background still filled the visible width, so the
+lane looked present but empty, and only above 1× — at 1× the widest child is exactly the
+view width, so nothing overflows and it renders correctly. Every lane is therefore pinned
+with `.frame(width: width, alignment: .leading)` and clipped. Any new lane must do the
+same. This is a rendering fault the headless suite cannot see; it was found by
+screenshotting the running app.
+
 ### 4.3 Snapping
 
 A single `snap(_ time: Double, excluding: UUID?) -> Double` helper, applied to section

@@ -38,6 +38,10 @@ final class AppModel: ObservableObject {
     var zoomAnalysisTask: Task<Void, Never>?
     var movieExportTask: Task<Void, Never>?
     @Published var selectedSegmentID: UUID?
+    /// The slice of the edited timeline on screen. It lives here rather than in the
+    /// timeline view so the zoom menu commands can reach it and so it survives the view
+    /// being rebuilt; `syncViewport` keeps its length matching the selected clip.
+    @Published var viewport = TimelineViewport(total: 0)
     @Published var projectURL: URL?
     @Published var hasUnsavedChanges = false
     @Published var undoEntries: [EditHistory] = []

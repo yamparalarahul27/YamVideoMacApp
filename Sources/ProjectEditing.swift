@@ -363,3 +363,38 @@ extension AppModel {
         commitTimeline(timeline, name: "Change Section Speed", selection: id)
     }
 }
+
+// MARK: - Timeline viewport
+
+extension AppModel {
+    /// Keeps the viewport's length matching whatever the timeline is now, and starts a
+    /// newly selected clip zoomed out. Called whenever the timeline is rebuilt.
+    func syncViewport() {
+        let total = selectedItem?.editedDuration ?? 0
+        if abs(viewport.total - total) > 0.0005 { viewport.resize(total: total) }
+    }
+
+    /// Zoom out to the whole recording.
+    func zoomTimelineToFit() {
+        viewport.fit()
+    }
+
+    /// One step in or out, holding the playhead still when it is on screen and the
+    /// middle of the view when it is not.
+    func zoomTimeline(in zoomIn: Bool) {
+        viewport.zoom(by: zoomIn ? TimelineViewport.step : 1 / TimelineViewport.step, keeping: viewportAnchor)
+    }
+
+    /// What a zoom should hold still: the playhead if you can see it, otherwise the
+    /// centre of what you are looking at. Zooming away from the playhead when it is off
+    /// screen would drag the view somewhere you did not ask to go.
+    var viewportAnchor: Double {
+        let time = previewTime
+        return viewport.contains(time) ? time : viewport.start + viewport.visible / 2
+    }
+
+    /// Scroll the timeline so the playhead stays in view while it is moving.
+    func followPlayhead() {
+        viewport.reveal(previewTime)
+    }
+}
