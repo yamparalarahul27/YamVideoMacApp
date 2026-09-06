@@ -143,6 +143,20 @@ formatter and should gain a frames variant rather than being duplicated.
 Ticks are generated from the visible scroll range, not the whole timeline, so a long
 recording at high magnification does not build thousands of views.
 
+**Implemented 2026-09-06, with two deferrals to 4.2.** At the current `1...8` ceiling
+the 80-point minimum bounds the tick count on its own — a 60-minute recording at 8×
+draws 61 labels and 301 minor ticks — so ticks are currently generated across the whole
+width and culling was not needed. Both deferrals bite only when the ceiling rises:
+
+- **Culling.** At 60× a 60-minute recording wants 361 labels and 1,801 minor ticks.
+  Visible-range generation must land with the zoom work, which needs the scroll offset
+  tracked anyway to anchor zooming. On macOS 14 that means a `GeometryReader` in a named
+  coordinate space; `onScrollGeometryChange` is macOS 15.
+- **The ladder's bottom rung is not frame-aware.** `0.04` is one frame at 25fps. On a
+  30fps clip it is 1.2 frames, so labels round to frames 1, 2, 4 — skipping 3. Reachable
+  only above 2000 px/s, which `1...8` cannot produce. When the ceiling rises, the rungs
+  below one second should derive from the clip: `1/fps`, `2/fps`, `5/fps`.
+
 ### 4.2 Zoom
 
 - **Zoom to fit** — `⇧Z`, sets `scale` to 1 and scrolls to 0.

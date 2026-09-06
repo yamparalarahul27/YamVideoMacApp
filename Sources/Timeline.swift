@@ -204,3 +204,63 @@ func timelineTime(_ seconds: Double) -> String {
     return String(format: "%02d:%02d.%02d", centiseconds / 6000,
                   (centiseconds / 100) % 60, centiseconds % 100)
 }
+
+// MARK: - Ruler
+
+/// Tick spacing for the timeline ruler.
+///
+/// A fixed number of ticks is wrong at every magnification but one: zooming in spreads
+/// the same labels further apart, so most of the visible timeline ends up with no time
+/// reference at all. The interval is therefore chosen from the pixels-per-second on
+/// screen, so labels stay a readable distance apart however far the timeline is zoomed.
+enum TimelineRuler {
+    /// Seconds between labelled ticks, finest first. The smallest is one frame at 25fps;
+    /// anything below that would be labelling individual frames.
+    static let intervals: [Double] = [0.04, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+
+    /// The closest two labels may sit, in points. The ladder steps by at most 2.5×, so
+    /// the chosen spacing lands between this and roughly 200 points.
+    static let minimumSpacing = 80.0
+
+    /// Minor ticks subdivide the interval, and are drawn only when they stay this far
+    /// apart. Below that they read as a grey smear rather than as ticks.
+    static let minorDivisions = 5
+    static let minimumMinorSpacing = 6.0
+
+    /// The finest interval whose labels still clear `minimumSpacing`, or the coarsest
+    /// available when even that is too dense to label.
+    static func interval(pixelsPerSecond: Double) -> Double {
+        guard pixelsPerSecond > 0, pixelsPerSecond.isFinite else { return intervals[intervals.count - 1] }
+        return intervals.first { $0 * pixelsPerSecond >= minimumSpacing } ?? intervals[intervals.count - 1]
+    }
+
+    /// Nil when subdividing would put the minor ticks closer than `minimumMinorSpacing`.
+    static func minorInterval(_ interval: Double, pixelsPerSecond: Double) -> Double? {
+        let step = interval / Double(minorDivisions)
+        return step * pixelsPerSecond >= minimumMinorSpacing ? step : nil
+    }
+
+    /// Every multiple of `step` falling inside `range`, inclusive of both ends.
+    static func ticks(every step: Double, in range: ClosedRange<Double>) -> [Double] {
+        guard step > 0, step.isFinite, range.lowerBound.isFinite, range.upperBound.isFinite else { return [] }
+        let first = Int((range.lowerBound / step).rounded(.up))
+        let last = Int((range.upperBound / step).rounded(.down))
+        // A guard against a pathological zoom asking for more views than can be drawn.
+        guard last >= first, last - first < 20_000 else { return [] }
+        return (first...last).map { Double($0) * step }
+    }
+
+    /// Ruler labels drop the centiseconds `timelineTime` carries: at one second apart or
+    /// coarser they are noise. Below a second the frame number is the only thing that
+    /// distinguishes one tick from the next, so it replaces them.
+    static func label(_ seconds: Double, interval: Double, fps: Double) -> String {
+        let clamped = max(0, seconds.isFinite ? seconds : 0)
+        if interval >= 1 {
+            let total = Int(clamped.rounded())
+            return String(format: "%d:%02d", total / 60, total % 60)
+        }
+        let rate = max(1, Int((fps > 0 && fps.isFinite ? fps : 30).rounded()))
+        let frames = Int((clamped * Double(rate)).rounded())
+        return String(format: "%d:%02d.%02d", frames / (rate * 60), (frames / rate) % 60, frames % rate)
+    }
+}

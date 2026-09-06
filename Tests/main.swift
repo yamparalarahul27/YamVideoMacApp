@@ -1434,6 +1434,63 @@ if canBurn {
 
 // MARK: - Non-destructive editing and project round trips
 
+print("\nTimeline ruler")
+
+// The ladder must stay sorted, or `interval` cannot pick the finest fit by scanning it.
+check(zip(TimelineRuler.intervals, TimelineRuler.intervals.dropFirst()).allSatisfy { $0 < $1 },
+      "the interval ladder is sorted finest first")
+
+// The defect this replaces: a fixed tick count spreads labels further apart the further
+// you zoom, so most of the timeline carried no time reference. Across four decades of
+// magnification every chosen interval must stay legible and must come from the ladder.
+let coarsest = TimelineRuler.intervals[TimelineRuler.intervals.count - 1]
+let scales = stride(from: -1.0, through: 3.0, by: 0.1).map { pow(10, $0) }
+var spacings: [Double] = []
+var offLadder: Double?
+for pixelsPerSecond in scales {
+    let interval = TimelineRuler.interval(pixelsPerSecond: pixelsPerSecond)
+    if !TimelineRuler.intervals.contains(interval) { offLadder = pixelsPerSecond }
+    // The coarsest interval is a floor: past it there is nothing wider to choose.
+    if interval != coarsest { spacings.append(interval * pixelsPerSecond) }
+}
+check(offLadder == nil, "every chosen interval comes from the ladder",
+      offLadder.map { "off-ladder at \(Int($0))px/s" } ?? "\(scales.count) scales")
+check(spacings.allSatisfy { $0 >= TimelineRuler.minimumSpacing }, "labels never fall closer than the minimum",
+      "tightest \(spacings.min().map { String(format: "%.1f", $0) } ?? "none")")
+check(spacings.allSatisfy { $0 < 210 }, "and never spread further than the ladder's largest step allows",
+      "widest \(spacings.max().map { String(format: "%.1f", $0) } ?? "none")")
+
+// Zooming in must never coarsen the ruler.
+var previous = coarsest
+var coarsened: Double?
+for pixelsPerSecond in scales {
+    let interval = TimelineRuler.interval(pixelsPerSecond: pixelsPerSecond)
+    if interval > previous { coarsened = pixelsPerSecond }
+    previous = interval
+}
+check(coarsened == nil, "the ruler only ever gets finer as it is zoomed in",
+      coarsened.map { "coarsened at \(Int($0))px/s" } ?? "monotonic")
+
+equal(TimelineRuler.interval(pixelsPerSecond: 0), coarsest, "a degenerate scale falls back to the coarsest interval")
+equal(TimelineRuler.interval(pixelsPerSecond: .nan), coarsest, "and so does a non-finite one")
+
+// Minor ticks are dropped rather than drawn as a smear.
+check(TimelineRuler.minorInterval(1, pixelsPerSecond: 100) != nil, "minor ticks appear when there is room")
+check(TimelineRuler.minorInterval(1, pixelsPerSecond: 20) == nil, "and are dropped when there is not")
+
+equal(TimelineRuler.ticks(every: 5, in: 0...20), [0, 5, 10, 15, 20], "ticks include both ends")
+equal(TimelineRuler.ticks(every: 5, in: 6...19), [10, 15], "and only whole multiples inside the range")
+check(TimelineRuler.ticks(every: 0, in: 0...10).isEmpty, "a zero step yields no ticks")
+check(TimelineRuler.ticks(every: 0.0001, in: 0...100).isEmpty, "an absurd tick count is refused rather than drawn")
+
+// Labels carry frames only when ticks are closer together than a second.
+equal(TimelineRuler.label(75, interval: 5, fps: 30), "1:15", "a coarse label drops the fraction")
+equal(TimelineRuler.label(75.5, interval: 0.2, fps: 30), "1:15.15", "a fine label counts frames instead")
+equal(TimelineRuler.label(0, interval: 1, fps: 30), "0:00", "zero formats cleanly")
+equal(TimelineRuler.label(-4, interval: 1, fps: 30), "0:00", "and so does a negative time")
+equal(TimelineRuler.label(1, interval: 0.5, fps: 0), "0:01.00", "a missing frame rate falls back instead of dividing by zero")
+
+
 print("\nTimeline and projects")
 let wholeTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 10)])
 var splitTimeline = wholeTimeline

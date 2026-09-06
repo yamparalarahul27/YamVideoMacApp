@@ -128,15 +128,38 @@ struct TimelineView: View {
     }
 
     private func ruler(width: Double) -> some View {
-        ZStack(alignment: .topLeading) {
+        let duration = max(0.001, item.editedDuration)
+        let pixels = width / duration
+        let interval = TimelineRuler.interval(pixelsPerSecond: pixels)
+        let minor = TimelineRuler.minorInterval(interval, pixelsPerSecond: pixels)
+        let fps = item.info?.fps ?? 30
+        // Enough room for "12:34" or "12:34.29" at 9pt monospace. The last label on the
+        // ruler is the only one that can reach past the end, and it loses its text
+        // rather than its tick.
+        let labelWidth = interval >= 1 ? 34.0 : 46.0
+        return ZStack(alignment: .topLeading) {
             Color.primary.opacity(0.001)
-            ForEach(0...8, id: \.self) { tick in
+            if let minor {
+                ForEach(TimelineRuler.ticks(every: minor, in: 0...duration), id: \.self) { tick in
+                    Rectangle()
+                        .fill(.quaternary)
+                        .frame(width: 1, height: 3)
+                        .offset(x: tick * pixels, y: 15)
+                }
+            }
+            ForEach(TimelineRuler.ticks(every: interval, in: 0...duration), id: \.self) { tick in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(timelineTime(item.editedDuration * Double(tick) / 8)).font(.system(size: 9, design: .monospaced))
+                    if tick * pixels + labelWidth <= width {
+                        Text(TimelineRuler.label(tick, interval: interval, fps: fps))
+                            .font(.system(size: 9, design: .monospaced))
+                            .fixedSize()
+                    } else {
+                        Color.clear.frame(width: 1, height: 11)
+                    }
                     Rectangle().frame(width: 1, height: 4)
                 }
                 .foregroundStyle(.secondary)
-                .offset(x: min(width - 52, width * Double(tick) / 8))
+                .offset(x: tick * pixels)
             }
         }
         .frame(height: 22)
