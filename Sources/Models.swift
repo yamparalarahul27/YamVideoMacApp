@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Media info (from ffprobe)
 
-struct MediaInfo: Equatable {
+struct MediaInfo: Equatable, Codable {
     /// Dimensions as displayed (rotation metadata already applied), in pixels.
     var width: Int
     var height: Int
@@ -53,7 +53,7 @@ struct MediaInfo: Equatable {
 
 /// A rectangle to obscure, in source pixels against the *displayed* (rotation-applied)
 /// frame — the same coordinate space as the crop rectangle.
-struct BlurRegion: Identifiable, Equatable {
+struct BlurRegion: Identifiable, Equatable, Codable {
     let id: UUID
     var rect: CGRect
 
@@ -63,7 +63,7 @@ struct BlurRegion: Identifiable, Equatable {
     }
 }
 
-enum BlurStyle: String, CaseIterable, Identifiable {
+enum BlurStyle: String, CaseIterable, Identifiable, Codable {
     case blur, pixelate, black
 
     var id: String { rawValue }
@@ -100,7 +100,7 @@ enum EditorMode: String, CaseIterable, Identifiable {
 // MARK: - Zoom shots
 
 /// A push-in on one spot: ease in, hold still, ease back out.
-struct ZoomShot: Identifiable, Equatable {
+struct ZoomShot: Identifiable, Equatable, Codable {
     let id: UUID
     /// When the ease-in begins, in seconds.
     var start: Double
@@ -151,8 +151,8 @@ struct VideoItem: Identifiable {
         }
     }
 
-    let id = UUID()
-    let url: URL
+    var id = UUID()
+    var url: URL
     var info: MediaInfo?
     /// Crop rectangle in source pixels, origin top-left. Nil until probed.
     var crop: CGRect?
@@ -165,6 +165,11 @@ struct VideoItem: Identifiable {
     var zoomShots: [ZoomShot] = []
     /// A subtitle file to burn in, picked by the user or found next to the source.
     var subtitles: URL?
+    /// Nil means the entire source; edits store ordered, non-destructive source ranges.
+    var includedInMovie = true
+    var segments: [TimelineSegment]?
+    var timeline: ClipTimeline { ClipTimeline(segments: segments ?? [TimelineSegment(id: id, start: 0, end: info?.duration ?? 0)]) }
+    var editedDuration: Double { timeline.duration }
     var status: Status = .probing
     /// Preview scrub position, 0...1.
     var previewFraction: Double = 0.15
@@ -179,7 +184,7 @@ struct VideoItem: Identifiable {
 
 // MARK: - Export settings
 
-enum VideoEncoder: String, CaseIterable, Identifiable {
+enum VideoEncoder: String, CaseIterable, Identifiable, Codable {
     case x264
     case h264VT
     case hevcVT
@@ -197,7 +202,7 @@ enum VideoEncoder: String, CaseIterable, Identifiable {
     var isHardware: Bool { self != .x264 }
 }
 
-enum AudioMode: String, CaseIterable, Identifiable {
+enum AudioMode: String, CaseIterable, Identifiable, Codable {
     case aac, normalised, copy, none
     var id: String { rawValue }
     var label: String {
@@ -239,7 +244,7 @@ struct LoudnessMeasurement: Equatable {
     }
 }
 
-enum SizeLimit: Int, CaseIterable, Identifiable {
+enum SizeLimit: Int, CaseIterable, Identifiable, Codable {
     case original = 0
     case uhd = 3840
     case qhd = 2560
@@ -273,7 +278,7 @@ enum SizeLimit: Int, CaseIterable, Identifiable {
 /// anything near the bottom edge disappears behind it. libass measures margins against a
 /// fixed 288-tall reference canvas whatever the real frame size is, so one number clears
 /// that furniture at any aspect ratio.
-enum SubtitlePlacement: String, CaseIterable, Identifiable {
+enum SubtitlePlacement: String, CaseIterable, Identifiable, Codable {
     case bottom, safeArea
 
     var id: String { rawValue }
@@ -302,7 +307,7 @@ enum SubtitlePlacement: String, CaseIterable, Identifiable {
 }
 
 /// Caption size, as a libass `FontSize` against the same 288-tall canvas.
-enum SubtitleSize: Int, CaseIterable, Identifiable {
+enum SubtitleSize: Int, CaseIterable, Identifiable, Codable {
     case small = 16
     case medium = 20
     case large = 26
@@ -320,7 +325,7 @@ enum SubtitleSize: Int, CaseIterable, Identifiable {
 
 // MARK: - Output format
 
-enum OutputFormat: String, CaseIterable, Identifiable {
+enum OutputFormat: String, CaseIterable, Identifiable, Codable {
     case mp4, gif, webp
 
     var id: String { rawValue }
@@ -365,7 +370,7 @@ enum OutputFormat: String, CaseIterable, Identifiable {
 
 /// Frame rate for GIF/WebP. Dropping frames is the single biggest saving available —
 /// a 30 fps GIF is twice the file of a 15 fps one and rarely looks better.
-enum AnimationFrameRate: Int, CaseIterable, Identifiable {
+enum AnimationFrameRate: Int, CaseIterable, Identifiable, Codable {
     case source = 0
     case fps24 = 24
     case fps20 = 20
@@ -381,7 +386,7 @@ enum AnimationFrameRate: Int, CaseIterable, Identifiable {
 
 /// Palette size for GIF. Fewer colours is a smaller file and, on screen recordings
 /// (flat UI colours), usually indistinguishable.
-enum GIFColors: Int, CaseIterable, Identifiable {
+enum GIFColors: Int, CaseIterable, Identifiable, Codable {
     case full = 256
     case half = 128
     case quarter = 64
@@ -398,7 +403,7 @@ enum GIFColors: Int, CaseIterable, Identifiable {
     }
 }
 
-enum GIFDither: String, CaseIterable, Identifiable {
+enum GIFDither: String, CaseIterable, Identifiable, Codable {
     case bayer, diffusion, none
 
     var id: String { rawValue }
@@ -429,7 +434,7 @@ enum GIFDither: String, CaseIterable, Identifiable {
     }
 }
 
-struct ExportSettings: Equatable {
+struct ExportSettings: Equatable, Codable {
     var format: OutputFormat = .mp4
     var encoder: VideoEncoder = .x264
     /// 0 = smallest file, 100 = best quality.

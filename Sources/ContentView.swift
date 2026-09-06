@@ -15,16 +15,18 @@ struct ContentView: View {
                     .frame(minWidth: 210, idealWidth: 240, maxWidth: 340)
 
                 editorPane
-                    .frame(minWidth: 460)
+                    .frame(minWidth: 600)
+                    .disabled(model.isConverting)
 
                 SettingsPane(showCommand: $showCommand)
                     .frame(minWidth: 268, idealWidth: 288, maxWidth: 340)
+                    .disabled(model.isConverting)
             }
 
             Divider()
             statusBar
         }
-        .frame(minWidth: 1020, minHeight: 660)
+        .frame(minWidth: 1140, minHeight: 800)
         .toolbar {
             ToolbarItemGroup {
                 Button {
@@ -34,6 +36,14 @@ struct ContentView: View {
                 }
                 .help("Add video files (⌘O)")
 
+                Button { model.saveProject() } label: { Label("Save Project", systemImage: "square.and.arrow.down") }
+                    .help("Save editable project (⌘S)")
+                Text((model.projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled") + (model.hasUnsavedChanges ? " •" : ""))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Picker("Workspace", selection: Binding(get: { model.isMovieMode }, set: { model.setMovieMode($0) })) {
+                    Text("Recording").tag(false)
+                    Text("Movie").tag(true)
+                }.pickerStyle(.segmented).frame(width: 175).disabled(model.isConverting)
                 Spacer()
 
                 if model.isConverting {
@@ -42,24 +52,29 @@ struct ContentView: View {
                     } label: {
                         Label("Stop", systemImage: "stop.fill")
                     }
+                } else if model.isMovieMode {
+                    Button { model.promptForMovieExport() } label: { Label("Export Movie", systemImage: "square.and.arrow.up") }
+                        .buttonStyle(.borderedProminent)
+                        .disabled((try? model.moviePlan()) == nil || !model.toolsAvailable)
                 } else {
                     Button {
                         model.convertSelected()
                     } label: {
-                        Label("Convert Selected", systemImage: "play")
+                        Label("Export Selected", systemImage: "play")
                     }
                     .disabled(model.selectedItem?.info == nil || !model.toolsAvailable)
 
                     Button {
                         model.convertAll()
                     } label: {
-                        Label("Convert All (\(model.convertibleCount))", systemImage: "square.and.arrow.down.on.square")
+                        Label("Export All (\(model.convertibleCount))", systemImage: "square.and.arrow.down.on.square")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.convertibleCount == 0 || !model.toolsAvailable)
                 }
             }
         }
+        .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
         .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
             loadDroppedURLs(providers) { urls in model.addDropped(urls) }
             return true
@@ -78,7 +93,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var editorPane: some View {
-        if let item = model.selectedItem, let info = item.info, let crop = item.crop {
+        if model.isMovieMode {
+            MovieView(playback: model.playback)
+        } else if let item = model.selectedItem, !FileManager.default.fileExists(atPath: item.url.path) {
+            centeredMessage(icon: "exclamationmark.triangle", title: "Source video is missing",
+                            detail: item.url.path, action: ("Locate Source…", { model.locateSource() }))
+        } else if let item = model.selectedItem, let info = item.info, let crop = item.crop {
             CropEditorPane(item: item, info: info, crop: crop)
         } else if let item = model.selectedItem, case .failed(let message) = item.status {
             centeredMessage(
@@ -92,8 +112,8 @@ struct ContentView: View {
         } else {
             centeredMessage(
                 icon: "film.stack",
-                title: "Drop MOV files here",
-                detail: "Or press ⌘O to choose files. Crop visually, then convert to MP4, GIF or WebP.",
+                title: "Start with a recording",
+                detail: "Drop a video or open a saved project. Cut mistakes, arrange zooms, and preview your edit.",
                 action: ("Add Videos…", { model.promptForFiles() })
             )
         }
@@ -299,9 +319,9 @@ struct QueueRow: View {
         case .probing:
             return "Reading…"
         case .ready:
-            guard let info = item.info, let crop = item.crop else { return "Ready" }
+            guard item.info != nil, let crop = item.crop else { return "Ready" }
             let out = FFmpeg.scaledSize(for: crop.size, limit: .original) ?? crop.size
-            return "\(Int(out.width))×\(Int(out.height)) · \(formatDuration(info.duration))"
+            return "\(Int(out.width))×\(Int(out.height)) · \(formatDuration(item.editedDuration))"
         case .converting(let fraction):
             return "Converting \(Int(fraction * 100))%"
         case .done:
@@ -325,6 +345,9 @@ struct CropEditorPane: View {
             header
             Divider()
 
+            if model.showPlayback {
+                PlaybackCanvas(playback: model.playback).frame(maxHeight: .infinity)
+            } else {
             CropCanvas(
                 image: model.previewImage,
                 info: info,
@@ -346,7 +369,8 @@ struct CropEditorPane: View {
             )
             .frame(maxHeight: .infinity)
 
-            scrubber
+            }
+            TimelineView(playback: model.playback, item: item)
             Divider()
             switch model.editorMode {
             case .crop: cropControls
@@ -355,7 +379,9 @@ struct CropEditorPane: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: model.editorMode) { _, _ in model.setPlaybackVisible(false) }
         .onDeleteCommand {
+            guard !model.isConverting else { return }
             switch model.editorMode {
             case .blur: model.removeSelectedRegion()
             case .zoom: model.removeSelectedZoom()
@@ -377,6 +403,10 @@ struct CropEditorPane: View {
             .labelsHidden()
             .frame(width: 230)
 
+            Picker("Viewer", selection: Binding(get: { model.showPlayback }, set: { model.setPlaybackVisible($0) })) {
+                Text("Edit frame").tag(false)
+                Text("Preview").tag(true)
+            }.pickerStyle(.segmented).frame(width: 165).labelsHidden()
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name).font(.headline).lineLimit(1).truncationMode(.middle)
                 Text("\(info.width)×\(info.height) · \(info.videoCodec.uppercased()) · \(formatDuration(info.duration))"
@@ -393,44 +423,6 @@ struct CropEditorPane: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-    }
-
-    private var scrubber: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "film")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Slider(
-                value: Binding(
-                    get: { item.previewFraction },
-                    set: { model.setPreviewFraction($0) }
-                ),
-                in: 0...1
-            )
-            .overlay(alignment: .bottomLeading) {
-                // Where the zooms sit along the clip.
-                if model.editorMode == .zoom, info.duration > 0, !item.zoomShots.isEmpty {
-                    GeometryReader { geo in
-                        ForEach(item.zoomShots) { shot in
-                            Capsule()
-                                .fill(Color.cyan.opacity(shot.id == model.selectedShotID ? 0.9 : 0.45))
-                                .frame(
-                                    width: max(3, geo.size.width * shot.duration / info.duration),
-                                    height: 3
-                                )
-                                .offset(x: geo.size.width * shot.start / info.duration, y: geo.size.height - 1)
-                        }
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
-            Text(formatDuration(info.duration * item.previewFraction))
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 48, alignment: .trailing)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     private var cropControls: some View {
@@ -564,6 +556,19 @@ struct CropEditorPane: View {
 
     private var zoomControls: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if model.isAnalyzingZooms {
+                    ProgressView().controlSize(.small)
+                    Text("Finding local activity…").font(.caption).foregroundStyle(.secondary)
+                    Button("Cancel") { model.cancelZoomAnalysis() }.controlSize(.small)
+                } else {
+                    Button { model.suggestZooms() } label: { Label("Suggest Zooms", systemImage: "sparkles") }
+                        .controlSize(.small).disabled(item.editedDuration < 1.5)
+                    Text("Local motion analysis · review before adding")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
             HStack(spacing: 8) {
                 Image(systemName: "cursorarrow.click")
                     .font(.caption)
@@ -601,7 +606,7 @@ struct CropEditorPane: View {
                     .frame(width: 130)
                     .accessibilityLabel("Zoom level")
 
-                    Text("at \(formatDuration(shot.start))")
+                    Text("at \(timelineTime(shot.start))")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
 
@@ -664,12 +669,15 @@ struct CropEditorPane: View {
 struct SettingsPane: View {
     @EnvironmentObject var model: AppModel
     @Binding var showCommand: Bool
+    private var settingsBinding: Binding<ExportSettings> {
+        Binding(get: { model.settings }, set: { model.updateSettings($0) })
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 section("Format") {
-                    Picker("Format", selection: $model.settings.format) {
+                    Picker("Format", selection: settingsBinding.format) {
                         ForEach(OutputFormat.allCases) { Text($0.label).tag($0) }
                     }
                     .labelsHidden()
@@ -700,7 +708,7 @@ struct SettingsPane: View {
                 colourSection
 
                 section("Blur Areas") {
-                    Picker("Style", selection: $model.settings.blurStyle) {
+                    Picker("Style", selection: settingsBinding.blurStyle) {
                         ForEach(BlurStyle.allCases) { Text($0.label).tag($0) }
                     }
                     .labelsHidden()
@@ -720,7 +728,7 @@ struct SettingsPane: View {
                                     .font(.system(.caption, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
-                            Slider(value: $model.settings.blurStrength, in: 4...80, step: 2)
+                            Slider(value: settingsBinding.blurStrength, in: 4...80, step: 2)
                                 .onChange(of: model.settings.blurStrength) { _, _ in
                                     model.refreshPreview()
                                 }
@@ -741,6 +749,10 @@ struct SettingsPane: View {
                 }
 
                 section("Destination") {
+                    if model.isMovieMode {
+                        Text("Choose the movie's name and location when you export.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
                     HStack(spacing: 6) {
                         Text(model.settings.outputFolder?.lastPathComponent ?? "Alongside originals")
                             .font(.caption)
@@ -761,13 +773,18 @@ struct SettingsPane: View {
                     }
                     HStack(spacing: 6) {
                         Text("Suffix").font(.caption).foregroundStyle(.secondary)
-                        TextField("-converted", text: $model.settings.suffix)
+                        TextField("-converted", text: settingsBinding.suffix)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.caption, design: .monospaced))
+                    }
                     }
                 }
 
                 DisclosureGroup(isExpanded: $showCommand) {
+                    if model.isMovieMode {
+                        Text("Example destination; Export Movie asks where to save.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     if let command = model.previewCommand {
                         Text(command)
                             .font(.system(size: 10, design: .monospaced))
@@ -793,7 +810,7 @@ struct SettingsPane: View {
 
     private var videoSection: some View {
         section("Video") {
-            Picker("Encoder", selection: $model.settings.encoder) {
+            Picker("Encoder", selection: settingsBinding.encoder) {
                 ForEach(VideoEncoder.allCases) { Text($0.label).tag($0) }
             }
             .labelsHidden()
@@ -801,7 +818,7 @@ struct SettingsPane: View {
             qualitySlider
 
             if !model.settings.encoder.isHardware {
-                Picker("Speed", selection: $model.settings.preset) {
+                Picker("Speed", selection: settingsBinding.preset) {
                     ForEach(ExportSettings.presets, id: \.self) { Text($0).tag($0) }
                 }
             }
@@ -812,7 +829,7 @@ struct SettingsPane: View {
 
     private var animationSection: some View {
         section(model.settings.format == .gif ? "GIF" : "WebP") {
-            Picker("Frame rate", selection: $model.settings.frameRate) {
+            Picker("Frame rate", selection: settingsBinding.frameRate) {
                 ForEach(AnimationFrameRate.allCases) { Text($0.label).tag($0) }
             }
             .labelsHidden()
@@ -826,12 +843,12 @@ struct SettingsPane: View {
             }
 
             if model.settings.format == .gif {
-                Picker("Colours", selection: $model.settings.gifColors) {
+                Picker("Colours", selection: settingsBinding.gifColors) {
                     ForEach(GIFColors.allCases) { Text($0.label).tag($0) }
                 }
                 .labelsHidden()
 
-                Picker("Dither", selection: $model.settings.gifDither) {
+                Picker("Dither", selection: settingsBinding.gifDither) {
                     ForEach(GIFDither.allCases) { Text($0.label).tag($0) }
                 }
                 .labelsHidden()
@@ -842,7 +859,7 @@ struct SettingsPane: View {
             } else {
                 if !model.settings.webpLossless { qualitySlider }
 
-                Toggle("Lossless", isOn: $model.settings.webpLossless)
+                Toggle("Lossless", isOn: settingsBinding.webpLossless)
                     .controlSize(.small)
                 Text(model.settings.webpLossless
                      ? "Pixel-exact, and much bigger. Worth it for text and flat UI."
@@ -851,7 +868,7 @@ struct SettingsPane: View {
                     .foregroundStyle(.secondary)
             }
 
-            Toggle("Loop forever", isOn: $model.settings.loopForever)
+            Toggle("Loop forever", isOn: settingsBinding.loopForever)
                 .controlSize(.small)
 
             Text("Neither format carries audio, so the sound is dropped.")
@@ -963,11 +980,18 @@ struct SettingsPane: View {
 
     private var audioSection: some View {
         section("Audio") {
-            Picker("Audio", selection: $model.settings.audio) {
+            if model.isMovieMode, model.settings.audio != .none {
+                Text("Movies use AAC audio, with silence for recordings without sound.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if model.selectedItem?.segments != nil, model.settings.audio == .copy {
+                Text("Timeline cuts require audio encoding. Export will use AAC to keep cuts in sync.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Picker("Audio", selection: settingsBinding.audio) {
                 ForEach(AudioMode.allCases) { Text($0.label).tag($0) }
             }
             .labelsHidden()
-            if model.settings.audio == .copy, let info = model.selectedItem?.info,
+            if !model.isMovieMode, model.settings.audio == .copy, let info = model.selectedItem?.info,
                info.hasAudio, !info.audioIsMP4Compatible {
                 HStack(alignment: .top, spacing: 5) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -976,7 +1000,7 @@ struct SettingsPane: View {
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            } else if model.settings.audio == .copy {
+            } else if !model.isMovieMode, model.settings.audio == .copy, model.selectedItem?.segments == nil {
                 Text("Skips audio re-encoding when the source track is already MP4-compatible.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -999,7 +1023,7 @@ struct SettingsPane: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Slider(value: $model.settings.quality, in: 0...100, step: 5) {
+            Slider(value: settingsBinding.quality, in: 0...100, step: 5) {
                 EmptyView()
             } minimumValueLabel: {
                 Text("small").font(.caption2).foregroundStyle(.tertiary)
@@ -1010,7 +1034,7 @@ struct SettingsPane: View {
     }
 
     private var scalePicker: some View {
-        Picker("Scale", selection: $model.settings.sizeLimit) {
+        Picker("Scale", selection: settingsBinding.sizeLimit) {
             ForEach(SizeLimit.allCases) { Text($0.label).tag($0) }
         }
         .labelsHidden()

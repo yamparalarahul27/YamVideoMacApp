@@ -3,3 +3,7 @@ build/
 
 # macOS
 .DS_Store
+
+# Browser tooling scratch
+.playwright-cli/
+output/

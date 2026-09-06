@@ -1,8 +1,12 @@
 # YamVideo
 
-A small native macOS app for cropping video, blurring out parts of it, adding Screen
-Studio-style zooms, and converting it to MP4, animated GIF or animated WebP. Drop in a
-`.mov` (or almost anything else ffmpeg reads), edit on the frame, hit Convert.
+A native macOS editor for screen recordings: cut mistakes, reorder sections, crop and
+blur the frame, arrange smooth zooms, preview the result with sound, and export MP4,
+animated GIF or animated WebP. Save the edits in a `.yamvideo` project and pick up later.
+
+Each imported recording has its own timeline. Export recordings separately, or switch to
+**Movie** to combine them into one export. **Suggest Zooms** finds concentrated visual
+activity locally and proposes editable zooms for you to preview and accept.
 
 Built as a plain SwiftUI app that drives `ffmpeg` — no Xcode project, no dependencies to
 vendor, and the exact command it runs is always visible in the sidebar.
@@ -49,10 +53,91 @@ To keep it around, drag `build/YamVideo.app` to `/Applications` — or:
 cp -R build/YamVideo.app /Applications/
 ```
 
-Run the checks with `./test.sh` (roughly 285 assertions, including real encodes and
+Run the checks with `./test.sh` (roughly 285 assertions). Tests include real encodes and
 frame-by-frame verification that blurs actually remove detail, zooms land where they
 should, burned-in captions land in the band they were aimed at, HDR clips come back
-tagged Rec.709, and normalised audio lands on target).
+tagged Rec.709, and normalised audio lands on target — plus video and audio section
+ordering, exact frame counts, native preview/export coordinate comparisons, undo/redo,
+project round trips, autosave recovery, and export failure/cancellation cleanup. Movie
+checks cover mixed dimensions, frame rates, rotated footage, silent recordings, GIF
+palettes, preview/export parity, and preserving existing exports on cancellation.
+
+## Building a movie
+
+Use the **Movie** workspace in the toolbar after importing recordings. Include or exclude
+recordings with the checkboxes and change their order with the arrow buttons. **Edit**
+opens a recording's timeline; its cuts, crop, blur areas and zooms also apply in the movie.
+The movie preview plays through every included recording with sound.
+
+Choose **Match first clip**, **16:9**, **9:16**, or **1:1** for the canvas. Recordings fit
+inside it with black bars where needed. Frame rates normalize to the first recording's
+rate without changing playback speed. The export size limit applies to the canvas.
+**Export Movie…** (⌘R in Movie) writes one MP4, GIF, or WebP to your chosen destination.
+MP4 audio is normalized to AAC; silent clips receive silence. Cancellation keeps an
+existing destination intact. Inclusion, order and canvas save with the project.
+
+## Assisted zooms
+
+In a recording's **Zoom** controls, choose **Suggest Zooms**. Analysis samples up to
+1,200 small frames on this Mac, looks for localized changes, and ignores full-screen
+changes, removed footage, activity outside the crop, and existing zooms. Preview each
+suggestion, uncheck any you do not want, then choose **Add Selected**. Added shots use
+the same target, timing, strength and undo controls as manual zooms.
+
+This is a visual-activity heuristic: it does not recognize mouse clicks, track a cursor,
+or understand which part of your content matters. Quiet footage may yield no suggestions.
+
+## Editing a recording
+
+- **Waveform:** an audio waveform appears below the video sections as analysis finishes.
+  It follows cuts, reordering and speed changes. Click or drag it to seek. Analysis stays
+  on this Mac; recordings without audio show **No audio track**.
+- **Remove pauses:** choose **Review Silence…**, adjust the audio threshold, minimum
+  pause length and padding around speech, then listen to each proposed cut. Uncheck cuts
+  you want to keep and choose **Apply Cuts**. The time saving reflects current section
+  speeds; the minimum-pause setting measures the original recording. One Undo restores
+  all removed sections. Low volume is not necessarily silence, so review quiet speech
+  and intentional pauses before applying.
+- **Change speed:** select a video section and choose **Speed**, from **0.25× to 4×**.
+  Split a section first to retime only part of it. Audio preserves pitch in native playback
+  and export. Movies, waveforms and time labels follow the new duration. Zoom starts stay
+  anchored to their source frames; their hold lengths remain in playback seconds and
+  may be shortened or removed if they no longer fit.
+- **Play / pause:** press Space or the play button beneath the viewer. Left/Right step one
+  frame. The Preview tab shows the edited movie with crop, blur, zooms, cuts and audio;
+  Edit frame gives you the original frame and draggable editing handles.
+- **Seek:** click or drag the time ruler, or click inside a video section. The timeline
+  magnification slider provides more room for precise cuts; scroll horizontally when zoomed in.
+- **Split:** place the playhead inside a section and press **⌘B** or click **Split**.
+- **Trim:** drag a section's left/right handle, or select it and enter source seconds in
+  **In / Out**. Changes snap to source frames. **⌘⇧[ / ⌘⇧]** trim the current section's
+  start/end to the playhead. Hidden footage can be restored up to neighboring retained ranges.
+- **Delete:** select a section, then click the trash button or press **⌘⌫**. The gap closes
+  automatically. At least one section stays; remove the sidebar item to discard a recording.
+- **Reorder:** drag a section onto another, or use the earlier/later arrow buttons.
+- **Arrange zooms:** use Zoom mode to add one at the playhead. Drag a cyan timeline block
+  to move its start; drag its right handle to change the hold duration. Zooms stay inside
+  the edited duration and cannot overlap. When cutting or reordering, their start frames
+  anchor them to retained footage. Zooms whose start was removed, or which no longer fit,
+  are removed with a status message; Undo restores them.
+- **Undo / redo:** **⌘Z / ⌘⇧Z** restore timeline, crop, blur, zoom and export-setting edits.
+  Continuous drags are grouped into one step. History is kept for the current session.
+- **Save:** **⌘S** saves a `.yamvideo` project; **⌘⇧S** saves a copy. **⌘⇧O** opens a project,
+  and **⌘N** starts a new one. Opening/starting a project can also be undone.
+  Projects containing speed edits use version 2 and require this build; older version 1
+  projects open with normal-speed sections.
+- **Recover:** edits autosave after a short idle period and when quitting. The next launch
+  restores the session, including its named save destination. Recovery lives in
+  `~/Library/Application Support/YamVideo/Recovery.yamvideo`; it does not overwrite a named
+  project until you save. Projects reference the original source paths. If a source moves,
+  **Locate Source…** reconnects a video with matching dimensions and duration.
+
+Playback uses AVFoundation and Core Image, so ordinary MP4/MOV recordings preview without
+an intermediate render. Other formats remain available for FFmpeg export but may not play
+natively. Soft blur/pixelation can look slightly different between the native preview and
+FFmpeg export; the Edit frame preview uses the FFmpeg blur graph. Export resolution, encoder
+quality and animation frame thinning apply during export. Cuts encode audio to AAC even
+when Copy is selected, to keep the cut boundaries synchronized.
 
 ## Using it
 
@@ -67,9 +152,9 @@ tagged Rec.709, and normalised audio lands on target).
 | **Reuse your work** | **Apply to All** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
 | **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one in the **Subtitles** section. Choose where it sits and how big it is |
 | **Make a GIF or WebP** | Pick the format in the settings pane. Everything else — crop, blur, zoom — works exactly the same |
-| **Convert** | ⌘R for the whole queue, or **Convert Selected** in the toolbar. ⌘. stops |
+| **Export** | ⌘R exports all recordings in Recording or the assembled movie in Movie. ⌘. stops |
 
-Output lands next to each source file as `<name>-converted.<ext>` (`.mp4`, `.gif` or
+Individual clip output lands next to each source file as `<name>-converted.<ext>` (`.mp4`, `.gif` or
 `.webp`, following the format) unless you choose another folder. Existing files are never
 overwritten and the source is never clobbered.
 
@@ -185,8 +270,9 @@ A few things this handles that are easy to get wrong:
   makes ffmpeg buffer every frame in memory before it can emit any; two passes cost a
   decode and stay flat regardless of clip length. The palette lands in the temp folder and
   is deleted afterwards, including when the encode fails.
-- **Frame thinning happens after the zoom.** `zoompan` re-times to whatever rate it is
-  given, so an `fps` filter placed before it would simply be undone.
+- **Zoom and frame rate agree.** `zoompan` emits one frame per input, so its input cadence
+  must match its declared output rate. Clip exports normalize both to the chosen rate;
+  movies normalize each source to a common rate and thin animation frames after assembly.
 - **The two formats spell "play once" differently.** GIF wants `-loop -1`, WebP wants
   `-loop 1`, and both use `0` for forever. Getting this backwards silently produces a
   one-shot animation.
@@ -204,6 +290,16 @@ Sources/
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
+  Timeline.swift    ordered source ranges and project serialization
+  TimelineView.swift timeline, section trim handles and zoom blocks
+  Playback.swift    native video/audio composition and live effects
+  ProjectEditing.swift undo history, project files and session recovery
+  Movie.swift       movie canvas and multi-source FFmpeg export graph
+  MoviePlayback.swift native compositor for differently oriented recordings
+  MovieEditing.swift movie actions and atomic export publishing
+  MovieView.swift   assembly preview, inclusion and order controls
+  ZoomSuggestions.swift local motion analysis and suggestion review
+  AudioAnalysis.swift audio waveform, silence detection and reviewable cuts
   Shell.swift       process runner with streamed output
 Tests/main.swift    end-to-end checks (./test.sh)
 Tools/makeicon.swift  draws the app icon at build time

@@ -94,25 +94,21 @@ enum Shell {
         let waiter = ProcessWaiter()
         process.terminationHandler = { _ in waiter.finish() }
 
-        if let onStdoutLine {
-            let splitter = LineSplitter()
-            outPipe.fileHandleForReading.readabilityHandler = { handle in
-                let chunk = handle.availableData
-                if chunk.isEmpty {
-                    handle.readabilityHandler = nil
-                    return
-                }
-                splitter.feed(chunk, onStdoutLine)
-            }
-        }
-
+        try Task.checkCancellation()
+        try process.run()
         // Drain on background threads so a full pipe buffer can never deadlock the process.
         let group = DispatchGroup()
-        if onStdoutLine == nil {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { group.leave() }
+            if let onStdoutLine {
+                let splitter = LineSplitter()
+                while let chunk = try? outPipe.fileHandleForReading.read(upToCount: 65536), !chunk.isEmpty {
+                    splitter.feed(chunk, onStdoutLine)
+                }
+                splitter.feed(Data([10]), onStdoutLine)
+            } else {
                 outBox.append(outPipe.fileHandleForReading.readDataToEndOfFile())
-                group.leave()
             }
         }
         group.enter()
@@ -121,15 +117,12 @@ enum Shell {
             group.leave()
         }
 
-        try process.run()
-
         await withTaskCancellationHandler {
             await waiter.wait()
         } onCancel: {
             process.terminate()
         }
 
-        outPipe.fileHandleForReading.readabilityHandler = nil
         // Let the drain threads finish without blocking this task's thread.
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             group.notify(queue: .global(qos: .userInitiated)) { cont.resume() }
