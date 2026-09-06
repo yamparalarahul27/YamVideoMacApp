@@ -1009,7 +1009,13 @@ do {
         "-hide_banner", "-loglevel", "error", "-y",
         "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "2",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        // The container-level flags are what older ffmpeg honoured; ffmpeg 9's libx264
+        // ignores them and writes an untagged stream, which made this fixture silently
+        // SDR and skipped every tone-mapping check below. Passing the tags through to
+        // x264 itself writes them into the bitstream. Both are sent so the fixture is
+        // correct whichever build is installed.
         "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-color_primaries", "bt2020",
+        "-x264-params", "transfer=arib-std-b67:colorprim=bt2020:colormatrix=bt2020nc",
         url.path,
     ])
     if result.status == 0 { hlg = url }
