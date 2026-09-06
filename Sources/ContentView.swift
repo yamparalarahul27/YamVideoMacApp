@@ -697,6 +697,8 @@ struct SettingsPane: View {
                     videoSection
                 }
 
+                colourSection
+
                 section("Blur Areas") {
                     Picker("Style", selection: $model.settings.blurStyle) {
                         ForEach(BlurStyle.allCases) { Text($0.label).tag($0) }
@@ -731,6 +733,8 @@ struct SettingsPane: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+
+                subtitleSection
 
                 if model.settings.format == .mp4 {
                     audioSection
@@ -856,6 +860,107 @@ struct SettingsPane: View {
         }
     }
 
+    /// Only shown for HLG/PQ sources — there is nothing to decide about an SDR clip.
+    @ViewBuilder
+    private var colourSection: some View {
+        if let info = model.selectedItem?.info, info.isHDR {
+            section("Colour") {
+                Toggle("Convert HDR to SDR", isOn: $model.settings.toneMapHDR)
+                    .onChange(of: model.settings.toneMapHDR) { _, _ in model.refreshPreview() }
+
+                Text(model.settings.toneMapHDR
+                     ? "This clip is \(info.hdrLabel ?? "HDR"). Tone-mapped to Rec.709 so it looks right in browsers and on the web, not just in QuickTime."
+                     : "Off: the export keeps the source's HDR transfer. QuickTime will look fine; most other players will show it blown out.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if model.settings.toneMapHDR, !model.toneMappingAvailable {
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("This ffmpeg has no zscale filter and cannot tone-map. Run "
+                             + "brew install ffmpeg-full and relaunch, or turn this off to "
+                             + "export the source colours unchanged.")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// The file is per-clip; the styling is shared, like the blur areas and their style.
+    private var subtitleSection: some View {
+        section("Subtitles") {
+            if let subtitles = model.selectedItem?.subtitles {
+                HStack(spacing: 6) {
+                    Image(systemName: "captions.bubble")
+                        .foregroundStyle(.secondary)
+                    Text(subtitles.lastPathComponent)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(subtitles.path)
+                    Spacer()
+                    Button("Change…") { model.chooseSubtitles() }
+                        .controlSize(.small)
+                    Button {
+                        model.clearSubtitles()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Export without captions")
+                }
+
+                Picker("Placement", selection: $model.settings.subtitlePlacement) {
+                    ForEach(SubtitlePlacement.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+                .onChange(of: model.settings.subtitlePlacement) { _, _ in model.refreshPreview() }
+
+                Text(model.settings.subtitlePlacement.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Picker("Size", selection: $model.settings.subtitleSize) {
+                    ForEach(SubtitleSize.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: model.settings.subtitleSize) { _, _ in model.refreshPreview() }
+
+                if !model.subtitlesAvailable {
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("This ffmpeg was built without libass and cannot burn subtitles "
+                             + "in. Run brew install ffmpeg-full and relaunch, or clear the "
+                             + "file to export without them.")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Text(model.selectedItem == nil
+                         ? "Select a clip to add captions."
+                         : "No subtitle file.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Choose…") { model.chooseSubtitles() }
+                        .controlSize(.small)
+                        .disabled(model.selectedItem == nil)
+                }
+                Text("Burns an .srt, .vtt or .ass file into the picture. One sitting next to "
+                     + "the video under the same name is picked up on its own.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     private var audioSection: some View {
         section("Audio") {
             Picker("Audio", selection: $model.settings.audio) {
@@ -873,6 +978,12 @@ struct SettingsPane: View {
                 .foregroundStyle(.secondary)
             } else if model.settings.audio == .copy {
                 Text("Skips audio re-encoding when the source track is already MP4-compatible.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if model.settings.audio == .normalised {
+                Text("Measures the clip, then encodes it to \(Loudness.summary) — what "
+                     + "YouTube, Instagram and TikTok normalise toward, so they leave it "
+                     + "alone. Costs one extra pass over the audio.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
