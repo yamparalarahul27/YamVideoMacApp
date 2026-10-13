@@ -6,8 +6,17 @@ implements nothing and does not lift that plan's pause.
 `SKILL.md`, `helpers/{render,grade,transcribe,transcribe_batch,pack_transcripts,timeline_view}.py`.
 **Baseline:** YamVideo `01afdb1`.
 
+**Reconciliation, 2026-10-13:** This research describes its historical baseline, not the
+current editor. [Local co-editing](local-coediting.md) supersedes its roadmap exclusions
+and sets implementation order. Native Core Image playback now exists on `timeline-editing`
+(`98a6789`); HDR tone mapping, normalization and subtitle burning landed in PR #3. Those
+features must not be proposed again as missing. Renderer parity, working-colour-space,
+blend cost and boundary contact-sheet investigations remain relevant to creative blur.
+The [Pocket 3 colour plan](pocket-3-colour.md) adds camera-specific D-Log M normalization.
+
 `video-use` is an agent skill, not an app: an LLM reads a word-level transcript and emits an
-EDL, and ~2,100 lines of Python drive ffmpeg from it. Its editorial half does not apply here.
+EDL, and ~2,100 lines of Python drive ffmpeg from it. Its editorial half was outside the scope of this original review; the new local
+co-editing plan supersedes that product assumption.
 Its ffmpeg half was written against the same failure modes YamVideo documents in
 *Notes on correctness*, and in three places it is ahead of where the blur plan currently stands.
 
@@ -213,7 +222,10 @@ result in a browser rather than QuickTime.
 
 - **EDL-driven multi-take assembly, transcript-first editing, the `takes_packed.md` reading
   view, animation slots.** These exist to give an LLM a cheap surface to reason over. YamVideo
-  has a human with a timeline in front of them; the surface is already there.
+  has a human with a timeline in front of them; that was the original rationale.
+  **Superseded for agent access:** the owner now explicitly wants local Codex/Claude
+  co-editing. Implement a typed command surface over the live app model per the parent
+  plan. Transcript-first editing and multi-take assembly remain separate follow-ons.
 - **Hosted ASR as a dependency.** `video-use` requires an ElevenLabs key and rejects local
   Whisper outright. A local macOS app that silently uploads the user's screen recordings is a
   different product with a different privacy story.
