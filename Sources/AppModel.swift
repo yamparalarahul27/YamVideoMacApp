@@ -3,6 +3,11 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// What the inspector is showing: the last thing selected, or the recording itself.
+enum InspectorFocus: Equatable {
+    case recording, section, zoom, blurArea
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     /// Shared so files opened from Finder reach the same window.
@@ -23,7 +28,9 @@ final class AppModel: ObservableObject {
     @Published var subtitlesAvailable = true
     @Published var statusMessage: String?
     @Published var editorMode: EditorMode = .crop
-    @Published var selectedRegionID: BlurRegion.ID?
+    @Published var selectedRegionID: BlurRegion.ID? { didSet { focusInspector(selectedRegionID, .blurArea) } }
+    /// What the inspector shows: whatever was selected last, or the recording.
+    @Published var inspectorFocus: InspectorFocus = .recording
 
     let playback = PlaybackController()
     @Published var showPlayback = false
@@ -39,7 +46,7 @@ final class AppModel: ObservableObject {
     var zoomSuggestionTimeline: ClipTimeline?
     var zoomAnalysisTask: Task<Void, Never>?
     var movieExportTask: Task<Void, Never>?
-    @Published var selectedSegmentID: UUID?
+    @Published var selectedSegmentID: UUID? { didSet { focusInspector(selectedSegmentID, .section) } }
     /// The slice of the edited timeline on screen. It lives here rather than in the
     /// timeline view so the zoom menu commands can reach it and so it survives the view
     /// being rebuilt; `syncViewport` keeps its length matching the selected clip.
@@ -53,6 +60,12 @@ final class AppModel: ObservableObject {
     var editSession = EditSessionState()
     /// While true, local agents can read but every agent edit is refused.
     @Published var agentsPaused = false
+    /// Recent changes by anyone, newest first, for the activity list.
+    @Published var recentActivity: [EditEvent] = []
+    /// What an agent just changed, shown briefly on the timeline.
+    @Published var agentHighlight: AgentHighlight?
+    /// Local clients heard from since launch, most recent first.
+    @Published var agentClients: [AgentClient] = []
     /// Finished agent requests by request ID, for idempotent retries within a session.
     var agentRequests: [String: AgentRequestRecord] = [:]
     /// Request IDs currently being answered, so a duplicate sent meanwhile is not run twice.
@@ -62,6 +75,8 @@ final class AppModel: ObservableObject {
     var agentJobTasks: [UUID: Task<Void, Never>] = [:]
     /// Fingerprint of the named project file as last opened or saved.
     var savedFingerprint: Data?
+    /// Where this instance writes preview frames for agents; one folder per running app.
+    var agentArtifactsDirectory = AppModel.artifactsDirectory.appendingPathComponent("default", isDirectory: true)
     var autosaveTask: Task<Void, Never>?
     var savedProject: VideoProject?
     /// The open document's persistent identity; see `VideoProject.projectID`.
@@ -390,7 +405,17 @@ final class AppModel: ObservableObject {
 
     // MARK: - Zoom shots
 
-    @Published var selectedShotID: ZoomShot.ID?
+    @Published var selectedShotID: ZoomShot.ID? { didSet { focusInspector(selectedShotID, .zoom) } }
+
+    /// Selecting something shows it in the inspector; clearing the thing shown falls
+    /// back to the recording.
+    private func focusInspector(_ id: UUID?, _ kind: InspectorFocus) {
+        if id != nil {
+            if inspectorFocus != kind { inspectorFocus = kind }
+        } else if inspectorFocus == kind {
+            inspectorFocus = .recording
+        }
+    }
     /// Level used for the next zoom you add.
     @Published var defaultZoomLevel: Double = 2
 

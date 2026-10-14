@@ -1963,6 +1963,21 @@ equal(probing.undoEntries.count, probeHistory, "a finished probe adds no undo st
 probing.undoEdit(); probing.redoEdit()
 equal(probing.items.first?.info, info, "undo and redo do not forget a probe that finished after Add")
 
+// The inspector follows what was selected last, and falls back to the recording.
+let focusing = freshEditor()
+equal(focusing.inspectorFocus, .recording, "with nothing selected the inspector shows the recording")
+focusing.selectedSegmentID = sectionA.id
+equal(focusing.inspectorFocus, .section, "selecting a section shows it in the inspector")
+focusing.selectedShotID = anchoredZoom.id
+equal(focusing.inspectorFocus, .zoom, "selecting a zoom afterwards shows the zoom instead")
+focusing.selectedSegmentID = nil
+equal(focusing.inspectorFocus, .zoom, "clearing something not shown leaves the inspector alone")
+focusing.selectedShotID = nil
+equal(focusing.inspectorFocus, .recording, "clearing what is shown falls back to the recording")
+focusing.selectedRegionID = UUID()
+focusing.perform([.setAspect(clip: focusing.items[0].id, preset: "1:1")])
+equal(focusing.inspectorFocus, .recording, "a selection that no longer exists after an edit is cleared from the inspector")
+
 // MARK: - Local agent bridge
 
 print("\nLocal agent bridge")
@@ -2005,6 +2020,30 @@ speedUp["commands"] = [["type": "setSectionSpeed", "clipID": agentClip, "section
 let applied = await agentCall(agentEditor, speedUp)
 check(applied["ok"] as? Bool == true && agentEditor.items[0].timeline.segments[0].speed == 1.5, "an agent's apply edits the open project")
 equal(agentEditor.undoTitle, "Undo Speed up the intro (Codex)", "the agent's label and name reach the Undo menu")
+check(agentEditor.agentHighlight?.origin == "Codex" && agentEditor.agentHighlight?.elements.contains(sectionA.id) == true
+          && agentEditor.agentHighlight?.clips == [agentEditor.items[0].id],
+      "an agent's change is highlighted on exactly the section it changed")
+equal(agentEditor.statusMessage, "Codex: Speed up the intro", "the status line says which agent did what")
+check(agentEditor.recentActivity.first?.origin == .agent("Codex") && agentEditor.recentActivity.first?.label == "Speed up the intro",
+      "the activity list records the agent's step")
+equal(agentEditor.agentClients.first?.name, "Codex", "the Local agents panel knows who connected")
+let clientsBeforeDiscovery = agentEditor.agentClients
+_ = await agentCall(agentEditor, ["method": "sessions"])
+equal(agentEditor.agentClients, clientsBeforeDiscovery, "discovery alone is not counted as an agent's activity")
+agentEditor.agentHighlight = nil
+agentEditor.perform([.setAspect(clip: agentEditor.items[0].id, preset: "4:5")])
+check(agentEditor.agentHighlight == nil && agentEditor.recentActivity.first?.origin == .human,
+      "the owner's own edits are listed but not highlighted")
+equal(AgentSetup.quoted("/Users/me/YamVideo/build/yamvideoctl"), "/Users/me/YamVideo/build/yamvideoctl",
+      "plain paths are pasted as they are")
+equal(AgentSetup.quoted("/Users/me/My Videos/it's/yamvideoctl"), #"'/Users/me/My Videos/it'\''s/yamvideoctl'"#,
+      "paths with spaces or quotes are quoted for the shell")
+equal(AgentSetup.claudeCommand(ctl: "/a/yamvideoctl", server: "/a/server.mjs"),
+      "claude mcp add yamvideo -s user -e YAMVIDEO_CLIENT=Claude -e YAMVIDEO_CTL=/a/yamvideoctl -- node /a/server.mjs",
+      "the Claude Code command matches claude mcp add's syntax")
+equal(AgentSetup.codexCommand(ctl: "/a/yamvideoctl", server: "/a/server.mjs"),
+      "codex mcp add yamvideo --env YAMVIDEO_CLIENT=Codex --env YAMVIDEO_CTL=/a/yamvideoctl -- node /a/server.mjs",
+      "the Codex command matches codex mcp add's documented syntax")
 let stepsBeforeRetry = agentEditor.undoEntries.count, revisionBeforeRetry = agentEditor.revision
 let retried = await agentCall(agentEditor, speedUp)
 check(NSDictionary(dictionary: retried).isEqual(to: applied) && agentEditor.undoEntries.count == stepsBeforeRetry
@@ -2222,6 +2261,19 @@ let demo = try await Shell.run("/usr/bin/env", ["YAMVIDEO_AGENT_BRIDGE_DIR=\(bri
                                                  "/bin/bash", "\(repository)/Tools/YamVideoCLI/demo.sh"])
 check(demo.status == 0 && demo.stdoutText.contains("Both edits are in the open project"),
       "the two-client demo script runs end to end", demo.stdoutText)
+// The MCP adapter, driven by the official MCP client exactly as Claude Code or Codex would.
+let adapter = "\(repository)/Tools/AgentBridge"
+if FileManager.default.fileExists(atPath: "\(adapter)/node_modules/@modelcontextprotocol/sdk") {
+    let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "node"
+    let smoke = try await Shell.run("/usr/bin/env", ["YAMVIDEO_AGENT_BRIDGE_DIR=\(bridgeDir.path)", "YAMVIDEO_CTL=\(ctl)",
+                                                      "YAMVIDEO_CLIENT=Claude", node, "\(adapter)/smoke.mjs"])
+    check(smoke.status == 0, "the MCP adapter lists tools, reads, dry-runs, applies, conflicts, previews and undoes",
+          smoke.stdoutText + smoke.stderrText)
+    check(sharedEditor.recentActivity.contains { $0.origin == .agent("Claude") && $0.label == "Smoke test blur" },
+          "an edit through MCP is credited to the client named in its config")
+} else {
+    print("  --   MCP adapter check skipped (run npm ci in Tools/AgentBridge)")
+}
 let recordPath = server.recordURL!.path
 server.stop()
 check(!FileManager.default.fileExists(atPath: socketPath) && !FileManager.default.fileExists(atPath: recordPath),

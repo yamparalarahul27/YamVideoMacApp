@@ -29,8 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startAgentBridge() {
-        // Previews from an earlier run are of no use to anyone now.
-        try? FileManager.default.removeItem(at: AppModel.artifactsDirectory)
         let instance = UUID()
         let server = LocalAgentServer(instanceID: instance) { line in
             await AppModel.shared.handleAgentRequest(line, instanceID: instance)
@@ -38,6 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try server.start()
             agentServer = server
+            let artifacts = AppModel.artifactsDirectory.appendingPathComponent(instance.uuidString, isDirectory: true)
+            MainActor.assumeIsolated { AppModel.shared.agentArtifactsDirectory = artifacts }
+            removeStaleArtifacts(keeping: instance)
         } catch {
             // Editing never depends on the bridge; say why agents cannot connect and carry on.
             MainActor.assumeIsolated {
@@ -46,7 +47,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Previews belonging to instances that are no longer running are of no use to anyone;
+    /// another running instance's are left alone.
+    private func removeStaleArtifacts(keeping instance: UUID) {
+        let records = (try? FileManager.default.contentsOfDirectory(at: AgentProtocol.discoveryDirectory,
+                                                                    includingPropertiesForKeys: nil)) ?? []
+        let live = Set(records.map { $0.deletingPathExtension().lastPathComponent.uppercased() } + [instance.uuidString])
+        let folders = (try? FileManager.default.contentsOfDirectory(at: AppModel.artifactsDirectory,
+                                                                    includingPropertiesForKeys: nil)) ?? []
+        for folder in folders where !live.contains(folder.lastPathComponent.uppercased()) {
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        if let instance = agentServer?.instanceID {
+            try? FileManager.default.removeItem(at: AppModel.artifactsDirectory.appendingPathComponent(instance.uuidString))
+        }
         agentServer?.stop()
         MainActor.assumeIsolated { AppModel.shared.flushRecovery() }
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }

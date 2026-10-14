@@ -75,16 +75,12 @@ struct TimelineView: View {
                 .clipped()
             }
             .frame(height: contentHeight + 12)
-            sectionControls
+            // Section speed, trims and order are in the inspector, which follows the selection.
             HStack(spacing: 10) {
-                if let segment = model.selectedSegment {
-                    Picker("Speed", selection: Binding(get: { segment.speed }, set: { model.setSegmentSpeed(segment.id, speed: $0) })) {
-                        ForEach([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0], id: \.self) { speed in
-                            Text("\(speed.formatted())×").tag(speed)
-                        }
-                    }.frame(width: 125).accessibilityLabel("Section speed")
-                    Text("\(timelineTime(segment.duration)) · preserve pitch").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(model.selectedSegment == nil
+                     ? "Click a section to edit it in the inspector. Drag its edges to trim, or drag it to reorder."
+                     : "Drag a section's edges to trim it, or drag it to reorder.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
                 if item.info?.hasAudio == true {
                     if overview != nil {
@@ -221,6 +217,7 @@ struct TimelineView: View {
                     id: \.segment.id) { placed in
                 SegmentBlock(segment: placed.segment, number: placed.index + 1, name: item.name,
                              selected: model.selectedSegmentID == placed.segment.id,
+                             highlighted: model.agentHighlight?.elements.contains(placed.segment.id) == true,
                              pixels: pixels,
                              onSelect: { fraction in
                                  model.selectedSegmentID = placed.segment.id
@@ -250,7 +247,8 @@ struct TimelineView: View {
                     .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
             }
             ForEach(item.zoomShots.filter { viewport.intersects($0.start, $0.start + $0.duration) }) { shot in
-                ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id, pixels: pixels,
+                ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id,
+                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
                           onSelect: { model.selectedShotID = shot.id; model.editorMode = .zoom },
                           onMove: { model.setZoomStart(shot.id, $0) },
                           onResize: { model.setZoomHold(shot.id, $0) })
@@ -270,37 +268,6 @@ struct TimelineView: View {
             .opacity(model.viewport.contains(time) ? 1 : 0)
             .allowsHitTesting(false)
     }
-
-    private var sectionControls: some View {
-        HStack(spacing: 8) {
-            if let segment = model.selectedSegment,
-               let index = item.timeline.segments.firstIndex(where: { $0.id == segment.id }) {
-                Text("Section \(index + 1)").font(.caption.weight(.medium))
-                TimelineTimeField(label: "In", value: segment.start) {
-                    model.trimSegment(segment.id, start: $0)
-                    return model.selectedSegment?.start ?? segment.start
-                }
-                TimelineTimeField(label: "Out", value: segment.end) {
-                    model.trimSegment(segment.id, end: $0)
-                    return model.selectedSegment?.end ?? segment.end
-                }
-                Button { model.moveSegment(segment.id, to: index - 1) } label: { Image(systemName: "arrow.left") }
-                    .disabled(index == 0).help("Move section earlier").accessibilityLabel("Move section earlier")
-                Button { model.moveSegment(segment.id, to: index + 1) } label: { Image(systemName: "arrow.right") }
-                    .disabled(index == item.timeline.segments.count - 1).help("Move section later").accessibilityLabel("Move section later")
-                Button { model.deleteSegment() } label: { Image(systemName: "trash") }
-                    .disabled(item.timeline.segments.count < 2).help("Delete selected section (⌘⌫)").accessibilityLabel("Delete section")
-            } else {
-                Text("Click a section to trim it. Drag sections to reorder.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            Text("\(item.timeline.segments.count) section\(item.timeline.segments.count == 1 ? "" : "s")")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(height: 24)
-        .controlSize(.small)
-    }
 }
 
 private struct SegmentBlock: View {
@@ -308,6 +275,8 @@ private struct SegmentBlock: View {
     let number: Int
     let name: String
     let selected: Bool
+    /// An agent just changed this section: outlined for a moment, never selected.
+    var highlighted = false
     let pixels: Double
     let onSelect: (Double) -> Void
     let onTrim: (Double?, Double?) -> Void
@@ -326,6 +295,11 @@ private struct SegmentBlock: View {
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 }.padding(.horizontal, 13).frame(maxWidth: .infinity, alignment: .leading)
                 RoundedRectangle(cornerRadius: 5).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 1)
+                RoundedRectangle(cornerRadius: 5).strokeBorder(Color.orange, lineWidth: 2.5)
+                    .shadow(color: .orange.opacity(0.6), radius: 4)
+                    .opacity(highlighted ? 1 : 0)
+                    .animation(.easeOut(duration: 0.35), value: highlighted)
+                    .allowsHitTesting(false)
                 HStack {
                     handle(start: true)
                     Spacer(minLength: 0)
@@ -369,6 +343,7 @@ private struct SegmentBlock: View {
 private struct ZoomBlock: View {
     let shot: ZoomShot
     let selected: Bool
+    var highlighted = false
     let pixels: Double
     let onSelect: () -> Void
     let onMove: (Double) -> Void
@@ -388,6 +363,11 @@ private struct ZoomBlock: View {
             .frame(width: max(8, geo.size.width + resize), height: 28)
             .background(Color.cyan.opacity(selected ? 0.45 : 0.23), in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.cyan.opacity(selected ? 1 : 0.5)))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.orange, lineWidth: 2.5)
+                .shadow(color: .orange.opacity(0.6), radius: 4)
+                .opacity(highlighted ? 1 : 0)
+                .animation(.easeOut(duration: 0.35), value: highlighted)
+                .allowsHitTesting(false))
             .contentShape(Rectangle())
             .onTapGesture(perform: onSelect)
             .gesture(DragGesture(minimumDistance: 2)
@@ -408,7 +388,7 @@ private struct ZoomBlock: View {
     }
 }
 
-private struct TimelineTimeField: View {
+struct TimelineTimeField: View {
     let label: String
     let value: Double
     let onCommit: (Double) -> Double

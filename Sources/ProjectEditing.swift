@@ -41,7 +41,11 @@ extension AppModel {
     }
 
     nonisolated static var recoveryURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        // A separate instance (a test, an acceptance run) keeps its own session.
+        if let override = ProcessInfo.processInfo.environment["YAMVIDEO_RECOVERY_PATH"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("YamVideo", isDirectory: true).appendingPathComponent("Recovery.yamvideo")
     }
 

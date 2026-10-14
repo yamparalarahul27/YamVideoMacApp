@@ -291,6 +291,7 @@ extension AppModel {
             return agentResponse(Result<AgentEmpty, EditError>.failure(EditError(code: .unsupportedCapability,
                 message: "This YamVideo speaks protocol \(AgentProtocol.version), not \(version).")), instanceID)
         }
+        if request.method != "hello", request.method != "sessions" { noteAgentClient(request) }
         switch request.method {
         case "hello", "sessions":
             return agentResponse(.success(AgentSessions(sessions: [agentSessionInfo(instanceID)])), instanceID)
@@ -375,6 +376,16 @@ extension AppModel {
             return EditError(code: .wrongSession, message: "A different project is open now. Read state again.")
         }
         return nil
+    }
+
+    /// Remembers who has been talking to the app, for the Local agents panel. Discovery
+    /// (`sessions`) is not activity, so it is not counted.
+    private func noteAgentClient(_ request: AgentRequest) {
+        let name = agentOrigin(request).label
+        let action = request.label.map { String($0.prefix(80)) } ?? request.method
+        agentClients.removeAll { $0.name == name }
+        agentClients.insert(AgentClient(name: name, lastSeen: Date(), lastAction: action), at: 0)
+        if agentClients.count > 12 { agentClients.removeLast(agentClients.count - 12) }
     }
 
     private func agentOrigin(_ request: AgentRequest) -> EditOrigin {
@@ -789,7 +800,12 @@ extension AppModel {
     // MARK: Previews and jobs
 
     nonisolated static var artifactsDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        // An instance with its own bridge directory keeps its previews there too, so its
+        // cleanup can never touch another instance's.
+        if let override = ProcessInfo.processInfo.environment["YAMVIDEO_AGENT_BRIDGE_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true).appendingPathComponent("Artifacts", isDirectory: true)
+        }
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("YamVideo", isDirectory: true).appendingPathComponent("AgentArtifacts", isDirectory: true)
     }
 
@@ -835,7 +851,7 @@ extension AppModel {
             guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
                 throw EditError.invalid("The frame could not be encoded.")
             }
-            let directory = Self.artifactsDirectory
+            let directory = agentArtifactsDirectory
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             let file = directory.appendingPathComponent(

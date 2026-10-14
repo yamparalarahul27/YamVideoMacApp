@@ -1,0 +1,22 @@
+{
+  "name": "yamvideo-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server that lets Codex, Claude and other MCP clients co-edit the project open in YamVideo, through yamvideoctl.",
+  "type": "module",
+  "main": "server.mjs",
+  "bin": {
+    "yamvideo-mcp": "server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "zod": "4.6.5"
+  }
+}

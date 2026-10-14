@@ -25,6 +25,7 @@ xcrun swiftc \
 	"$ROOT/Sources/AgentProtocol.swift" \
 	"$ROOT/Sources/LocalAgentServer.swift" \
 	"$ROOT/Sources/AgentRequests.swift" \
+	"$ROOT/Sources/AgentActivityView.swift" \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
 	"$ROOT/Sources/CropEditor.swift" \
