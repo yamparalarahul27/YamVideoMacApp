@@ -1666,7 +1666,7 @@ equal(landing(7.0302, crowded)?.kind, .playhead, "as does a gap too small to see
 // What a gesture leaves out.
 let scrubbing = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: nil)
 check(!scrubbing.targets.contains { $0.kind == .playhead }, "dragging the playhead does not snap it to itself")
-let movingZoom = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: 5.5, excludingZoom: snapZoom.id)
+let movingZoom = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: 5.5, excluding: snapZoom.id)
 check(!movingZoom.targets.contains { $0.kind == .zoomEdge }, "a zoom being dragged does not snap to its own edges")
 check(landing(5.45, within: 4...7) != nil, "a trim snaps to targets over its own section")
 equal(landing(4.05, within: 4...7)?.time, 4, "including its own edges, which leave it as it was")
@@ -3562,6 +3562,192 @@ check(borderError <= 8, "and the frame's own edge gets no dark or bright halo in
       String(format: "worst %.1f of 255", borderError))
 print(String(format: "       blur at hold: sharp %.4f, ffmpeg %.4f, native %.4f; edge %.1f, border %.1f of 255",
              sharpContrast, ffmpegHoldContrast, nativeHoldContrast, edgeError, borderError))
+
+print("\nEditing blur effects and markers")
+@MainActor func effectEditor() -> AppModel {
+    let model = AppModel(recoveryURL: nil)
+    var item = VideoItem(url: fxSource); item.info = fxInfo; item.crop = fxInfo.fullFrame
+    model.restore(VideoProject(clips: [ProjectClip(item)], settings: ExportSettings(), selection: item.id))
+    return model
+}
+let effecting = effectEditor()
+let effectClip = effecting.items[0].id
+effecting.setPreviewFraction(0.5 / 3)
+effecting.addBlurEffect()
+let added = effecting.items[0].blurEffects.first
+check(added.map { abs($0.start - 0.5) < 0.000001 && abs($0.end - 3) < 0.000001 } == true,
+      "Add Blur Effect runs from the playhead for three seconds, or to the end", "\(String(describing: added))")
+check(effecting.selectedEffectID == added?.id && effecting.inspectorFocus == .effect, "and selects the new effect")
+equal(effecting.undoTitle, "Undo Add Blur Effect", "as one named step")
+effecting.addBlurEffect()
+check(effecting.items[0].blurEffects.count == 1 && effecting.statusMessage?.contains("no room") == true,
+      "Add inside an effect would start where it ends; with no room left it changes nothing and says so",
+      effecting.statusMessage ?? "")
+check(effecting.perform([.addBlurEffect(clip: effectClip, effect: VideoBlurEffect(start: 1, end: 2))]).isFailure,
+      "an overlapping effect is refused")
+let shortEffect = VideoBlurEffect(start: 0, end: 0.4, fadeIn: 0.1, fadeOut: 0.1)
+effecting.perform([.addBlurEffect(clip: effectClip, effect: shortEffect)])
+let stored = effecting.items[0].blurEffects
+check(stored.count == 2 && stored[0].id == shortEffect.id, "two effects can touch, and are kept in time order")
+// The UI's clamps: a move stops at the neighbour, a fade shrinks to fit.
+effecting.updateEffect(added!.id) { $0.start = 0.1; $0.end = 2.6 }
+check(effecting.items[0].blurEffects.last.map { abs($0.start - 0.4) < 0.000001 && abs($0.duration - 2.5) < 0.000001 } == true,
+      "dragging an effect into its neighbour stops at it", "\(effecting.items[0].blurEffects)")
+effecting.updateEffect(added!.id) { $0.fadeIn = 10 }
+let fadeFit = effecting.items[0].blurEffects.last!
+check(abs(fadeFit.fadeIn + fadeFit.fadeOut - fadeFit.duration) < 0.000001, "a fade longer than the effect is shortened to fit")
+let sliderSteps = effecting.undoEntries.count
+for amount in [30.0, 40, 50] { effecting.updateEffect(added!.id, live: true) { $0.amount = amount } }
+effecting.endGesture()
+check(effecting.undoEntries.count == sliderSteps + 1 && effecting.items[0].blurEffects.last?.amount == 50,
+      "an amount drag is one undo step")
+effecting.selectedEffectID = added!.id
+effecting.toggleSelectedEffect()
+check(effecting.items[0].blurEffects.last?.isEnabled == false, "an effect can be switched off without deleting it")
+effecting.removeSelectedEffect()
+check(effecting.items[0].blurEffects.count == 1 && effecting.selectedEffectID == nil, "and deleted")
+
+effecting.setPreviewFraction(1.0 / 3)
+effecting.addMarkerAtPlayhead()
+effecting.setPreviewFraction(2.0 / 3)
+effecting.addMarkerAtPlayhead()
+effecting.addMarkerAtPlayhead()
+equal(effecting.items[0].markers.count, 2, "M adds a marker at the playhead, once per frame")
+effecting.updateMarker(effecting.items[0].markers[0].id) { $0.label = "Intro ends\nhere"; $0.color = .green }
+check(effecting.items[0].markers[0].label == "Intro endshere" && effecting.items[0].markers[0].color == .green,
+      "a marker can be named and coloured, on one line")
+effecting.setPreviewFraction(0)
+effecting.jumpToMarker(forward: true)
+check(abs(effecting.previewTime - 1) < 0.02, "⇧↓ jumps to the next marker")
+effecting.jumpToMarker(forward: true)
+check(abs(effecting.previewTime - 2) < 0.02, "and on to the one after")
+effecting.jumpToMarker(forward: true)
+check(abs(effecting.previewTime - 2) < 0.02 && effecting.statusMessage?.contains("No marker after") == true,
+      "stopping at the last rather than wrapping")
+effecting.jumpToMarker(forward: false)
+check(abs(effecting.previewTime - 1) < 0.02, "⇧↑ jumps back")
+check(effecting.perform([.addMarker(clip: effectClip, marker: TimelineMarker(time: 99))]).isFailure, "a marker past the end is refused")
+let roundTripEffects = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(effecting.project))
+check(roundTripEffects == effecting.project && roundTripEffects.version == 5, "effects and markers survive a version 5 round trip")
+var olderWithEffects = roundTripEffects; olderWithEffects.version = 4
+check((try? olderWithEffects.validate()) == nil, "a version 4 file carrying effects or markers is refused")
+effecting.perform([.splitSection(clip: effectClip, at: 1.5)])
+let splitSections = effecting.items[0].timeline.segments
+if case .success(let cut) = effecting.perform([.deleteSection(clip: effectClip, section: splitSections[0].id)]) {
+    check(cut.removedMarkers.count == 1 && effecting.items[0].markers.count == 1
+              && abs(effecting.items[0].markers[0].time - 0.5) < 0.02,
+          "cutting footage removes the markers on it and moves the rest with theirs")
+} else { check(false, "cutting footage removes the markers on it and moves the rest with theirs") }
+
+print("\nBlur effects and markers for agents")
+let catalog = AgentCatalog.current
+let wireFields = Set(Mirror(reflecting: WireCommand(type: "x")).children.compactMap(\.label))
+equal(Set(catalog.commands.map(\.type)), Set(WireCommand.types), "the catalog describes exactly the commands apply accepts")
+let unknownFields = catalog.commands.flatMap { command in command.fields.map(\.name).filter { !wireFields.contains($0) }.map { "\(command.type).\($0)" } }
+check(unknownFields.isEmpty, "every field it names is one apply reads", unknownFields.joined(separator: ", "))
+var badExamples: [String] = []
+for command in catalog.commands {
+    guard let data = try? JSONEncoder().encode(command.example),
+          let wire = try? JSONDecoder().decode(WireCommand.self, from: data), wire.type == command.type,
+          case .object(let keys) = command.example, Set(keys.keys).isSubset(of: wireFields) else { badExamples.append(command.type); continue }
+}
+check(badExamples.isEmpty, "every example is a well-formed command of its own type", badExamples.joined(separator: ", "))
+check(catalog.commands.allSatisfy { !$0.summary.isEmpty && $0.fields.allSatisfy { !$0.description.isEmpty } },
+      "and every command and field says what it is for")
+equal(Set(catalog.methods.map(\.method)), Set(AppModel.agentMethods), "the catalog describes every request method")
+let served = agentResult(await agentCall(effectEditor(), ["method": "catalog"]))
+check((served["commands"] as? [Any])?.count == catalog.commands.count && (served["conventions"] as? [Any])?.isEmpty == false,
+      "and agents can ask the app for it")
+
+let fxAgent = effectEditor()
+let fxClipID = fxAgent.items[0].id.uuidString
+let fxEffectID = UUID(), fxMarkerID = UUID()
+var fxApply = address(fxAgent)
+fxApply["method"] = "apply"; fxApply["requestID"] = "fx-1"; fxApply["client"] = "Codex"; fxApply["label"] = "Blur the middle"
+fxApply["commands"] = [["type": "addBlurEffect", "clipID": fxClipID, "start": 1, "duration": 1, "effectID": fxEffectID.uuidString],
+                       ["type": "addMarker", "clipID": fxClipID, "time": 1.5, "label": "Blurred here", "color": "purple",
+                        "markerID": fxMarkerID.uuidString]]
+let fxApplied = await agentCall(fxAgent, fxApply)
+let fxEffect = fxAgent.items[0].blurEffects.first
+check(fxApplied["ok"] as? Bool == true && fxEffect?.id == fxEffectID && fxEffect?.end == 2
+          && fxEffect?.fadeIn == 0.25 && fxAgent.items[0].markers.first?.label == "Blurred here",
+      "an agent can add an effect and a marker with its own ids in one step", "\(fxApplied)")
+check(fxAgent.agentHighlight?.elements.isSuperset(of: [fxEffectID, fxMarkerID]) == true,
+      "and the owner sees both highlighted")
+var fxUpdate = address(fxAgent)
+fxUpdate["method"] = "apply"; fxUpdate["requestID"] = "fx-2"
+fxUpdate["commands"] = [["type": "updateBlurEffect", "clipID": fxClipID, "effectID": fxEffectID.uuidString, "mix": 0.5, "start": 1.5]]
+_ = await agentCall(fxAgent, fxUpdate)
+check(fxAgent.items[0].blurEffects.first.map { $0.mix == 0.5 && $0.start == 1.5 && $0.end == 2.5 } == true,
+      "moving an effect's start keeps its length")
+var fxBad = address(fxAgent)
+fxBad["method"] = "apply"; fxBad["requestID"] = "fx-3"
+fxBad["commands"] = [["type": "updateBlurEffect", "clipID": fxClipID, "effectID": fxEffectID.uuidString, "fadeIn": 0.8, "fadeOut": 0.8]]
+let fxBadAnswer = await agentCall(fxAgent, fxBad)
+check(agentError(fxBadAnswer) == "invalid_command"
+          && ((fxBadAnswer["error"] as? [String: Any])?["message"] as? String)?.contains("must fit") == true,
+      "fades that do not fit are refused with a reason an agent can act on")
+let fxState = (agentResult(await agentCall(fxAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first
+check((fxState?["blurEffects"] as? [[String: Any]])?.first?["mix"] as? Double == 0.5
+          && (fxState?["markers"] as? [[String: Any]])?.first?["color"] as? String == "purple",
+      "state lists effects and markers with their settings")
+let composedHold = agentResult(await agentCall(fxAgent, ["method": "preview", "clip": fxClipID, "time": 2, "composed": true]))
+let composedClear = agentResult(await agentCall(fxAgent, ["method": "preview", "clip": fxClipID, "time": 0.5, "composed": true]))
+func previewContrast(_ result: [String: Any]) -> Double {
+    guard let path = result["path"] as? String, let image = NSImage(contentsOfFile: path) else { return -1 }
+    return checkerContrast(thumbFrame(image))
+}
+check(composedHold["composed"] as? Bool == true && composedHold["width"] as? Int == fxWidth,
+      "a composed preview is the picture at the export's frame size")
+let holdDetail = previewContrast(composedHold), clearDetail = previewContrast(composedClear)
+check(holdDetail >= 0 && holdDetail < 0.5 * clearDetail,
+      "and shows the effect where it runs and not where it does not", String(format: "%.3f vs %.3f", holdDetail, clearDetail))
+_ = await agentCall(fxAgent, ["method": "reveal", "clip": fxClipID, "effect": fxEffectID.uuidString])
+check(fxAgent.selectedEffectID == fxEffectID && fxAgent.editorMode == .effects, "reveal shows the owner an effect")
+
+print("\nBlur effects in exports")
+var fxExportItem = fxAgent.items[0]
+fxExportItem.blurEffects = [VideoBlurEffect(start: 1, end: 2)]
+let fxWith = colorScratch.appendingPathComponent("fx-with.mp4"), fxWithout = colorScratch.appendingPathComponent("fx-without.mp4")
+try await FFmpeg.export(input: fxSource, output: fxWith, info: fxInfo, crop: fxInfo.fullFrame, settings: ExportSettings(),
+                        effects: fxExportItem.blurEffects) { _ in }
+try await FFmpeg.export(input: fxSource, output: fxWithout, info: fxInfo, crop: fxInfo.fullFrame, settings: ExportSettings()) { _ in }
+equal(try await frameCount(fxWith), try await frameCount(fxWithout), "an effect never changes the frame count")
+func exportedContrast(_ url: URL, at time: Double) async throws -> Double {
+    let result = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-ss", String(format: "%.3f", time), "-i", url.path,
+                                              "-frames:v", "1", "-vf", "scale=in_color_matrix=bt709:in_range=tv:out_range=pc,format=rgb48le",
+                                              "-f", "rawvideo", "-"])
+    let words = result.stdout.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }
+    return checkerContrast(RGBFrame(width: fxWidth, height: fxHeight, values: words.map { Double(UInt16(littleEndian: $0)) / 65535 }))
+}
+let exportSharp = try await exportedContrast(fxWith, at: 0.5), exportBlurred = try await exportedContrast(fxWith, at: 1.5)
+check(exportBlurred < 0.25 * exportSharp, "the exported MP4 is blurred during the effect and sharp outside it",
+      String(format: "%.3f vs %.3f", exportBlurred, exportSharp))
+var fxGIF = ExportSettings(); fxGIF.format = .gif
+let fxGIFCommands = FFmpeg.exportCommands(input: fxSource, output: colorScratch.appendingPathComponent("fx.gif"), info: fxInfo,
+                                          crop: fxInfo.fullFrame, settings: fxGIF, effects: fxExportItem.blurEffects)
+check(fxGIFCommands.count == 2 && fxGIFCommands.allSatisfy { $0.joined(separator: " ").contains("gblur=sigma") },
+      "both GIF passes get the effect, so the palette is built for the picture written")
+// A movie where the affected recording is second: its effect is timed from its own start.
+var firstInMovie = gradeOther; firstInMovie.includedInMovie = true
+let fxMoviePlan = try MoviePlan(items: [firstInMovie, fxExportItem], movieSettings: MovieSettings(canvas: .widescreen), settings: ExportSettings())
+let fxMovieArgs = FFmpeg.movieArguments(plan: fxMoviePlan, settings: ExportSettings(), output: colorScratch.appendingPathComponent("fxm.mp4"))
+check(fxMovieArgs.joined(separator: " ").contains("blend@fx1_0"), "a movie names each recording's effect filters apart")
+let fxMovie = colorScratch.appendingPathComponent("fx-movie.mp4")
+try await FFmpeg.exportMovie(plan: fxMoviePlan, settings: ExportSettings(), output: fxMovie) { _ in }
+let secondStart = fxMoviePlan.offset(of: fxExportItem.id)
+func movieDetail(_ time: Double) async throws -> Double {
+    let result = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-ss", String(format: "%.3f", time), "-i", fxMovie.path,
+                                              "-frames:v", "1", "-vf", "scale=1280:720,format=gray", "-f", "rawvideo", "-"])
+    let bytes = [UInt8](result.stdout)
+    var values: [Double] = []
+    for y in 260..<460 { for x in 200..<440 { values.append(Double(bytes[y * 1280 + x]) / 255) } }
+    let mean = values.reduce(0, +) / Double(values.count)
+    return (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)).squareRoot()
+}
+let movieSharp = try await movieDetail(secondStart + 0.5), movieBlurred = try await movieDetail(secondStart + 1.5)
+check(movieBlurred < 0.25 * movieSharp, "in a movie the second recording's blur starts at its own one second",
+      String(format: "%.3f at its 1.5 s vs %.3f at its 0.5 s", movieBlurred, movieSharp))
 
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)

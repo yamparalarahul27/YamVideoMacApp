@@ -108,13 +108,14 @@ enum BlurStyle: String, CaseIterable, Identifiable, Codable {
 }
 
 enum EditorMode: String, CaseIterable, Identifiable {
-    case crop, blur, zoom
+    case crop, blur, zoom, effects
     var id: String { rawValue }
     var label: String {
         switch self {
         case .crop: return "Crop"
         case .blur: return "Blur"
         case .zoom: return "Zoom"
+        case .effects: return "Effects"
         }
     }
 }

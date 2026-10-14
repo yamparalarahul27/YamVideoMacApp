@@ -71,10 +71,12 @@ final class PlaybackController: ObservableObject {
             if !isLoading, play { player.play(); isPlaying = true }
             return
         }
-        // A colour change alone needs a new picture, not a new movie: swapping the video
-        // composition keeps the loaded item, its position and its audio.
+        // A colour or effect change alone needs a new picture, not a new movie: swapping
+        // the video composition keeps the loaded item, its position and its audio.
         var recolored = loadedClip
         recolored?.color = record.color
+        recolored?.blurEffects = record.blurEffects
+        recolored?.markers = record.markers
         if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
            recolored == record, loadedSettings == settings, let info = clip.info {
             item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,

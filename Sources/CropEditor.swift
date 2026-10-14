@@ -531,6 +531,8 @@ struct CropCanvas: View {
                             onChange: onChangeRegion,
                             onAdd: onAddRegion
                         )
+                    case .effects:
+                        EmptyView()
                     case .zoom:
                         ZoomOverlay(
                             shots: shots,

@@ -64,14 +64,23 @@ const server = new McpServer(
   {
     instructions: [
       "YamVideo is a Mac video editor. These tools read and edit the project the owner has open, while they keep editing it too.",
-      "Workflow: call yamvideo_get_state, plan, then yamvideo_apply_edits with the sessionID, projectID and revision you read. All commands in one call apply together or not at all.",
+      "Start with yamvideo_describe: it lists every edit command with its fields, units, ranges, defaults and an example, and the rules every request follows. It comes from the app, so it is always current.",
+      "Workflow: call yamvideo_get_state, plan, check with yamvideo_apply_edits dryRun, then apply with the sessionID, projectID and revision you read. All commands in one call apply together or not at all.",
       "If you get revision_conflict, someone else (often the owner) edited meanwhile: read state again and replan. Never retry an edit with a guessed revision.",
       "Each applied call is one undo step credited to you. Use yamvideo_undo only for your own most recent step (the transactionID from state.history.undo).",
       "Times: split points and zoom starts are edited-recording seconds; trims and section ranges are source seconds; movie time only with timeSpace \"movie\".",
-      "Look before and after with yamvideo_render_preview. Analysis proposes cuts or zooms but applies nothing. Ask the owner before exporting or saving over their file.",
+      "Look before and after with yamvideo_render_preview; pass composed: true to see zooms and whole-frame blur effects exactly as the owner's Preview shows them. Analysis proposes cuts or zooms but applies nothing. Ask the owner before exporting or saving over their file.",
+      "Markers (state.clips[].markers) are the owner's notes on the timeline; read their labels to learn what they mean by \"the bit after the intro\", and add your own to point at moments.",
     ].join("\n"),
   },
 );
+
+server.registerTool("yamvideo_describe", {
+  title: "Describe what YamVideo can do",
+  description: "Every edit command (sections, crop, blur areas, zooms, whole-frame blur effects, markers, colour, movie, project) with each field's type, unit, range, default and allowed values, a worked example per command, every other request, and the conventions: time spaces, units, revisions and how commands in one request see each other. Read this before planning edits.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async () => result(await request("catalog", {})));
 
 server.registerTool("yamvideo_list_sessions", {
   title: "List YamVideo sessions",
@@ -99,7 +108,9 @@ server.registerTool("yamvideo_apply_edits", {
     "setMovieOrder {order:[every clipID]} · setIncludedInMovie {clipID, included} · setMovieCanvas {canvas: firstClip|widescreen|portrait|square}",
     "setExportSettings {settings: only the keys to change, e.g. {format: \"gif\", frameRate: 12}} · setSubtitles {clipID, path} · clearSubtitles {clipID} · addMedia {paths} · removeMedia {clipID} · relinkMedia {clipID, path}",
     "Colour (each recording's state.color shows the profile in effect and why, the conversion and any problem): setInputProfile {clipID, profile: auto|standard|pocket3DLogM|hlg|pq} · importTechnicalLUT {clipID, path to DJI's Pocket 3 D-Log M to Rec.709 .cube; needs profile pocket3DLogM} · clearTechnicalLUT {clipID} · setColorCorrection {clipID, enabled} (Natural colour) · setColorAdjustments {clipID, exposureEV? -2–2, warmth? -1–1, contrast? 0.5–1.5, saturation? 0–2} · resetColorAdjustments {clipID} · copyColorAdjustments {clipID (from), targets:[clipID], includeInterpretation? (also copy profile and conversion)}",
-    "splitSection and zoom start accept timeSpace \"movie\" to give a movie time instead.",
+    "Whole-frame blur: addBlurEffect {clipID, start, end? or duration? (3), amount? 0–80 (24), mix? 0–1 (1), fadeIn? (0.25), fadeOut? (0.25), enabled?, effectID?} · updateBlurEffect {clipID, effectID, any of those} · removeBlurEffect {clipID, effectID}",
+    "Markers: addMarker {clipID, time, label?, color? red|orange|yellow|green|blue|purple, markerID?} · updateMarker {clipID, markerID, time?, label?, color?} · removeMarker {clipID, markerID}",
+    "splitSection, zoom and effect starts and marker times accept timeSpace \"movie\" to give a movie time instead. yamvideo_describe has every field's range, default and an example.",
   ].join("\n"),
   inputSchema: {
     ...address,
@@ -125,6 +136,7 @@ server.registerTool("yamvideo_render_preview", {
     clip: id.optional().describe("Recording ID (omit with timeSpace \"movie\")."),
     time: z.number().nonnegative(),
     timeSpace: z.enum(["recording", "movie"]).optional(),
+    composed: z.boolean().optional().describe("Render as the owner's Preview plays it: crop, zoom, colour, blur areas and whole-frame effects at this exact time. Use it to check an effect or a zoom."),
     cropped: z.boolean().optional(),
     original: z.boolean().optional().describe("Leave the recording's colour correction out."),
     expectedRevision: z.number().int().nonnegative().optional().describe("Refuse if the project is no longer at this revision."),
@@ -208,9 +220,9 @@ for (const [name, method, verb] of [["yamvideo_undo", "undo", "Undo"], ["yamvide
 
 server.registerTool("yamvideo_reveal", {
   title: "Show something to the owner",
-  description: "Move the owner's view to a recording, section, zoom or time. Edits never move their view; use this only when it helps them see what you mean.",
+  description: "Move the owner's view to a recording, section, zoom, blur effect, marker or time, selecting it. Edits never move their view; use this only when it helps them see what you mean.",
   inputSchema: {
-    clip: id.optional(), section: id.optional(), zoom: id.optional(),
+    clip: id.optional(), section: id.optional(), zoom: id.optional(), effect: id.optional(), marker: id.optional(),
     time: z.number().nonnegative().optional(), timeSpace: z.enum(["recording", "movie"]).optional(),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },

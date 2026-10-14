@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CryptoKit
 import Foundation
 
@@ -39,6 +40,11 @@ struct AgentRequest: Codable {
     var cropped: Bool?
     /// A preview without the recording's colour stage, to pair with a corrected one.
     var original: Bool?
+    /// A preview as the owner's Preview plays it: cropped, zoomed, coloured, with blur
+    /// areas and whole-frame effects, at the export's frame size.
+    var composed: Bool?
+    var effect: UUID?
+    var marker: UUID?
     var threshold: Double?
     var minimum: Double?
     var padding: Double?
@@ -112,6 +118,16 @@ struct WireCommand: Codable, Equatable {
     var saturation: Double?
     var targets: [UUID]?
     var includeInterpretation: Bool?
+    var effectID: UUID?
+    var markerID: UUID?
+    var time: Double?
+    var duration: Double?
+    var amount: Double?
+    var mix: Double?
+    var fadeIn: Double?
+    var fadeOut: Double?
+    var label: String?
+    var color: String?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -120,6 +136,7 @@ struct WireCommand: Codable, Equatable {
         "setMovieCanvas", "setExportSettings", "setSubtitles", "clearSubtitles", "addMedia", "removeMedia",
         "relinkMedia", "setInputProfile", "importTechnicalLUT", "clearTechnicalLUT", "setColorCorrection",
         "setColorAdjustments", "resetColorAdjustments", "copyColorAdjustments",
+        "addBlurEffect", "updateBlurEffect", "removeBlurEffect", "addMarker", "updateMarker", "removeMarker",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -205,7 +222,15 @@ struct AgentState: Encodable {
         var blurAreas: [Area]
         var zooms: [Zoom]
         var color: Color?
+        var blurEffects: [Effect]
+        var markers: [Marker]
     }
+    /// Edited-recording seconds; `weight` follows `VideoBlurEffect.weight`.
+    struct Effect: Encodable {
+        var id: UUID, start: Double, end: Double, duration: Double
+        var amount: Double, mix: Double, fadeIn: Double, fadeOut: Double, enabled: Bool
+    }
+    struct Marker: Encodable { var id: UUID; var time: Double; var label: String; var color: String }
     /// A recording's colour as stored, plus what the app makes of it: the profile in
     /// effect and whether that was chosen or inferred, the conversion table and whether
     /// this Mac has it, and why a requested correction cannot run.
@@ -226,7 +251,7 @@ struct AgentState: Encodable {
     struct Selection: Encodable {
         /// `section` is the one last clicked; `sections` is everything selected, in
         /// timeline order.
-        var clip: UUID?, section: UUID?, sections: [UUID], zoom: UUID?, blurArea: UUID?
+        var clip: UUID?, section: UUID?, sections: [UUID], zoom: UUID?, blurArea: UUID?, effect: UUID?, marker: UUID?
         var playhead: Double, movieMode: Bool, movieTime: Double
     }
     struct Busy: Encodable {
@@ -296,6 +321,8 @@ struct AgentPreview: Encodable {
     var cropped: Bool
     /// True when the colour stage was left out on request.
     var original: Bool
+    /// True when rendered as Preview plays it, effects and zooms included.
+    var composed: Bool
 }
 
 struct AgentSaveResult: Encodable {
@@ -310,7 +337,7 @@ struct AgentSaveResult: Encodable {
 
 @MainActor
 extension AppModel {
-    static let agentMethods = ["sessions", "state", "apply", "events", "undo", "redo", "save", "preview",
+    static let agentMethods = ["catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview",
                                "analyze", "export", "job", "cancel", "reveal"]
 
     /// Answers one request line with one response line. Never throws: every failure is
@@ -329,6 +356,8 @@ extension AppModel {
         switch request.method {
         case "hello", "sessions":
             return agentResponse(.success(AgentSessions(sessions: [agentSessionInfo(instanceID)])), instanceID)
+        case "catalog":
+            return agentResponse(.success(AgentCatalog.current), instanceID)
         case "state":
             if let refusal = checkSession(request, required: false) { return agentResponse(Result<AgentEmpty, EditError>.failure(refusal), instanceID) }
             return agentResponse(.success(agentState()), instanceID)
@@ -496,7 +525,12 @@ extension AppModel {
                 sections: sections, blurAreas: clip.blurRegions.map { .init(id: $0.id, rect: WireRect($0.rect)) },
                 zooms: clip.zoomShots.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end,
                                                   target: WirePoint($0.target)) },
-                color: clip.info.map { colorState(clip, info: $0, settings: document.settings) })
+                color: clip.info.map { colorState(clip, info: $0, settings: document.settings) },
+                blurEffects: (clip.blurEffects ?? []).map {
+                    .init(id: $0.id, start: $0.start, end: $0.end, duration: $0.duration, amount: $0.amount, mix: $0.mix,
+                          fadeIn: $0.fadeIn, fadeOut: $0.fadeOut, enabled: $0.isEnabled)
+                },
+                markers: (clip.markers ?? []).map { .init(id: $0.id, time: $0.time, label: $0.label, color: $0.color.rawValue) })
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -513,7 +547,7 @@ extension AppModel {
             history: .init(undo: historyStep(undoEntries.last), redo: historyStep(redoEntries.last)),
             selection: .init(clip: selection, section: selectedSegmentID,
                              sections: selectedItem.map { sectionSelection.ordered(in: $0.timeline).map(\.id) } ?? [],
-                             zoom: selectedShotID, blurArea: selectedRegionID,
+                             zoom: selectedShotID, blurArea: selectedRegionID, effect: selectedEffectID, marker: selectedMarkerID,
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             movie: .init(canvas: (document.movieSettings ?? MovieSettings()).canvas.rawValue, duration: movieOffset, clips: movieClips),
@@ -647,6 +681,13 @@ extension AppModel {
             default: throw EditError.invalid("timeSpace must be \"recording\" or \"movie\".")
             }
         }
+        func markerColor(_ name: String?) throws -> TimelineMarker.Color? {
+            guard let name else { return nil }
+            guard let color = TimelineMarker.Color(rawValue: name) else {
+                throw EditError.invalid("Unknown marker colour \"\(name)\". Colours: \(TimelineMarker.Color.allCases.map(\.rawValue).joined(separator: ", ")).")
+            }
+            return color
+        }
         func zoom(_ value: WireZoom) -> ZoomShot {
             ZoomShot(id: value.id ?? UUID(), start: value.start, hold: value.hold ?? 2, level: value.level ?? 2,
                      target: value.target.point)
@@ -765,6 +806,50 @@ extension AppModel {
         case "copyColorAdjustments":
             return .copyColor(from: try field(wire.clipID, "clipID"), to: try field(wire.targets, "targets"),
                               includeInterpretation: wire.includeInterpretation ?? false)
+        case "addBlurEffect":
+            let (clip, start) = try placed(try field(wire.start, "start"))
+            guard wire.end == nil || wire.duration == nil else { throw EditError.invalid("Give end or duration, not both.") }
+            let length = try record(clip).timeline.duration
+            let end = try wire.end.map { try placed($0).1 } ?? start + (wire.duration ?? min(VideoBlurEffect.defaultDuration, max(0, length - start)))
+            // Default fades shrink to fit a short effect; fades you give are kept or refused.
+            let room = max(0, end - start) / 2
+            return .addBlurEffect(clip: clip, effect: VideoBlurEffect(
+                id: wire.effectID ?? UUID(), start: start, end: end, amount: wire.amount ?? VideoBlurEffect.defaultAmount,
+                mix: wire.mix ?? 1, fadeIn: wire.fadeIn ?? min(VideoBlurEffect.defaultFade, room),
+                fadeOut: wire.fadeOut ?? min(VideoBlurEffect.defaultFade, room), isEnabled: wire.enabled ?? true))
+        case "updateBlurEffect":
+            let clipID = try field(wire.clipID, "clipID"), effectID = try field(wire.effectID, "effectID")
+            guard var effect = (try record(clipID).blurEffects ?? []).first(where: { $0.id == effectID }) else {
+                throw EditError.notFound("No blur effect \(effectID) on recording \(clipID).")
+            }
+            guard wire.end == nil || wire.duration == nil else { throw EditError.invalid("Give end or duration, not both.") }
+            let length = effect.duration
+            if let start = wire.start { effect.start = try placed(start).1; effect.end = effect.start + length }
+            if let end = wire.end { effect.end = try placed(end).1 }
+            if let duration = wire.duration { effect.end = effect.start + duration }
+            if let amount = wire.amount { effect.amount = amount }
+            if let mix = wire.mix { effect.mix = mix }
+            if let fadeIn = wire.fadeIn { effect.fadeIn = fadeIn }
+            if let fadeOut = wire.fadeOut { effect.fadeOut = fadeOut }
+            if let enabled = wire.enabled { effect.isEnabled = enabled }
+            return .updateBlurEffect(clip: clipID, effect: effect)
+        case "removeBlurEffect":
+            return .removeBlurEffect(clip: try field(wire.clipID, "clipID"), effect: try field(wire.effectID, "effectID"))
+        case "addMarker":
+            let (clip, time) = try placed(try field(wire.time, "time"))
+            return .addMarker(clip: clip, marker: TimelineMarker(id: wire.markerID ?? UUID(), time: time, label: wire.label ?? "",
+                                                                 color: try markerColor(wire.color) ?? .blue))
+        case "updateMarker":
+            let clipID = try field(wire.clipID, "clipID"), markerID = try field(wire.markerID, "markerID")
+            guard var marker = (try record(clipID).markers ?? []).first(where: { $0.id == markerID }) else {
+                throw EditError.notFound("No marker \(markerID) on recording \(clipID).")
+            }
+            if let time = wire.time { marker.time = try placed(time).1 }
+            if let label = wire.label { marker.label = label }
+            if let color = try markerColor(wire.color) { marker.color = color }
+            return .updateMarker(clip: clipID, marker: marker)
+        case "removeMarker":
+            return .removeMarker(clip: try field(wire.clipID, "clipID"), marker: try field(wire.markerID, "markerID"))
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
@@ -790,7 +875,7 @@ extension AppModel {
         catch { throw EditError.invalid("An export setting has the wrong type or value (\(Self.describe(error))).") }
     }
 
-    static let exportSettingKeys: Set<String> = {
+    nonisolated static let exportSettingKeys: Set<String> = {
         var every = ExportSettings()
         every.outputFolder = URL(fileURLWithPath: "/")
         guard case .object(let fields)? = try? JSONValue.from(every) else { return [] }
@@ -881,6 +966,19 @@ extension AppModel {
                 editorMode = .zoom; selectedShotID = zoom
                 scrubToShot(shot)
             }
+            if let id = request.effect {
+                guard let effect = selectedItem?.blurEffects.first(where: { $0.id == id }) else {
+                    return .failure(.notFound("No blur effect \(id) on the selected recording."))
+                }
+                editorMode = .effects
+                jumpToEffect(effect)
+            }
+            if let id = request.marker {
+                guard let marker = selectedItem?.markers.first(where: { $0.id == id }) else {
+                    return .failure(.notFound("No marker \(id) on the selected recording."))
+                }
+                selectMarker(marker)
+            }
             if let time = request.time, let item = selectedItem, item.editedDuration > 0 {
                 setPreviewFraction(time / item.editedDuration)
             }
@@ -925,6 +1023,20 @@ extension AppModel {
             let source = timeline.location(at: local)?.source ?? 0
             let cropped = request.cropped ?? false
             let settings = document.settings
+            let composed = request.composed ?? false
+            if composed {
+                // The native renderer the owner's Preview uses, so an agent sees what the
+                // owner sees: zooms and effects at this exact time, which a still from the
+                // source frame cannot show.
+                let player = try await PlaybackController.makeItem(clip.item(), settings: settings, original: request.original ?? false)
+                let generator = AVAssetImageGenerator(asset: player.asset)
+                generator.videoComposition = player.videoComposition
+                generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+                let image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
+                                                                 preferredTimescale: 600_000)).image
+                return .success(try writePreview(image, clipID: clipID, local: local, source: source, revision: requestedRevision,
+                                                 cropped: true, original: request.original ?? false, composed: true))
+            }
             let data = try await FFmpeg.thumbnail(
                 url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.map(\.rect),
                 style: settings.blurStyle, strength: settings.blurStrength, toneMap: info.isHDR && settings.toneMapHDR,
@@ -940,20 +1052,25 @@ extension AppModel {
                 guard let piece = image.cropping(to: rect) else { throw EditError.invalid("The crop could not be applied.") }
                 image = piece
             }
-            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
-                throw EditError.invalid("The frame could not be encoded.")
-            }
-            let directory = agentArtifactsDirectory
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            let file = directory.appendingPathComponent(
-                "preview-r\(requestedRevision)-\(clipID.uuidString.prefix(8))-\(Int((local * 1000).rounded()))ms-\(UUID().uuidString.prefix(6)).png")
-            try png.write(to: file, options: .atomic)
-            return .success(AgentPreview(path: file.path, revision: requestedRevision, clip: clipID, time: local,
-                                         sourceTime: source, width: image.width, height: image.height, cropped: cropped,
-                                         original: request.original ?? false))
+            return .success(try writePreview(image, clipID: clipID, local: local, source: source, revision: requestedRevision,
+                                             cropped: cropped, original: request.original ?? false, composed: false))
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid("The frame could not be rendered: \(error.localizedDescription)")) }
+    }
+
+    private func writePreview(_ image: CGImage, clipID: UUID, local: Double, source: Double, revision: Int,
+                              cropped: Bool, original: Bool, composed: Bool) throws -> AgentPreview {
+        guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+            throw EditError.invalid("The frame could not be encoded.")
+        }
+        let directory = agentArtifactsDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let file = directory.appendingPathComponent(
+            "preview-r\(revision)-\(clipID.uuidString.prefix(8))-\(Int((local * 1000).rounded()))ms-\(UUID().uuidString.prefix(6)).png")
+        try png.write(to: file, options: .atomic)
+        return AgentPreview(path: file.path, revision: revision, clip: clipID, time: local, sourceTime: source,
+                            width: image.width, height: image.height, cropped: cropped, original: original, composed: composed)
     }
 
     private func agentJob(_ request: AgentRequest) -> Result<AgentJob, EditError> {

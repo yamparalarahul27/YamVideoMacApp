@@ -477,7 +477,7 @@ struct TimelineSnapping {
     /// What a target is. When two are equally close the earlier kind wins: the playhead
     /// is the one thing deliberately put somewhere to be lined up with.
     enum Kind: Int, Comparable {
-        case playhead, sectionBoundary, zoomEdge, timelineEnd
+        case playhead, sectionBoundary, zoomEdge, effectEdge, marker, timelineEnd
         static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
     }
 
@@ -495,9 +495,10 @@ struct TimelineSnapping {
     let targets: [Target]
 
     /// Everything on the timeline as drawn. `playhead` is nil while the playhead itself
-    /// is what is moving; `excludingZoom` leaves out the zoom being dragged, whose own
-    /// edges travel with it.
-    init(timeline: ClipTimeline, zooms: [ZoomShot], playhead: Double?, excludingZoom: UUID? = nil) {
+    /// is what is moving; `excluding` leaves out the zoom or effect being dragged, whose
+    /// own edges travel with it.
+    init(timeline: ClipTimeline, zooms: [ZoomShot], effects: [VideoBlurEffect] = [], markers: [TimelineMarker] = [],
+         playhead: Double?, excluding: UUID? = nil) {
         var targets: [Target] = []
         if let playhead, playhead.isFinite { targets.append(Target(time: playhead, kind: .playhead)) }
         var offset = 0.0
@@ -505,10 +506,15 @@ struct TimelineSnapping {
             offset += segment.duration
             targets.append(Target(time: offset, kind: .sectionBoundary))
         }
-        for shot in zooms where shot.id != excludingZoom {
+        for shot in zooms where shot.id != excluding {
             targets.append(Target(time: shot.start, kind: .zoomEdge))
             targets.append(Target(time: shot.end, kind: .zoomEdge))
         }
+        for effect in effects where effect.id != excluding {
+            targets.append(Target(time: effect.start, kind: .effectEdge))
+            targets.append(Target(time: effect.end, kind: .effectEdge))
+        }
+        targets += markers.map { Target(time: $0.time, kind: .marker) }
         targets.append(Target(time: 0, kind: .timelineEnd))
         targets.append(Target(time: timeline.duration, kind: .timelineEnd))
         self.targets = targets
