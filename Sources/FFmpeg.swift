@@ -713,7 +713,7 @@ enum FFmpeg {
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
 
-        let graph = editedFilterGraph(
+        var graph = editedFilterGraph(
             head: head,
             segments: segments, audio: info.hasAudio && settings.audio != .none && !settings.format.isAnimation,
             regions: regions.map { $0.evenClamped(in: info.fullFrame) },
@@ -721,6 +721,20 @@ enum FFmpeg {
             strength: settings.blurStrength,
             tail: tail, fpsExpression: info.fpsExpression
         )
+
+        var loudnessFilter: String?
+        if settings.format == .mp4, settings.audio == .normalised, info.hasAudio {
+            loudnessFilter = "loudnorm=\(Loudness.filterTargets)" + (loudness.map { ":" + $0.filterArguments } ?? "")
+        }
+        // Cut audio leaves -filter_complex as [timelinea], and ffmpeg refuses -af on a
+        // stream that a complex graph feeds. The loudness filter joins the graph instead.
+        var audioLabel = segments == nil ? "0:a:0" : "[timelinea]"
+        if let filter = loudnessFilter, var edited = graph, edited.isComplex, edited.spec.contains("[timelinea]") {
+            edited.spec += ";[timelinea]\(filter)[normala]"
+            graph = edited
+            audioLabel = "[normala]"
+            loudnessFilter = nil
+        }
 
         if palette != nil {
             // diff_mode=rectangle leaves untouched areas of the frame alone, which is
@@ -737,7 +751,7 @@ enum FFmpeg {
             args += ["-filter_complex", spec, "-map", "[gif]"]
         } else {
             args += mapped(graph, audio: info.hasAudio && settings.audio != .none
-                           && !settings.format.isAnimation, audioLabel: segments == nil ? "0:a:0" : "[timelinea]")
+                           && !settings.format.isAnimation, audioLabel: audioLabel)
         }
 
         switch settings.format {
@@ -764,11 +778,11 @@ enum FFmpeg {
                 if info.hasAudio { args += ["-c:a", "aac", "-b:a", "192k"] } else { args += ["-an"] }
             case .normalised:
                 if info.hasAudio {
-                    var filter = "loudnorm=\(Loudness.filterTargets)"
-                    if let loudness { filter += ":" + loudness.filterArguments }
+                    // Nil here when the filter already sits in the cut graph above.
+                    if let loudnessFilter { args += ["-af", loudnessFilter] }
                     // loudnorm resamples to 192 kHz internally and will happily hand that
                     // rate to the encoder, so the output rate is pinned back explicitly.
-                    args += ["-af", filter, "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+                    args += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
                 } else {
                     args += ["-an"]
                 }
