@@ -9,7 +9,7 @@ Each imported recording has its own timeline. Export recordings separately, or s
 activity locally and proposes editable zooms for you to preview and accept.
 
 Built as a plain SwiftUI app that drives `ffmpeg` — no Xcode project, no dependencies to
-vendor, and the exact command it runs is always visible in the sidebar.
+vendor, and the exact command it runs is always visible in the Export sheet.
 
 ## Requirements
 
@@ -149,15 +149,16 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | | |
 |---|---|
 | **Add clips** | Drop files (or a folder) onto the window, press ⌘O, or open a video with the app from Finder |
-| **Crop** | Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one. Type exact pixel values in the X/Y/W/H fields |
+| **Crop** | Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one. Exact pixel values are under **Details** in the inspector |
 | **Lock a shape** | Pick an aspect preset (16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) and resizing keeps that ratio |
-| **Blur an area** | Switch the editor to **Blur Areas** and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
+| **Blur an area** | Switch the picture to **Blur** and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
 | **Zoom in** | Switch to **Zoom**, scrub to the moment, then click the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds; drag the marker to re-aim it |
 | **Pick the frame you work against** | Drag the scrubber under the preview |
-| **Reuse your work** | **Apply to All** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
-| **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one in the **Subtitles** section. Choose where it sits and how big it is |
-| **Make a GIF or WebP** | Pick the format in the settings pane. Everything else — crop, blur, zoom — works exactly the same |
-| **Export** | ⌘R exports all recordings in Recording or the assembled movie in Movie. ⌘. stops |
+| **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
+| **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
+| **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector. Choose where it sits and how big it is |
+| **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
+| **Export** | **Export…** opens a sheet for the selected recording, all recordings or the movie, with format, quality, audio and destination. ⌘R still exports all recordings (or the movie in Movie). ⌘. stops |
 
 Individual clip output lands next to each source file as `<name>-converted.<ext>` (`.mp4`, `.gif` or
 `.webp`, following the format) unless you choose another folder. Existing files are never
@@ -302,7 +303,10 @@ Mac: the app listens only on a private socket that other users cannot reach. See
 Sources/
   App.swift         @main, menu commands, Finder open-file handling
   AppModel.swift    queue, selection, preview, conversion driver
-  ContentView.swift window layout: queue sidebar, editor, settings pane
+  ContentView.swift window layout: media list, picture and inspector over a full-width timeline
+  InspectorView.swift selection-following inspector: section, zoom, blur area, recording
+  ExportSheet.swift scope, format, quality, audio and destination for one Export button
+  AgentActivityView.swift Local agents status, pause switch, activity and setup commands
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
@@ -325,6 +329,8 @@ Sources/
 Tests/main.swift    end-to-end checks (./test.sh)
 Tools/makeicon.swift  draws the app icon at build time
 Tools/YamVideoCLI/    yamvideoctl, its guide and the two-client demo
+Tools/AgentBridge/    MCP server for Claude Code and Codex, with setup and a smoke test
+Tools/Snapshot/       renders the real window offscreen to PNGs for layout checks
 ```
 
 ## Implementation plans

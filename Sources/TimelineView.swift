@@ -75,16 +75,12 @@ struct TimelineView: View {
                 .clipped()
             }
             .frame(height: contentHeight + 12)
-            sectionControls
+            // Section speed, trims and order are in the inspector, which follows the selection.
             HStack(spacing: 10) {
-                if let segment = model.selectedSegment {
-                    Picker("Speed", selection: Binding(get: { segment.speed }, set: { model.setSegmentSpeed(segment.id, speed: $0) })) {
-                        ForEach([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0], id: \.self) { speed in
-                            Text("\(speed.formatted())×").tag(speed)
-                        }
-                    }.frame(width: 125).accessibilityLabel("Section speed")
-                    Text("\(timelineTime(segment.duration)) · preserve pitch").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(model.selectedSegment == nil
+                     ? "Click a section to edit it in the inspector. Drag its edges to trim, or drag it to reorder."
+                     : "Drag a section's edges to trim it, or drag it to reorder.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
                 if item.info?.hasAudio == true {
                     if overview != nil {
@@ -272,37 +268,6 @@ struct TimelineView: View {
             .opacity(model.viewport.contains(time) ? 1 : 0)
             .allowsHitTesting(false)
     }
-
-    private var sectionControls: some View {
-        HStack(spacing: 8) {
-            if let segment = model.selectedSegment,
-               let index = item.timeline.segments.firstIndex(where: { $0.id == segment.id }) {
-                Text("Section \(index + 1)").font(.caption.weight(.medium))
-                TimelineTimeField(label: "In", value: segment.start) {
-                    model.trimSegment(segment.id, start: $0)
-                    return model.selectedSegment?.start ?? segment.start
-                }
-                TimelineTimeField(label: "Out", value: segment.end) {
-                    model.trimSegment(segment.id, end: $0)
-                    return model.selectedSegment?.end ?? segment.end
-                }
-                Button { model.moveSegment(segment.id, to: index - 1) } label: { Image(systemName: "arrow.left") }
-                    .disabled(index == 0).help("Move section earlier").accessibilityLabel("Move section earlier")
-                Button { model.moveSegment(segment.id, to: index + 1) } label: { Image(systemName: "arrow.right") }
-                    .disabled(index == item.timeline.segments.count - 1).help("Move section later").accessibilityLabel("Move section later")
-                Button { model.deleteSegment() } label: { Image(systemName: "trash") }
-                    .disabled(item.timeline.segments.count < 2).help("Delete selected section (⌘⌫)").accessibilityLabel("Delete section")
-            } else {
-                Text("Click a section to trim it. Drag sections to reorder.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            Text("\(item.timeline.segments.count) section\(item.timeline.segments.count == 1 ? "" : "s")")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(height: 24)
-        .controlSize(.small)
-    }
 }
 
 private struct SegmentBlock: View {
@@ -423,7 +388,7 @@ private struct ZoomBlock: View {
     }
 }
 
-private struct TimelineTimeField: View {
+struct TimelineTimeField: View {
     let label: String
     let value: Double
     let onCommit: (Double) -> Double

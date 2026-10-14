@@ -1963,6 +1963,21 @@ equal(probing.undoEntries.count, probeHistory, "a finished probe adds no undo st
 probing.undoEdit(); probing.redoEdit()
 equal(probing.items.first?.info, info, "undo and redo do not forget a probe that finished after Add")
 
+// The inspector follows what was selected last, and falls back to the recording.
+let focusing = freshEditor()
+equal(focusing.inspectorFocus, .recording, "with nothing selected the inspector shows the recording")
+focusing.selectedSegmentID = sectionA.id
+equal(focusing.inspectorFocus, .section, "selecting a section shows it in the inspector")
+focusing.selectedShotID = anchoredZoom.id
+equal(focusing.inspectorFocus, .zoom, "selecting a zoom afterwards shows the zoom instead")
+focusing.selectedSegmentID = nil
+equal(focusing.inspectorFocus, .zoom, "clearing something not shown leaves the inspector alone")
+focusing.selectedShotID = nil
+equal(focusing.inspectorFocus, .recording, "clearing what is shown falls back to the recording")
+focusing.selectedRegionID = UUID()
+focusing.perform([.setAspect(clip: focusing.items[0].id, preset: "1:1")])
+equal(focusing.inspectorFocus, .recording, "a selection that no longer exists after an edit is cleared from the inspector")
+
 // MARK: - Local agent bridge
 
 print("\nLocal agent bridge")

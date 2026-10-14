@@ -1,6 +1,6 @@
 # Local co-editing and the simplified editor — implementation plan
 
-**Updated:** 2026-10-14. **Status:** Phases 1–2 implemented (see section 10); phases 3–6 planned.
+**Updated:** 2026-10-14. **Status:** Phases 1–2 implemented; phase 3 mostly implemented (see section 10); phases 4–6 planned.
 **Owner intent:** Edit videos in the native Mac app while Codex or Claude edits the same
 open project on the same Mac. The owner also needs beginner-friendly DJI Osmo Pocket 3
 colour correction. No cloud collaboration service is required.
@@ -448,4 +448,35 @@ one change. The suite has 585 checks. Decisions taken while building them:
 - The MCP adapter (`Tools/AgentBridge/`) and a live Codex/Claude session are phase 3. The
   two-client acceptance gate is covered by real `yamvideoctl` processes in the suite and by
   `Tools/YamVideoCLI/demo.sh` against the running app.
+
+### Phase 3 status (2026-10-14)
+
+Implemented:
+
+- **Local agents** toolbar item: a recent-activity dot, an "Allow agent edits" switch
+  (pause), the clients seen recently, a collapsible activity list with Reveal and Undo for
+  the step on top, and copyable Claude Code / Codex setup commands. An agent's change
+  outlines the sections and zooms it touched and marks the recording for 2.5 s, without
+  moving the selection.
+- **MCP adapter** (`Tools/AgentBridge/`, SDK 1.31.0 and zod 4.6.5 pinned with a lockfile):
+  thirteen tools over `yamvideoctl`, a smoke test through the official client in the
+  suite, and a setup guide. The Claude Code command was checked against its CLI help; the
+  Codex command and `config.toml` follow OpenAI's documentation.
+- **Simplified layout:** media list, picture and a selection-following inspector side by
+  side, the timeline full width beneath at its natural height, Undo/Redo in the toolbar,
+  and one Export button that opens a sheet with scope, format and destination. Section
+  controls moved from under the timeline into the inspector; exact values sit behind
+  Details. `Tools/Snapshot/` renders the real window offscreen to check this layout,
+  including at the minimum window size.
+- Recovery files and preview folders are separated per running instance.
+
+Remaining for phase 3:
+
+- **Navigation:** snapping (8 pt) and multi-section selection. Shared lane sizing and the
+  adaptive ruler and anchored zoom were already on the editor branch.
+- **Live acceptance:** a scripted headless Claude Code 2.1.241 session, with a scratch
+  instance and MCP config, was set up. It stopped before any tool call because the
+  Claude Code login on the development Mac had expired. The Codex CLI is not installed
+  there. Both runs still need doing, with the client versions and results recorded.
+- Hands-on checks of keyboard focus and VoiceOver in the new layout.
 
