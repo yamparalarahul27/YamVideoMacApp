@@ -3,3 +3,6 @@ build/
 
 # macOS
 .DS_Store
+
+# SwiftPM build output (native-scaffold)
+.build/
