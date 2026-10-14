@@ -12,7 +12,7 @@ Reading
   yamvideoctl sessions
   yamvideoctl state
   yamvideoctl events [--after N] [--limit N]
-  yamvideoctl preview --clip ID --time SECONDS [--cropped] [--revision N]
+  yamvideoctl preview --clip ID --time SECONDS [--cropped] [--original] [--revision N]
   yamvideoctl preview --movie --time SECONDS
   yamvideoctl job JOB [--wait]
 
@@ -51,7 +51,7 @@ struct Arguments {
     var flags: Set<String> = []
     var positional: [String] = []
 
-    static let booleans: Set<String> = ["dry-run", "cropped", "movie", "overwrite", "pretty", "wait", "help"]
+    static let booleans: Set<String> = ["dry-run", "cropped", "original", "movie", "overwrite", "pretty", "wait", "help"]
 
     init(_ raw: [String]) throws {
         var index = 0
@@ -264,6 +264,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         request["time"] = time
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" } else { request["clip"] = try value("clip") }
         if arguments.flags.contains("cropped") { request["cropped"] = true }
+        if arguments.flags.contains("original") { request["original"] = true }
     case "job":
         request["method"] = "job"; request["job"] = try job()
     case "cancel":

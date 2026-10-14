@@ -467,6 +467,8 @@ struct CropCanvas: View {
     let info: MediaInfo
     let crop: CGRect
     let ratio: CGFloat?
+    /// The same frame without colour correction: shown on the left half to compare.
+    var originalImage: NSImage? = nil
     let isLoading: Bool
     let mode: EditorMode
     let regions: [BlurRegion]
@@ -499,6 +501,7 @@ struct CropCanvas: View {
                             .resizable()
                             .interpolation(.medium)
                             .frame(width: fitted.width, height: fitted.height)
+                        if let originalImage { comparison(originalImage, size: fitted) }
                     } else {
                         Rectangle()
                             .fill(Color(nsColor: .darkGray).opacity(0.4))
@@ -547,6 +550,34 @@ struct CropCanvas: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+    }
+
+    /// Original on the left, corrected on the right, at the same frame and crop. Purely a
+    /// view: it never takes part in editing or export.
+    private func comparison(_ original: NSImage, size: CGSize) -> some View {
+        ZStack(alignment: .topLeading) {
+            Image(nsImage: original)
+                .resizable()
+                .interpolation(.medium)
+                .frame(width: size.width, height: size.height)
+                .mask(alignment: .leading) { Rectangle().frame(width: size.width / 2) }
+            Rectangle().fill(Color.white.opacity(0.85))
+                .frame(width: 1, height: size.height)
+                .offset(x: size.width / 2)
+            HStack {
+                Text("Original")
+                Spacer()
+                Text("Corrected")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .shadow(color: .black.opacity(0.8), radius: 2)
+            .frame(width: size.width)
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Comparison: original on the left, corrected on the right")
     }
 
     private func fittedSize(aspect: CGFloat, in container: CGSize) -> CGSize {

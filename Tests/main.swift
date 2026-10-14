@@ -3171,6 +3171,225 @@ if let djiPath = ProcessInfo.processInfo.environment["YAMVIDEO_DJI_LUT"], FileMa
     print("       DJI parity: \(describe(djiParity))")
 }
 
+print("\nColour commands")
+extension Result { var isFailure: Bool { if case .failure = self { return true } else { return false } } }
+// Two probed recordings: the 10-bit chart and the landscape clip.
+var gradeChart = VideoItem(url: chart); gradeChart.info = chartInfo; gradeChart.crop = chartInfo.fullFrame
+var gradeOther = VideoItem(url: landscape); gradeOther.info = info; gradeOther.crop = info.fullFrame
+@MainActor func colorEditor() -> AppModel {
+    let model = AppModel(recoveryURL: nil)
+    model.restore(VideoProject(clips: [ProjectClip(gradeChart), ProjectClip(gradeOther)], settings: ExportSettings(), selection: gradeChart.id))
+    return model
+}
+let grading = colorEditor()
+@MainActor func gradingColor(_ index: Int = 0) -> ClipColorSettings { grading.items[index].color }
+
+check(grading.perform([.setColorCorrection(clip: gradeChart.id, enabled: true)]).isFailure,
+      "Natural colour is refused before there is a conversion")
+check(grading.perform([.setTechnicalLUT(clip: gradeChart.id, lut: conversion)]).isFailure,
+      "a conversion is refused while the recording is not set to D-Log M")
+let gradingSteps = grading.undoEntries.count
+grading.applyNaturalColor(conversion)
+check(gradingColor().inputProfile == .pocket3DLogM && gradingColor().technicalLUT == conversion && gradingColor().correctionEnabled,
+      "Natural colour sets D-Log M, the conversion and the correction")
+check(grading.undoEntries.count == gradingSteps + 1 && grading.undoTitle == "Undo Natural Colour", "as one undoable step")
+check(grading.statusMessage?.contains("not DJI's official") == true, "and says when the conversion is not DJI's own")
+check(grading.items[0].colorStage(grading.settings).render != nil, "the recording now has a colour stage")
+
+let dragSteps = grading.undoEntries.count
+for value in [0.2, 0.4, 0.6] { grading.setColorAdjustments(ColorAdjustments(exposureEV: value), live: true) }
+equal(gradingColor().exposureEV, 0.6, "a brightness drag shows each value as it goes")
+equal(grading.undoEntries.count, dragSteps, "without an undo step per value")
+grading.endGesture()
+check(grading.undoEntries.count == dragSteps + 1 && grading.undoTitle == "Undo Adjust Colour", "and is one step when it ends")
+check(grading.perform([.setColorAdjustments(clip: gradeChart.id, exposureEV: 3, warmth: nil, contrast: nil, saturation: nil)]).isFailure
+          && gradingColor().exposureEV == 0.6,
+      "an out-of-range value is refused, never clamped")
+check(grading.perform([.setColorAdjustments(clip: gradeChart.id, exposureEV: nil, warmth: nil, contrast: nil, saturation: nil)]).isFailure,
+      "an adjustment naming no control is refused")
+grading.perform([.setColorAdjustments(clip: gradeChart.id, exposureEV: nil, warmth: 0.5, contrast: nil, saturation: nil)])
+check(gradingColor().warmth == 0.5 && gradingColor().exposureEV == 0.6, "a partial adjustment leaves the other controls alone")
+
+grading.copyColor(to: [gradeOther.id], includeInterpretation: false)
+check(gradingColor(1).adjustments == gradingColor().adjustments && gradingColor(1).inputProfile == .auto
+          && gradingColor(1).technicalLUT == nil,
+      "copying colour copies the look, not how the footage was recorded")
+grading.undoEdit()
+grading.copyColor(to: [gradeOther.id], includeInterpretation: true)
+check(gradingColor(1).inputProfile == .pocket3DLogM && gradingColor(1).correctionEnabled, "unless asked to")
+var hdrProject = grading.project
+hdrProject.clips[1].info?.colorTransfer = "smpte2084"; hdrProject.clips[1].color = nil
+check((try? ProjectReducer.apply([.copyColor(from: gradeChart.id, to: [gradeOther.id], includeInterpretation: true)], to: hdrProject)) == nil,
+      "and never onto a recording whose file rules D-Log M out")
+check((try? ProjectReducer.apply([.copyColor(from: gradeChart.id, to: [gradeChart.id], includeInterpretation: false)], to: grading.project)) == nil,
+      "a recording cannot copy onto itself")
+
+grading.resetColorAdjustments()
+check(gradingColor().adjustments.isNeutral && gradingColor().correctionEnabled, "Reset Adjustments keeps Natural colour")
+grading.removeColorCorrection()
+check(!gradingColor().correctionEnabled && gradingColor().technicalLUT == conversion, "Remove Correction keeps the conversion to hand")
+grading.setInputProfile(.standard)
+check(gradingColor().technicalLUT == nil && !gradingColor().correctionEnabled, "a profile the conversion does not fit removes it")
+grading.setInputProfile(.auto)
+check(grading.project.clips[0].color == nil, "a recording back at the defaults stores no colour at all")
+
+grading.applyNaturalColor(conversion)
+grading.setColorAdjustments(ColorAdjustments(exposureEV: 0.25, warmth: -0.2, contrast: 1.1, saturation: 0.9))
+let gradedProject = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(grading.project))
+check(gradedProject == grading.project && gradedProject.version == 4, "colour survives a version 4 round trip")
+var olderWithColour = gradedProject; olderWithColour.version = 3
+check((try? olderWithColour.validate()) == nil, "a version 3 file carrying colour is refused")
+var unknownAlgorithm = gradedProject; unknownAlgorithm.clips[0].color?.algorithmVersion = 9
+check((try? unknownAlgorithm.validate()) == nil, "so is colour from an algorithm this build does not know")
+
+print("\nColour for agents")
+let colorAgent = colorEditor()
+let colorClip = gradeChart.id.uuidString
+let colorState = (agentResult(await agentCall(colorAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["color"] as? [String: Any]
+check(colorState?["inputProfile"] as? String == "auto" && colorState?["profileInEffect"] as? String == "standard"
+          && colorState?["profileChosen"] as? Bool == false,
+      "state says which profile is in effect and that it was inferred")
+var colorApply = address(colorAgent)
+colorApply["method"] = "apply"; colorApply["requestID"] = "colour-1"; colorApply["client"] = "Claude"; colorApply["label"] = "Correct the D-Log M"
+colorApply["commands"] = [["type": "setInputProfile", "clipID": colorClip, "profile": "pocket3DLogM"],
+                          ["type": "importTechnicalLUT", "clipID": colorClip, "path": conversionFile.path],
+                          ["type": "setColorCorrection", "clipID": colorClip, "enabled": true],
+                          ["type": "setColorAdjustments", "clipID": colorClip, "warmth": 0.2]]
+let colorApplied = await agentCall(colorAgent, colorApply)
+check(colorApplied["ok"] as? Bool == true && colorAgent.items[0].color.correctionEnabled && colorAgent.items[0].color.warmth == 0.2,
+      "an agent can set D-Log M, import the conversion, correct and adjust in one step", "\(colorApplied)")
+equal(colorAgent.undoTitle, "Undo Correct the D-Log M (Claude)", "and it is one named undo step")
+let agentColor = (agentResult(await agentCall(colorAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["color"] as? [String: Any]
+let agentConversion = agentColor?["conversion"] as? [String: Any]
+check(agentConversion?["sha256"] as? String == conversion.sha256 && agentConversion?["available"] as? Bool == true
+          && agentConversion?["official"] as? Bool == false && agentColor?["profileChosen"] as? Bool == true,
+      "state reports the conversion by hash, whether it is DJI's, and that this Mac has it")
+var badTable = address(colorAgent)
+badTable["method"] = "apply"; badTable["requestID"] = "colour-2"
+badTable["commands"] = [["type": "importTechnicalLUT", "clipID": colorClip, "path": brokenCube.path]]
+let badAnswer = await agentCall(colorAgent, badTable)
+check(agentError(badAnswer) == "invalid_command" && colorAgent.items[0].color.technicalLUT == conversion,
+      "a malformed table from an agent changes nothing")
+var outOfRange = address(colorAgent)
+outOfRange["method"] = "apply"; outOfRange["requestID"] = "colour-3"
+outOfRange["commands"] = [["type": "setColorAdjustments", "clipID": colorClip, "saturation": 2.5]]
+equal(agentError(await agentCall(colorAgent, outOfRange)), "invalid_command", "an agent's out-of-range colour is refused")
+let pairTime = 0.5
+let correctedPreview = agentResult(await agentCall(colorAgent, ["method": "preview", "clip": colorClip, "time": pairTime]))
+let originalPreview = agentResult(await agentCall(colorAgent, ["method": "preview", "clip": colorClip, "time": pairTime, "original": true]))
+check(correctedPreview["revision"] as? Int == originalPreview["revision"] as? Int && originalPreview["original"] as? Bool == true
+          && correctedPreview["original"] as? Bool == false,
+      "an agent can ask for original and corrected previews at the same revision")
+if let correctedPath = correctedPreview["path"] as? String, let originalPath = originalPreview["path"] as? String {
+    check((try? Data(contentsOf: URL(fileURLWithPath: correctedPath))) != (try? Data(contentsOf: URL(fileURLWithPath: originalPath))),
+          "and the two differ")
+}
+
+print("\nColour with saved projects")
+let projectFolder = colorScratch.appendingPathComponent("projects", isDirectory: true)
+try FileManager.default.createDirectory(at: projectFolder, withIntermediateDirectories: true)
+let gradedFile = projectFolder.appendingPathComponent("Graded.yamvideo")
+grading.save(to: gradedFile, asCopy: false)
+let besideProject = LUTStore.projectURL(for: conversion.sha256, beside: gradedFile)
+check((try? Data(contentsOf: besideProject)).map(ColorCube.sha256) == conversion.sha256,
+      "saving copies the conversion beside the project, under its hash")
+let homeStore = LUTStore.directory.path
+setenv("YAMVIDEO_LUT_STORE", colorScratch.appendingPathComponent("another-mac").path, 1)
+check(!LUTStore.has(conversion.sha256), "a Mac that never imported the table does not have it")
+let reopened = AppModel(recoveryURL: nil)
+reopened.openProject(at: gradedFile)
+check(LUTStore.has(conversion.sha256) && reopened.items[0].colorStage(reopened.settings).render != nil,
+      "opening the project there takes the table from beside it", reopened.statusMessage ?? "")
+try FileManager.default.removeItem(at: besideProject.deletingLastPathComponent().deletingLastPathComponent())
+setenv("YAMVIDEO_LUT_STORE", colorScratch.appendingPathComponent("third-mac").path, 1)
+let stranded = AppModel(recoveryURL: nil)
+stranded.openProject(at: gradedFile)
+check(stranded.statusMessage?.contains("missing") == true && stranded.items[0].colorStage(stranded.settings).problem != nil,
+      "with the table nowhere, opening says so and correction is held back, not dropped", stranded.statusMessage ?? "")
+var strandedExport = false
+do {
+    try await FFmpeg.export(input: chart, output: colorScratch.appendingPathComponent("stranded.mp4"), info: chartInfo,
+                            crop: chartInfo.fullFrame, settings: ExportSettings(),
+                            color: stranded.items[0].colorStage(stranded.settings)) { _ in }
+} catch { strandedExport = error.localizedDescription.contains("missing") }
+check(strandedExport && !FileManager.default.fileExists(atPath: colorScratch.appendingPathComponent("stranded.mp4").path),
+      "and an export refuses rather than writing uncorrected video")
+setenv("YAMVIDEO_LUT_STORE", homeStore, 1)
+
+print("\nColour in movies")
+var movieGraded = grading.items[0]
+var movieStandard = gradeOther
+let colourPlan = try MoviePlan(items: [movieGraded, movieStandard], movieSettings: MovieSettings(), settings: ExportSettings())
+let colourMovieArgs = FFmpeg.movieArguments(plan: colourPlan, settings: ExportSettings(), output: colorScratch.appendingPathComponent("m.mp4"))
+let colourGraph = colourMovieArgs[colourMovieArgs.firstIndex(of: "-filter_complex")! + 1]
+check(colourGraph.components(separatedBy: "lut3d").count == 2, "a movie applies colour only to the recording that has it")
+check(colourMovieArgs.contains("-color_primaries") && colourMovieArgs.contains("bt709"), "and is tagged Rec.709")
+movieStandard.info?.colorTransfer = "arib-std-b67"
+let hdrMovieArgs = FFmpeg.movieArguments(plan: try MoviePlan(items: [movieStandard], movieSettings: MovieSettings(), settings: ExportSettings()),
+                                         settings: ExportSettings(), output: colorScratch.appendingPathComponent("h.mp4"))
+check(hdrMovieArgs.joined(separator: " ").contains("tonemap="), "an HDR recording in a movie is tone-mapped like its own export")
+
+// Movie preview gets half-float frames and writes Rec.709, so it matches too.
+movieGraded.color.adjustments = ColorAdjustments(exposureEV: 0.5, warmth: 0.3, contrast: 1.2, saturation: 1.3)
+let moviePlanGraded = try MoviePlan(items: [movieGraded], movieSettings: MovieSettings(), settings: ExportSettings())
+let movieItemGraded = try await PlaybackController.makeMovieItem(moviePlanGraded, settings: ExportSettings())
+let movieGrader = AVAssetImageGenerator(asset: movieItemGraded.asset)
+movieGrader.videoComposition = movieItemGraded.videoComposition
+movieGrader.requestedTimeToleranceBefore = .zero; movieGrader.requestedTimeToleranceAfter = .zero
+let colourMovieImage = try await movieGrader.image(at: CMTime(seconds: 0.5, preferredTimescale: 600)).image
+var movieWords = [UInt16](repeating: 0, count: colourMovieImage.width * colourMovieImage.height * 4)
+let movieContext = CGContext(data: &movieWords, width: colourMovieImage.width, height: colourMovieImage.height, bitsPerComponent: 16,
+                             bytesPerRow: colourMovieImage.width * 8, space: ColorPipeline.videoSpace,
+                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+movieContext.draw(colourMovieImage, in: CGRect(x: 0, y: 0, width: colourMovieImage.width, height: colourMovieImage.height))
+var movieValues: [Double] = []
+for pixel in stride(from: 0, to: movieWords.count, by: 4) {
+    movieValues += [Double(movieWords[pixel]) / 65535, Double(movieWords[pixel + 1]) / 65535, Double(movieWords[pixel + 2]) / 65535]
+}
+let colourMovieFrame = RGBFrame(width: colourMovieImage.width, height: colourMovieImage.height, values: movieValues)
+let movieStage = movieGraded.colorStage(ExportSettings())
+let movieExpected = { (index: Int) in Array(repeating: movieStage.render!.cube.sample(patchColors[index]), count: plainFFmpeg.patch(index).count) }
+let movieParity = errorStats(colourMovieFrame, movieExpected)
+check(colourMovieFrame.width == chartWidth && movieParity.mean <= 2 && movieParity.p99 <= 6,
+      "movie preview colours the chart within the release gate", describe(movieParity))
+print("       movie preview vs maths: \(describe(movieParity))")
+
+print("\nFast colour preview")
+let plainThumb = NSImage(data: try await FFmpeg.thumbnail(url: chart, at: 0.5, duration: chartInfo.duration))!
+let exactThumb = NSImage(data: try await FFmpeg.thumbnail(url: chart, at: 0.5, duration: chartInfo.duration,
+                                                          color: try ColorPipeline.ffmpegFilters(movieStage, info: chartInfo, toneMapped: false)))!
+let quickThumb = ColorPipeline.quickPreview(plainThumb, movieStage.render!)!
+func thumbFrame(_ image: NSImage) -> RGBFrame {
+    let frame = image.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+    let space = plainThumb.cgImage(forProposedRect: nil, context: nil, hints: nil)!.colorSpace!
+    var words = [UInt16](repeating: 0, count: frame.width * frame.height * 4)
+    let context = CGContext(data: &words, width: frame.width, height: frame.height, bitsPerComponent: 16, bytesPerRow: frame.width * 8,
+                            space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+    context.draw(frame, in: CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
+    var values: [Double] = []
+    for pixel in stride(from: 0, to: words.count, by: 4) {
+        values += [Double(words[pixel]) / 65535, Double(words[pixel + 1]) / 65535, Double(words[pixel + 2]) / 65535]
+    }
+    return RGBFrame(width: frame.width, height: frame.height, values: values)
+}
+let quickExact = thumbFrame(exactThumb)
+let quickStats = errorStats(thumbFrame(quickThumb)) { quickExact.patch($0) }
+check(quickStats.mean <= 2 && quickStats.p99 <= 6, "a slider's instant preview matches the exact frame that replaces it", describe(quickStats))
+print("       instant vs exact preview: \(describe(quickStats))")
+// The plan's target: slider feedback within 150 ms of a frame already on screen. Timed
+// on a 4K frame, the largest a Pocket 3 records, after one warm-up for the GPU.
+let fourK = NSImage(size: NSSize(width: 3840, height: 2160), flipped: false) { rect in
+    NSColor(calibratedRed: 0.4, green: 0.5, blue: 0.3, alpha: 1).setFill(); rect.fill(); return true
+}
+let fourKBitmap = NSBitmapImageRep(data: fourK.tiffRepresentation!)!
+let fourKFrame = NSImage(size: fourK.size); fourKFrame.addRepresentation(fourKBitmap)
+_ = ColorPipeline.quickPreview(fourKFrame, movieStage.render!)
+let quickStart = Date()
+_ = ColorPipeline.quickPreview(fourKFrame, movieStage.render!)
+let quickMilliseconds = Date().timeIntervalSince(quickStart) * 1000
+check(quickMilliseconds < 150, "a slider's instant preview of a 4K frame takes under 150 ms", String(format: "%.0f ms", quickMilliseconds))
+print(String(format: "       instant preview, 4K frame: %.0f ms", quickMilliseconds))
+
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)
 exit(failures == 0 ? 0 : 1)

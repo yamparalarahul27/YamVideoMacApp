@@ -104,13 +104,22 @@ struct WireCommand: Codable, Equatable {
     var settings: [String: JSONValue]?
     var path: String?
     var paths: [String]?
+    var profile: String?
+    var enabled: Bool?
+    var exposureEV: Double?
+    var warmth: Double?
+    var contrast: Double?
+    var saturation: Double?
+    var targets: [UUID]?
+    var includeInterpretation: Bool?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
         "setCrop", "setAspect", "addBlurArea", "updateBlurArea", "removeBlurArea", "replaceBlurAreas",
         "addZoom", "updateZoom", "removeZoom", "replaceZooms", "setMovieOrder", "setIncludedInMovie",
         "setMovieCanvas", "setExportSettings", "setSubtitles", "clearSubtitles", "addMedia", "removeMedia",
-        "relinkMedia",
+        "relinkMedia", "setInputProfile", "importTechnicalLUT", "clearTechnicalLUT", "setColorCorrection",
+        "setColorAdjustments", "resetColorAdjustments", "copyColorAdjustments",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -121,6 +130,9 @@ struct WireCommand: Codable, Equatable {
         default: return []
         }
     }
+
+    /// Conversion tables that must be read and checked before this command can be resolved.
+    var lutPaths: [String] { type == "importTechnicalLUT" ? path.map { [$0] } ?? [] : [] }
 }
 
 // MARK: - Results
@@ -192,6 +204,22 @@ struct AgentState: Encodable {
         var sections: [Section]
         var blurAreas: [Area]
         var zooms: [Zoom]
+        var color: Color?
+    }
+    /// A recording's colour as stored, plus what the app makes of it: the profile in
+    /// effect and whether that was chosen or inferred, the conversion table and whether
+    /// this Mac has it, and why a requested correction cannot run.
+    struct Color: Encodable {
+        struct Conversion: Encodable { var sha256: String; var name: String; var official: Bool; var available: Bool }
+        var inputProfile: String
+        var profileInEffect: String?
+        var profileChosen: Bool
+        var evidence: String
+        var conversion: Conversion?
+        var correctionEnabled: Bool
+        var exposureEV: Double, warmth: Double, contrast: Double, saturation: Double
+        var algorithmVersion: Int
+        var problem: String?
     }
     struct MovieEntry: Encodable { var clip: UUID; var offset: Double; var duration: Double }
     struct Movie: Encodable { var canvas: String; var duration: Double; var clips: [MovieEntry] }
@@ -467,7 +495,8 @@ extension AppModel {
                 crop: clip.crop.map(WireRect.init), aspect: clip.aspectLabel, subtitles: clip.subtitles?.path,
                 sections: sections, blurAreas: clip.blurRegions.map { .init(id: $0.id, rect: WireRect($0.rect)) },
                 zooms: clip.zoomShots.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end,
-                                                  target: WirePoint($0.target)) })
+                                                  target: WirePoint($0.target)) },
+                color: clip.info.map { colorState(clip, info: $0, settings: document.settings) })
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -489,6 +518,24 @@ extension AppModel {
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             movie: .init(canvas: (document.movieSettings ?? MovieSettings()).canvas.rawValue, duration: movieOffset, clips: movieClips),
             clips: clips)
+    }
+
+    private func colorState(_ clip: ProjectClip, info: MediaInfo, settings: ExportSettings) -> AgentState.Color {
+        let color = clip.color ?? ClipColorSettings()
+        let name = clip.url.lastPathComponent
+        let inferred = info.inferredColorProfile(fileName: name)
+        let chosen = color.inputProfile != .auto
+        return AgentState.Color(
+            inputProfile: color.inputProfile.rawValue,
+            profileInEffect: chosen ? color.inputProfile.rawValue : inferred.profile?.rawValue,
+            profileChosen: chosen,
+            evidence: chosen ? "Chosen for this recording." : inferred.evidence,
+            conversion: color.technicalLUT.map { .init(sha256: $0.sha256, name: $0.originalName, official: LUTStore.isOfficial($0),
+                                                       available: LUTStore.has($0.sha256)) },
+            correctionEnabled: color.correctionEnabled,
+            exposureEV: color.exposureEV, warmth: color.warmth, contrast: color.contrast, saturation: color.saturation,
+            algorithmVersion: color.algorithmVersion,
+            problem: clip.item().colorStage(settings).problem)
     }
 
     private func agentEvents(_ request: AgentRequest) -> Result<AgentEventsPage, EditError> {
@@ -547,8 +594,21 @@ extension AppModel {
                     throw EditError(code: .missingMedia, message: "\(url.lastPathComponent) could not be read as video: \(error.localizedDescription)")
                 }
             }
+            // Tables are read and checked the same way. A good one is kept in the table
+            // store even if the edit is then refused or only a dry run: the store holds
+            // files by content, not project state.
+            var tables: [String: LUTAssetRef] = [:]
+            for path in Set(wire.flatMap(\.lutPaths)) {
+                let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    throw EditError(code: .missingMedia, message: "No file at \(url.path).")
+                }
+                do { tables[path] = try LUTStore.importTable(at: url, role: .pocket3DLogMToRec709) } catch {
+                    throw EditError.invalid("\(url.lastPathComponent) cannot be used as a conversion: \(error.localizedDescription)")
+                }
+            }
             let document = committedProject
-            let commands = try wire.map { try resolve($0, in: document, probed: probed) }
+            let commands = try wire.map { try resolve($0, in: document, probed: probed, tables: tables) }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
                                  dryRun: request.dryRun ?? false)
@@ -562,7 +622,8 @@ extension AppModel {
     }
 
     /// One wire command as an `EditCommand`, against the committed document.
-    private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo]) throws -> EditCommand {
+    private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
+                         tables: [String: LUTAssetRef] = [:]) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -682,6 +743,28 @@ extension AppModel {
             guard let info = probed[path] else { throw EditError(code: .missingMedia, message: "Could not read \(path).") }
             return .relinkMedia(clip: try field(wire.clipID, "clipID"),
                                 url: URL(fileURLWithPath: (path as NSString).expandingTildeInPath), info: info)
+        case "setInputProfile":
+            let name = try field(wire.profile, "profile")
+            guard let profile = ColorInputProfile(rawValue: name) else {
+                throw EditError.invalid("Unknown profile \"\(name)\". Profiles: \(ColorInputProfile.allCases.map(\.rawValue).joined(separator: ", ")).")
+            }
+            return .setInputProfile(clip: try field(wire.clipID, "clipID"), profile: profile)
+        case "importTechnicalLUT":
+            let path = try field(wire.path, "path")
+            guard let table = tables[path] else { throw EditError(code: .missingMedia, message: "Could not read \(path).") }
+            return .setTechnicalLUT(clip: try field(wire.clipID, "clipID"), lut: table)
+        case "clearTechnicalLUT":
+            return .setTechnicalLUT(clip: try field(wire.clipID, "clipID"), lut: nil)
+        case "setColorCorrection":
+            return .setColorCorrection(clip: try field(wire.clipID, "clipID"), enabled: try field(wire.enabled, "enabled"))
+        case "setColorAdjustments":
+            return .setColorAdjustments(clip: try field(wire.clipID, "clipID"), exposureEV: wire.exposureEV,
+                                        warmth: wire.warmth, contrast: wire.contrast, saturation: wire.saturation)
+        case "resetColorAdjustments":
+            return .resetColorAdjustments(clip: try field(wire.clipID, "clipID"))
+        case "copyColorAdjustments":
+            return .copyColor(from: try field(wire.clipID, "clipID"), to: try field(wire.targets, "targets"),
+                              includeInterpretation: wire.includeInterpretation ?? false)
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")

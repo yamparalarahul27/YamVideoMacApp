@@ -1,7 +1,7 @@
 # Pocket 3 colour for beginners — implementation plan
 
-**Updated:** 2026-10-14. **Status:** In progress: colour engine, rendering parity and v4
-persistence are implemented; controls and commands are not. See section 6.
+**Updated:** 2026-10-14. **Status:** Implemented apart from native HDR tone mapping and
+checks with real Pocket 3 footage. See section 6.
 **Owner context:** Newly purchased DJI Osmo Pocket 3; little colour-grading knowledge;
 wants an understandable UI and help from local Codex/Claude sessions.
 **Parent plan:** [Local co-editing](local-coediting.md). This colour phase precedes
@@ -283,21 +283,44 @@ Findings that changed the design:
 - Native single-recording preview is 8-bit only in its final display buffer; the table runs
   on float data.
 
-Remaining for phase 4:
+Implemented in the second part:
 
-1. Edit commands and agent commands: `setInputProfile`, `importTechnicalLUT`,
-   `setColorAdjustments`, `resetColorAdjustments`, `copyColorAdjustments`, and colour state
-   in `state`.
-2. The Colour inspector: recorded colour, Get DJI conversion and Import, Natural colour,
-   the four sliders with reset, Details, Reset Adjustments, Remove Correction, Copy colour…
-   The `colorComparison` view state and split preview images exist in `AppModel`, but
-   nothing sets them yet.
-3. Movie paths: per-recording stage in `movieArguments` (which also lacks HDR tone mapping
-   today) and in `MovieCompositor` (8-bit BGRA sources and a device RGB output space).
-4. Save, Save As and open copying tables to `YamVideo Assets/LUTs/<hash>.cube` beside the
-   project (`LUTStore.export` and `adopt` exist but are not called yet), and relinking a
-   missing table.
-5. Native HDR: Core Image does not tone-map, so an adjusted HLG/PQ recording previews
-   differently from its export.
-6. Slider latency against the 150 ms target, 4K performance, and real Pocket 3 footage
-   (none available yet).
+- **Commands** (`EditCommands.swift`): `setInputProfile`, `setTechnicalLUT`,
+  `setColorCorrection`, `setColorAdjustments` (any subset, absolute, refused rather than
+  clamped), `resetColorAdjustments` and `copyColor`. Every change is validated against the
+  recording's file, and colour is stored only while it differs from the default. On the
+  wire they are `setInputProfile`, `importTechnicalLUT` (a path, read and checked before the
+  edit, like media probes), `clearTechnicalLUT`, `setColorCorrection`, `setColorAdjustments`,
+  `resetColorAdjustments` and `copyColorAdjustments`. State reports each recording's colour
+  (section 3's list). Previews take `original` for before/after pairs at one revision.
+- **Colour inspector** (`ColorInspector.swift`, actions in `ColorEditing.swift`): recorded
+  colour with Auto's inference shown; for D-Log M, Get DJI Conversion / Import Conversion
+  File… until a table is available, then Natural Colour (one undo step), "Pocket 3
+  correction applied" naming whether the table is DJI's, and Remove Correction; the four
+  sliders with per-control reset, Details, Reset Adjustments, Copy Colour… The HDR tone-map
+  switch moved here.
+- **Comparison:** Corrected / Original / Compare under the picture. Compare shows the
+  original on the left half and corrected on the right of the same FFmpeg-rendered frame.
+  Playback offers Corrected and Original.
+- **Slider latency:** the exact preview is FFmpeg's (4K: about 0.41 s plus the 0.13 s
+  debounce). While a slider moves, Core Image grades the uncorrected frame already on hand.
+  That takes 20 ms on a 4K frame and matches the exact frame within p99 0.77 of 255. The
+  exact frame replaces it when it arrives.
+- **Movie:** movie export runs each recording's tone mapping and colour stage before
+  fitting it to the canvas, and refuses when any recording's correction is unavailable.
+  Movie export previously skipped HDR tone mapping entirely, which is fixed here. Movie
+  preview takes half-float source frames and writes Rec.709 rather than device RGB; it
+  matches the reference maths within p99 3.0.
+- **Project assets:** saving copies used tables to `YamVideo Assets/LUTs/<hash>.cube` beside
+  the project, and opening or recovering takes them into the store. A table found nowhere
+  is reported on open, held back in previews and refused by export. The asset folder is
+  shared and content-addressed rather than named per project, so renaming a project
+  cannot break it; `LUTAssetRef` therefore carries no project path.
+
+Remaining:
+
+1. Native HDR: Core Image does not tone-map, so an HLG/PQ recording previews differently
+   from its tone-mapped export, with or without adjustments. This predates colour.
+2. Real Pocket 3 D-Log M footage: daylight, skin, highlights and low light, plus Normal
+   and HLG clips, with contact sheets. None is available yet.
+3. Hands-on checks of the inspector, keyboard focus and VoiceOver in the running app.

@@ -84,13 +84,19 @@ exits. `./test.sh` runs the same check against a test instance.
 | `yamvideo_get_state` | The project as committed, with stable IDs and timing. |
 | `yamvideo_apply_edits` | 1–100 typed commands as one undo step, against a revision; `dryRun` to check first. |
 | `yamvideo_get_events` | What changed since a cursor, and who changed it. |
-| `yamvideo_render_preview` | A frame as a PNG (path, and the image unless `attachImage` is false). |
+| `yamvideo_render_preview` | A frame as a PNG (path, and the image unless `attachImage` is false); `original` leaves the colour correction out, for a before/after pair at one revision. |
 | `yamvideo_analyze` | Silence or zoom suggestions as a job; applies nothing. |
 | `yamvideo_get_job`, `yamvideo_cancel_job` | Job status and result (optionally waiting), or cancel. |
 | `yamvideo_save_project` | Save in place, first save, or a copy — no dialog. |
 | `yamvideo_export` | Export one recording or the movie as a job. |
 | `yamvideo_undo`, `yamvideo_redo` | The named step only, never someone else's. |
 | `yamvideo_reveal` | Move your view to something the agent wants to show you. |
+
+Colour is edited like everything else: `setInputProfile`, `importTechnicalLUT` (a path
+to DJI's `.cube`, checked before the edit), `setColorCorrection`, `setColorAdjustments`,
+`resetColorAdjustments` and `copyColorAdjustments`. Each recording's `color` in state
+shows the profile in effect and whether it was chosen or inferred, the conversion by hash
+(and whether it is DJI's and present on this Mac), the four values and any problem.
 
 The server's instructions teach the agent the workflow: read state, plan, apply with the
 revision it read, and on `revision_conflict` read again rather than guess. Command types

@@ -318,7 +318,7 @@ private struct RecordingInspector: View {
             blurAreas
             zooms
             subtitles
-            colour
+            ColorInspector(item: item, info: info)
         }
     }
 
@@ -455,25 +455,6 @@ private struct RecordingInspector: View {
                 Text("Burns an .srt, .vtt or .ass file into the picture. One next to the video with the same name is found automatically.")
                     .font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// Only for HLG/PQ sources — there is nothing to decide about an SDR clip.
-    @ViewBuilder
-    private var colour: some View {
-        if info.isHDR {
-            InspectorSection("Colour") {
-                Toggle("Convert HDR to SDR", isOn: settingsBinding.toneMapHDR)
-                    .onChange(of: model.settings.toneMapHDR) { _, _ in model.refreshPreview() }
-                Text(model.settings.toneMapHDR
-                     ? "This recording is \(info.hdrLabel ?? "HDR"). It is tone-mapped to Rec.709 so it looks right in browsers and on the web, not just in QuickTime."
-                     : "Off: the export keeps the HDR transfer. QuickTime will look fine; most other players will show it blown out.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if model.settings.toneMapHDR, !model.toneMappingAvailable {
-                    warning("This ffmpeg has no zscale filter and cannot tone-map. Run brew install ffmpeg-full and relaunch, or turn this off.")
-                }
             }
         }
     }

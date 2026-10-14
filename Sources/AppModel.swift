@@ -325,6 +325,13 @@ final class AppModel: ObservableObject {
         }
         let cached = wanted.compactMap { thumbnailCache[$0.key] }
         if cached.count == wanted.count { show(cached); return }
+        // A colour change on a frame already seen: Core Image grades the uncorrected
+        // frame at once, and ffmpeg's exact frame replaces it when it arrives.
+        if compared != .original, let render = stage.render, let base = thumbnailCache[original.key],
+           let quick = ColorPipeline.quickPreview(base, render) {
+            previewImage = quick
+            previewOriginalImage = compared == .split ? base : nil
+        }
 
         previewIsLoading = true
         let url = item.url
@@ -351,6 +358,15 @@ final class AppModel: ObservableObject {
                     images.append(image)
                 }
                 show(images)
+                // Keep the uncorrected frame to hand, so the next colour change on this
+                // frame can be shown without waiting for ffmpeg.
+                if stage.render != nil, thumbnailCache[original.key] == nil {
+                    let data = try await FFmpeg.thumbnail(
+                        url: url, at: seconds, duration: duration, regions: regions, style: style, strength: strength,
+                        toneMap: toneMap, subtitles: subtitles, subtitleStyle: subtitleStyle)
+                    if Task.isCancelled { return }
+                    if let image = NSImage(data: data) { thumbnailCache[original.key] = image }
+                }
             } catch {
                 if !Task.isCancelled { previewIsLoading = false }
             }
