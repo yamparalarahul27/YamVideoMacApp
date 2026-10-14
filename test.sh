@@ -16,6 +16,9 @@ xcrun swiftc \
 	"$ROOT/Sources/ColorAdjustments.swift" \
 	"$ROOT/Sources/ColorPipeline.swift" \
 	"$ROOT/Sources/ColorEditing.swift" \
+	"$ROOT/Sources/VisualEffects.swift" \
+	"$ROOT/Sources/VisualEffectsEditing.swift" \
+	"$ROOT/Sources/AgentCatalog.swift" \
 	"$ROOT/Sources/AudioAnalysis.swift" \
 	"$ROOT/Sources/Movie.swift" \
 	"$ROOT/Sources/ZoomSuggestions.swift" \

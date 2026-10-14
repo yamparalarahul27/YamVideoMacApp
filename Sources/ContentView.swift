@@ -395,12 +395,14 @@ struct CropEditorPane: View {
         }
         .overlay(alignment: .bottom) { comparison }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onChange(of: model.editorMode) { _, _ in model.setPlaybackVisible(false) }
+        // Effects can only be judged in the composed picture, so Effects mode shows it.
+        .onChange(of: model.editorMode) { _, mode in model.setPlaybackVisible(mode == .effects) }
         .onDeleteCommand {
             guard !model.isConverting else { return }
             switch model.editorMode {
             case .blur: model.removeSelectedRegion()
             case .zoom: model.removeSelectedZoom()
+            case .effects: model.removeSelectedEffect()
             case .crop: break
             }
         }

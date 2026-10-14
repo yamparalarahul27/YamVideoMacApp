@@ -77,15 +77,22 @@ extension FFmpeg {
             // zoompan's EOF timestamp excessively on some FFmpeg versions.
             filters.append("fps=\(plan.fpsExpression)")
             if let zoom = zoomFilter(shots: clip.zoomShots, frame: crop.size, cropOrigin: crop.origin, fpsExpression: plan.fpsExpression) { filters.append(zoom) }
-            filters += ["scale=\(Int(plan.size.width)):\(Int(plan.size.height)):force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos",
+            // Whole-frame effects blur the recording before it is fitted, so the bars stay
+            // solid; each recording's are timed from its own start.
+            let head = videoHead(info: info, settings: settings, color: clip.colorFilters(settings))
+            let effects = effectStage(clip.blurEffects, info: info, crop: crop, converted: !head.isEmpty,
+                                      fps: plan.fps, name: "fx\(i)_")
+            var delivery: [String] = []
+            delivery += ["scale=\(Int(plan.size.width)):\(Int(plan.size.height)):force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos",
                         "pad=\(Int(plan.size.width)):\(Int(plan.size.height)):(ow-iw)/2:(oh-ih)/2:color=black",
                         "setsar=1", "setpts=PTS-STARTPTS"]
             // Each recording is normalised on its own — tone mapping, then its own colour
             // stage — before anything mixes it with the others.
-            let graph = editedFilterGraph(head: videoHead(info: info, settings: settings, color: clip.colorFilters(settings)),
+            let graph = editedFilterGraph(head: head,
                                           segments: clip.segments, audio: withAudio && info.hasAudio,
                                           regions: clip.blurRegions.map { $0.rect.evenClamped(in: info.fullFrame) },
-                                          style: settings.blurStyle, strength: settings.blurStrength, tail: filters, fpsExpression: info.fpsExpression)!
+                                          style: settings.blurStyle, strength: settings.blurStrength, tail: filters,
+                                          fpsExpression: info.fpsExpression, effects: effects, delivery: delivery)!
             // Namespace every internal pad so independent per-recording graphs coexist.
             let expression = try! NSRegularExpression(pattern: "\\[([^\\]]+)\\]")
             var spec = graph.isComplex ? graph.spec : "[0:v]\(graph.spec)[vout]"
@@ -134,7 +141,9 @@ extension FFmpeg {
             if normalized.audio == .copy { normalized.audio = .aac }
             // Tagged Rec.709 whenever any recording was converted to it; an untouched
             // recording is assumed to be Rec.709 already.
-            let converted = plan.clips.contains { !videoHead(info: $0.info!, settings: settings, color: $0.colorFilters(settings)).isEmpty }
+            let converted = plan.clips.contains {
+                !videoHead(info: $0.info!, settings: settings, color: $0.colorFilters(settings)).isEmpty || $0.blurEffects.contains(where: \.isVisible)
+            }
             let template = exportArguments(input: first.url, output: output, info: first.info!,
                                             crop: first.info!.fullFrame, settings: normalized, tagRec709: converted)
             let firstCodec = template.firstIndex(of: "-c:v") ?? template.firstIndex(of: "-an")!
@@ -158,6 +167,9 @@ extension FFmpeg {
         guard let executable = ffmpegPath else { throw FFmpegError(message: "ffmpeg was not found.") }
         for clip in plan.clips {
             if let problem = clip.colorStage(settings).problem { throw FFmpegError(message: "\(clip.name): \(problem)") }
+            if let info = clip.info, let problem = effectProblem(clip.blurEffects, info: info, settings: settings) {
+                throw FFmpegError(message: "\(clip.name): \(problem)")
+            }
         }
         if settings.format == .webp, await !supportsWebP() { throw FFmpegError(message: "This ffmpeg build cannot export WebP.") }
         let palette = settings.format == .gif ? paletteURL(for: output) : nil

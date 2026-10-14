@@ -33,6 +33,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case (124, .command): model.selectAdjacentSegment(1)
                 case (115, .shift): model.movePlayheadToSelection(start: true)     // Home
                 case (119, .shift): model.movePlayheadToSelection(start: false)    // End
+                case (126, .shift): model.jumpToMarker(forward: false)            // Up
+                case (125, .shift): model.jumpToMarker(forward: true)             // Down
+                case (_, []) where event.charactersIgnoringModifiers?.lowercased() == "m": model.addMarkerAtPlayhead()
+                case (_, .shift) where event.charactersIgnoringModifiers?.lowercased() == "m":
+                    if model.selectedMarker == nil {
+                        model.statusMessage = "Select a marker to name it; M adds one at the playhead."
+                    } else {
+                        model.renamingMarker = true
+                    }
                 case (_, .command) where event.charactersIgnoringModifiers?.lowercased() == "a": model.selectAllSegments()
                 default: return false
                 }
@@ -142,6 +151,9 @@ struct YamVideoApp: App {
                     .disabled(model.viewport.scale <= 1.0001)
                 Divider()
                 Toggle("Snapping", isOn: $model.timelineSnapping)
+                Divider()
+                Button("Add Marker at Playhead") { model.addMarkerAtPlayhead() }
+                Button("Add Blur Effect at Playhead") { model.addBlurEffect() }
                 }.disabled(model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
             }
             CommandGroup(after: .newItem) {

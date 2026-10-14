@@ -71,10 +71,12 @@ final class PlaybackController: ObservableObject {
             if !isLoading, play { player.play(); isPlaying = true }
             return
         }
-        // A colour change alone needs a new picture, not a new movie: swapping the video
-        // composition keeps the loaded item, its position and its audio.
+        // A colour or effect change alone needs a new picture, not a new movie: swapping
+        // the video composition keeps the loaded item, its position and its audio.
         var recolored = loadedClip
         recolored?.color = record.color
+        recolored?.blurEffects = record.blurEffects
+        recolored?.markers = record.markers
         if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
            recolored == record, loadedSettings == settings, let info = clip.info {
             item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
@@ -213,12 +215,13 @@ final class PlaybackController: ObservableObject {
         let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
         let shots = clip.zoomShots
         let regions = clip.blurRegions
+        let effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
                                         toneMapHDR: settings.toneMapHDR, original: original).render
         let videoComposition = AVMutableVideoComposition(asset: asset) { request in
             let result = renderFrame(request.sourceImage, info: info, crop: crop,
                                      regions: regions, shots: shots, settings: settings,
-                                     time: request.compositionTime.seconds, color: color)
+                                     time: request.compositionTime.seconds, color: color, effects: effects)
             request.finish(with: result, context: nil)
         }
         videoComposition.renderSize = crop.size
@@ -237,7 +240,8 @@ final class PlaybackController: ObservableObject {
 /// Order follows the shared rendering contract: colour first, on the whole frame, then
 /// area obscuring, crop and zoom. A black area therefore stays black whatever the grade.
 func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurRegion],
-                 shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil) -> CIImage {
+                 shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil,
+                 effects: [VideoBlurEffect] = []) -> CIImage {
     var image = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
     if let color { image = ColorPipeline.apply(color, to: image, space: source.colorSpace) }
     for region in regions {
@@ -272,7 +276,34 @@ func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [Blu
         image = image.transformed(by: CGAffineTransform(translationX: -x, y: -y))
             .transformed(by: CGAffineTransform(scaleX: zoom, y: zoom))
     }
-    return image.cropped(to: CGRect(origin: .zero, size: crop.size))
+    let bounds = CGRect(origin: .zero, size: crop.size)
+    image = image.cropped(to: bounds)
+    if let effect = effects.first(where: { $0.isVisible && $0.weight(at: time) > 0 }) {
+        image = applyBlurEffect(effect, to: image, bounds: bounds, weight: effect.weight(at: time))
+    }
+    return image
+}
+
+/// A whole-frame blur mixed in at `weight`, matching the export: blurred and mixed on the
+/// frame's encoded values, as ffmpeg does, not in Core Image's linear working space, where
+/// a blur pulls highlights outward. Edges repeat their outermost pixels, so no dark or
+/// transparent halo creeps in.
+func applyBlurEffect(_ effect: VideoBlurEffect, to image: CIImage, bounds: CGRect, weight: Double) -> CIImage {
+    let space = ColorPipeline.videoSpace
+    guard let encoded = image.matchedFromWorkingSpace(to: space) else { return image }
+    let blurred = encoded.clampedToExtent()
+        .applyingGaussianBlur(sigma: effect.sigma(for: bounds.size) * BlurCalibration.coreImageRadiusPerSigma)
+        .cropped(to: bounds)
+    let mixed = weight >= 1 ? blurred : encoded.applyingFilter("CIDissolveTransition", parameters: [
+        kCIInputTargetImageKey: blurred, kCIInputTimeKey: weight,
+    ])
+    return (mixed.matchedToWorkingSpace(from: space) ?? mixed).cropped(to: bounds)
+}
+
+/// Core Image's Gaussian radius against ffmpeg's `gblur` sigma, measured by the parity
+/// checks in `./test.sh`.
+enum BlurCalibration {
+    static let coreImageRadiusPerSigma = 1.0
 }
 
 struct PlaybackCanvas: View {

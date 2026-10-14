@@ -383,13 +383,41 @@ enum FFmpeg {
     }
 
     /// Builds the video filter graph: obscured regions first (so their coordinates stay in
-    /// full-frame space), then `tail` — the crop and scale steps.
+    /// full-frame space), then `tail` — the crop and zoom — then any whole-frame `effects`,
+    /// then `delivery`, the scaling and captions. Without effects, `tail` and `delivery`
+    /// simply run in order, exactly as one chain always did.
     static func filterGraph(
         head: [String] = [],
         regions: [CGRect],
         style: BlurStyle,
         strength: Double,
-        tail: [String]
+        tail: [String],
+        effects: EffectStage? = nil,
+        delivery: [String] = []
+    ) -> FilterGraph? {
+        guard let effects else {
+            return baseGraph(head: head, regions: regions, style: style, strength: strength, tail: tail + delivery)
+        }
+        var parts: [String] = []
+        let input: String
+        if let base = baseGraph(head: head, regions: regions, style: style, strength: strength, tail: tail) {
+            if base.isComplex, let label = base.outputLabel {
+                parts.append(base.spec); input = label
+            } else {
+                parts.append("[0:v]\(base.spec)[fxpre]"); input = "fxpre"
+            }
+        } else { input = "0:v" }
+        parts += effects.parts.map { $0.replacingOccurrences(of: "[fxin]", with: "[\(input)]") }
+        if delivery.isEmpty {
+            parts[parts.count - 1] = parts[parts.count - 1].replacingOccurrences(of: "[fxout]", with: "[vfx]")
+        } else {
+            parts.append("[fxout]" + delivery.joined(separator: ",") + "[vfx]")
+        }
+        return FilterGraph(spec: parts.joined(separator: ";"), isComplex: true, outputLabel: "vfx")
+    }
+
+    private static func baseGraph(
+        head: [String], regions: [CGRect], style: BlurStyle, strength: Double, tail: [String]
     ) -> FilterGraph? {
         guard !regions.isEmpty else {
             let chain = head + tail
@@ -574,14 +602,16 @@ enum FFmpeg {
 
     // MARK: - Export
 
-    /// Everything applied after the blur regions: crop, zoom, frame-rate cut, downscale.
-    private static func videoTail(
+    /// Everything applied after the blur regions, in two parts: `geometry` (crop, frame
+    /// rate, zoom), which whole-frame effects follow, and `delivery` (downscale, captions),
+    /// which comes after them.
+    private static func videoStages(
         info: MediaInfo,
         crop cropRect: CGRect,
         zoomShots: [ZoomShot],
         settings: ExportSettings,
         subtitles: URL? = nil
-    ) -> [String] {
+    ) -> (geometry: [String], delivery: [String], rate: Double) {
         var tail: [String] = []
 
         if cropRect.integral != info.fullFrame.integral {
@@ -598,6 +628,8 @@ enum FFmpeg {
                                  cropOrigin: cropRect.origin, fpsExpression: outputExpression) {
             tail.append(zoom)
         }
+        let geometry = tail
+        tail = []
 
         if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
             tail.append("scale=\(Int(scaled.width)):\(Int(scaled.height)):flags=lanczos")
@@ -610,7 +642,72 @@ enum FFmpeg {
             tail.append(subtitlesFilter(staged: stagedSubtitlesURL(for: subtitles),
                                         forceStyle: settings.subtitleForceStyle))
         }
-        return tail
+        return (geometry, tail, outputRate)
+    }
+
+    // MARK: - Whole-frame effects
+
+    /// The whole-frame blur stage: graph parts reading `[fxin]` and writing `[fxout]`.
+    struct EffectStage {
+        let parts: [String]
+    }
+
+    /// Blurs and mixes in float RGB from the frames' own matrix and range, back to 10-bit
+    /// BT.709, as Core Image does in the preview: no subsampled chroma blurred twice as
+    /// far, and the same encoded values blurred in both renderers.
+    ///
+    /// The mix changes once per frame, not per pixel, so it is not an expression: an
+    /// `all_expr` blend runs ffmpeg's interpreter for every sample and took 73 s for six
+    /// seconds of 1080p. Instead `sendcmd` sets each frame's opacity, computed here with
+    /// `VideoBlurEffect.weight`, the same function the preview uses. Each command is timed
+    /// half a frame early, so rounding can never land it on the neighbouring frame.
+    /// `name` keeps filter instances unique when several recordings share one graph.
+    static func effectStage(_ effects: [VideoBlurEffect], frame: CGSize, fps: Double, matrix: String,
+                            fullRange: Bool, name: String = "fx") throws -> EffectStage? {
+        let visible = effects.filter(\.isVisible)
+        guard !visible.isEmpty else { return nil }
+        let rate = max(1, fps)
+        var commands: [String] = []
+        var parts: [String] = []
+        for (index, effect) in visible.enumerated() {
+            let target = "blend@\(name)\(index)"
+            let gate = "enable='gte(t,\(num(effect.start)))*lt(t,\(num(effect.end)))'"
+            parts.append("[fx\(index)]split=2[fx\(index)a][fx\(index)b]")
+            parts.append("[fx\(index)b]gblur=sigma=\(num(effect.sigma(for: frame))):steps=3:\(gate)[fx\(index)c]")
+            // Normal mode shows the first input at `all_opacity`: the original at 1 - weight.
+            parts.append("[fx\(index)a][fx\(index)c]\(target)=all_mode=normal:all_opacity=1:\(gate)[fx\(index + 1)]")
+            let first = Int((effect.start * rate).rounded(.down)), last = Int((effect.end * rate).rounded(.up))
+            for frame in first...last {
+                let opacity = 1 - effect.weight(at: Double(frame) / rate)
+                commands.append(String(format: "%.6f %@ all_opacity %.6f;", max(0, (Double(frame) - 0.5) / rate), target, opacity))
+            }
+        }
+        let script = Data((commands.joined(separator: "\n") + "\n").utf8)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("YamVideo-effects", isDirectory: true)
+        let file = folder.appendingPathComponent("\(ColorCube.sha256(script)).cmd")
+        if (try? Data(contentsOf: file)) != script {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try script.write(to: file, options: .atomic)
+        }
+        parts.insert("[fxin]scale=in_color_matrix=\(matrix):in_range=\(fullRange ? "pc" : "tv"):out_range=pc"
+                     + ":flags=accurate_rnd+full_chroma_int+full_chroma_inp,format=gbrpf32le,sendcmd=f='\(file.path)'[fx0]", at: 0)
+        parts.append("[fx\(visible.count)]scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p10le[fxout]")
+        return EffectStage(parts: parts)
+    }
+
+    /// Why a recording's effects cannot be exported as asked, if they cannot. The effect
+    /// stage writes Rec.709; HDR kept as HDR would come out blurred and mislabelled.
+    static func effectProblem(_ effects: [VideoBlurEffect], info: MediaInfo, settings: ExportSettings) -> String? {
+        guard effects.contains(where: \.isVisible), info.isHDR, !settings.toneMapHDR else { return nil }
+        return "Whole-frame effects work on standard colour. Turn on Convert HDR to SDR to export this \(info.hdrLabel ?? "HDR") recording with its effects."
+    }
+
+    /// The effect stage for one recording's export: frames reach it at the cropped size,
+    /// in BT.709 limited range once anything converted them, otherwise as recorded.
+    static func effectStage(_ effects: [VideoBlurEffect], info: MediaInfo, crop: CGRect, converted: Bool,
+                            fps: Double? = nil, name: String = "fx") -> EffectStage? {
+        try? effectStage(effects, frame: crop.size, fps: fps ?? info.fps,
+                         matrix: converted ? "bt709" : info.yuvMatrix, fullRange: converted ? false : info.isFullRange, name: name)
     }
 
     /// Wraps `graph` in the input/output maps ffmpeg needs, honouring whether it turned out
@@ -631,11 +728,13 @@ enum FFmpeg {
     static func editedFilterGraph(
         head: [String] = [],
         segments: [TimelineSegment]?, audio: Bool,
-        regions: [CGRect], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30"
+        regions: [CGRect], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30",
+        effects effectStage: EffectStage? = nil, delivery: [String] = []
     ) -> FilterGraph? {
         // With segments the head runs after the concat rather than before the split: tone
         // mapping is per-frame, so the result is identical and fewer frames pass through it.
-        let effects = filterGraph(head: head, regions: regions, style: style, strength: strength, tail: tail)
+        let effects = filterGraph(head: head, regions: regions, style: style, strength: strength, tail: tail,
+                                  effects: effectStage, delivery: delivery)
         guard let segments, !segments.isEmpty else { return effects }
         var parts: [String] = []
         let count = segments.count
@@ -703,12 +802,14 @@ enum FFmpeg {
         palette: URL? = nil,
         loudness: LoudnessMeasurement? = nil,
         color: [String] = [],
-        tagRec709: Bool = false
+        tagRec709: Bool = false,
+        effects: [VideoBlurEffect] = []
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
-        let tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots,
-                             settings: settings, subtitles: subtitles)
+        let stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
+                                 settings: settings, subtitles: subtitles)
+        let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
@@ -719,7 +820,8 @@ enum FFmpeg {
             regions: regions.map { $0.evenClamped(in: info.fullFrame) },
             style: settings.blurStyle,
             strength: settings.blurStrength,
-            tail: tail, fpsExpression: info.fpsExpression
+            tail: stages.geometry, fpsExpression: info.fpsExpression,
+            effects: effectStage, delivery: stages.delivery
         )
 
         if palette != nil {
@@ -755,7 +857,7 @@ enum FFmpeg {
             // The frames are Rec.709 now. Saying so matters: without these the muxer
             // copies the source's HDR tags onto SDR pixels and players stretch them back,
             // and a D-Log M file's own tags no longer describe the corrected picture.
-            if !head.isEmpty || tagRec709 {
+            if !head.isEmpty || tagRec709 || effectStage != nil {
                 args += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             }
 
@@ -822,26 +924,30 @@ enum FFmpeg {
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil,
-        color: [String] = []
+        color: [String] = [],
+        effects: [VideoBlurEffect] = []
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
-        // Both GIF passes must see exactly the same frames, captions included, or the
-        // palette is built for a picture the encode never renders.
-        var tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots,
-                             settings: settings, subtitles: subtitles)
+        let head = videoHead(info: info, settings: settings, color: color)
+        // Both GIF passes must see exactly the same frames, captions and effects included,
+        // or the palette is built for a picture the encode never renders.
+        var stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
+                                 settings: settings, subtitles: subtitles)
         // stats_mode=diff weights the palette towards whatever moves — the part anyone
         // actually looks at. A still background can afford to band a little.
-        tail.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
+        stages.delivery.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         args += mapped(
             editedFilterGraph(
-                head: videoHead(info: info, settings: settings, color: color),
+                head: head,
                 segments: segments, audio: false,
                 regions: regions.map { $0.evenClamped(in: info.fullFrame) },
                 style: settings.blurStyle,
                 strength: settings.blurStrength,
-                tail: tail, fpsExpression: info.fpsExpression
+                tail: stages.geometry, fpsExpression: info.fpsExpression,
+                effects: effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate),
+                delivery: stages.delivery
             ),
             audio: false
         )
@@ -926,7 +1032,8 @@ enum FFmpeg {
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil,
-        color: [String] = []
+        color: [String] = [],
+        effects: [VideoBlurEffect] = []
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
@@ -937,12 +1044,12 @@ enum FFmpeg {
             commands.append(paletteArguments(input: input, palette: palette, info: info,
                                              crop: crop, regions: regions,
                                              zoomShots: zoomShots, segments: segments,
-                                             settings: settings, subtitles: subtitles, color: color))
+                                             settings: settings, subtitles: subtitles, color: color, effects: effects))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
                                         segments: segments, settings: settings,
-                                        subtitles: subtitles, palette: palette, color: color))
+                                        subtitles: subtitles, palette: palette, color: color, effects: effects))
         return commands
     }
 
@@ -968,6 +1075,7 @@ enum FFmpeg {
         settings: ExportSettings,
         subtitles: URL? = nil,
         color: ColorStage = .none,
+        effects: [VideoBlurEffect] = [],
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
         guard let ffmpeg = ffmpegPath else {
@@ -975,6 +1083,7 @@ enum FFmpeg {
         }
         // An uncorrected file reported as a success is worse than no file.
         if let problem = color.problem { throw FFmpegError(message: problem) }
+        if let problem = effectProblem(effects, info: info, settings: settings) { throw FFmpegError(message: problem) }
         let color = try ColorPipeline.ffmpegFilters(color, info: info, toneMapped: info.isHDR && settings.toneMapHDR)
         // Fail with something actionable instead of ffmpeg's "Unknown encoder 'libwebp'"
         // four passes into the error log.
@@ -1008,9 +1117,15 @@ enum FFmpeg {
             }
         }
 
+        // Written now, so a failure to stage the effect's commands is an error rather than
+        // an export that quietly leaves the effect out.
+        if effects.contains(where: \.isVisible) {
+            _ = try effectStage(effects, frame: crop.evenClamped(in: info.fullFrame).size, fps: info.fps, matrix: info.yuvMatrix,
+                                fullRange: info.isFullRange)
+        }
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, segments: segments,
-                                      settings: settings, subtitles: subtitles, color: color)
+                                      settings: settings, subtitles: subtitles, color: color, effects: effects)
         let measuring = needsLoudnessPass(info: info, settings: settings)
         // Progress is reported against what the export actually writes, which is the
         // edited timeline rather than the whole source.
@@ -1040,7 +1155,7 @@ enum FFmpeg {
                     settings: settings,
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
-                    loudness: measurement, color: color
+                    loudness: measurement, color: color, effects: effects
                 )
             }
 

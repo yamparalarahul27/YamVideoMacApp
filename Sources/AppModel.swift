@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea
+    case recording, section, zoom, blurArea, effect, marker
 }
 
 @MainActor
@@ -41,6 +41,11 @@ final class AppModel: ObservableObject {
     @Published var statusMessage: String?
     @Published var editorMode: EditorMode = .crop
     @Published var selectedRegionID: BlurRegion.ID? { didSet { focusInspector(selectedRegionID, .blurArea) } }
+    /// The whole-frame effect and the marker the inspector shows, when one is selected.
+    @Published var selectedEffectID: VideoBlurEffect.ID? { didSet { focusInspector(selectedEffectID, .effect) } }
+    @Published var selectedMarkerID: TimelineMarker.ID? { didSet { focusInspector(selectedMarkerID, .marker) } }
+    /// ⇧M asks the marker inspector to put the cursor in the name field.
+    @Published var renamingMarker = false
     /// What the inspector shows: whatever was selected last, or the recording.
     @Published var inspectorFocus: InspectorFocus = .recording
 
@@ -748,7 +753,8 @@ final class AppModel: ObservableObject {
                         segments: item.segments,
                         settings: exportSettings,
                         subtitles: item.subtitles,
-                        color: item.colorStage(exportSettings)
+                        color: item.colorStage(exportSettings),
+                        effects: item.blurEffects
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -819,7 +825,7 @@ final class AppModel: ObservableObject {
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.subtitles,
-            color: item.colorFilters(settings)
+            color: item.colorFilters(settings), effects: item.blurEffects
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 

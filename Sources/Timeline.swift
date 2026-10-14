@@ -111,6 +111,9 @@ struct ProjectClip: Codable, Equatable {
     /// Version 4 onwards. Nil when the recording has never had its colour touched, so an
     /// untouched recording reads exactly as it did before colour existed.
     var color: ClipColorSettings?
+    /// Version 5 onwards, and nil while empty, like `color`.
+    var blurEffects: [VideoBlurEffect]?
+    var markers: [TimelineMarker]?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -118,6 +121,8 @@ struct ProjectClip: Codable, Equatable {
         blurRegions = item.blurRegions; zoomShots = item.zoomShots; segments = item.segments
         includedInMovie = item.includedInMovie; subtitles = item.subtitles
         color = item.color.isDefault ? nil : item.color
+        blurEffects = item.blurEffects.isEmpty ? nil : item.blurEffects
+        markers = item.markers.isEmpty ? nil : item.markers
     }
 
     func item() -> VideoItem {
@@ -127,6 +132,8 @@ struct ProjectClip: Codable, Equatable {
         item.blurRegions = blurRegions; item.zoomShots = zoomShots; item.segments = segments
         item.includedInMovie = includedInMovie ?? true; item.subtitles = subtitles
         item.color = color ?? ClipColorSettings()
+        item.blurEffects = blurEffects ?? []
+        item.markers = markers ?? []
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -135,10 +142,10 @@ struct ProjectClip: Codable, Equatable {
 
 struct VideoProject: Codable, Equatable {
     /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
-    /// and the per-recording subtitle file. 4: adds per-recording colour. Every edited
-    /// project is written as the current version; older builds reject it rather than
-    /// silently dropping edits.
-    static let currentVersion = 4
+    /// and the per-recording subtitle file. 4: adds per-recording colour. 5: adds
+    /// whole-frame blur effects and timeline markers. Every edited project is written as
+    /// the current version; older builds reject it rather than silently dropping edits.
+    static let currentVersion = 5
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -188,6 +195,9 @@ struct VideoProject: Codable, Equatable {
         if version < 4, clips.contains(where: { $0.color != nil }) {
             try reject("The project claims an older format but contains colour settings."); return
         }
+        if version < 5, clips.contains(where: { $0.blurEffects != nil || $0.markers != nil }) {
+            try reject("The project claims an older format but contains blur effects or markers."); return
+        }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
         }
@@ -206,7 +216,8 @@ struct VideoProject: Codable, Equatable {
                 if let info = clip.info { try color.validate(against: info) }
             }
             guard let info = clip.info else {
-                guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty else {
+                guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
+                      clip.blurEffects == nil, clip.markers == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -247,6 +258,21 @@ struct VideoProject: Codable, Equatable {
                       $0.end <= duration + 0.01 && $0.target.x.isFinite && $0.target.y.isFinite }),
                   zip(shots, shots.dropFirst()).allSatisfy({ !$0.overlaps($1) }) else {
                 try reject("The project contains invalid zoom timing."); return
+            }
+            let effects = clip.blurEffects ?? []
+            guard Set(effects.map(\.id)).count == effects.count,
+                  zip(effects, effects.dropFirst()).allSatisfy({ $0.start <= $1.start && !$0.overlaps($1) }) else {
+                try reject("The project contains overlapping or duplicate blur effects."); return
+            }
+            if let problem = effects.lazy.compactMap({ $0.problem(duration: duration, fps: info.fps) }).first {
+                try reject("The project contains an invalid blur effect: \(problem)"); return
+            }
+            let markers = clip.markers ?? []
+            guard Set(markers.map(\.id)).count == markers.count else {
+                try reject("The project contains duplicate markers."); return
+            }
+            if let problem = markers.lazy.compactMap({ $0.problem(duration: duration) }).first {
+                try reject("The project contains an invalid marker: \(problem)"); return
             }
             for rect in [clip.crop].compactMap({ $0 }) + clip.blurRegions.map(\.rect) {
                 guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
@@ -451,7 +477,7 @@ struct TimelineSnapping {
     /// What a target is. When two are equally close the earlier kind wins: the playhead
     /// is the one thing deliberately put somewhere to be lined up with.
     enum Kind: Int, Comparable {
-        case playhead, sectionBoundary, zoomEdge, timelineEnd
+        case playhead, sectionBoundary, zoomEdge, effectEdge, marker, timelineEnd
         static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
     }
 
@@ -469,9 +495,10 @@ struct TimelineSnapping {
     let targets: [Target]
 
     /// Everything on the timeline as drawn. `playhead` is nil while the playhead itself
-    /// is what is moving; `excludingZoom` leaves out the zoom being dragged, whose own
-    /// edges travel with it.
-    init(timeline: ClipTimeline, zooms: [ZoomShot], playhead: Double?, excludingZoom: UUID? = nil) {
+    /// is what is moving; `excluding` leaves out the zoom or effect being dragged, whose
+    /// own edges travel with it.
+    init(timeline: ClipTimeline, zooms: [ZoomShot], effects: [VideoBlurEffect] = [], markers: [TimelineMarker] = [],
+         playhead: Double?, excluding: UUID? = nil) {
         var targets: [Target] = []
         if let playhead, playhead.isFinite { targets.append(Target(time: playhead, kind: .playhead)) }
         var offset = 0.0
@@ -479,10 +506,15 @@ struct TimelineSnapping {
             offset += segment.duration
             targets.append(Target(time: offset, kind: .sectionBoundary))
         }
-        for shot in zooms where shot.id != excludingZoom {
+        for shot in zooms where shot.id != excluding {
             targets.append(Target(time: shot.start, kind: .zoomEdge))
             targets.append(Target(time: shot.end, kind: .zoomEdge))
         }
+        for effect in effects where effect.id != excluding {
+            targets.append(Target(time: effect.start, kind: .effectEdge))
+            targets.append(Target(time: effect.end, kind: .effectEdge))
+        }
+        targets += markers.map { Target(time: $0.time, kind: .marker) }
         targets.append(Target(time: 0, kind: .timelineEnd))
         targets.append(Target(time: timeline.duration, kind: .timelineEnd))
         self.targets = targets
