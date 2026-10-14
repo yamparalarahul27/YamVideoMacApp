@@ -114,17 +114,22 @@ enum FFmpeg {
               result.status == 0
         else { return [] }  // Not cached: a later lookup should get a second chance.
 
-        // Rows read "  ... zscale            V->V       Apply resizing…"; the legend above
-        // them has "=" in the second field, and no "->" arrow in the third.
+        let names = filterNames(in: result.stdoutText)
+        filterCache.store(names)
+        return names
+    }
+
+    /// Parses `ffmpeg -filters`. Rows read " .S zscale  V->V  Apply resizing…" — ffmpeg 9
+    /// prints two flag columns where older builds printed three ("..C"), so accept either.
+    /// The legend above them has "=" in the second field, and no "->" arrow in the third.
+    static func filterNames(in listing: String) -> Set<String> {
         var names: Set<String> = []
-        for line in result.stdoutText.split(separator: "\n") {
+        for line in listing.split(separator: "\n") {
             let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            guard fields.count >= 3, fields[0].count == 3,
+            guard fields.count >= 3, (2...3).contains(fields[0].count),
                   fields[1] != "=", fields[2].contains("->") else { continue }
             names.insert(fields[1])
         }
-
-        filterCache.store(names)
         return names
     }
 
@@ -267,8 +272,10 @@ enum FFmpeg {
         // regions, tone mapping and captions are baked in by the same graph builder the
         // export uses, in the same order, so the two cannot drift apart.
         var tail = ["scale='min(\(maxWidth),iw)':-2:flags=bilinear"]
+        var captioned = false
         if let subtitles, let staged = try? stageSubtitles(subtitles) {
             tail.append(subtitlesFilter(staged: staged, forceStyle: subtitleStyle))
+            captioned = true
         }
 
         let graph = filterGraph(
@@ -280,8 +287,12 @@ enum FFmpeg {
         )
 
         func grab(_ time: Double) async throws -> Data {
-            var args = [
-                "-hide_banner", "-loglevel", "error",
+            var args = ["-hide_banner", "-loglevel", "error"]
+            // An input seek restarts timestamps at the seek point, so the subtitles filter
+            // would time every preview frame as 0 and show the opening caption. Keep the
+            // seek in the timestamps, measured from the clip's start as the export does.
+            if captioned { args += ["-copyts", "-start_at_zero"] }
+            args += [
                 "-ss", String(format: "%.3f", time),
                 "-i", url.path,
                 "-frames:v", "1",

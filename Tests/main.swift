@@ -995,6 +995,31 @@ if let portraitThumb, let rep = NSBitmapImageRep(data: portraitThumb), rotated !
           "\(rep.pixelsWide)x\(rep.pixelsHigh)")
 }
 
+// MARK: - Filter detection
+
+print("\nFilter detection")
+
+let legend = """
+Filters:
+  T.. = Timeline support
+  .S. = Slice threading
+  A = Audio input/output
+  ------
+
+"""
+let threeFlags = FFmpeg.filterNames(in: legend + """
+ ..C subtitles         V->V       Render text subtitles onto input video using the libass library.
+ .S. zscale            V->V       Apply resizing, colorspace and bit depth conversion.
+""")
+equal(threeFlags, ["subtitles", "zscale"], "older three-flag rows are read, the legend is not")
+let twoFlags = FFmpeg.filterNames(in: legend + """
+ .. subtitles         V->V       Render text subtitles onto input video using the libass library.
+ .S zscale            V->V       Apply resizing, colorspace and bit depth conversion.
+""")
+equal(twoFlags, ["subtitles", "zscale"], "ffmpeg 9's two-flag rows are read too")
+// Every build has scale; an empty set here means the listing format moved again.
+check(await FFmpeg.filters().contains("scale"), "the installed ffmpeg's filter list parses")
+
 // MARK: - HDR tone mapping
 
 print("\nHDR tone mapping")
@@ -1358,7 +1383,9 @@ if canBurn {
 
     // Three frames from the same source: no captions, captions at the bottom, and
     // captions lifted into the safe area. Thumbnails are lossless PNG, so outside the
-    // text the pixels are identical and any difference really is the caption.
+    // text the pixels are identical and any difference really is the caption. The cue
+    // starts at 0.2 s and the preview seeks to 1.0 s, so this also proves the preview
+    // times captions from the clip, not from the seek point.
     let bottomStyle = ExportSettings()
     var liftedStyle = ExportSettings()
     liftedStyle.subtitlePlacement = .safeArea
@@ -1385,7 +1412,6 @@ if canBurn {
     let width = frame.width
     let lowBand = (y: frame.height * 3 / 4, height: frame.height / 4)
     let topBand = (y: 0, height: frame.height / 4)
-    let footBand = (y: frame.height * 7 / 8, height: frame.height / 8)
 
     let plainLow = try await bandLuma(plainFile, y: lowBand.y, height: lowBand.height, width: width)
     let bottomLow = try await bandLuma(bottomFile, y: lowBand.y, height: lowBand.height, width: width)
@@ -1402,17 +1428,30 @@ if canBurn {
         check(false, "could compare the captioned and plain frames")
     }
 
-    // Lifting the caption should leave the very bottom of the frame alone. The bottom
-    // eighth is used rather than the quarter so the check holds whichever reference
-    // height libass ends up scaling the margin against.
-    let plainFoot = try await bandLuma(plainFile, y: footBand.y, height: footBand.height, width: width)
-    let bottomFoot = try await bandLuma(bottomFile, y: footBand.y, height: footBand.height, width: width)
-    let liftedFoot = try await bandLuma(liftedFile, y: footBand.y, height: footBand.height, width: width)
-    if let seated = meanDifference(plainFoot, bottomFoot),
-       let lifted = meanDifference(plainFoot, liftedFoot) {
-        check(lifted < seated,
-              "the safe area lifts the caption out of the bottom of the frame",
-              "bottom \(seated) vs lifted \(lifted)")
+    // Lifting the caption should move its ink up the frame. Compare where each caption
+    // actually sits rather than whether it touches a fixed band: the seated caption's
+    // margin (35/288) ends within a few pixels of the bottom eighth, so whether it
+    // reaches that band depends on libass's glyph metrics, not on the placement.
+    let plainFull = try await bandLuma(plainFile, y: 0, height: frame.height, width: width)
+    func inkRow(_ captioned: URL) async throws -> Double? {
+        let pixels = try await bandLuma(captioned, y: 0, height: frame.height, width: width)
+        guard pixels.count == plainFull.count, pixels.count == width * frame.height else { return nil }
+        var weight = 0.0, moment = 0.0
+        for row in 0..<frame.height {
+            var delta = 0
+            for column in 0..<width {
+                let index = row * width + column
+                delta += abs(Int(pixels[index]) - Int(plainFull[index]))
+            }
+            weight += Double(delta)
+            moment += Double(delta) * Double(row)
+        }
+        return weight > 0 ? moment / weight : nil
+    }
+    if let seated = try await inkRow(bottomFile), let lifted = try await inkRow(liftedFile) {
+        check(lifted < seated - Double(frame.height) / 10,
+              "the safe area lifts the caption well up the frame",
+              "bottom row \(Int(seated)) vs lifted row \(Int(lifted))")
     } else {
         check(false, "could compare the two caption placements")
     }
