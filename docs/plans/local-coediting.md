@@ -503,7 +503,8 @@ Remaining for phase 3:
 
 ### Phase 4 status (2026-10-14)
 
-Started. The colour engine, renderer parity and version 4 persistence are in; controls,
-commands, Movie paths and project assets are not. See section 6 of
-[Pocket 3 colour](pocket-3-colour.md).
+Implemented: colour engine and renderer parity, version 4 persistence, human and agent
+colour commands, the Colour inspector and comparison, Movie paths and project assets.
+Remaining: native HDR tone mapping and checks with real Pocket 3 footage. See section 6
+of [Pocket 3 colour](pocket-3-colour.md).
 

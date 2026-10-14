@@ -52,19 +52,23 @@ enum LUTStore {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try data.write(to: stored, options: .atomic)
         }
-        cache.store(sha, cube)
+        cache.store(cacheKey(sha), cube)
         return LUTAssetRef(sha256: sha, originalName: url.lastPathComponent, role: role)
     }
 
     /// The table with this hash, or nil when the store does not have it or the stored
     /// file no longer matches its name.
     static func cube(_ sha256: String) -> ColorCube? {
-        if let cached = cache.value(sha256) { return cached }
+        if let cached = cache.value(cacheKey(sha256)) { return cached }
         guard let data = try? Data(contentsOf: url(for: sha256)), ColorCube.sha256(data) == sha256,
               let cube = try? ColorCube.parse(data) else { return nil }
-        cache.store(sha256, cube)
+        cache.store(cacheKey(sha256), cube)
         return cube
     }
+
+    /// The store's folder is part of the key: a table this process has seen is not
+    /// thereby in a different store.
+    private static func cacheKey(_ sha256: String) -> String { directory.path + "|" + sha256 }
 
     static func has(_ sha256: String) -> Bool { cube(sha256) != nil }
 
@@ -78,6 +82,7 @@ enum LUTStore {
     }
 
     /// Copies the tables a project uses beside it. Returns the ones it could not copy.
+    @discardableResult
     static func export(_ hashes: Set<String>, beside project: URL) -> [String] {
         var missing: [String] = []
         for sha in hashes.sorted() {

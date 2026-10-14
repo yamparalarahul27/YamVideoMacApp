@@ -91,15 +91,32 @@ extension AppModel {
         }
     }
 
-    /// Writes atomically and returns the file's fingerprint.
+    /// Writes atomically and returns the file's fingerprint. The conversion tables the
+    /// project uses are copied into `YamVideo Assets` beside it first, so the file never
+    /// names a table that is not next to it when this Mac has one to copy.
     @discardableResult
     func writeProject(_ project: VideoProject, to url: URL) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(project)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        LUTStore.export(Self.tableHashes(project), beside: url)
         try data.write(to: url, options: .atomic)
         return Self.fingerprint(data)
+    }
+
+    /// The conversion tables a project's recordings use, by hash.
+    nonisolated static func tableHashes(_ project: VideoProject) -> Set<String> {
+        Set(project.clips.compactMap { $0.color?.technicalLUT?.sha256 })
+    }
+
+    /// Tables the project names that this Mac has nowhere: not in the store, and not in
+    /// the assets folder beside `file` (which are taken into the store).
+    func adoptTables(_ project: VideoProject, beside file: URL?) -> [String] {
+        Self.tableHashes(project).sorted().filter { sha in
+            if let file { return !LUTStore.adopt(sha, beside: file) }
+            return !LUTStore.has(sha)
+        }
     }
 
     nonisolated static func fingerprint(_ data: Data) -> Data { Data(SHA256.hash(data: data)) }
@@ -135,6 +152,7 @@ extension AppModel {
             let stored = try session?.project ?? JSONDecoder().decode(VideoProject.self, from: data)
             try stored.validate()
             let recovered = stored.migrated(identity: UUID(deterministicFrom: data))
+            _ = adoptTables(recovered, beside: session?.fileURL)
             restore(recovered)
             projectURL = session?.fileURL
             // A pre-identity recovery file holds the saved copy without an identity too;
@@ -222,7 +240,9 @@ extension AppModel {
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             if projectID != previousID { rotateSession() }
             scheduleAutosave()
-            statusMessage = "Saved \(destination.lastPathComponent)."
+            let missing = Self.tableHashes(project).filter { !LUTStore.has($0) }
+            statusMessage = missing.isEmpty ? "Saved \(destination.lastPathComponent)."
+                : "Saved \(destination.lastPathComponent), but \(missing.count) colour conversion file(s) are missing from this Mac and could not be copied beside it."
         } catch {
             projectID = previousID
             statusMessage = "Could not save project: \(error.localizedDescription)"
@@ -250,10 +270,13 @@ extension AppModel {
         do {
             let data = try Data(contentsOf: url)
             let opened = try VideoProject.decodeMigrating(from: data)
+            // Tables travel beside the project; take them in before anything renders.
+            let missing = adoptTables(opened, beside: url)
             replaceDocument(opened, label: "Open Project", fileURL: url, saved: opened)
             savedFingerprint = Self.fingerprint(data)
             hasUnsavedChanges = false
-            statusMessage = "Opened \(url.lastPathComponent). Previous work is available with Undo."
+            statusMessage = missing.isEmpty ? "Opened \(url.lastPathComponent). Previous work is available with Undo."
+                : "Opened \(url.lastPathComponent). \(missing.count) colour conversion file(s) are missing; import DJI's conversion again in the Colour inspector."
         } catch { statusMessage = "Could not open project: \(error.localizedDescription)" }
     }
 

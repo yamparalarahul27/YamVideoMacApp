@@ -373,6 +373,7 @@ struct CropEditorPane: View {
                 info: info,
                 crop: crop,
                 ratio: item.aspectLock,
+                originalImage: model.previewOriginalImage,
                 isLoading: model.previewIsLoading,
                 mode: model.editorMode,
                 regions: item.blurRegions,
@@ -392,6 +393,7 @@ struct CropEditorPane: View {
 
             }
         }
+        .overlay(alignment: .bottom) { comparison }
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: model.editorMode) { _, _ in model.setPlaybackVisible(false) }
         .onDeleteCommand {
@@ -401,6 +403,26 @@ struct CropEditorPane: View {
             case .zoom: model.removeSelectedZoom()
             case .crop: break
             }
+        }
+    }
+
+    /// Original / Corrected / Compare, under the picture while the recording has a colour
+    /// stage to compare. Playback can show either version but not both halves.
+    @ViewBuilder
+    private var comparison: some View {
+        if item.colorStage(model.settings).render != nil {
+            Picker("Colour", selection: $model.colorComparison) {
+                ForEach(model.showPlayback ? [ColorComparison.corrected, .original] : ColorComparison.allCases) {
+                    Text($0.label).tag($0)
+                }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .controlSize(.small)
+            .padding(4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+            .padding(.bottom, 8)
+            .help("Original shows the recording without colour correction; Compare shows both halves of the same frame.")
+            .accessibilityLabel("Colour comparison")
         }
     }
 

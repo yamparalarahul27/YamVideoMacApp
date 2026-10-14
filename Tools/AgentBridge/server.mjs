@@ -98,6 +98,7 @@ server.registerTool("yamvideo_apply_edits", {
     "addZoom {clipID, start, target, hold? (2), level? (2), zoomID?} · updateZoom {clipID, zoomID, start?, hold?, level?, target?} · removeZoom {clipID, zoomID} · replaceZooms {clipID, zooms:[…]}",
     "setMovieOrder {order:[every clipID]} · setIncludedInMovie {clipID, included} · setMovieCanvas {canvas: firstClip|widescreen|portrait|square}",
     "setExportSettings {settings: only the keys to change, e.g. {format: \"gif\", frameRate: 12}} · setSubtitles {clipID, path} · clearSubtitles {clipID} · addMedia {paths} · removeMedia {clipID} · relinkMedia {clipID, path}",
+    "Colour (each recording's state.color shows the profile in effect and why, the conversion and any problem): setInputProfile {clipID, profile: auto|standard|pocket3DLogM|hlg|pq} · importTechnicalLUT {clipID, path to DJI's Pocket 3 D-Log M to Rec.709 .cube; needs profile pocket3DLogM} · clearTechnicalLUT {clipID} · setColorCorrection {clipID, enabled} (Natural colour) · setColorAdjustments {clipID, exposureEV? -2–2, warmth? -1–1, contrast? 0.5–1.5, saturation? 0–2} · resetColorAdjustments {clipID} · copyColorAdjustments {clipID (from), targets:[clipID], includeInterpretation? (also copy profile and conversion)}",
     "splitSection and zoom start accept timeSpace \"movie\" to give a movie time instead.",
   ].join("\n"),
   inputSchema: {
@@ -119,12 +120,13 @@ server.registerTool("yamvideo_get_events", {
 
 server.registerTool("yamvideo_render_preview", {
   title: "Render a preview frame",
-  description: "Render one frame of a recording at an edited time (or a movie time with timeSpace \"movie\") to a PNG on this Mac, with blur areas, tone mapping and captions applied; cropped also applies the crop (zooms are not drawn). Returns the file path and the revision and source time it shows; attachImage includes the picture in this result so you can see it.",
+  description: "Render one frame of a recording at an edited time (or a movie time with timeSpace \"movie\") to a PNG on this Mac, with colour, blur areas, tone mapping and captions applied; cropped also applies the crop (zooms are not drawn); original leaves the colour correction out, to compare with a corrected frame at the same revision. Returns the file path and the revision and source time it shows; attachImage includes the picture in this result so you can see it.",
   inputSchema: {
     clip: id.optional().describe("Recording ID (omit with timeSpace \"movie\")."),
     time: z.number().nonnegative(),
     timeSpace: z.enum(["recording", "movie"]).optional(),
     cropped: z.boolean().optional(),
+    original: z.boolean().optional().describe("Leave the recording's colour correction out."),
     expectedRevision: z.number().int().nonnegative().optional().describe("Refuse if the project is no longer at this revision."),
     attachImage: z.boolean().optional().describe("Include the PNG in the result (default true)."),
   },

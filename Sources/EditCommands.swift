@@ -60,6 +60,22 @@ enum EditCommand: Equatable {
     case removeMedia(clip: UUID)
     /// Points a recording at a moved copy of the same video, keeping every edit.
     case relinkMedia(clip: UUID, url: URL, info: MediaInfo)
+    /// How the recording's colour was recorded. A profile the conversion table does not
+    /// belong to removes the table and turns Natural colour off with it.
+    case setInputProfile(clip: UUID, profile: ColorInputProfile)
+    /// Attaches an imported conversion table, or removes it with nil (turning Natural
+    /// colour off). Importing — reading, checking and storing the file — happens before
+    /// the command, so the reducer stays free of I/O.
+    case setTechnicalLUT(clip: UUID, lut: LUTAssetRef?)
+    /// Natural colour: the technical conversion on or off.
+    case setColorCorrection(clip: UUID, enabled: Bool)
+    /// Any of the four controls, as absolute values; nil leaves a control as it is.
+    case setColorAdjustments(clip: UUID, exposureEV: Double?, warmth: Double?, contrast: Double?, saturation: Double?)
+    /// The four controls back to neutral. The recorded colour and conversion stay.
+    case resetColorAdjustments(clip: UUID)
+    /// One recording's adjustments onto others. The recorded colour, table and Natural
+    /// colour come too only when asked, and only where the destination file allows them.
+    case copyColor(from: UUID, to: [UUID], includeInterpretation: Bool)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -88,6 +104,12 @@ enum EditCommand: Equatable {
         case .addMedia: return "Add Videos"
         case .removeMedia: return "Remove Video"
         case .relinkMedia: return "Locate Source"
+        case .setInputProfile: return "Recorded Colour"
+        case .setTechnicalLUT(_, let lut): return lut == nil ? "Remove Conversion" : "Add Conversion"
+        case .setColorCorrection(_, let enabled): return enabled ? "Natural Colour" : "Remove Correction"
+        case .setColorAdjustments: return "Adjust Colour"
+        case .resetColorAdjustments: return "Reset Colour"
+        case .copyColor: return "Copy Colour"
         }
     }
 }
@@ -406,6 +428,71 @@ enum ProjectReducer {
             outcome.project.clips[index].url = url
             outcome.project.clips[index].info = info
             if outcome.project.clips[index].crop == nil { outcome.project.clips[index].crop = info.fullFrame }
+
+        case .setInputProfile(let clip, let profile):
+            try editColor(clip, in: &outcome) { color, _ in
+                color.inputProfile = profile
+                if profile != .pocket3DLogM { color.technicalLUT = nil; color.correctionEnabled = false }
+            }
+
+        case .setTechnicalLUT(let clip, let lut):
+            try editColor(clip, in: &outcome) { color, _ in
+                if let lut {
+                    guard color.inputProfile == .pocket3DLogM else {
+                        throw EditError.invalid("Set the recording's colour to Pocket 3 D-Log M before adding its conversion.")
+                    }
+                    color.technicalLUT = lut
+                } else {
+                    color.technicalLUT = nil; color.correctionEnabled = false
+                }
+            }
+
+        case .setColorCorrection(let clip, let enabled):
+            try editColor(clip, in: &outcome) { color, _ in
+                guard !enabled || (color.inputProfile == .pocket3DLogM && color.technicalLUT != nil) else {
+                    throw EditError.invalid("Natural colour needs the recording set to Pocket 3 D-Log M and DJI's conversion added.")
+                }
+                color.correctionEnabled = enabled
+            }
+
+        case .setColorAdjustments(let clip, let exposureEV, let warmth, let contrast, let saturation):
+            guard exposureEV != nil || warmth != nil || contrast != nil || saturation != nil else {
+                throw EditError.invalid("Give at least one of exposureEV, warmth, contrast or saturation.")
+            }
+            try editColor(clip, in: &outcome) { color, _ in
+                let changes: [(String, Double?, ClosedRange<Double>, WritableKeyPath<ClipColorSettings, Double>)] = [
+                    ("Brightness (exposureEV)", exposureEV, ColorAdjustments.exposureRange, \.exposureEV),
+                    ("Warmth", warmth, ColorAdjustments.warmthRange, \.warmth),
+                    ("Contrast", contrast, ColorAdjustments.contrastRange, \.contrast),
+                    ("Colour strength (saturation)", saturation, ColorAdjustments.saturationRange, \.saturation),
+                ]
+                for (name, value, range, path) in changes {
+                    guard let value else { continue }
+                    guard value.isFinite, range.contains(value) else {
+                        throw EditError.invalid("\(name) must be from \(range.lowerBound.formatted()) to \(range.upperBound.formatted()).")
+                    }
+                    color[keyPath: path] = value
+                }
+            }
+
+        case .resetColorAdjustments(let clip):
+            try editColor(clip, in: &outcome) { color, _ in color.adjustments = .neutral }
+
+        case .copyColor(let source, let targets, let includeInterpretation):
+            let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
+            guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
+            guard !targets.contains(source), Set(targets).count == targets.count else {
+                throw EditError.invalid("Copy to other recordings, each named once.")
+            }
+            for target in targets {
+                try editColor(target, in: &outcome) { color, info in
+                    color.adjustments = from.adjustments
+                    guard includeInterpretation else { return }
+                    color.inputProfile = from.inputProfile
+                    color.technicalLUT = from.technicalLUT
+                    color.correctionEnabled = from.correctionEnabled
+                }
+            }
         }
     }
 
@@ -444,6 +531,23 @@ enum ProjectReducer {
             record.segments = timeline.segments
         }
         outcome.removedZooms += removed
+    }
+
+    /// Edits one probed recording's colour settings, checks them against its file, and
+    /// stores them only when they differ from the untouched default.
+    private static func editColor(_ id: UUID, in outcome: inout EditOutcome,
+                                  _ body: (inout ClipColorSettings, MediaInfo) throws -> Void) throws {
+        try editClip(id, in: &outcome) { record, info in
+            var color = record.color ?? ClipColorSettings()
+            try body(&color, info)
+            do {
+                try color.validate()
+                try color.validate(against: info)
+            } catch {
+                throw EditError.invalid("\(record.url.lastPathComponent): \(error.localizedDescription)")
+            }
+            record.color = color.isDefault ? nil : color
+        }
     }
 
     private static func sectionIndex(_ id: UUID, in timeline: ClipTimeline) throws -> Int {

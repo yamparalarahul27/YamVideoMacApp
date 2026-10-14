@@ -9,9 +9,13 @@
 import AppKit
 import SwiftUI
 
+/// Waits by suspending, so the app's own main-actor work — a preview frame arriving
+/// from ffmpeg — runs meanwhile, and the main run loop at the bottom of this file keeps
+/// drawing. Spinning the run loop from inside this task would hold the main actor and
+/// the frame would never land.
 @MainActor
-func pump(_ seconds: TimeInterval) {
-    RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+func pump(_ seconds: TimeInterval) async {
+    try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
 }
 
 /// A real window, so SwiftUI lays out and draws its layers exactly as it would for a
@@ -30,7 +34,7 @@ func hostingViews(in view: NSView) -> [NSView] {
 }
 
 @MainActor
-func render<V: View>(_ view: V, size: CGSize, to url: URL) {
+func render<V: View>(_ view: V, size: CGSize, to url: URL) async {
     let host = NSHostingView(rootView: view)
     let window = OffscreenWindow(contentRect: CGRect(origin: .zero, size: size),
                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -41,7 +45,7 @@ func render<V: View>(_ view: V, size: CGSize, to url: URL) {
     window.ignoresMouseEvents = true
     window.setFrameOrigin(NSScreen.main?.visibleFrame.origin ?? .zero)
     window.orderFrontRegardless()
-    pump(1.5)
+    await pump(1.5)
     CATransaction.flush()
     let frame = window.contentView!.superview ?? host
     frame.layoutSubtreeIfNeeded()
@@ -117,46 +121,74 @@ func run() async throws {
                       label: "Speed up the ending", origin: .agent("Claude"), expectedRevision: model.revision)
     model.agentClients = [AgentClient(name: "Claude", lastSeen: Date(), lastAction: "Speed up the ending"),
                           AgentClient(name: "Codex", lastSeen: Date().addingTimeInterval(-600), lastAction: "state")]
-    pump(1.5)
+    await pump(1.5)
 
     let size = CGSize(width: 1360, height: 880)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
 
     model.selectedShotID = nil; model.selectedRegionID = nil
     model.selectedSegmentID = model.items[0].timeline.segments[0].id
-    render(window(), size: size, to: output.appendingPathComponent("1-section.png"))
+    await render(window(), size: size, to: output.appendingPathComponent("1-section.png"))
 
     // Two of three sections, at different speeds.
     let sections = model.items[0].timeline.segments
     model.clickSegment(sections[1].id, at: model.items[0].timeline.offset(of: sections[1].id), extend: true)
-    render(window(), size: size, to: output.appendingPathComponent("1b-sections.png"))
+    await render(window(), size: size, to: output.appendingPathComponent("1b-sections.png"))
 
     model.agentHighlight = nil
     model.editorMode = .zoom
     model.selectedShotID = model.items[0].zoomShots.first?.id
-    render(window(), size: size, to: output.appendingPathComponent("2-zoom.png"))
+    await render(window(), size: size, to: output.appendingPathComponent("2-zoom.png"))
 
     model.editorMode = .blur
     model.selectedRegionID = model.items[0].blurRegions.first?.id
-    render(window(), size: size, to: output.appendingPathComponent("3-blur-area.png"))
+    await render(window(), size: size, to: output.appendingPathComponent("3-blur-area.png"))
 
     model.editorMode = .crop
     model.selectedSegmentID = nil; model.selectedShotID = nil; model.selectedRegionID = nil
-    render(window(), size: size, to: output.appendingPathComponent("4-recording.png"))
+    await render(window(), size: size, to: output.appendingPathComponent("4-recording.png"))
 
-    render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),
+    await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),
            to: output.appendingPathComponent("5-export-sheet.png"))
-    render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
+    await render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
            to: output.appendingPathComponent("6-local-agents.png"))
 
     model.setMovieMode(true)
-    pump(1)
-    render(window(), size: size, to: output.appendingPathComponent("7-movie.png"))
+    await pump(1)
+    await render(window(), size: size, to: output.appendingPathComponent("7-movie.png"))
 
     let minimum = CGSize(width: 1140, height: 800)
     model.setMovieMode(false)
-    render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
+    await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
            to: output.appendingPathComponent("8-minimum-size.png"))
+
+    // Colour: D-Log M chosen before any conversion is imported, then Natural colour
+    // with adjustments, then the comparison. DJI's table when YAMVIDEO_DJI_LUT names
+    // it; otherwise a stand-in, which is all a layout check needs.
+    let inspector = CGSize(width: 340, height: 1500)
+    model.selectedSegmentID = nil; model.selectedShotID = nil; model.selectedRegionID = nil
+    model.setInputProfile(.pocket3DLogM)
+    await pump(0.5)
+    await render(InspectorPane().environmentObject(model).frame(width: inspector.width, height: inspector.height), size: inspector,
+           to: output.appendingPathComponent("9-colour-setup.png"))
+    let table: URL
+    if let dji = ProcessInfo.processInfo.environment["YAMVIDEO_DJI_LUT"], !dji.isEmpty {
+        table = URL(fileURLWithPath: dji)
+    } else {
+        table = FileManager.default.temporaryDirectory.appendingPathComponent("snapshot-conversion.cube")
+        let lifted = ColorCube.build(size: 17) { p in p * p * (3 - 2 * p) * 0.9 + 0.05 }
+        try Data(lifted.cubeText(title: "snapshot").utf8).write(to: table)
+    }
+    model.applyNaturalColor(try LUTStore.importTable(at: table, role: .pocket3DLogMToRec709))
+    model.setColorAdjustments(ColorAdjustments(exposureEV: 0.3, warmth: 0.2, contrast: 1.1, saturation: 1.15))
+    await pump(2)
+    await render(InspectorPane().environmentObject(model).frame(width: inspector.width, height: inspector.height), size: inspector,
+           to: output.appendingPathComponent("10-colour.png"))
+    model.colorComparison = .split
+    await pump(3)
+    await render(window(), size: size, to: output.appendingPathComponent("11-compare.png"))
+    await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
+           to: output.appendingPathComponent("12-compare-minimum.png"))
 }
 
 Task { @MainActor in

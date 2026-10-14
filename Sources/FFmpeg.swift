@@ -702,7 +702,8 @@ enum FFmpeg {
         subtitles: URL? = nil,
         palette: URL? = nil,
         loudness: LoudnessMeasurement? = nil,
-        color: [String] = []
+        color: [String] = [],
+        tagRec709: Bool = false
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
@@ -754,7 +755,7 @@ enum FFmpeg {
             // The frames are Rec.709 now. Saying so matters: without these the muxer
             // copies the source's HDR tags onto SDR pixels and players stretch them back,
             // and a D-Log M file's own tags no longer describe the corrected picture.
-            if !head.isEmpty {
+            if !head.isEmpty || tagRec709 {
                 args += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             }
 

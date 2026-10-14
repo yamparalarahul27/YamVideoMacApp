@@ -79,6 +79,13 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `addMedia` | `paths` (probed first) |
 | `removeMedia` | `clipID` |
 | `relinkMedia` | `clipID`, `path` of a moved copy of the same video |
+| `setInputProfile` | `clipID`, `profile`: auto, standard, pocket3DLogM, hlg, pq (HLG/PQ only for files tagged so) |
+| `importTechnicalLUT` | `clipID`, `path` of DJI's Pocket 3 D-Log M to Rec.709 `.cube` (checked first; needs `pocket3DLogM`) |
+| `clearTechnicalLUT` | `clipID` (also turns Natural colour off) |
+| `setColorCorrection` | `clipID`, `enabled` (Natural colour) |
+| `setColorAdjustments` | `clipID`, any of `exposureEV` (−2–2), `warmth` (−1–1), `contrast` (0.5–1.5), `saturation` (0–2) |
+| `resetColorAdjustments` | `clipID` |
+| `copyColorAdjustments` | `clipID` (from), `targets`: recording IDs, `includeInterpretation`? (also copy profile and conversion) |
 
 A section of an uncut recording has the recording's own ID. A split keeps the left
 section's ID and reports the new right one in `createdIDs`.
@@ -88,7 +95,7 @@ section's ID and reports the new right one in `createdIDs`.
 | command | what it does |
 |---|---|
 | `undo` / `redo --transaction ID` | Undo or redo the named step. Refused (`history_conflict`) if another edit is now on top — an agent never undoes someone else's work by accident. |
-| `preview --clip ID --time T [--cropped]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. |
+| `preview --clip ID --time T [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--original` leaves the colour correction out. |
 | `analyze --kind silence\|zooms --clip ID` | Starts a job that proposes cuts or zooms for the revision it read. It applies nothing. |
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |

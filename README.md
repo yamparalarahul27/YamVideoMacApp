@@ -174,6 +174,10 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
 | **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector. Choose where it sits and how big it is |
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
+| **Correct Pocket 3 D-Log M colour** | In the inspector's **Colour** section set **Recorded colour** to **DJI Pocket 3 D-Log M**. The first time, **Get DJI Conversion** opens DJI's download page and **Import Conversion File…** takes the `.cube` you saved. After that, **Natural Colour** is one click, and one Undo. Auto never assumes D-Log M: a `DJI_` file name only makes it ask |
+| **Adjust the look** | **Brightness**, **Warmth**, **Contrast** and **Colour strength**, each with its own reset. Exact values are under **Details**. A drag is one undo step, and the picture follows it straight away |
+| **Compare before and after** | **Corrected / Original / Compare** under the picture. Compare shows the original on the left half and the corrected picture on the right, at the same frame. It never changes the project or the export |
+| **Copy colour to other recordings** | **Copy Colour…** copies the look. Tick **Also copy the recorded colour and conversion** only for recordings made the same way |
 | **Export** | **Export…** opens a sheet for the selected recording, all recordings or the movie, with format, quality, audio and destination. ⌘R still exports all recordings (or the movie in Movie). ⌘. stops |
 
 Individual clip output lands next to each source file as `<name>-converted.<ext>` (`.mp4`, `.gif` or
@@ -244,6 +248,20 @@ A few things this handles that are easy to get wrong:
 - **The tone map runs at the head of the graph.** Before the blur regions, not after, so
   the blur sees the same pixels the export writes — and so does the preview, which shares
   the graph builder.
+- **Colour is one table, applied the same way twice.** A recording's DJI conversion and
+  its four adjustments are compiled into a single 3D table. ffmpeg applies it with `lut3d`
+  (trilinear, float RGB, from the source's own YUV matrix and range, back to 10-bit
+  BT.709), and Core Image applies the same table for playback. On a 10-bit test chart the
+  two agree within 3 of 255 levels at the 99th percentile. The table runs first, before blur
+  areas, so a black area stays black whatever the grade.
+- **macOS does not read Rec.709 video with the textbook curve.** It decodes into its own
+  `CoreMedia709` space; converting through `itur_709` moves mid-grey by about 19 levels.
+  Core Image therefore applies the table in the frame's own decoding space.
+- **Conversion files travel by content.** Imported tables are kept under their SHA-256 in
+  `~/Library/Application Support/YamVideo/LUTs`, and saving a project copies the ones it
+  uses into a `YamVideo Assets` folder beside it. Opening the project on another Mac takes
+  them from there. If a table is nowhere to be found, export refuses rather than writing
+  uncorrected video. DJI's file is never bundled; the app recognises it by hash.
 - **Loudness normalisation is two passes, not one.** `loudnorm` with no measurements is a
   dynamic-range compressor: it moves quiet and loud parts relative to each other. Measuring
   first and handing the numbers back (`linear=true`) makes the second pass a single gain

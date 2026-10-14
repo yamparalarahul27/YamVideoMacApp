@@ -13,11 +13,14 @@ final class MovieInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
     let transform: CGAffineTransform
     let settings: ExportSettings
     let canvas: CGSize
+    /// The recording's colour stage, compiled once for every frame it draws.
+    let color: ColorRender?
 
     init(range: CMTimeRange, trackID: CMPersistentTrackID, clip: VideoItem,
          transform: CGAffineTransform, settings: ExportSettings, canvas: CGSize) {
         timeRange = range; self.trackID = trackID; self.clip = clip
         self.transform = transform; self.settings = settings; self.canvas = canvas
+        color = clip.colorStage(settings).render
         requiredSourceTrackIDs = [NSNumber(value: trackID)]
     }
 }
@@ -25,9 +28,12 @@ final class MovieInstruction: NSObject, AVVideoCompositionInstructionProtocol, @
 /// Separate instructions retain each source's rotation and coordinate space even when
 /// portrait, landscape and cropped recordings share a movie.
 final class MovieCompositor: NSObject, AVVideoCompositing {
+    /// Half-float sources, so a 10-bit recording reaches its colour table without first
+    /// being rounded to 8 bits. Only the displayed frame is 8-bit.
     var sourcePixelBufferAttributes: [String: any Sendable]? {
-        [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA]]
+        [kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_64RGBAHalf]]
     }
+    var supportsWideColorSourceFrames: Bool { true }
     var requiredPixelBufferAttributesForRenderContext: [String: any Sendable] {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
          kCVPixelBufferIOSurfacePropertiesKey as String: [String: Int]()]
@@ -64,7 +70,8 @@ final class MovieCompositor: NSObject, AVVideoCompositing {
             let edited = renderFrame(oriented, info: info, crop: crop,
                                      regions: instruction.clip.blurRegions, shots: instruction.clip.zoomShots,
                                      settings: instruction.settings,
-                                     time: request.compositionTime.seconds - instruction.timeRange.start.seconds)
+                                     time: request.compositionTime.seconds - instruction.timeRange.start.seconds,
+                                     color: instruction.color)
             let canvas = instruction.canvas
             let factor = min(canvas.width / crop.width, canvas.height / crop.height)
             let width = max(2, floor(crop.width * factor / 2) * 2)
@@ -73,7 +80,12 @@ final class MovieCompositor: NSObject, AVVideoCompositing {
                 .transformed(by: CGAffineTransform(translationX: (canvas.width - width) / 2, y: (canvas.height - height) / 2))
             let bounds = CGRect(origin: .zero, size: canvas)
             let result = fitted.composited(over: CIImage(color: .black).cropped(to: bounds)).cropped(to: bounds)
-            context.render(result, to: output, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
+            // Written and tagged as Rec.709 video, the space a single recording's preview
+            // and every export use, rather than whatever the display happens to be.
+            context.render(result, to: output, bounds: bounds, colorSpace: ColorPipeline.videoSpace)
+            CVBufferSetAttachment(output, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(output, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(output, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, .shouldPropagate)
             request.finish(withComposedVideoFrame: output)
         }
     }
