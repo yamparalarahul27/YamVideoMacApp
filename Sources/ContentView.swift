@@ -46,6 +46,8 @@ struct ContentView: View {
                 }.pickerStyle(.segmented).frame(width: 175).disabled(model.isConverting)
                 Spacer()
 
+                AgentsToolbarButton()
+
                 if model.isConverting {
                     Button(role: .destructive) {
                         model.cancelConversion()
@@ -227,7 +229,7 @@ struct QueueSidebar: View {
         VStack(spacing: 0) {
             List(selection: model.listSelection) {
                 ForEach(model.items) { item in
-                    QueueRow(item: item)
+                    QueueRow(item: item, agentNote: model.agentHighlight?.clips.contains(item.id) == true ? model.agentHighlight?.origin : nil)
                         .tag(item.id)
                         .contextMenu {
                             if case .done(let url) = item.status {
@@ -272,6 +274,8 @@ struct QueueSidebar: View {
 
 struct QueueRow: View {
     let item: VideoItem
+    /// Names the agent that just changed this recording, for a moment.
+    var agentNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -286,6 +290,12 @@ struct QueueRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+
+            if let agentNote {
+                Label("\(agentNote) edited", systemImage: "sparkles")
+                    .font(.caption2).foregroundStyle(.orange)
+                    .transition(.opacity)
             }
 
             if case .converting(let fraction) = item.status {

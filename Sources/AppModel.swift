@@ -53,6 +53,12 @@ final class AppModel: ObservableObject {
     var editSession = EditSessionState()
     /// While true, local agents can read but every agent edit is refused.
     @Published var agentsPaused = false
+    /// Recent changes by anyone, newest first, for the activity list.
+    @Published var recentActivity: [EditEvent] = []
+    /// What an agent just changed, shown briefly on the timeline.
+    @Published var agentHighlight: AgentHighlight?
+    /// Local clients heard from since launch, most recent first.
+    @Published var agentClients: [AgentClient] = []
     /// Finished agent requests by request ID, for idempotent retries within a session.
     var agentRequests: [String: AgentRequestRecord] = [:]
     /// Request IDs currently being answered, so a duplicate sent meanwhile is not run twice.

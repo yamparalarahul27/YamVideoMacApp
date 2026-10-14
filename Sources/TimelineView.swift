@@ -221,6 +221,7 @@ struct TimelineView: View {
                     id: \.segment.id) { placed in
                 SegmentBlock(segment: placed.segment, number: placed.index + 1, name: item.name,
                              selected: model.selectedSegmentID == placed.segment.id,
+                             highlighted: model.agentHighlight?.elements.contains(placed.segment.id) == true,
                              pixels: pixels,
                              onSelect: { fraction in
                                  model.selectedSegmentID = placed.segment.id
@@ -250,7 +251,8 @@ struct TimelineView: View {
                     .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
             }
             ForEach(item.zoomShots.filter { viewport.intersects($0.start, $0.start + $0.duration) }) { shot in
-                ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id, pixels: pixels,
+                ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id,
+                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
                           onSelect: { model.selectedShotID = shot.id; model.editorMode = .zoom },
                           onMove: { model.setZoomStart(shot.id, $0) },
                           onResize: { model.setZoomHold(shot.id, $0) })
@@ -308,6 +310,8 @@ private struct SegmentBlock: View {
     let number: Int
     let name: String
     let selected: Bool
+    /// An agent just changed this section: outlined for a moment, never selected.
+    var highlighted = false
     let pixels: Double
     let onSelect: (Double) -> Void
     let onTrim: (Double?, Double?) -> Void
@@ -326,6 +330,11 @@ private struct SegmentBlock: View {
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 }.padding(.horizontal, 13).frame(maxWidth: .infinity, alignment: .leading)
                 RoundedRectangle(cornerRadius: 5).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 1)
+                RoundedRectangle(cornerRadius: 5).strokeBorder(Color.orange, lineWidth: 2.5)
+                    .shadow(color: .orange.opacity(0.6), radius: 4)
+                    .opacity(highlighted ? 1 : 0)
+                    .animation(.easeOut(duration: 0.35), value: highlighted)
+                    .allowsHitTesting(false)
                 HStack {
                     handle(start: true)
                     Spacer(minLength: 0)
@@ -369,6 +378,7 @@ private struct SegmentBlock: View {
 private struct ZoomBlock: View {
     let shot: ZoomShot
     let selected: Bool
+    var highlighted = false
     let pixels: Double
     let onSelect: () -> Void
     let onMove: (Double) -> Void
@@ -388,6 +398,11 @@ private struct ZoomBlock: View {
             .frame(width: max(8, geo.size.width + resize), height: 28)
             .background(Color.cyan.opacity(selected ? 0.45 : 0.23), in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.cyan.opacity(selected ? 1 : 0.5)))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.orange, lineWidth: 2.5)
+                .shadow(color: .orange.opacity(0.6), radius: 4)
+                .opacity(highlighted ? 1 : 0)
+                .animation(.easeOut(duration: 0.35), value: highlighted)
+                .allowsHitTesting(false))
             .contentShape(Rectangle())
             .onTapGesture(perform: onSelect)
             .gesture(DragGesture(minimumDistance: 2)

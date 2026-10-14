@@ -24,6 +24,26 @@ struct EditEvent: Equatable, Codable {
     var label: String
     var transactionID: UUID?
     var clips: [UUID]
+    var date = Date()
+}
+
+/// What a local agent just changed, so the timeline can point at it for a moment
+/// without moving the owner's selection.
+struct AgentHighlight: Equatable {
+    let id = UUID()
+    var origin: String
+    var label: String
+    var clips: Set<UUID>
+    /// Sections, zooms and blur areas that are new or different.
+    var elements: Set<UUID>
+}
+
+/// A local client the app has heard from, for the Local agents panel.
+struct AgentClient: Identifiable, Equatable {
+    var id: String { name }
+    var name: String
+    var lastSeen: Date
+    var lastAction: String
 }
 
 /// A continuous human interaction — a drag, a slider, typing a field — that becomes one
@@ -94,6 +114,7 @@ extension AppModel {
         receipt.transactionID = transaction
         receipt.revision = finishCommit(.edit, origin: origin, label: label, transaction: transaction,
                                         clips: receipt.affectedClips)
+        if !origin.isHuman { announceAgentChange(origin, label: label, from: base, to: project) }
         return .success(receipt)
     }
 
@@ -158,6 +179,34 @@ extension AppModel {
         editSession.nextSequence += 1
         if editSession.events.count > EditSessionState.eventLimit {
             editSession.events.removeFirst(editSession.events.count - EditSessionState.eventLimit)
+        }
+        if [.edit, .undo, .redo, .document, .job].contains(kind), let event = editSession.events.last {
+            recentActivity.insert(event, at: 0)
+            if recentActivity.count > 40 { recentActivity.removeLast(recentActivity.count - 40) }
+        }
+    }
+
+    /// Points at an agent's change for a moment and says who made it. Selection,
+    /// playhead and focus stay exactly where the owner left them.
+    func announceAgentChange(_ origin: EditOrigin, label: String, from old: VideoProject, to new: VideoProject) {
+        let clips = Set(Self.changedClips(from: old, to: new))
+        let before = Dictionary(uniqueKeysWithValues: old.clips.map { ($0.id, $0) })
+        var elements: Set<UUID> = []
+        for clip in new.clips where clips.contains(clip.id) {
+            let previous = before[clip.id]
+            let oldSections = Dictionary(uniqueKeysWithValues: (previous?.timeline.segments ?? []).map { ($0.id, $0) })
+            elements.formUnion(clip.timeline.segments.filter { oldSections[$0.id] != $0 }.map(\.id))
+            let oldZooms = Dictionary(uniqueKeysWithValues: (previous?.zoomShots ?? []).map { ($0.id, $0) })
+            elements.formUnion(clip.zoomShots.filter { oldZooms[$0.id] != $0 }.map(\.id))
+            let oldAreas = Dictionary(uniqueKeysWithValues: (previous?.blurRegions ?? []).map { ($0.id, $0) })
+            elements.formUnion(clip.blurRegions.filter { oldAreas[$0.id] != $0 }.map(\.id))
+        }
+        let highlight = AgentHighlight(origin: origin.label, label: label, clips: clips, elements: elements)
+        agentHighlight = highlight
+        statusMessage = "\(origin.label): \(label)"
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if self?.agentHighlight?.id == highlight.id { self?.agentHighlight = nil }
         }
     }
 
@@ -252,6 +301,11 @@ extension AppModel {
         }
         let before = project
         let opposite = historyEntry(entry.name, transaction: entry.transactionID, origin: entry.origin)
+        defer {
+            if !origin.isHuman {
+                announceAgentChange(origin, label: "\(redo ? "Redid" : "Undid") \(entry.name)", from: before, to: project)
+            }
+        }
         if redo { redoEntries.removeLast(); undoEntries.append(opposite) }
         else { undoEntries.removeLast(); redoEntries.append(opposite) }
         restoreHistory(entry, navigation: origin.isHuman)

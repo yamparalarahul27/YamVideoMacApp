@@ -2005,6 +2005,20 @@ speedUp["commands"] = [["type": "setSectionSpeed", "clipID": agentClip, "section
 let applied = await agentCall(agentEditor, speedUp)
 check(applied["ok"] as? Bool == true && agentEditor.items[0].timeline.segments[0].speed == 1.5, "an agent's apply edits the open project")
 equal(agentEditor.undoTitle, "Undo Speed up the intro (Codex)", "the agent's label and name reach the Undo menu")
+check(agentEditor.agentHighlight?.origin == "Codex" && agentEditor.agentHighlight?.elements.contains(sectionA.id) == true
+          && agentEditor.agentHighlight?.clips == [agentEditor.items[0].id],
+      "an agent's change is highlighted on exactly the section it changed")
+equal(agentEditor.statusMessage, "Codex: Speed up the intro", "the status line says which agent did what")
+check(agentEditor.recentActivity.first?.origin == .agent("Codex") && agentEditor.recentActivity.first?.label == "Speed up the intro",
+      "the activity list records the agent's step")
+equal(agentEditor.agentClients.first?.name, "Codex", "the Local agents panel knows who connected")
+let clientsBeforeDiscovery = agentEditor.agentClients
+_ = await agentCall(agentEditor, ["method": "sessions"])
+equal(agentEditor.agentClients, clientsBeforeDiscovery, "discovery alone is not counted as an agent's activity")
+agentEditor.agentHighlight = nil
+agentEditor.perform([.setAspect(clip: agentEditor.items[0].id, preset: "4:5")])
+check(agentEditor.agentHighlight == nil && agentEditor.recentActivity.first?.origin == .human,
+      "the owner's own edits are listed but not highlighted")
 let stepsBeforeRetry = agentEditor.undoEntries.count, revisionBeforeRetry = agentEditor.revision
 let retried = await agentCall(agentEditor, speedUp)
 check(NSDictionary(dictionary: retried).isEqual(to: applied) && agentEditor.undoEntries.count == stepsBeforeRetry
