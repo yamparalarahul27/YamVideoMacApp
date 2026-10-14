@@ -17,6 +17,9 @@ struct TimelineView: View {
     private static let waveformHeight = 28.0
     private static let zoomHeight = 28.0
     private static let effectHeight = 24.0
+    /// Two rows: column graphics above, panel graphics below.
+    private static let graphicsRowHeight = 18.0
+    private static let graphicsHeight = graphicsRowHeight * 2 + 4
     private static let laneSpacing = 5.0
 
     private var laneHeights: [Double] {
@@ -24,6 +27,7 @@ struct TimelineView: View {
         if overview != nil { lanes.append(Self.waveformHeight) }
         lanes.append(Self.zoomHeight)
         lanes.append(Self.effectHeight)
+        lanes.append(Self.graphicsHeight)
         return lanes
     }
 
@@ -61,6 +65,7 @@ struct TimelineView: View {
                         }
                         zoomLane(width: width, pixels: pixels)
                         effectLane(width: width, pixels: pixels)
+                        graphicsLane(width: width, pixels: pixels)
                     }
                     playhead(width: width)
                     guide(width: width)
@@ -354,6 +359,39 @@ struct TimelineView: View {
         .clipped()
     }
 
+    private func graphicsLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        let graphics = item.graphics?.items ?? []
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
+            if graphics.isEmpty {
+                Text("Graphics track · import a graphics file in the inspector")
+                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 12)
+            }
+            ForEach(graphics.filter { viewport.intersects($0.start, $0.end) }) { graphic in
+                GraphicBlock(graphic: graphic, ink: item.graphics?.look(of: graphic) == .ink,
+                             selected: model.selectedGraphicID == graphic.id,
+                             highlighted: model.agentHighlight?.elements.contains(graphic.id) == true, pixels: pixels,
+                             snapStart: { start in
+                                 guard let snapping = snapping() else { showGuide(at: nil); return start }
+                                 let landed = snapping.snapSpan(start: start, duration: graphic.length, pixelsPerSecond: pixels)
+                                 showGuide(at: landed.target?.time)
+                                 return landed.start
+                             },
+                             snapEnd: { snap($0, pixels: pixels) },
+                             endSnap: endSnap,
+                             onSelect: { model.selectedGraphicID = graphic.id },
+                             onMove: { model.moveGraphic(graphic.id, to: $0) },
+                             onResize: { model.setGraphicEdge(graphic.id, end: $0) })
+                    .frame(width: max(3, graphic.length * pixels), height: Self.graphicsRowHeight)
+                    .offset(x: viewport.x(of: graphic.start, across: width),
+                            y: graphic.kind.zone == .column ? 1 : Self.graphicsRowHeight + 3)
+            }
+        }
+        .frame(width: width, height: Self.graphicsHeight, alignment: .leading)
+        .clipped()
+    }
+
     private func playhead(width: Double) -> some View {
         let time = model.previewTime
         return Rectangle().fill(Color.primary)
@@ -517,6 +555,68 @@ private struct ZoomBlock: View {
 
     private func movedStart(_ translation: Double) -> Double { snapStart(shot.start + translation / pixels) }
     private func resizedEnd(_ translation: Double) -> Double { snapEnd(shot.end + translation / pixels) }
+}
+
+/// One graphic on the timeline: drag to move it, drag its right edge to change its length.
+private struct GraphicBlock: View {
+    let graphic: Graphic
+    let ink: Bool
+    let selected: Bool
+    var highlighted = false
+    let pixels: Double
+    let snapStart: (Double) -> Double
+    let snapEnd: (Double) -> Double
+    let endSnap: () -> Void
+    let onSelect: () -> Void
+    let onMove: (Double) -> Void
+    let onResize: (Double) -> Void
+    @State private var delta = 0.0
+    @State private var resize = 0.0
+
+    private var tint: Color { graphic.kind.zone == .panel ? .orange : .purple }
+    private var title: String {
+        let props = graphic.props
+        let text = props["title"]?.string ?? props["kicker"]?.string ?? props["url"]?.string ?? graphic.kind.label
+        return (props["number"]?.string.map { $0 + " " } ?? "") + text
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 3) {
+                Image(systemName: ink ? "pencil.and.scribble" : "rectangle.on.rectangle")
+                Text(title).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 5)
+            .frame(width: max(8, geo.size.width + resize), height: geo.size.height)
+            .background(tint.opacity(selected ? 0.5 : 0.25), in: RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(tint.opacity(selected ? 1 : 0.5)))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.orange, lineWidth: 2.5)
+                .opacity(highlighted ? 1 : 0)
+                .animation(.easeOut(duration: 0.35), value: highlighted)
+                .allowsHitTesting(false))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onSelect)
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { value in delta = (movedStart(value.translation.width) - graphic.start) * pixels }
+                .onEnded { value in onSelect(); onMove(movedStart(value.translation.width)); delta = 0; endSnap() })
+            .overlay(alignment: .trailing) {
+                RoundedRectangle(cornerRadius: 2).fill(tint).frame(width: 4, height: 12).padding(.trailing, 2)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(DragGesture(minimumDistance: 1)
+                        .onChanged { resize = (resizedEnd($0.translation.width) - graphic.end) * pixels }
+                        .onEnded { value in onSelect(); onResize(resizedEnd(value.translation.width)); resize = 0; endSnap() })
+                    .help("Drag to change how long the graphic shows")
+            }
+            .offset(x: delta)
+            .help("\(graphic.kind.label): drag to move it, drag its right edge to change its length")
+            .accessibilityLabel("\(graphic.kind.label) graphic at \(timelineTime(graphic.start))")
+        }
+    }
+
+    private func movedStart(_ translation: Double) -> Double { snapStart(graphic.start + translation / pixels) }
+    private func resizedEnd(_ translation: Double) -> Double { snapEnd(graphic.end + translation / pixels) }
 }
 
 struct TimelineTimeField: View {

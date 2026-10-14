@@ -1255,6 +1255,21 @@ if let before = try await integratedLoudness(loudSource),
     check(false, "could measure the loudness either side of the export")
 }
 
+// Cut audio leaves -filter_complex, and ffmpeg refuses an -af on such a stream.
+let loudCuts = [TimelineSegment(start: 0, end: 2), TimelineSegment(start: 3, end: 6)]
+let loudCutCommand = FFmpeg.exportCommands(input: loudSource, output: loudOut, info: loudSourceInfo,
+                                           crop: loudSourceInfo.fullFrame, segments: loudCuts,
+                                           settings: loud).last!
+check(!loudCutCommand.contains("-af"), "a cut, normalised export puts loudnorm in the filter graph")
+check(loudCutCommand.contains("[normala]"), "a cut, normalised export maps the normalised audio")
+let loudCutOut = scratch.appendingPathComponent("loud-cut.mp4")
+try await FFmpeg.export(input: loudSource, output: loudCutOut, info: loudSourceInfo,
+                        crop: loudSourceInfo.fullFrame, segments: loudCuts, settings: loud) { _ in }
+let loudCutInfo = try await FFmpeg.probe(url: loudCutOut)
+equal(loudCutInfo.audioCodec, "aac", "a cut, normalised export carries an AAC track")
+check(abs(loudCutInfo.duration - 5) < 0.25, "a cut, normalised export keeps the edited duration",
+      "\(loudCutInfo.duration)")
+
 // MARK: - Subtitles
 
 print("\nSubtitles")
@@ -2653,6 +2668,13 @@ let silentFirstPlan = try MoviePlan(items: [combinedClip, nativeClip], movieSett
 let silentFirstMovie = scratch.appendingPathComponent("silent-first.mp4")
 try await FFmpeg.exportMovie(plan: silentFirstPlan, settings: firstSilentSettings, output: silentFirstMovie) { _ in }
 equal(try await FFmpeg.probe(url: silentFirstMovie).audioCodec, "aac", "audio survives when the first recording is silent and Copy is selected")
+var movieLoudSettings = ExportSettings(); movieLoudSettings.audio = .normalised
+let movieLoudArguments = FFmpeg.movieArguments(plan: moviePlan, settings: movieLoudSettings, output: movieFile)
+check(!movieLoudArguments.contains("-af"), "a normalised movie puts loudnorm in the filter graph")
+check(movieLoudArguments.contains("[normalsound]"), "a normalised movie maps the normalised sound")
+let movieLoud = scratch.appendingPathComponent("movie-normalised.mp4")
+try await FFmpeg.exportMovie(plan: moviePlan, settings: movieLoudSettings, output: movieLoud) { _ in }
+equal(try await FFmpeg.probe(url: movieLoud).audioCodec, "aac", "a normalised movie exports with an AAC track")
 
 if let rotated {
     var portraitClip = VideoItem(url: rotated)
@@ -3628,7 +3650,7 @@ effecting.jumpToMarker(forward: false)
 check(abs(effecting.previewTime - 1) < 0.02, "⇧↑ jumps back")
 check(effecting.perform([.addMarker(clip: effectClip, marker: TimelineMarker(time: 99))]).isFailure, "a marker past the end is refused")
 let roundTripEffects = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(effecting.project))
-check(roundTripEffects == effecting.project && roundTripEffects.version == 5, "effects and markers survive a version 5 round trip")
+check(roundTripEffects == effecting.project && roundTripEffects.version == VideoProject.currentVersion, "effects and markers survive a project round trip")
 var olderWithEffects = roundTripEffects; olderWithEffects.version = 4
 check((try? olderWithEffects.validate()) == nil, "a version 4 file carrying effects or markers is refused")
 effecting.perform([.splitSection(clip: effectClip, at: 1.5)])
@@ -3754,6 +3776,189 @@ var keepHDR = ExportSettings(); keepHDR.toneMapHDR = false
 check(FFmpeg.effectProblem([VideoBlurEffect(start: 1, end: 2)], info: hdrFxInfo, settings: keepHDR) != nil
           && FFmpeg.effectProblem([VideoBlurEffect(start: 1, end: 2)], info: hdrFxInfo, settings: ExportSettings()) == nil,
       "an effect on HDR kept as HDR is refused, not exported mislabelled; tone-mapped it is fine")
+
+// MARK: - Graphics
+
+print("\nGraphics model")
+extension Result { var isSuccess: Bool { !isFailure } }
+let partialStyle = try JSONDecoder().decode(GraphicsStyle.self, from: Data(#"{"look": "mix"}"#.utf8))
+check(partialStyle.look == .mix && partialStyle.panel == .shade && partialStyle.moveVideo && partialStyle.edge == 170
+          && partialStyle.accent == "#F5C42C", "a partial style keeps the defaults for every key it leaves out")
+func gfx(_ kind: GraphicKind, _ start: Double, _ end: Double, _ props: [String: JSONValue] = [:], look: GraphicsLook? = nil) -> Graphic {
+    Graphic(kind: kind, start: start, end: end, props: props, look: look)
+}
+let plate = gfx(.namePlate, 0.2, 1.4, ["title": .string("Yamparala Rahul")])
+let ruleA = gfx(.rule, 0.5, 1.5, ["title": .string("Own every asset"), "points": .array([.object(["text": .string("Yours"), "at": .number(0.4)])])])
+let ruleB = gfx(.rule, 1.9, 2.8, ["title": .string("Privacy")])
+let cleanTrack = GraphicsTrack(items: [plate, ruleA, ruleB])
+check(cleanTrack.problem(duration: 3) == nil, "column and panel graphics may overlap in time", cleanTrack.problem(duration: 3) ?? "")
+check(GraphicsTrack(items: [ruleA, gfx(.checklist, 1.2, 2)]).problem(duration: 3)?.contains("overlap") == true,
+      "two panel graphics may not overlap")
+check(GraphicsTrack(items: [gfx(.link, 2, 3.5)]).problem(duration: 3) != nil, "a graphic must end inside the recording")
+check(GraphicsTrack(items: [gfx(.link, 1, 1.2)]).problem(duration: 3) != nil, "a graphic shows for at least half a second")
+check(GraphicsTrack(items: [gfx(.phoneScreens, 0, 1, ["screens": .array([.object(["image": .string("media/a.png")])])])])
+          .problem(duration: 3)?.contains("absolute") == true, "images are absolute paths in a project")
+check(GraphicsTrack(items: [gfx(.rule, 0, 1, ["points": .array([.object(["at": .number(-1)])])])]).problem(duration: 3) != nil,
+      "beat times inside a graphic start from 0")
+var badAccent = GraphicsTrack(items: [plate]); badAccent.style.accent = "yellow"
+check(badAccent.problem(duration: 3) != nil, "the accent must be a hex colour")
+
+var mixTrack = cleanTrack; mixTrack.style.look = .mix
+check(mixTrack.look(of: ruleA) == .ink && mixTrack.look(of: plate) == .glass, "mix writes panel graphics in ink and keeps cards for the rest")
+check(mixTrack.look(of: gfx(.rule, 0, 1, look: .glass)) == .glass, "one graphic can choose glass in a mix")
+var inkTrack = cleanTrack; inkTrack.style.look = .ink
+check(inkTrack.look(of: plate) == .glass, "a kind without an ink version stays glass")
+
+let spanTrack = GraphicsTrack(items: [gfx(.panelTitle, 0, 1), gfx(.rule, 1.5, 2), gfx(.checklist, 3.2, 4)])
+let spans = spanTrack.panelSpans()
+check(spans.count == 2 && spans[0].start == 0 && spans[0].end == 2 && spans[1].start == 3.2,
+      "panel graphics closer than a second share one panel", "\(spans)")
+let nodeBinary = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
+if let nodeBinary {
+    let planFile = scratch.appendingPathComponent("spans.json")
+    try spanTrack.engineData(duration: 4, fps: "30").write(to: planFile)
+    let script = "const g=require(process.argv[1]);const d=JSON.parse(require('fs').readFileSync(process.argv[2],'utf8'));"
+        + "console.log(JSON.stringify(g.plan(d).spans.map(s=>[s.start,s.end])))"
+    let planned = try await Shell.run(nodeBinary, ["-e", script, "\(repository)/Resources/Graphics/graphics.js", planFile.path])
+    equal(planned.stdoutText.trimmingCharacters(in: .whitespacesAndNewlines), "[[0,2],[3.2,4]]",
+          "the engine plans the same panel spans as the app")
+} else {
+    print("  --   engine parity skipped (no node)")
+}
+
+let motionTrack = GraphicsTrack(items: [gfx(.rule, 1, 2)])
+let motion = GraphicsMotion(motionTrack)!
+let near = { (a: Double, b: Double) in abs(a - b) < 0.0001 }
+check(motion.progress(at: 0.9).amount == 0 && near(motion.progress(at: 1.4).amount, 0.5) && motion.progress(at: 1.9).amount == 1
+          && near(motion.progress(at: 2.4).amount, 0.5) && motion.progress(at: 2.81).amount == 0,
+      "the move aside eases in over 0.8 s from the panel's start and out from its end")
+var stayTrack = motionTrack; stayTrack.style.moveVideo = false
+check(GraphicsMotion(stayTrack) == nil && GraphicsMotion(GraphicsTrack(items: [plate])) == nil,
+      "nothing moves without panels, or with the move switched off")
+
+print("\nGraphics in projects")
+let gfxEditor = AppModel(recoveryURL: nil)
+gfxEditor.restore(VideoProject(clips: [ProjectClip(gradeOther)], settings: ExportSettings(), selection: gradeOther.id))
+let gfxClip = gradeOther.id
+check(gfxEditor.perform([.replaceGraphics(clip: gfxClip, graphics: [plate, ruleA, ruleB], style: nil)]).isSuccess,
+      "a recording takes graphics")
+check(gfxEditor.perform([.addGraphic(clip: gfxClip, graphic: gfx(.checklist, 1.0, 1.8))]).isFailure,
+      "an overlapping panel graphic is refused")
+check(gfxEditor.perform([.addGraphic(clip: gfxClip, graphic: gfx(.link, 1.0, 9))]).isFailure,
+      "a graphic past the end is refused")
+var movedPlate = plate; movedPlate.start = 1.6; movedPlate.end = 2.6
+check(gfxEditor.perform([.updateGraphic(clip: gfxClip, graphic: movedPlate)]).isSuccess
+          && gfxEditor.items[0].graphics?.items.first(where: { $0.id == plate.id })?.start == 1.6, "a graphic can move")
+check(gfxEditor.perform([.setGraphicsStyle(clip: gfxClip, style: mixTrack.style)]).isSuccess
+          && gfxEditor.items[0].graphics?.style.look == .mix, "the style changes on its own")
+equal(gfxEditor.undoTitle, "Undo Graphics Style", "each change is a named undo step")
+
+let savedGraphics = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(gfxEditor.project))
+check(savedGraphics == gfxEditor.project && savedGraphics.version == 6 && savedGraphics.clips[0].graphics?.items.count == 3,
+      "graphics survive a version 6 round trip")
+var olderClaim = savedGraphics; olderClaim.version = 5
+check((try? olderClaim.validate()) == nil, "a version 5 file with graphics is refused")
+var olderPlain = savedGraphics; olderPlain.version = 5; olderPlain.clips[0].graphics = nil
+check((try? olderPlain.validate()) != nil, "a version 5 file without graphics still opens")
+
+// Cuts carry graphics the way they carry zooms.
+let gfxSection = gfxEditor.items[0].timeline.segments[0].id
+check(gfxEditor.perform([.trimSection(clip: gfxClip, section: gfxSection, start: 0.4, end: nil)]).isSuccess, "trim the start")
+let afterTrim = gfxEditor.items[0].graphics?.items ?? []
+check(abs((afterTrim.first { $0.id == ruleA.id }?.start ?? -1) - 0.1) < 0.001,
+      "a graphic follows its footage when a cut removes time before it")
+check(afterTrim.contains { $0.id == plate.id }, "a graphic whose footage remains is kept")
+let trimReceipt = gfxEditor.perform([.trimSection(clip: gfxClip, section: gfxSection, start: 1.2, end: nil)])
+if case .success(let receipt) = trimReceipt {
+    check(receipt.removedGraphics.contains(ruleA.id) && !(gfxEditor.items[0].graphics?.items.contains { $0.id == ruleA.id } ?? true),
+          "a graphic whose first frame is cut away is removed and reported")
+} else { check(false, "a cut that removes a graphic's start still applies") }
+gfxEditor.undo()
+check(gfxEditor.items[0].graphics?.items.contains { $0.id == ruleA.id } == true, "Undo brings it back")
+
+print("\nGraphics files")
+let gfxFolder = scratch.appendingPathComponent("graphics-import", isDirectory: true)
+try FileManager.default.createDirectory(at: gfxFolder.appendingPathComponent("art"), withIntermediateDirectories: true)
+let pixelPNG = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4,
+                                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+try pixelPNG.representation(using: .png, properties: [:])!.write(to: gfxFolder.appendingPathComponent("art/phone.png"))
+let importJSON = """
+{"version":1,"style":{"look":"mix","edge":120},"items":[
+ {"id":"name","kind":"namePlate","start":0.2,"end":1.2,"props":{"title":"Hello"}},
+ {"id":"phone","kind":"phoneScreens","start":1.4,"end":2.4,"props":{"screens":[{"image":"art/phone.png","at":0}]}}]}
+"""
+try importJSON.write(to: gfxFolder.appendingPathComponent("graphics.json"), atomically: true, encoding: .utf8)
+let imported = try GraphicsEngine.importFile(gfxFolder.appendingPathComponent("graphics.json"))
+let importedImage = imported.items.last?.props["screens"]?.array?.first?.object?["image"]?.string
+check(imported.items.count == 2 && imported.style.look == .mix && imported.style.edge == 120
+          && importedImage == gfxFolder.appendingPathComponent("art/phone.png").standardizedFileURL.path,
+      "an import reads the style and makes image paths absolute")
+check(imported.items[0].id == UUID(deterministicFrom: Data("name".utf8)), "a text ID becomes the same UUID every time")
+try importJSON.replacingOccurrences(of: "art/phone.png", with: "art/missing.png")
+    .write(to: gfxFolder.appendingPathComponent("missing.json"), atomically: true, encoding: .utf8)
+check((try? GraphicsEngine.importFile(gfxFolder.appendingPathComponent("missing.json"))) == nil, "a missing image stops the import")
+try importJSON.replacingOccurrences(of: "namePlate", with: "hologram")
+    .write(to: gfxFolder.appendingPathComponent("kind.json"), atomically: true, encoding: .utf8)
+check((try? GraphicsEngine.importFile(gfxFolder.appendingPathComponent("kind.json"))) == nil, "an unknown kind stops the import")
+
+if GraphicsEngine.resources != nil {
+    let pageFolder = scratch.appendingPathComponent("graphics-page", isDirectory: true)
+    let index = try GraphicsEngine.writePage(imported, duration: 3, fps: "30000/1001", mode: "preview", to: pageFolder)
+    let page = try String(contentsOf: index, encoding: .utf8)
+    let media = try FileManager.default.contentsOfDirectory(atPath: pageFolder.appendingPathComponent("media").path)
+    check(page.contains("\"kind\":\"phoneScreens\"") && page.contains("\"mode\":\"preview\"") && !page.contains("{{"),
+          "the page carries the graphics and the mode, with every placeholder filled")
+    check(media.count == 1 && page.contains("media/\(media[0])") && !page.contains(gfxFolder.path),
+          "images are copied into the page under a content name; the page names no outside path")
+    check(["graphics.js", "graphics.css", "gsap.min.js", "fonts/Virgil.woff2"].allSatisfy {
+        FileManager.default.fileExists(atPath: pageFolder.appendingPathComponent($0).path) }, "the engine files are next to the page")
+} else {
+    check(false, "the graphics engine files are found for tests (YAMVIDEO_ROOT)")
+}
+
+print("\nGraphics for agents")
+let gfxAgent = AppModel(recoveryURL: nil)
+gfxAgent.restore(VideoProject(clips: [ProjectClip(gradeOther)], settings: ExportSettings(), selection: gradeOther.id))
+var gfxImport = address(gfxAgent)
+gfxImport["method"] = "apply"; gfxImport["requestID"] = "graphics-1"; gfxImport["client"] = "Claude"; gfxImport["label"] = "Add the graphics"
+gfxImport["commands"] = [["type": "importGraphics", "clipID": gfxClip.uuidString, "path": gfxFolder.appendingPathComponent("graphics.json").path]]
+let gfxImported = await agentCall(gfxAgent, gfxImport)
+check(gfxImported["ok"] as? Bool == true && gfxAgent.items[0].graphics?.items.count == 2, "an agent imports a graphics file", "\(gfxImported)")
+let gfxState = (agentResult(await agentCall(gfxAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["graphics"] as? [String: Any]
+check((gfxState?["items"] as? [Any])?.count == 2 && (gfxState?["style"] as? [String: Any])?["look"] as? String == "mix",
+      "state shows the graphics and their style")
+let nameID = UUID(deterministicFrom: Data("name".utf8)).uuidString
+var gfxPatch = address(gfxAgent)
+gfxPatch["method"] = "apply"; gfxPatch["requestID"] = "graphics-2"; gfxPatch["client"] = "Claude"
+gfxPatch["commands"] = [["type": "updateGraphic", "clipID": gfxClip.uuidString, "graphicID": nameID,
+                         "graphic": ["start": 0.1, "props": ["title": "Yamparala Rahul"]]],
+                        ["type": "setGraphicsStyle", "clipID": gfxClip.uuidString, "graphicsStyle": ["panel": "solid"]]]
+let gfxPatched = await agentCall(gfxAgent, gfxPatch)
+let patchedName = gfxAgent.items[0].graphics?.items.first { $0.id.uuidString == nameID }
+check(gfxPatched["ok"] as? Bool == true && patchedName?.start == 0.1 && abs((patchedName?.end ?? 0) - 1.1) < 0.0001
+          && patchedName?.props["title"]?.string == "Yamparala Rahul",
+      "an update moves a graphic with its length and replaces its props", "\(gfxPatched)")
+check(gfxAgent.items[0].graphics?.style.panel == .solid && gfxAgent.items[0].graphics?.style.look == .mix && gfxAgent.items[0].graphics?.style.edge == 120,
+      "a style change touches only the keys it names")
+var gfxBad = address(gfxAgent)
+gfxBad["method"] = "apply"; gfxBad["requestID"] = "graphics-3"
+gfxBad["commands"] = [["type": "addGraphic", "clipID": gfxClip.uuidString, "graphic": ["kind": "rule", "start": 0, "end": 1,
+                       "props": ["demo": ["type": "image", "image": "/nowhere/missing.png"]]]]]
+equal(agentError(await agentCall(gfxAgent, gfxBad)), "missing_media", "an agent cannot add a graphic with a missing image")
+
+print("\nMove aside")
+let stripes = CIImage(color: .red).cropped(to: CGRect(x: 760, y: 0, width: 40, height: 720))
+    .composited(over: CIImage(color: .blue).cropped(to: CGRect(x: 0, y: 0, width: 1280, height: 720)))
+let movedFrame = moveAside(stripes, size: CGSize(width: 1280, height: 720), motion: motion, time: 1.9)
+let movedImage = CIContext().createCGImage(movedFrame, from: CGRect(x: 0, y: 0, width: 1280, height: 720))!
+let movedRed = nativePixel(movedImage, x: 780 - 320, y: 360), leftBehind = nativePixel(movedImage, x: 780, y: 360)
+check(movedRed.0 > 200 && movedRed.2 < 60 && leftBehind.0 < 120,
+      "fully aside, the picture sits a quarter of the width to the left", "\(movedRed) \(leftBehind)")
+let edgeFill = nativePixel(movedImage, x: 1270, y: 360)
+check(edgeFill.2 > 40 && edgeFill.2 < 245, "the space it leaves shows the darker, blurred copy, not black", "\(edgeFill)")
+let unmoved = CIContext().createCGImage(moveAside(stripes, size: CGSize(width: 1280, height: 720), motion: motion, time: 0.5),
+                                        from: CGRect(x: 0, y: 0, width: 1280, height: 720))!
+check(nativePixel(unmoved, x: 780, y: 360).0 > 200, "before the panel the picture is untouched")
 
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)

@@ -29,6 +29,7 @@ struct AgentRequest: Codable {
     var clip: UUID?
     var section: UUID?
     var zoom: UUID?
+    var graphic: UUID?
     var time: Double?
     /// "recording" (the default) or "movie". Movie time is never assumed.
     var timeSpace: String?
@@ -82,6 +83,18 @@ struct WireZoom: Codable, Equatable {
     var target: WirePoint
 }
 
+/// A graphic as JSON. In `updateGraphic` every field is optional and replaces only
+/// itself; `props`, when given, replaces all of the graphic's props.
+struct WireGraphic: Codable, Equatable {
+    var id: UUID?
+    var kind: String?
+    var start: Double?
+    var end: Double?
+    var props: [String: JSONValue]?
+    /// "glass" or "ink"; "" clears it back to the style's choice.
+    var look: String?
+}
+
 /// One command as JSON: a `type` plus the fields that type uses. Unused fields are
 /// ignored; missing required ones are named in the error.
 struct WireCommand: Codable, Equatable {
@@ -128,6 +141,11 @@ struct WireCommand: Codable, Equatable {
     var fadeOut: Double?
     var label: String?
     var color: String?
+    var graphicID: UUID?
+    var graphic: WireGraphic?
+    var graphics: [WireGraphic]?
+    /// Only the keys to change: accent, panel, moveVideo, edge, look.
+    var graphicsStyle: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -137,6 +155,7 @@ struct WireCommand: Codable, Equatable {
         "relinkMedia", "setInputProfile", "importTechnicalLUT", "clearTechnicalLUT", "setColorCorrection",
         "setColorAdjustments", "resetColorAdjustments", "copyColorAdjustments",
         "addBlurEffect", "updateBlurEffect", "removeBlurEffect", "addMarker", "updateMarker", "removeMarker",
+        "addGraphic", "updateGraphic", "removeGraphic", "replaceGraphics", "setGraphicsStyle", "importGraphics",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -161,6 +180,7 @@ struct AgentReceipt: Encodable {
     var dryRun: Bool
     var createdIDs: [UUID]
     var removedZooms: [UUID]
+    var removedGraphics: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -224,6 +244,7 @@ struct AgentState: Encodable {
         var color: Color?
         var blurEffects: [Effect]
         var markers: [Marker]
+        var graphics: GraphicsTrack?
     }
     /// Edited-recording seconds; `weight` follows `VideoBlurEffect.weight`.
     struct Effect: Encodable {
@@ -251,7 +272,7 @@ struct AgentState: Encodable {
     struct Selection: Encodable {
         /// `section` is the one last clicked; `sections` is everything selected, in
         /// timeline order.
-        var clip: UUID?, section: UUID?, sections: [UUID], zoom: UUID?, blurArea: UUID?, effect: UUID?, marker: UUID?
+        var clip: UUID?, section: UUID?, sections: [UUID], zoom: UUID?, blurArea: UUID?, effect: UUID?, marker: UUID?, graphic: UUID?
         var playhead: Double, movieMode: Bool, movieTime: Double
     }
     struct Busy: Encodable {
@@ -530,7 +551,8 @@ extension AppModel {
                     .init(id: $0.id, start: $0.start, end: $0.end, duration: $0.duration, amount: $0.amount, mix: $0.mix,
                           fadeIn: $0.fadeIn, fadeOut: $0.fadeOut, enabled: $0.isEnabled)
                 },
-                markers: (clip.markers ?? []).map { .init(id: $0.id, time: $0.time, label: $0.label, color: $0.color.rawValue) })
+                markers: (clip.markers ?? []).map { .init(id: $0.id, time: $0.time, label: $0.label, color: $0.color.rawValue) },
+                graphics: clip.graphics)
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -547,7 +569,7 @@ extension AppModel {
             history: .init(undo: historyStep(undoEntries.last), redo: historyStep(redoEntries.last)),
             selection: .init(clip: selection, section: selectedSegmentID,
                              sections: selectedItem.map { sectionSelection.ordered(in: $0.timeline).map(\.id) } ?? [],
-                             zoom: selectedShotID, blurArea: selectedRegionID, effect: selectedEffectID, marker: selectedMarkerID,
+                             zoom: selectedShotID, blurArea: selectedRegionID, effect: selectedEffectID, marker: selectedMarkerID, graphic: selectedGraphicID,
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             movie: .init(canvas: (document.movieSettings ?? MovieSettings()).canvas.rawValue, duration: movieOffset, clips: movieClips),
@@ -649,7 +671,7 @@ extension AppModel {
             return result.map {
                 AgentReceipt(revision: $0.revision, transactionID: $0.transactionID, changed: $0.changed,
                              dryRun: request.dryRun ?? false, createdIDs: $0.createdIDs, removedZooms: $0.removedZooms,
-                             affectedClips: $0.affectedClips)
+                             removedGraphics: $0.removedGraphics, affectedClips: $0.affectedClips)
             }
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid(error.localizedDescription)) }
@@ -687,6 +709,54 @@ extension AppModel {
                 throw EditError.invalid("Unknown marker colour \"\(name)\". Colours: \(TimelineMarker.Color.allCases.map(\.rawValue).joined(separator: ", ")).")
             }
             return color
+        }
+        func graphic(_ value: WireGraphic, keeping old: Graphic? = nil) throws -> Graphic {
+            var result = old ?? Graphic(id: value.id ?? UUID(), kind: .titleCard, start: 0, end: 0)
+            if let name = value.kind {
+                guard let kind = GraphicKind(rawValue: name) else {
+                    throw EditError.invalid("Unknown graphic kind \"\(name)\". Kinds: \(GraphicKind.allCases.map(\.rawValue).joined(separator: ", ")).")
+                }
+                result.kind = kind
+            } else if old == nil { throw EditError.invalid("A new graphic needs a kind.") }
+            if let start = value.start {
+                let length = (value.end ?? result.end) - (value.end == nil ? result.start : start)
+                result.start = try placed(start).1
+                result.end = result.start + length
+            } else if old == nil { throw EditError.invalid("A new graphic needs start and end.") }
+            if let end = value.end, value.start == nil { result.end = end }
+            if let props = value.props { result.props = props }
+            if let look = value.look {
+                switch look {
+                case "": result.look = nil
+                case "glass", "ink": result.look = GraphicsLook(rawValue: look)
+                default: throw EditError.invalid("A graphic's look is \"glass\" or \"ink\".")
+                }
+            }
+            return result
+        }
+        func checkedImages(_ graphic: Graphic) throws -> Graphic {
+            var missing: String?
+            JSONValue.object(graphic.props).visit { key, value in
+                if key == "image", let path = value.string, missing == nil, !FileManager.default.fileExists(atPath: path) {
+                    missing = path
+                }
+            }
+            if let missing { throw EditError(code: .missingMedia, message: "No image at \(missing).") }
+            return graphic
+        }
+        func mergedStyle(_ changes: [String: JSONValue], onto style: GraphicsStyle) throws -> GraphicsStyle {
+            let known: Set<String> = ["accent", "panel", "moveVideo", "edge", "look"]
+            if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
+                throw EditError.invalid("Unknown graphics style key \"\(unknown)\". Keys: accent, panel, moveVideo, edge, look.")
+            }
+            guard case .object(var merged) = try JSONValue.from(style) else { return style }
+            for (key, value) in changes { merged[key] = value }
+            do {
+                return try AgentProtocol.decoder.decode(GraphicsStyle.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+            } catch {
+                throw EditError.invalid("graphicsStyle: panel is shade or solid, look is glass, ink or mix, "
+                    + "moveVideo is true or false, edge is a number and accent is a colour like #F5C42C.")
+            }
         }
         func zoom(_ value: WireZoom) -> ZoomShot {
             ZoomShot(id: value.id ?? UUID(), start: value.start, hold: value.hold ?? 2, level: value.level ?? 2,
@@ -850,6 +920,42 @@ extension AppModel {
             return .updateMarker(clip: clipID, marker: marker)
         case "removeMarker":
             return .removeMarker(clip: try field(wire.clipID, "clipID"), marker: try field(wire.markerID, "markerID"))
+        case "addGraphic":
+            var value = try field(wire.graphic, "graphic")
+            if value.id == nil { value.id = wire.graphicID }
+            let clip = wire.timeSpace == "movie" ? try placed(try field(value.start, "graphic.start")).0
+                : try field(wire.clipID, "clipID")
+            return .addGraphic(clip: clip, graphic: try checkedImages(try graphic(value)))
+        case "updateGraphic":
+            let clipID = try field(wire.clipID, "clipID")
+            let value = try field(wire.graphic, "graphic")
+            let graphicID = try field(wire.graphicID ?? value.id, "graphicID")
+            guard let old = try record(clipID).graphics?.items.first(where: { $0.id == graphicID }) else {
+                throw EditError.notFound("No graphic \(graphicID) on recording \(clipID).")
+            }
+            return .updateGraphic(clip: clipID, graphic: try checkedImages(try graphic(value, keeping: old)))
+        case "removeGraphic":
+            return .removeGraphic(clip: try field(wire.clipID, "clipID"), graphic: try field(wire.graphicID, "graphicID"))
+        case "replaceGraphics":
+            let clipID = try field(wire.clipID, "clipID")
+            let graphics = try field(wire.graphics, "graphics").map { try checkedImages(try graphic($0)) }
+            let style = try wire.graphicsStyle.map { try mergedStyle($0, onto: try record(clipID).graphics?.style ?? GraphicsStyle()) }
+            return .replaceGraphics(clip: clipID, graphics: graphics, style: style)
+        case "setGraphicsStyle":
+            let clipID = try field(wire.clipID, "clipID")
+            let changes = try field(wire.graphicsStyle, "graphicsStyle")
+            return .setGraphicsStyle(clip: clipID, style: try mergedStyle(changes, onto: try record(clipID).graphics?.style ?? GraphicsStyle()))
+        case "importGraphics":
+            let path = (try field(wire.path, "path") as NSString).expandingTildeInPath
+            guard FileManager.default.fileExists(atPath: path) else {
+                throw EditError(code: .missingMedia, message: "No file at \(path).")
+            }
+            do {
+                let track = try GraphicsEngine.importFile(URL(fileURLWithPath: path))
+                return .replaceGraphics(clip: try field(wire.clipID, "clipID"), graphics: track.items, style: track.style)
+            } catch {
+                throw EditError.invalid("\((path as NSString).lastPathComponent) cannot be used as graphics: \(error.localizedDescription)")
+            }
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
@@ -978,6 +1084,13 @@ extension AppModel {
                     return .failure(.notFound("No marker \(id) on the selected recording."))
                 }
                 selectMarker(marker)
+            }
+            if let graphic = request.graphic {
+                guard let found = selectedItem?.graphics?.items.first(where: { $0.id == graphic }) else {
+                    return .failure(.notFound("No graphic \(graphic) on the selected recording."))
+                }
+                selectedGraphicID = graphic
+                if let item = selectedItem, item.editedDuration > 0 { setPreviewFraction(found.start / item.editedDuration) }
             }
             if let time = request.time, let item = selectedItem, item.editedDuration > 0 {
                 setPreviewFraction(time / item.editedDuration)

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="graphics.css" />
+</head>
+<body class="yg-{{MODE}}">
+<div id="stage" data-composition-id="yam-graphics" data-start="0" data-duration="{{DURATION}}" data-fps="{{FPS}}" data-width="1920" data-height="1080">
+{{MEDIA}}
+<script type="application/json" id="graphics-data">{{JSON}}</script>
+<script src="gsap.min.js"></script>
+<script src="graphics.js"></script>
+<script>
+  window.__timelines = window.__timelines || {};
+  window.__timelines["yam-graphics"] = YamGraphics.boot({{OPTIONS}});
+</script>
+</div>
+</body>
+</html>

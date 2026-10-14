@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea, effect, marker
+    case recording, section, zoom, blurArea, effect, marker, graphic
 }
 
 @MainActor
@@ -465,10 +465,11 @@ final class AppModel: ObservableObject {
     // MARK: - Zoom shots
 
     @Published var selectedShotID: ZoomShot.ID? { didSet { focusInspector(selectedShotID, .zoom) } }
+    @Published var selectedGraphicID: UUID? { didSet { focusInspector(selectedGraphicID, .graphic) } }
 
     /// Selecting something shows it in the inspector; clearing the thing shown falls
     /// back to the recording.
-    private func focusInspector(_ id: UUID?, _ kind: InspectorFocus) {
+    func focusInspector(_ id: UUID?, _ kind: InspectorFocus) {
         if id != nil {
             if inspectorFocus != kind { inspectorFocus = kind }
         } else if inspectorFocus == kind {

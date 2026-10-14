@@ -86,6 +86,14 @@ enum EditCommand: Equatable {
     /// Replaces the marker with the same ID.
     case updateMarker(clip: UUID, marker: TimelineMarker)
     case removeMarker(clip: UUID, marker: UUID)
+    case addGraphic(clip: UUID, graphic: Graphic)
+    /// Replaces the graphic with the same ID.
+    case updateGraphic(clip: UUID, graphic: Graphic)
+    case removeGraphic(clip: UUID, graphic: UUID)
+    /// Every graphic at once, and the style too when given — what an import produces.
+    case replaceGraphics(clip: UUID, graphics: [Graphic], style: GraphicsStyle?)
+    /// The look of every graphic on the recording: accent, panel, move aside, edge, look.
+    case setGraphicsStyle(clip: UUID, style: GraphicsStyle)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -126,6 +134,11 @@ enum EditCommand: Equatable {
         case .addMarker: return "Add Marker"
         case .updateMarker: return "Edit Marker"
         case .removeMarker: return "Delete Marker"
+        case .addGraphic: return "Add Graphic"
+        case .updateGraphic: return "Edit Graphic"
+        case .removeGraphic: return "Delete Graphic"
+        case .replaceGraphics: return "Edit Graphics"
+        case .setGraphicsStyle: return "Graphics Style"
         }
     }
 }
@@ -192,6 +205,8 @@ struct EditOutcome: Equatable {
     var removedZooms: [UUID] = []
     var removedEffects: [UUID] = []
     var removedMarkers: [UUID] = []
+    /// Graphics dropped for the same reason.
+    var removedGraphics: [UUID] = []
 }
 
 /// Applies a batch of commands to a project value. Pure: no UI state, no selection, no
@@ -496,6 +511,40 @@ enum ProjectReducer {
         case .resetColorAdjustments(let clip):
             try editColor(clip, in: &outcome) { color, _ in color.adjustments = .neutral }
 
+        case .addGraphic(let clip, let graphic):
+            try editGraphics(clip, in: &outcome) { track in
+                guard !track.items.contains(where: { $0.id == graphic.id }) else {
+                    throw EditError.invalid("A graphic with that ID already exists.")
+                }
+                track.items.append(graphic)
+            }
+            outcome.createdIDs.append(graphic.id)
+
+        case .updateGraphic(let clip, let graphic):
+            try editGraphics(clip, in: &outcome) { track in
+                guard let index = track.items.firstIndex(where: { $0.id == graphic.id }) else {
+                    throw EditError.notFound("No graphic with that ID on this recording.")
+                }
+                track.items[index] = graphic
+            }
+
+        case .removeGraphic(let clip, let id):
+            try editGraphics(clip, in: &outcome) { track in
+                guard track.items.contains(where: { $0.id == id }) else {
+                    throw EditError.notFound("No graphic with that ID on this recording.")
+                }
+                track.items.removeAll { $0.id == id }
+            }
+
+        case .replaceGraphics(let clip, let graphics, let style):
+            try editGraphics(clip, in: &outcome) { track in
+                track.items = graphics
+                if let style { track.style = style }
+            }
+
+        case .setGraphicsStyle(let clip, let style):
+            try editGraphics(clip, in: &outcome) { track in track.style = style }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -583,11 +632,12 @@ enum ProjectReducer {
         try body(&outcome.project.clips[index], info)
     }
 
-    /// Edits a recording's sections, then carries its zooms, blur effects and markers
-    /// across: each follows the frame it began on, and is dropped when that footage is gone.
+    /// Edits a recording's sections, then carries its zooms, blur effects, markers and
+    /// graphics across: each follows the frame it began on, and is dropped when that
+    /// footage is gone.
     private static func editTimeline(_ id: UUID, in outcome: inout EditOutcome,
                                      _ body: (inout ClipTimeline, MediaInfo) throws -> Void) throws {
-        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID]) = ([], [], [])
+        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID], graphics: [UUID]) = ([], [], [], [])
         try editClip(id, in: &outcome) { record, info in
             let old = record.timeline
             var timeline = old
@@ -604,11 +654,30 @@ enum ProjectReducer {
             let keptMarkers = timeline.remap(markers, from: old)
             removed.markers = markers.map(\.id).filter { id in !keptMarkers.contains { $0.id == id } }
             record.markers = keptMarkers.isEmpty ? nil : keptMarkers
+            if let graphics = record.graphics {
+                let remapped = timeline.remap(graphics, from: old)
+                record.graphics = remapped.track
+                removed.graphics = remapped.removed
+            }
             record.segments = timeline.segments
         }
         outcome.removedZooms += removed.zooms
         outcome.removedEffects += removed.effects
         outcome.removedMarkers += removed.markers
+        outcome.removedGraphics += removed.graphics
+    }
+
+    /// Edits one probed recording's graphics and checks the whole track against its
+    /// edited length. An empty track with the default style is stored as nothing.
+    private static func editGraphics(_ id: UUID, in outcome: inout EditOutcome,
+                                     _ body: (inout GraphicsTrack) throws -> Void) throws {
+        try editClip(id, in: &outcome) { record, _ in
+            var track = record.graphics ?? GraphicsTrack()
+            try body(&track)
+            track.items.sort { $0.start < $1.start }
+            if let problem = track.problem(duration: record.timeline.duration) { throw EditError.invalid(problem) }
+            record.graphics = track.isEmpty ? nil : track
+        }
     }
 
     /// Edits a recording's blur effects. `placing` names the block being placed, whose

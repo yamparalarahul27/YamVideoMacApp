@@ -48,6 +48,11 @@ struct InspectorPane: View {
                 BlurAreaInspector(region: region, info: info)
                 Divider()
             }
+        case .graphic:
+            if let graphic = model.selectedGraphic {
+                GraphicInspector(item: item, graphic: graphic)
+                Divider()
+            }
         case .effect:
             if let effect = model.selectedEffect {
                 EffectInspector(item: item, effect: effect)
@@ -327,6 +332,7 @@ private struct RecordingInspector: View {
             frame
             blurAreas
             zooms
+            GraphicsSection(item: item)
             subtitles
             ColorInspector(item: item, info: info)
             EffectsAndMarkersSection(item: item)

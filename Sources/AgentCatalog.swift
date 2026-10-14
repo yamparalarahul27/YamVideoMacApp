@@ -51,7 +51,7 @@ extension AgentCatalog {
         /// made-up ids, so a copied example is at least a valid command.
         func example(_ json: String) -> JSONValue {
             let ids = ["OTHER-CLIP-ID": "0", "SECOND-CLIP-ID": "2", "FIRST-CLIP-ID": "1", "CLIP-ID": "1", "SECTION-ID": "5",
-                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f"]
+                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c"]
             var text = json
             for (placeholder, digit) in ids.sorted(by: { $0.key.count > $1.key.count }) {
                 text = text.replacingOccurrences(of: placeholder, with: "00000000-0000-4000-8000-00000000000\(digit)")
@@ -172,6 +172,32 @@ extension AgentCatalog {
             #"{"type": "updateMarker", "clipID": "CLIP-ID", "markerID": "MARKER-ID", "label": "Check the audio here"}"#)
         add("removeMarker", "markers", "Remove a marker.", [clip, marker],
             #"{"type": "removeMarker", "clipID": "CLIP-ID", "markerID": "MARKER-ID"}"#)
+
+        // Graphics
+        let graphicID = field("graphicID", "uuid", "A graphic's id from state.clips[].graphics.items[].id.")
+        let kinds = GraphicKind.allCases.map(\.rawValue)
+        let graphicObject = field("graphic", "object",
+            "{kind, start, end, props, look?, id?}. kind is one of the values; namePlate, featureList, titleCard, phoneScreens, route, link and endCard sit in the right-hand column, panelTitle, rule and checklist in the side panel. start and end are edited-recording seconds; props is the template's data (see Tools/Graphics/README.md and docs/plans/graphics-track.md section 3): beat times in it (at, …At) are seconds after start, and image values are absolute paths to files that exist. look is glass or ink for this graphic alone.",
+            values: kinds)
+        let styleKeys = "Only the keys to change: accent (\"#F5C42C\"), panel (shade|solid), moveVideo (slide the picture aside while a panel shows), edge (soft edge of the shade, 0–400 px, default 170), look (glass|ink|mix; mix writes panel graphics in ink)."
+        let styleObject = field("graphicsStyle", "object", styleKeys)
+        add("addGraphic", "graphics", "Add a timed motion graphic over the recording. Two graphics in the same place (column or panel) may not overlap; a graphic shows for at least 0.5 s and ends inside the recording.",
+            [clip, graphicObject, timeSpace],
+            #"{"type": "addGraphic", "clipID": "CLIP-ID", "graphic": {"kind": "namePlate", "start": 0.3, "end": 4.3, "props": {"kicker": "Yamparala Media", "title": "Yamparala Rahul", "detail": "UX Design Engineer"}}}"#)
+        add("updateGraphic", "graphics", "Change a graphic. Give only the fields to change; moving start keeps the length; props, when given, replaces all props; look \"\" goes back to the style's choice.",
+            [clip, graphicID, field("graphic", "object", "{kind?, start?, end?, props?, look?}")],
+            #"{"type": "updateGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID", "graphic": {"start": 12.0}}"#)
+        add("removeGraphic", "graphics", "Remove a graphic.", [clip, graphicID],
+            #"{"type": "removeGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID"}"#)
+        add("replaceGraphics", "graphics", "Set every graphic on the recording at once, and the style too when given.",
+            [clip, field("graphics", "array", "Graphics as in addGraphic."), field("graphicsStyle", "object", styleKeys, required: false)],
+            #"{"type": "replaceGraphics", "clipID": "CLIP-ID", "graphics": [], "graphicsStyle": {"look": "mix"}}"#)
+        add("setGraphicsStyle", "graphics", "Change how every graphic on the recording looks.",
+            [clip, styleObject],
+            #"{"type": "setGraphicsStyle", "clipID": "CLIP-ID", "graphicsStyle": {"panel": "shade", "edge": 170}}"#)
+        add("importGraphics", "graphics", "Read a graphics.json file (the format Tools/Graphics uses) onto the recording, replacing its graphics and style. Image paths in the file are relative to it and must exist.",
+            [clip, field("path", "string", "A local graphics.json file.")],
+            #"{"type": "importGraphics", "clipID": "CLIP-ID", "path": "/Users/me/Desktop/recut/graphics.json"}"#)
 
         // Colour
         add("setInputProfile", "colour", "Say how the recording's colour was recorded. A profile the conversion does not fit removes it. HLG/PQ only for files tagged so; D-Log M never for a file tagged HDR.",

@@ -13,6 +13,7 @@ struct EditReceipt: Equatable {
     /// Blur effects and markers dropped because their footage was cut away.
     var removedEffects: [UUID] = []
     var removedMarkers: [UUID] = []
+    var removedGraphics: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -109,6 +110,7 @@ extension AppModel {
         var receipt = EditReceipt(revision: revision, transactionID: nil, changed: outcome.project != base,
                                   createdIDs: outcome.createdIDs, removedZooms: outcome.removedZooms,
                                   removedEffects: outcome.removedEffects, removedMarkers: outcome.removedMarkers,
+                                  removedGraphics: outcome.removedGraphics,
                                   affectedClips: Self.changedClips(from: base, to: outcome.project))
         guard !dryRun, receipt.changed else { return .success(receipt) }
 
@@ -208,6 +210,8 @@ extension AppModel {
             elements.formUnion((clip.blurEffects ?? []).filter { oldEffects[$0.id] != $0 }.map(\.id))
             let oldMarkers = Dictionary(uniqueKeysWithValues: (previous?.markers ?? []).map { ($0.id, $0) })
             elements.formUnion((clip.markers ?? []).filter { oldMarkers[$0.id] != $0 }.map(\.id))
+            let oldGraphics = Dictionary(uniqueKeysWithValues: (previous?.graphics?.items ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.graphics?.items ?? []).filter { oldGraphics[$0.id] != $0 }.map(\.id))
         }
         let highlight = AgentHighlight(origin: origin.label, label: label, clips: clips, elements: elements)
         agentHighlight = highlight
@@ -422,6 +426,7 @@ extension AppModel {
         let sections = sectionSelection.keeping(selectedItem?.timeline)
         if sections != sectionSelection { sectionSelection = sections }
         if let id = selectedShotID, selectedItem?.zoomShots.contains(where: { $0.id == id }) != true { selectedShotID = nil }
+        if let id = selectedGraphicID, selectedItem?.graphics?.items.contains(where: { $0.id == id }) != true { selectedGraphicID = nil }
         if let id = selectedRegionID, selectedItem?.blurRegions.contains(where: { $0.id == id }) != true { selectedRegionID = nil }
         if let id = selectedEffectID, selectedItem?.blurEffects.contains(where: { $0.id == id }) != true { selectedEffectID = nil }
         if let id = selectedMarkerID, selectedItem?.markers.contains(where: { $0.id == id }) != true { selectedMarkerID = nil }

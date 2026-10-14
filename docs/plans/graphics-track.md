@@ -1,0 +1,268 @@
+# Graphics track — implementation plan
+
+**Updated:** 2026-10-14. **Status:** G0 (the template engine) and G1 part 1 (graphics in
+the app: data, commands, preview, timeline, inspector) are implemented; see sections 8
+and 9. G1 part 2 (export with graphics from the app) is next. Phase 5 of
+[local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
+**Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
+layers"). This plan is the layer design that section asks for, limited to graphic overlays.
+
+## 1. Goal
+
+The owner makes YouTube talking-head videos. A first video went through this flow:
+cut in YamVideo, then 12 motion graphics (name plate, gear list, phone with app screens,
+route, link, three rule panels, flow diagram, recap, end card) made outside the app with
+HyperFrames and rendered over the app's export.
+
+The owner wants those graphics **in the app**: see them when Play runs, select one,
+change its text, timing, images and style, and export from the app. Example request:
+"the side panel must come in as an overlay with a shade, not as a solid block".
+
+Not in scope: free-form drawing, arbitrary HTML from users or agents, audio in graphics,
+vertical (9:16) layouts (phase G3), and graphics in Movie mode (phase G3).
+
+## 2. Decisions
+
+1. **One HTML engine for preview and export.** Graphics are data. A fixed template engine
+   (HTML, CSS, GSAP) in the app bundle draws them. A transparent `WKWebView` over the
+   player shows them at the playhead; HyperFrames renders the same page for export. One
+   engine means preview and export cannot drift, the same rule the blur and colour paths
+   follow.
+2. **HyperFrames, not Remotion, for this layer.** Section 7 of the parent plan names
+   Remotion. HyperFrames fits better here:
+   - The same page runs in `WKWebView` with no bundler.
+   - It renders frame-exact and seekable output, including PNG sequences with alpha.
+   - The first video already uses it.
+
+   The rule from section 7 stays: there is no arbitrary JavaScript and no shell through the
+   editing protocol. Agents send typed props for fixed template kinds.
+3. **Graphics are per recording,** like zooms. Times are **edited-recording seconds**, like
+   zoom `start`. A cut remaps them the same way `ClipTimeline.remap` remaps zooms.
+4. **The video move is native.** The "move aside" effect slides the picture left while a
+   side panel shows. It is a timed transform of the video, so it belongs to the app's
+   renderers (Core Image in preview, an `overlay` x-expression in FFmpeg), like zooms. The
+   HTML engine draws only graphics and the panel tint, never the video.
+   The **frosted shade** (blur under the panel) is native too. A web blur cannot see the
+   native video under the `WKWebView`, and an overlay rendered on its own has nothing
+   under it to blur. So the app blurs the panel region with its blur engine, as a timed
+   region that follows the panel slide, and the HTML adds only the tint. This uses the
+   whole-frame blur work of phase 5. In `full` mode (outside the app) the engine uses CSS
+   `backdrop-filter` for the same look.
+   The **blurred fill** is native too. Moving the video left by 480 px leaves the right
+   480 px empty. A larger (×1.3), blurred, darker copy of the same frame fills it, and the
+   moved video's right edge fades into the copy over 220 px. Without it the far side is
+   black, which the first renders showed under the frosted panel.
+5. **Export composites per graphic.** Each graphic, and each panel span, renders on its own
+   to a transparent clip of its own length. FFmpeg overlays each clip at its time. A change
+   to one graphic re-renders only that graphic (cache key: template version + props +
+   asset hashes + size + fps).
+
+## 2a. Two kinds of ink
+
+The owner likes the **ink** look (handwriting and drawn marks over a soft haze, as in
+"writing over a talking head"). It can come from two sources, and both share the same
+layout: the move aside, the blurred fill, the haze and the writing area.
+
+1. **Template ink** (no hand work): the engine's `ink` look draws the same graphic kinds as
+   handwriting and stroke-by-stroke marks. An agent or the owner fills in the props.
+2. **Hand-drawn ink, no AI needed:** the owner draws on the black canvas of the YamDraw
+   iPad app, which records the screen. YamVideo imports the recording as an **ink clip**:
+   - **Key:** a `screen` blend (Core Image `CIScreenBlendMode` in preview, FFmpeg
+     `blend=all_mode=screen` on a canvas-sized pad in export) makes black transparent and
+     keeps white and coloured ink.
+   - **Fields:** `source` path, `crop` (remove iPad edges; suggest it from the area where
+     ink appears), `rect` (placement in the writing area), `sourceIn`/`sourceOut`,
+     `start` (edited seconds), `speed` (0.25–8, to shorten slow drawing), `holdUntil`
+     (keep the last frame), `fadeOut`.
+   - It is native, so it needs no Node, HyperFrames or network. It is a timeline block and an
+     inspector section like the other graphics. Agents can only help with timing.
+   - Later: YamDraw exports strokes as data (points, times, colour), and the engine replays
+     them as ink. Then each stroke can be recoloured, moved or retimed.
+
+## 3. Data model
+
+```
+ProjectClip.graphics: GraphicsTrack?          // nil = no graphics (old projects)
+
+GraphicsTrack
+  style: GraphicsStyle
+  items: [Graphic]                            // sorted by start, may overlap only across zones
+
+GraphicsStyle
+  accent: String         // "#F5C42C"
+  panel: shade | solid   // shade = see-through gradient over the video (default)
+  moveVideo: Bool        // slide the picture to the left half while a panel shows (default true)
+  edge: Double           // soft edge of the shade next to the speaker, design px (default 170);
+                         // the tint and the native blur both fade in over this width
+  look: glass | ink | mix  // mix (owner's choice): panel kinds in ink, column kinds as glass cards
+
+Graphic
+  id: UUID
+  kind: GraphicKind
+  start: Double          // edited-recording seconds
+  end: Double
+  props: GraphicProps    // typed per kind, see below; beat times are seconds after `start`
+  look: glass | ink ?    // overrides the style for this graphic
+```
+
+**Zones.** Each kind has a zone. **Column** kinds sit in the right third (x 1240–1860 on
+a 1920×1080 design canvas, from the top). **Panel** kinds fill the side panel. Two column
+graphics must not overlap in time. Two panel graphics must not overlap either. Panel
+graphics closer than 1.0 s share one panel, so the shade does not flash between them.
+
+**Kinds (template version 1).** These come from the first video:
+
+| Kind | Zone | Props (beats in seconds after start) |
+|---|---|---|
+| `namePlate` | column | kicker, title, detail |
+| `featureList` | column | kicker; items [{title, detail, icon, image?, at}] (a transparent product photo replaces the icon); stat? {label, from, to, suffix, at} |
+| `titleCard` | column | kicker, title, detail; badges [text], badgesAt |
+| `phoneScreens` | column | kicker, title, detail; screens [{image, at}] |
+| `route` | column | kicker, from, to, drawAt; question?, questionAt; chips [{text, at}] |
+| `link` | column | kicker, url, typeAt |
+| `panelTitle` | panel | kicker, title, count (numbered badges), countAt |
+| `rule` | panel | kicker, number, title, subtitle?; points [{text, at}]; demo? (below) |
+| `checklist` | panel | kicker, title, footer; items [{text, at}] |
+| `endCard` | column | kicker, title, detail, button |
+
+`rule.demo` is one of: `image` {image, flag? {text, box {x, y, w, h} in image fractions,
+at}}, `account` {rows [text], button, toast, tapAt, clearAt}, `flow` {nodes [{text, at}],
+note? {text, at}, stamp? {text, at}, sweepAt}, `accessibility` {tilesAt, growAt,
+contrastAt, tip {text, at}, chips [{text, at}], sample, breakAt, fixAt}.
+
+`icon` is one name from a fixed set: camera, mic, app, link, check, none. Images are file
+paths, with the same relink rule as source media; a missing image draws a grey frame and
+the export refuses with `missing_media`.
+
+## 4. The template engine
+
+New folder `Resources/Graphics/`, copied into the bundle by `build.sh`:
+
+- `graphics.js` — builds every graphic from one JSON object, then one paused GSAP
+  timeline. It is synchronous and deterministic, has no timers and no network. It exposes
+  `YamGraphics.load(json, {mode})`, `seek(seconds)` and `spans()`.
+- `graphics.css` — tokens (`--accent`, panel shade) and the shared parts (glass card,
+  kicker, phone frame, number, point, chip).
+- `gsap.min.js`, `fonts/Inter-400/700.woff2` — pinned copies.
+- `page.html` — the page shell. Modes: `preview` (all graphics, transparent page, seeked
+  by the app), `unit` (one graphic or panel span, local time from 0, for export), `full`
+  (graphics plus a `<video>` and `<audio>` root child, for HyperFrames full renders and for
+  checks outside the app).
+
+Motion vocabulary, the same for every kind: column graphics slide in 56 px from the right
+(0.6 s, power3.out) and leave 36 px to the right (0.4 s). Contents rise 20 px (0.5 s).
+Marks pop (back.out) or draw (stroke). The panel shade slides in 160 px and fades (0.8 s).
+The video move uses smoothstep, `p² (3 − 2p)` over 0.8 s, in all three places (GSAP
+custom ease, Core Image, FFmpeg expression) so that they agree to the frame.
+
+## 5. App changes (phase G1)
+
+| Area | Files | Change |
+|---|---|---|
+| Model and schema | `Models.swift`, `Timeline.swift` | `Graphic`, `GraphicsTrack`, `GraphicsStyle`, typed props. `graphics` is optional in `ProjectClip`. Schema version 6 (phase 5 took 5), with a gate that refuses graphics in older versions. Remap through cuts beside zooms; report `removedGraphics`. |
+| Commands | `EditCommands.swift`, `ProjectCommandDispatcher.swift` | `addGraphic`, `updateGraphic` (patch), `removeGraphic`, `replaceGraphics`, `setGraphicsStyle`. Validate per kind: times in range, beats inside the graphic, no overlap in a zone, text length limits, known icons, image paths exist. Undo labels such as "Edit Graphic Text". |
+| Agents | `AgentRequests.swift`, `Tools/YamVideoCLI`, `Tools/AgentBridge` | Wire types, `state` shows `graphics`, `reveal --graphic`, the activity highlight diff. |
+| Preview | `Playback.swift`, new `GraphicsOverlay.swift` | `WKWebView` (transparent, no input) over `PlayerSurface`, fitted to `AVPlayerView.videoBounds`. The app calls `seek(previewTime)` on every playhead change and at 30 Hz while playing. Edits call `load` with new JSON. The move-aside transform goes into `renderFrame`. |
+| Timeline | `TimelineView.swift` | A Graphics lane: one block per graphic, with column and panel blocks in two tones. Click selects; drag moves; edge drag changes the length. Snaps like zoom blocks. |
+| Inspector | `InspectorView.swift` | Graphic section: kind, start, length, text fields, items with "appear after" times, image pickers, Delete, Show It. Recording section: Style (Panel: Shade / Solid; Move video aside; Accent). |
+| Export | `FFmpeg.swift`, `Movie.swift`, new `GraphicsRender.swift` | Find `node` and `npx` like `ffmpeg`, with an explicit `PATH`. Render each changed unit to a cached PNG sequence with `hyperframes render --format png-sequence`, pinned version. Add each unit as an input with `-itsoffset`, `overlay=eof_action=pass` after zoom and scale, and before subtitles. Input indexes shift after the GIF palette. The move-aside effect is a time-based `overlay` x on a black canvas. Progress: graphics 0–40 %, encode 40–100 %. |
+| Build and tests | `build.sh`, `test.sh`, `Tests/main.swift` | Copy `Resources/Graphics`. Add the new logic files to `test.sh`. |
+
+When `node` is missing, preview still works (it needs only WebKit). Export then says "Graphics
+need Node.js to export" and offers to export without them.
+
+## 6. Phases
+
+- **G0 — template engine (now, new files only).** `Resources/Graphics/` engine with the 10
+  kinds; `Tools/Graphics/assemble.mjs` writes a `full` or `unit` page from a JSON file;
+  the first video's 12 graphics as JSON; a full render with shade B to prove parity with
+  the hand-built version. No Swift changes, so no clash with phase 5.
+- **G1 — in the app (after phase 5 merges).** Section 5. Load the first video's JSON
+  into its project with `replaceGraphics`.
+- **G2 — authoring, templates and the skill.**
+  - "Add Graphic" menu with defaults per kind; duplicate; copy the project's images into a
+    `<project>.assets` folder.
+  - **Looks:** a saved `GraphicsStyle` (accent, panel, move video) that a new recording
+    gets by default.
+  - **Video templates:** a saved set of graphics with placeholder text, for a format that
+    repeats (name plate, numbered rule panels, recap, end card). "Apply Template" adds them
+    to a recording. Agents fill in the text and the times from the transcript.
+  - **A Claude skill** in `.claude/skills/youtube-edit/`: transcribe, cut with the owner's
+    saved choices (see the Auto edit options plan), plan graphics from the transcript, add
+    them with `replaceGraphics`, export, and write the title, description and chapters. It
+    uses only `yamvideoctl` commands, so every step lands in the app as an undo step.
+- **G3 — more.** 9:16 layouts for Shorts; graphics in Movie mode; caption styles.
+
+## 7. Acceptance gates
+
+- **Frame match:** for each kind, a G0 `full` render matches the hand-built composition
+  of the first video at its hero frame.
+- **Seek is deterministic:** in `preview` mode, the same time gives the same DOM state,
+  in any seek order.
+- **Remap:** a cut before a graphic moves it; a cut through its start removes it and
+  reports it.
+- **Move aside:** the Core Image and FFmpeg versions agree within 2 px at five sample
+  times of the move.
+- **Export:** marker pixels from a test graphic land in the expected box. An unchanged
+  graphic is not rendered again. Cancel deletes partial output.
+- **Agents:** an agent edit to one graphic is one undo step, refused on a stale revision,
+  and shown in the activity feed.
+- **Real use:** load the first video, change the panel to Solid and back, move one
+  graphic, edit one text, export, and compare with the G0 render.
+
+## 8. G0 status (2026-10-14)
+
+- `Resources/Graphics/`: `graphics.js` (10 kinds, 4 rule demos, `plan`, `load`, `seek`),
+  `graphics.css`, `page.html`, pinned GSAP 3.15.0 and Inter 400/700.
+- `Tools/Graphics/assemble.mjs` writes `full` and `unit` pages; `--units` lists the units.
+- The first video's 13 graphics as JSON (outside the repo, next to the footage) render
+  through the engine. Snapshots at 13 hero times match the hand-built composition, with
+  the shade-B panel. HyperFrames lint: 0 errors, 0 warnings.
+- A `unit` page renders one graphic with alpha and its own time from 0 (checked over a
+  magenta background), which is the export form for G1.
+- Changes from the hand-built version: the tap ring of the account demo no longer shows
+  before the tap; the panel shade gained a frost (`backdrop-filter`, `full` mode only).
+- Owner feedback on the first render: the shade was too dark next to the speaker. The
+  shade and the frost now fade in over `style.edge` (default 170 px), and the panel
+  content moves right by `edge − 108` px to stay on the dark part.
+- **Ink look** (owner's request, from a "writing over a talking head" reference frame):
+  `style.look` is `glass`, `ink` or `mix`. Ink is done for `panelTitle`, `rule` (all four
+  demos) and `checklist`: Virgil handwriting revealed left to right, marks drawn stroke by
+  stroke with a seeded wobble, a taped photo for images, and a wide haze (`.yg-veil`) in
+  place of the panel. Column kinds have no ink version yet and stay glass.
+- `full` mode adds the blurred fill: a second `<video id="bg-fill">` under the main one. A
+  960×540 copy (`--fill`) is enough because it is blurred, and it avoids the renderer's
+  duplicate-media warning and a slow second 1080p decode.
+- `featureList` items take an `image`: a product photo cut out with Apple Vision
+  (`VNGenerateForegroundInstanceMaskRequest`, the "Copy Subject" engine). G2 can offer
+  this cut-out in the app when an image is added.
+- `preview` mode works in a browser: out-of-order seeks show the right graphic, and the
+  count-up goes both ways. It is not yet tested inside `WKWebView`.
+- Not done: automated tests for the engine (G1 adds a Node check that seeks out of order
+  and compares DOM state).
+
+## 9. G1 part 1 status (2026-10-14)
+
+- **Data and schema:** `Sources/Graphics.swift` has `Graphic`, `GraphicsTrack`,
+  `GraphicsStyle`, panel spans, the move curve and the engine's files and page writer.
+  Props stay `JSONValue`, so a new template field needs no schema change. Project
+  version 6 stores `graphics` per recording.
+- **Commands:** `addGraphic`, `updateGraphic`, `removeGraphic`, `replaceGraphics` (with an
+  optional style) and `setGraphicsStyle`, plus `importGraphics` for agents. Cuts remap
+  graphics like zooms and report `removedGraphics`. The command catalog describes all six.
+- **Preview:** `GraphicsOverlay.swift` loads the engine page in a transparent `WKWebView`
+  over the player and seeks it to the playhead. `moveAside` in `Playback.swift` does the
+  move, the blurred fill and the frost in Core Image. A graphics-only edit does not
+  reload the video; a change to the move swaps only the video composition.
+- **Timeline and inspector:** a Graphics lane under Effects (column row, panel row; drag to
+  move, drag the right edge to change the length). The inspector edits the selected
+  graphic's times, look, text, numbers and images from its data, and the recording's
+  style, and imports a graphics file.
+- **Tests:** 44 checks, including Swift and JavaScript agreeing on panel spans, cut remap,
+  version gates, import, the page, agents, and move-aside pixels. Suite: 900/900.
+- **Real use:** the first video's 13 graphics imported into its project with one agent
+  command (one undo step) and saved as version 6.
+- **Known:** graphics show in **Preview**, not in Edit frame. Each rebuild of the ad-hoc
+  signed app can make macOS ask again for Desktop access; the first image read waits on it.
+- **Next (part 2):** export. Render each unit to a cached PNG sequence with HyperFrames,
+  overlay in ffmpeg, and port `moveAside` to an ffmpeg graph with a parity test.

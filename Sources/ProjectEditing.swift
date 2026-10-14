@@ -187,7 +187,7 @@ extension AppModel {
         movieSettings = snapshot.movieSettings ?? MovieSettings()
         movieTime = 0; movieOutput = nil
         selection = items.contains(where: { $0.id == snapshot.selection }) ? snapshot.selection : items.first?.id
-        selectedSegmentID = nil; selectedShotID = nil; selectedRegionID = nil
+        selectedSegmentID = nil; selectedShotID = nil; selectedRegionID = nil; selectedGraphicID = nil
         refreshPreview()
         for item in items where item.info == nil { retry(item.id) }
     }
@@ -368,7 +368,7 @@ extension AppModel {
             guard receipt.changed else { return false }
             sectionSelection = select(receipt)
             let removed = [(receipt.removedZooms.count, "zoom"), (receipt.removedEffects.count, "blur effect"),
-                           (receipt.removedMarkers.count, "marker")]
+                           (receipt.removedMarkers.count, "marker"), (receipt.removedGraphics.count, "graphic")]
                 .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
             statusMessage = removed.isEmpty ? name
                 : "\(name). Removed \(removed.joined(separator: ", ")) whose footage or space was cut; Undo restores them."

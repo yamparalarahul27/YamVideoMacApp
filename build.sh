@@ -33,6 +33,8 @@ xcrun swiftc \
 codesign --force --sign - --timestamp=none "$BUILD/yamvideoctl" >/dev/null 2>&1 || true
 
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+# The graphics engine: the preview loads it in a web view, the export renders with it.
+cp -R "$ROOT/Resources/Graphics" "$APP/Contents/Resources/Graphics"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 echo "==> Generating app icon"

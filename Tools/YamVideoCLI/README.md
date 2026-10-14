@@ -91,6 +91,12 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `removeBlurEffect` | `clipID`, `effectID` |
 | `addMarker` | `clipID`, `time`, `label`?, `color`? (red, orange, yellow, green, blue, purple), `markerID`? |
 | `updateMarker` / `removeMarker` | `clipID`, `markerID`, and for update any of `time`, `label`, `color` |
+| `addGraphic` | `clipID`, `graphic`: `{kind, start, end, props, look?, id?}` |
+| `updateGraphic` | `clipID`, `graphicID`, `graphic`: only the fields to change (`start` keeps the length; `props` replaces all props) |
+| `removeGraphic` | `clipID`, `graphicID` |
+| `replaceGraphics` | `clipID`, `graphics`, `graphicsStyle`? |
+| `setGraphicsStyle` | `clipID`, `graphicsStyle`: any of `accent`, `panel` (shade, solid), `moveVideo`, `edge` (0–400), `look` (glass, ink, mix) |
+| `importGraphics` | `clipID`, `path` of a graphics.json (the format `Tools/Graphics` uses) |
 
 `yamvideoctl catalog` prints all of this from the app itself, with each field's type,
 unit, range and default and an example per command. Effect starts and marker times
@@ -110,7 +116,7 @@ section's ID and reports the new right one in `createdIDs`.
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |
 | `save [--path FILE]` | Saves without a dialog: in place, to a first location, or — to a different path — as a copy with its own identity. |
-| `reveal --clip/--section/--zoom/--time` | Moves your view, only when asked; edits never do. |
+| `reveal --clip/--section/--zoom/--effect/--marker/--graphic/--time` | Moves your view, only when asked; edits never do. |
 
 ## Errors
 

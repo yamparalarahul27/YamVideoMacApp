@@ -190,6 +190,8 @@ struct VideoItem: Identifiable {
     var subtitles: URL?
     /// How the recording's colour is read and adjusted.
     var color = ClipColorSettings()
+    /// Timed motion graphics over the recording. Nil until one is added.
+    var graphics: GraphicsTrack?
     /// Whole-frame blurs, sorted and non-overlapping, in edited-recording seconds.
     var blurEffects: [VideoBlurEffect] = []
     /// Named points on the edited timeline, sorted by time.
