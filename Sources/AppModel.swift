@@ -68,6 +68,8 @@ final class AppModel: ObservableObject {
     var agentJobTasks: [UUID: Task<Void, Never>] = [:]
     /// Fingerprint of the named project file as last opened or saved.
     var savedFingerprint: Data?
+    /// Where this instance writes preview frames for agents; one folder per running app.
+    var agentArtifactsDirectory = AppModel.artifactsDirectory.appendingPathComponent("default", isDirectory: true)
     var autosaveTask: Task<Void, Never>?
     var savedProject: VideoProject?
     /// The open document's persistent identity; see `VideoProject.projectID`.

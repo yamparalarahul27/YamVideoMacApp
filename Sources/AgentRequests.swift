@@ -800,7 +800,12 @@ extension AppModel {
     // MARK: Previews and jobs
 
     nonisolated static var artifactsDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        // An instance with its own bridge directory keeps its previews there too, so its
+        // cleanup can never touch another instance's.
+        if let override = ProcessInfo.processInfo.environment["YAMVIDEO_AGENT_BRIDGE_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true).appendingPathComponent("Artifacts", isDirectory: true)
+        }
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("YamVideo", isDirectory: true).appendingPathComponent("AgentArtifacts", isDirectory: true)
     }
 
@@ -846,7 +851,7 @@ extension AppModel {
             guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
                 throw EditError.invalid("The frame could not be encoded.")
             }
-            let directory = Self.artifactsDirectory
+            let directory = agentArtifactsDirectory
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             let file = directory.appendingPathComponent(
