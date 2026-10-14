@@ -1255,6 +1255,21 @@ if let before = try await integratedLoudness(loudSource),
     check(false, "could measure the loudness either side of the export")
 }
 
+// Cut audio leaves -filter_complex, and ffmpeg refuses an -af on such a stream.
+let loudCuts = [TimelineSegment(start: 0, end: 2), TimelineSegment(start: 3, end: 6)]
+let loudCutCommand = FFmpeg.exportCommands(input: loudSource, output: loudOut, info: loudSourceInfo,
+                                           crop: loudSourceInfo.fullFrame, segments: loudCuts,
+                                           settings: loud).last!
+check(!loudCutCommand.contains("-af"), "a cut, normalised export puts loudnorm in the filter graph")
+check(loudCutCommand.contains("[normala]"), "a cut, normalised export maps the normalised audio")
+let loudCutOut = scratch.appendingPathComponent("loud-cut.mp4")
+try await FFmpeg.export(input: loudSource, output: loudCutOut, info: loudSourceInfo,
+                        crop: loudSourceInfo.fullFrame, segments: loudCuts, settings: loud) { _ in }
+let loudCutInfo = try await FFmpeg.probe(url: loudCutOut)
+equal(loudCutInfo.audioCodec, "aac", "a cut, normalised export carries an AAC track")
+check(abs(loudCutInfo.duration - 5) < 0.25, "a cut, normalised export keeps the edited duration",
+      "\(loudCutInfo.duration)")
+
 // MARK: - Subtitles
 
 print("\nSubtitles")
@@ -2653,6 +2668,13 @@ let silentFirstPlan = try MoviePlan(items: [combinedClip, nativeClip], movieSett
 let silentFirstMovie = scratch.appendingPathComponent("silent-first.mp4")
 try await FFmpeg.exportMovie(plan: silentFirstPlan, settings: firstSilentSettings, output: silentFirstMovie) { _ in }
 equal(try await FFmpeg.probe(url: silentFirstMovie).audioCodec, "aac", "audio survives when the first recording is silent and Copy is selected")
+var movieLoudSettings = ExportSettings(); movieLoudSettings.audio = .normalised
+let movieLoudArguments = FFmpeg.movieArguments(plan: moviePlan, settings: movieLoudSettings, output: movieFile)
+check(!movieLoudArguments.contains("-af"), "a normalised movie puts loudnorm in the filter graph")
+check(movieLoudArguments.contains("[normalsound]"), "a normalised movie maps the normalised sound")
+let movieLoud = scratch.appendingPathComponent("movie-normalised.mp4")
+try await FFmpeg.exportMovie(plan: moviePlan, settings: movieLoudSettings, output: movieLoud) { _ in }
+equal(try await FFmpeg.probe(url: movieLoud).audioCodec, "aac", "a normalised movie exports with an AAC track")
 
 if let rotated {
     var portraitClip = VideoItem(url: rotated)

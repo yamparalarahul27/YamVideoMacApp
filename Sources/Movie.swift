@@ -146,6 +146,17 @@ extension FFmpeg {
                 if let an = options.firstIndex(of: "-an") { options.remove(at: an) }
                 if !options.contains("-c:a") { options += ["-c:a", "aac", "-b:a", "192k"] }
             }
+            // [sound] leaves the complex graph, and ffmpeg refuses -af on such a stream,
+            // so the template's loudness filter moves into the graph.
+            if let af = options.firstIndex(of: "-af") {
+                let filter = options[af + 1]
+                options.removeSubrange(af...af + 1)
+                if withAudio, let graph = arguments.firstIndex(of: "-filter_complex"),
+                   let map = arguments.lastIndex(of: "[sound]") {
+                    arguments[graph + 1] += ";[sound]\(filter)[normalsound]"
+                    arguments[map] = "[normalsound]"
+                }
+            }
             arguments += options
         }
         if palettePass { arguments += ["-progress", "pipe:1", "-nostats"] }
