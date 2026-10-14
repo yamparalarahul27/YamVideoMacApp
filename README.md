@@ -365,6 +365,8 @@ Tools/makeicon.swift  draws the app icon at build time
 Tools/YamVideoCLI/    yamvideoctl, its guide and the two-client demo
 Tools/AgentBridge/    MCP server for Claude Code and Codex, with setup and a smoke test
 Tools/Snapshot/       renders the real window offscreen to PNGs for layout checks
+Tools/Graphics/       writes HyperFrames pages from graphics JSON (graphics track, phase G0)
+Resources/Graphics/   graphics engine: kinds, glass and ink looks, pinned GSAP and fonts
 ```
 
 ## Implementation plans
@@ -377,3 +379,9 @@ the earlier [timeline navigation](docs/plans/timeline-navigation.md) and
 shared-command phases (project identity, one edit path with revisions and gestures, the
 local socket and `yamvideoctl`) are implemented; the remaining phases describe planned
 work, not features available in this build.
+
+The [graphics track plan](docs/plans/graphics-track.md) is the layer design that the
+co-editing plan asks for: timed motion graphics over a recording, in a glass-card look or
+an ink look (handwriting over a soft haze), plus ink clips drawn on an iPad. Its first
+phase, the template engine in `Resources/Graphics/` with `Tools/Graphics/assemble.mjs`,
+runs outside the app today; the app phases wait for co-editing phase 5.
