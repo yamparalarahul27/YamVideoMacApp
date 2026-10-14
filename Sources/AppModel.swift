@@ -25,6 +25,32 @@ final class AppModel: ObservableObject {
     @Published var editorMode: EditorMode = .crop
     @Published var selectedRegionID: BlurRegion.ID?
 
+    let playback = PlaybackController()
+    @Published var showPlayback = false
+    @Published var isMovieMode = false
+    @Published var movieSettings = MovieSettings()
+    @Published var movieTime = 0.0
+    @Published var movieProgress: Double?
+    @Published var movieOutput: URL?
+    @Published var isAnalyzingZooms = false
+    @Published var showingZoomSuggestions = false
+    @Published var zoomSuggestions: [ZoomSuggestion] = []
+    var zoomAnalysisTask: Task<Void, Never>?
+    var movieExportTask: Task<Void, Never>?
+    @Published var selectedSegmentID: UUID?
+    /// The slice of the edited timeline on screen. It lives here rather than in the
+    /// timeline view so the zoom menu commands can reach it and so it survives the view
+    /// being rebuilt; `syncViewport` keeps its length matching the selected clip.
+    @Published var viewport = TimelineViewport(total: 0)
+    @Published var projectURL: URL?
+    @Published var hasUnsavedChanges = false
+    @Published var undoEntries: [EditHistory] = []
+    @Published var redoEntries: [EditHistory] = []
+    var lastEditKey: String?
+    var lastEditTime = Date.distantPast
+    var autosaveTask: Task<Void, Never>?
+    var savedProject: VideoProject?
+
     private var previewTask: Task<Void, Never>?
     private var conversionTask: Task<Void, Never>?
     private var thumbnailCache: [String: NSImage] = [:]
@@ -37,8 +63,19 @@ final class AppModel: ObservableObject {
         "mov", "mp4", "m4v", "avi", "mkv", "webm", "mpg", "mpeg", "wmv", "flv", "mts", "m2ts", "3gp", "hevc",
     ]
 
-    init() {
+    let sessionRecoveryURL: URL?
+
+    init(recoveryURL: URL? = AppModel.recoveryURL) {
+        sessionRecoveryURL = recoveryURL
         refreshCapabilities()
+        playback.onTime = { [weak self] seconds in
+            guard let self else { return }
+            if self.isMovieMode { self.movieTime = seconds; return }
+            guard let index = self.selectedIndex else { return }
+            let duration = self.items[index].editedDuration
+            if duration > 0 { self.items[index].previewFraction = min(1, seconds / duration) }
+        }
+        recoverSession()
     }
 
     /// Asks ffmpeg what it was built with, so the format picker can say up front that a
@@ -65,6 +102,11 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 if newValue == nil, !self.items.isEmpty { return }
                 guard newValue != self.selection else { return }
+                self.cancelZoomAnalysis()
+                self.playback.clear()
+                self.showPlayback = false
+                self.isMovieMode = false
+                self.selectedSegmentID = nil
                 self.selection = newValue
                 self.refreshPreview()
             }
@@ -77,7 +119,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private var selectedIndex: Int? {
+    var selectedIndex: Int? {
         guard let selection else { return nil }
         return items.firstIndex { $0.id == selection }
     }
@@ -90,6 +132,7 @@ final class AppModel: ObservableObject {
             .filter { url in !items.contains { $0.url.path == url.path } }
         guard !fresh.isEmpty else { return }
 
+        beginEdit("Add Videos", invalidatesExport: false)
         let newItems = fresh.map { VideoItem(url: $0) }
         items.append(contentsOf: newItems)
         ensureSelection()
@@ -98,6 +141,10 @@ final class AppModel: ObservableObject {
 
     /// Accepts a drop, expanding any folders one level deep.
     func addDropped(_ urls: [URL]) {
+        if let project = urls.first(where: { $0.pathExtension.lowercased() == "yamvideo" }) {
+            openProject(at: project)
+            return
+        }
         var expanded: [URL] = []
         for url in urls {
             var isDirectory: ObjCBool = false
@@ -115,6 +162,8 @@ final class AppModel: ObservableObject {
     func remove(_ id: VideoItem.ID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         if items[index].status.isBusy, isConverting { return }
+        beginEdit("Remove Video", invalidatesExport: false)
+        playback.clear()
         items.remove(at: index)
         if selection == id {
             selection = items.indices.contains(index) ? items[index].id : items.last?.id
@@ -123,6 +172,8 @@ final class AppModel: ObservableObject {
     }
 
     func clearFinished() {
+        guard items.contains(where: { if case .done = $0.status { return true }; return false }) else { return }
+        beginEdit("Clear Finished", invalidatesExport: false)
         items.removeAll { if case .done = $0.status { return true } else { return false } }
         if let selection, !items.contains(where: { $0.id == selection }) {
             self.selection = items.first?.id
@@ -140,10 +191,11 @@ final class AppModel: ObservableObject {
                 let info = try await FFmpeg.probe(url: url)
                 guard let index = items.firstIndex(where: { $0.id == id }) else { return }
                 items[index].info = info
-                items[index].crop = info.fullFrame
+                items[index].crop = items[index].crop?.evenClamped(in: info.fullFrame) ?? info.fullFrame
                 items[index].subtitles = Self.siblingSubtitles(for: url)
                 items[index].status = .ready
                 ensureSelection()
+                scheduleAutosave()
                 if selection == id { refreshPreview() }
             } catch {
                 guard let index = items.firstIndex(where: { $0.id == id }) else { return }
@@ -197,7 +249,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let seconds = (info.duration > 0 ? info.duration : 0) * item.previewFraction
+        let seconds = item.timeline.location(at: item.editedDuration * item.previewFraction)?.source ?? 0
         // The blur is baked into the preview, so it has to take part in the cache key.
         let regions = item.blurRegions.map { $0.rect }
         let blurKey = regions.isEmpty
@@ -211,7 +263,7 @@ final class AppModel: ObservableObject {
         let subtitles = item.subtitles
         let subtitleStyle = settings.subtitleForceStyle
         let subtitleKey = subtitles.map { "\($0.path)-\(subtitleStyle)" } ?? "none"
-        let key = "\(item.id)-\(Int(seconds * 4))-\(blurKey)-\(toneMap)-\(subtitleKey)"
+        let key = "\(item.id)-\(Int((seconds * max(1, info.fps)).rounded()))-\(blurKey)-\(toneMap)-\(subtitleKey)"
         if let cached = thumbnailCache[key] {
             previewImage = cached
             previewIsLoading = false
@@ -249,11 +301,15 @@ final class AppModel: ObservableObject {
 
     func updateCrop(_ rect: CGRect) {
         guard let index = selectedIndex, let info = items[index].info else { return }
-        items[index].crop = rect.evenClamped(in: info.fullFrame)
+        let clamped = rect.evenClamped(in: info.fullFrame)
+        guard clamped != items[index].crop else { return }
+        beginEdit("Crop", key: "crop")
+        items[index].crop = clamped
     }
 
     func applyAspect(_ preset: AspectPreset) {
         guard let index = selectedIndex, let info = items[index].info else { return }
+        beginEdit("Crop Aspect")
         items[index].aspectLock = preset.ratio
         items[index].aspectLabel = preset.label
         if let ratio = preset.ratio {
@@ -265,6 +321,7 @@ final class AppModel: ObservableObject {
 
     func resetCrop() {
         guard let index = selectedIndex, let info = items[index].info else { return }
+        beginEdit("Reset Crop")
         items[index].crop = info.fullFrame
         items[index].aspectLock = nil
         items[index].aspectLabel = "Free"
@@ -280,6 +337,7 @@ final class AppModel: ObservableObject {
     func addRegion(_ rect: CGRect) {
         guard let index = selectedIndex, let info = items[index].info else { return }
         let region = BlurRegion(rect: rect.evenClamped(in: info.fullFrame))
+        beginEdit("Add Blur")
         items[index].blurRegions.append(region)
         selectedRegionID = region.id
     }
@@ -290,12 +348,17 @@ final class AppModel: ObservableObject {
         guard let index = selectedIndex, let info = items[index].info,
               let regionIndex = items[index].blurRegions.firstIndex(where: { $0.id == id })
         else { return }
-        items[index].blurRegions[regionIndex].rect = rect.evenClamped(in: info.fullFrame)
+        let clamped = rect.evenClamped(in: info.fullFrame)
+        if clamped != items[index].blurRegions[regionIndex].rect {
+            beginEdit("Move Blur", key: "blur-\(id)")
+            items[index].blurRegions[regionIndex].rect = clamped
+        }
         if !live { refreshPreview() }
     }
 
     func removeSelectedRegion() {
         guard let index = selectedIndex, let id = selectedRegionID else { return }
+        beginEdit("Delete Blur")
         items[index].blurRegions.removeAll { $0.id == id }
         selectedRegionID = items[index].blurRegions.last?.id
         refreshPreview()
@@ -303,6 +366,8 @@ final class AppModel: ObservableObject {
 
     func clearRegions() {
         guard let index = selectedIndex else { return }
+        guard !items[index].blurRegions.isEmpty else { return }
+        beginEdit("Clear Blurs")
         items[index].blurRegions.removeAll()
         selectedRegionID = nil
         refreshPreview()
@@ -331,17 +396,17 @@ final class AppModel: ObservableObject {
 
     /// Current scrubber position in seconds.
     var previewTime: Double {
-        guard let item = selectedItem, let info = item.info else { return 0 }
-        return info.duration * item.previewFraction
+        guard let item = selectedItem, item.info != nil else { return 0 }
+        return item.editedDuration * item.previewFraction
     }
 
     /// Adds a zoom starting at the scrubber, targeting `point` (full-frame pixels).
     @discardableResult
     func addZoom(at point: CGPoint) -> Bool {
-        guard let index = selectedIndex, let info = items[index].info else { return false }
+        guard let index = selectedIndex, items[index].info != nil else { return false }
         let shot = ZoomShot(start: previewTime, level: defaultZoomLevel, target: point)
 
-        guard shot.end <= info.duration + 0.01 else {
+        guard shot.end <= items[index].editedDuration + 0.001 else {
             statusMessage = "Not enough clip left for a \(formatDuration(shot.duration)) zoom."
             return false
         }
@@ -350,6 +415,7 @@ final class AppModel: ObservableObject {
             return false
         }
 
+        beginEdit("Add Zoom")
         items[index].zoomShots.append(shot)
         items[index].zoomShots.sort { $0.start < $1.start }
         selectedShotID = shot.id
@@ -373,8 +439,12 @@ final class AppModel: ObservableObject {
 
         var shot = items[index].zoomShots[shotIndex]
         transform(&shot)
-        shot.start = max(0, min(shot.start, max(0, info.duration - shot.duration)))
+        shot.start = max(0, min(shot.start, max(0, items[index].editedDuration - shot.duration)))
         shot.hold = max(0.2, shot.hold)
+        guard shot.end <= items[index].editedDuration + 0.001 else {
+            statusMessage = "There is not enough video left for that zoom duration."
+            return
+        }
         shot.target.x = min(max(0, shot.target.x), info.fullFrame.maxX)
         shot.target.y = min(max(0, shot.target.y), info.fullFrame.maxY)
 
@@ -383,6 +453,8 @@ final class AppModel: ObservableObject {
             statusMessage = "That would overlap another zoom."
             return
         }
+        guard shot != items[index].zoomShots[shotIndex] else { return }
+        beginEdit("Adjust Zoom", key: "zoom-\(id)")
         items[index].zoomShots[shotIndex] = shot
         items[index].zoomShots.sort { $0.start < $1.start }
     }
@@ -397,7 +469,10 @@ final class AppModel: ObservableObject {
     }
 
     func setZoomHold(_ id: ZoomShot.ID, _ hold: Double) {
-        mutateShot(id) { $0.hold = hold }
+        let duration = selectedItem?.editedDuration ?? 0
+        mutateShot(id) { shot in
+            shot.hold = min(max(0.2, hold), max(0.2, duration - shot.start - 2 * ZoomShot.ease))
+        }
     }
 
     func setZoomStart(_ id: ZoomShot.ID, _ start: Double) {
@@ -412,12 +487,15 @@ final class AppModel: ObservableObject {
 
     func removeSelectedZoom() {
         guard let index = selectedIndex, let id = selectedShotID else { return }
+        beginEdit("Delete Zoom")
         items[index].zoomShots.removeAll { $0.id == id }
         selectedShotID = items[index].zoomShots.last?.id
     }
 
     func clearZooms() {
         guard let index = selectedIndex else { return }
+        guard !items[index].zoomShots.isEmpty else { return }
+        beginEdit("Clear Zooms")
         items[index].zoomShots.removeAll()
         selectedShotID = nil
     }
@@ -425,29 +503,31 @@ final class AppModel: ObservableObject {
     /// Jumps the preview to the middle of a shot's hold, so its framing can be checked.
     func scrubToShot(_ shot: ZoomShot) {
         guard let info = selectedItem?.info, info.duration > 0 else { return }
-        setPreviewFraction((shot.start + ZoomShot.ease + shot.hold / 2) / info.duration)
+        setPreviewFraction((shot.start + ZoomShot.ease + shot.hold / 2) / max(0.001, selectedItem?.editedDuration ?? 0))
     }
 
     func setPreviewFraction(_ fraction: Double) {
         guard let index = selectedIndex else { return }
         items[index].previewFraction = min(max(fraction, 0), 1)
-        refreshPreview()
+        if showPlayback { playback.seek(to: previewTime) } else { refreshPreview() }
     }
 
     /// Copies the selected item's crop and blur areas onto every other queued clip with the
     /// same dimensions — the coordinates only mean the same thing at the same frame size.
     func applyCropToAll() {
         guard let source = selectedItem, let crop = source.crop, let info = source.info else { return }
+        beginEdit("Apply to All")
         var applied = 0
         for index in items.indices where items[index].id != source.id {
             guard let other = items[index].info, other.width == info.width, other.height == info.height
             else { continue }
             items[index].crop = crop
+            items[index].status = .ready
             items[index].aspectLock = source.aspectLock
             items[index].aspectLabel = source.aspectLabel
             // Fresh ids so each clip owns its own regions.
             items[index].blurRegions = source.blurRegions.map { BlurRegion(rect: $0.rect) }
-            items[index].zoomShots = source.zoomShots.map {
+            items[index].zoomShots = source.zoomShots.filter { $0.end <= items[index].editedDuration }.map {
                 ZoomShot(start: $0.start, hold: $0.hold, level: $0.level, target: $0.target)
             }
             applied += 1
@@ -465,11 +545,11 @@ final class AppModel: ObservableObject {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = Self.acceptedTypes
+        panel.allowedContentTypes = Self.acceptedTypes + [.yamVideoProject]
         panel.message = "Choose the videos you want to crop and convert."
         panel.prompt = "Add"
         if panel.runModal() == .OK {
-            addFiles(panel.urls)
+            addDropped(panel.urls)
         }
     }
 
@@ -481,7 +561,9 @@ final class AppModel: ObservableObject {
         panel.prompt = "Choose"
         panel.message = "Where should converted MP4 files be saved?"
         if panel.runModal() == .OK, let url = panel.url {
-            settings.outputFolder = url
+            var updated = settings
+            updated.outputFolder = url
+            updateSettings(updated)
         }
     }
 
@@ -545,6 +627,8 @@ final class AppModel: ObservableObject {
     }
 
     private func run(_ ids: [VideoItem.ID]) {
+        playback.pause()
+        let exportSettings = settings
         isConverting = true
         statusMessage = nil
         conversionTask = Task {
@@ -557,10 +641,9 @@ final class AppModel: ObservableObject {
                       let info = items[index].info else { continue }
                 let item = items[index]
                 let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
-                let output = FFmpeg.outputURL(for: item.url, settings: settings)
+                let output = FFmpeg.outputURL(for: item.url, settings: exportSettings)
 
                 items[index].status = .converting(0)
-                selection = id
 
                 do {
                     try await FFmpeg.export(
@@ -570,7 +653,8 @@ final class AppModel: ObservableObject {
                         crop: crop,
                         regions: item.blurRegions.map { $0.rect },
                         zoomShots: item.zoomShots,
-                        settings: settings,
+                        segments: item.segments,
+                        settings: exportSettings,
                         subtitles: item.subtitles
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
@@ -610,6 +694,7 @@ final class AppModel: ObservableObject {
     }
 
     func cancelConversion() {
+        movieExportTask?.cancel()
         conversionTask?.cancel()
     }
 
@@ -620,17 +705,31 @@ final class AppModel: ObservableObject {
     /// The exact ffmpeg invocation for the selected clip — handy for sanity-checking or
     /// scripting. A GIF export runs two: the palette, then the encode against it.
     var previewCommand: String? {
+        if isMovieMode {
+            guard let plan = try? moviePlan() else { return nil }
+            let output = (settings.outputFolder ?? plan.clips[0].url.deletingLastPathComponent())
+                .appendingPathComponent("YamVideo-Movie.\(settings.format.fileExtension)")
+            let commands: [[String]]
+            if settings.format == .gif {
+                let palette = FFmpeg.paletteURL(for: output)
+                commands = [FFmpeg.movieArguments(plan: plan, settings: settings, output: palette, palettePass: true),
+                            FFmpeg.movieArguments(plan: plan, settings: settings, output: output, palette: palette)]
+            } else { commands = [FFmpeg.movieArguments(plan: plan, settings: settings, output: output)] }
+            return commands.map(Self.displayCommand).joined(separator: "\n\n")
+        }
         guard let item = selectedItem, let info = item.info else { return nil }
         let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
         let output = FFmpeg.outputURL(for: item.url, settings: settings)
         return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
-            settings: settings, subtitles: item.subtitles
-        ).map { command in
-            let args = command.filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
-            return (["ffmpeg"] + args).map { $0.contains(" ") ? "\"\($0)\"" : $0 }
-                .joined(separator: " ")
-        }.joined(separator: "\n\n")
+            segments: item.segments, settings: settings, subtitles: item.subtitles
+        ).map(Self.displayCommand).joined(separator: "\n\n")
+    }
+
+    private static func displayCommand(_ command: [String]) -> String {
+        let args = command.filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
+        return (["ffmpeg"] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+            .joined(separator: " ")
     }
 }

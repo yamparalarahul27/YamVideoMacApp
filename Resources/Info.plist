@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -28,8 +28,21 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Local utility — crop and convert video to MP4, GIF or WebP.</string>
-	<key>CFBundleDocumentTypes</key>
-	<array>
+	<key>UTExportedTypeDeclarations</key>
+    <array><dict>
+        <key>UTTypeIdentifier</key><string>com.equicomtech.yamvideo.project</string>
+        <key>UTTypeDescription</key><string>YamVideo Project</string>
+        <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+        <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>yamvideo</string></array></dict>
+    </dict></array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>YamVideo Project</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Owner</string>
+            <key>LSItemContentTypes</key><array><string>com.equicomtech.yamvideo.project</string></array>
+        </dict>
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Movie</string>

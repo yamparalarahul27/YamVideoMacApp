@@ -11,6 +11,15 @@ xcrun swiftc \
 	-sdk "$(xcrun --show-sdk-path --sdk macosx)" \
 	-o "$BIN" \
 	"$ROOT/Sources/Models.swift" \
+	"$ROOT/Sources/Timeline.swift" \
+	"$ROOT/Sources/AudioAnalysis.swift" \
+	"$ROOT/Sources/Movie.swift" \
+	"$ROOT/Sources/ZoomSuggestions.swift" \
+	"$ROOT/Sources/MoviePlayback.swift" \
+	"$ROOT/Sources/MovieEditing.swift" \
+	"$ROOT/Sources/Playback.swift" \
+	"$ROOT/Sources/AppModel.swift" \
+	"$ROOT/Sources/ProjectEditing.swift" \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
 	"$ROOT/Sources/CropEditor.swift" \

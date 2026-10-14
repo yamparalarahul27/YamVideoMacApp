@@ -114,17 +114,22 @@ enum FFmpeg {
               result.status == 0
         else { return [] }  // Not cached: a later lookup should get a second chance.
 
-        // Rows read "  ... zscale            V->V       Apply resizing…"; the legend above
-        // them has "=" in the second field, and no "->" arrow in the third.
+        let names = filterNames(in: result.stdoutText)
+        filterCache.store(names)
+        return names
+    }
+
+    /// Parses `ffmpeg -filters`. Rows read " .S zscale  V->V  Apply resizing…" — ffmpeg 9
+    /// prints two flag columns where older builds printed three ("..C"), so accept either.
+    /// The legend above them has "=" in the second field, and no "->" arrow in the third.
+    static func filterNames(in listing: String) -> Set<String> {
         var names: Set<String> = []
-        for line in result.stdoutText.split(separator: "\n") {
+        for line in listing.split(separator: "\n") {
             let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            guard fields.count >= 3, fields[0].count == 3,
+            guard fields.count >= 3, (2...3).contains(fields[0].count),
                   fields[1] != "=", fields[2].contains("->") else { continue }
             names.insert(fields[1])
         }
-
-        filterCache.store(names)
         return names
     }
 
@@ -190,7 +195,7 @@ enum FFmpeg {
             duration: duration,
             videoCodec: (video["codec_name"] as? String) ?? "unknown",
             audioCodec: audio?["codec_name"] as? String,
-            fps: parseRate(video["avg_frame_rate"]) ?? parseRate(video["r_frame_rate"]) ?? 0,
+            fps: parseRate(frameRateExpression(video)) ?? 30,
             fpsExpression: frameRateExpression(video),
             rotation: rotation,
             colorTransfer: video["color_transfer"] as? String
@@ -267,8 +272,10 @@ enum FFmpeg {
         // regions, tone mapping and captions are baked in by the same graph builder the
         // export uses, in the same order, so the two cannot drift apart.
         var tail = ["scale='min(\(maxWidth),iw)':-2:flags=bilinear"]
+        var captioned = false
         if let subtitles, let staged = try? stageSubtitles(subtitles) {
             tail.append(subtitlesFilter(staged: staged, forceStyle: subtitleStyle))
+            captioned = true
         }
 
         let graph = filterGraph(
@@ -280,8 +287,12 @@ enum FFmpeg {
         )
 
         func grab(_ time: Double) async throws -> Data {
-            var args = [
-                "-hide_banner", "-loglevel", "error",
+            var args = ["-hide_banner", "-loglevel", "error"]
+            // An input seek restarts timestamps at the seek point, so the subtitles filter
+            // would time every preview frame as 0 and show the opening caption. Keep the
+            // seek in the timestamps, measured from the clip's start as the export does.
+            if captioned { args += ["-copyts", "-start_at_zero"] }
+            args += [
                 "-ss", String(format: "%.3f", time),
                 "-i", url.path,
                 "-frames:v", "1",
@@ -564,19 +575,15 @@ enum FFmpeg {
             tail.append("crop=\(Int(cropRect.width)):\(Int(cropRect.height)):\(Int(cropRect.minX)):\(Int(cropRect.minY))")
         }
 
-        // Zoom runs on the cropped frame, before any downscale.
+        // Feed zoompan frames at its declared output rate. This preserves timing for
+        // speed edits and avoids an EOF timestamp bug when fps follows zoompan.
+        let animationRate = settings.format.isAnimation ? settings.frameRate.value : nil
+        let outputRate = animationRate.map { min($0, info.fps) } ?? info.fps
+        let outputExpression = outputRate < info.fps ? String(format: "%.8g", outputRate) : info.fpsExpression
+        if !zoomShots.isEmpty || outputRate < info.fps { tail.append("fps=\(outputExpression)") }
         if let zoom = zoomFilter(shots: zoomShots, frame: cropRect.size,
-                                 cropOrigin: cropRect.origin, fpsExpression: info.fpsExpression) {
+                                 cropOrigin: cropRect.origin, fpsExpression: outputExpression) {
             tail.append(zoom)
-        }
-
-        // Thinning frames out is the biggest saving a GIF or WebP has. It goes after the
-        // zoom (zoompan re-times to the source rate, so an earlier fps would be undone)
-        // and before the scale, so fewer frames need resampling. Never above the source
-        // rate — duplicated frames only add bytes.
-        if settings.format.isAnimation, let rate = settings.frameRate.value,
-           info.fps <= 0 || rate < info.fps {
-            tail.append("fps=\(Int(rate))")
         }
 
         if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
@@ -595,15 +602,75 @@ enum FFmpeg {
 
     /// Wraps `graph` in the input/output maps ffmpeg needs, honouring whether it turned out
     /// simple enough for `-vf`.
-    private static func mapped(_ graph: FilterGraph?, audio: Bool) -> [String] {
+    private static func mapped(_ graph: FilterGraph?, audio: Bool, audioLabel: String = "0:a:0") -> [String] {
         guard let graph else { return [] }
         if graph.isComplex, let label = graph.outputLabel {
             // Explicit maps: -filter_complex disables ffmpeg's automatic stream selection.
             var args = ["-filter_complex", graph.spec, "-map", "[\(label)]"]
-            if audio { args += ["-map", "0:a:0"] }
+            if audio { args += ["-map", audioLabel] }
             return args
         }
         return ["-vf", graph.spec]
+    }
+
+    /// Assemble source ranges first so zoom times describe the edited timeline. Audio
+    /// is cut with the exact same ranges, with silence padding for a short source track.
+    static func editedFilterGraph(
+        head: [String] = [],
+        segments: [TimelineSegment]?, audio: Bool,
+        regions: [CGRect], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30"
+    ) -> FilterGraph? {
+        // With segments the head runs after the concat rather than before the split: tone
+        // mapping is per-frame, so the result is identical and fewer frames pass through it.
+        let effects = filterGraph(head: head, regions: regions, style: style, strength: strength, tail: tail)
+        guard let segments, !segments.isEmpty else { return effects }
+        var parts: [String] = []
+        let count = segments.count
+        parts.append("[0:v]split=\(count)" + segments.indices.map { "[sv\($0)]" }.joined())
+        if audio {
+            parts.append("[0:a:0]aresample=async=1:first_pts=0,apad,asplit=\(count)" + segments.indices.map { "[sa\($0)]" }.joined())
+        }
+        let hasSpeedEdits = segments.contains { $0.speed != 1 }
+        let rate = parseRate(fpsExpression) ?? 30
+        var elapsed = 0.0
+        var previousFrames = 0
+        for (i, segment) in segments.enumerated() {
+            // Round cumulative boundaries, not each duration independently. Otherwise
+            // dozens of fractional-frame speed edits can accumulate noticeable drift.
+            elapsed += segment.duration
+            let endFrames = Int((elapsed * rate).rounded())
+            let frames = max(1, endFrames - previousFrames)
+            previousFrames += frames
+            let outputDuration = hasSpeedEdits ? Double(frames) / rate : segment.duration
+            let retime = !hasSpeedEdits ? "setpts=PTS-STARTPTS" :
+                "setpts=(PTS-STARTPTS)/\(num(segment.speed)),fps=\(fpsExpression),tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames),setpts=PTS-STARTPTS"
+            parts.append("[sv\(i)]trim=start=\(num(segment.start)):end=\(num(segment.end)),\(retime)[tv\(i)]")
+            if audio {
+                let tempo = !hasSpeedEdits ? "" : "," + tempoFilters(segment.speed) + ",apad,atrim=duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS"
+                parts.append("[sa\(i)]atrim=start=\(num(segment.start)):end=\(num(segment.end)),asetpts=PTS-STARTPTS\(tempo)[ta\(i)]")
+            }
+        }
+        let inputs = segments.indices.map { audio ? "[tv\($0)][ta\($0)]" : "[tv\($0)]" }.joined()
+        parts.append(inputs + "concat=n=\(count):v=1:a=\(audio ? 1 : 0)[timelinev]" + (audio ? "[timelinea]" : ""))
+        let label: String
+        if let effects {
+            if effects.isComplex {
+                parts.append(effects.spec.replacingOccurrences(of: "[0:v]", with: "[timelinev]"))
+                label = effects.outputLabel!
+            } else {
+                parts.append("[timelinev]" + effects.spec + "[vout]")
+                label = "vout"
+            }
+        } else { label = "timelinev" }
+        return FilterGraph(spec: parts.joined(separator: ";"), isComplex: true, outputLabel: label)
+    }
+
+    static func tempoFilters(_ speed: Double) -> String {
+        var rate = speed, filters: [String] = []
+        while rate > 2 { filters.append("atempo=2"); rate /= 2 }
+        while rate < 0.5 { filters.append("atempo=0.5"); rate /= 0.5 }
+        filters.append("atempo=\(num(rate))")
+        return filters.joined(separator: ",")
     }
 
     /// Builds the ffmpeg argument list. Exposed so the UI can show the exact command.
@@ -617,6 +684,7 @@ enum FFmpeg {
         crop: CGRect,
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
+        segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil,
         palette: URL? = nil,
@@ -629,12 +697,13 @@ enum FFmpeg {
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
 
-        let graph = filterGraph(
+        let graph = editedFilterGraph(
             head: videoHead(info: info, settings: settings),
+            segments: segments, audio: info.hasAudio && settings.audio != .none && !settings.format.isAnimation,
             regions: regions.map { $0.evenClamped(in: info.fullFrame) },
             style: settings.blurStyle,
             strength: settings.blurStrength,
-            tail: tail
+            tail: tail, fpsExpression: info.fpsExpression
         )
 
         if palette != nil {
@@ -652,7 +721,7 @@ enum FFmpeg {
             args += ["-filter_complex", spec, "-map", "[gif]"]
         } else {
             args += mapped(graph, audio: info.hasAudio && settings.audio != .none
-                           && !settings.format.isAnimation)
+                           && !settings.format.isAnimation, audioLabel: segments == nil ? "0:a:0" : "[timelinea]")
         }
 
         switch settings.format {
@@ -687,7 +756,7 @@ enum FFmpeg {
                     args += ["-an"]
                 }
             case .copy:
-                if info.hasAudio { args += ["-c:a", "copy"] } else { args += ["-an"] }
+                if info.hasAudio { args += segments == nil ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"] } else { args += ["-an"] }
             case .none:
                 args += ["-an"]
             }
@@ -733,6 +802,7 @@ enum FFmpeg {
         crop: CGRect,
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
+        segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil
     ) -> [String] {
@@ -747,12 +817,13 @@ enum FFmpeg {
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         args += mapped(
-            filterGraph(
+            editedFilterGraph(
                 head: videoHead(info: info, settings: settings),
+                segments: segments, audio: false,
                 regions: regions.map { $0.evenClamped(in: info.fullFrame) },
                 style: settings.blurStyle,
                 strength: settings.blurStrength,
-                tail: tail
+                tail: tail, fpsExpression: info.fpsExpression
             ),
             audio: false
         )
@@ -834,6 +905,7 @@ enum FFmpeg {
         crop: CGRect,
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
+        segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil
     ) -> [[String]] {
@@ -845,13 +917,13 @@ enum FFmpeg {
         if let palette {
             commands.append(paletteArguments(input: input, palette: palette, info: info,
                                              crop: crop, regions: regions,
-                                             zoomShots: zoomShots, settings: settings,
-                                             subtitles: subtitles))
+                                             zoomShots: zoomShots, segments: segments,
+                                             settings: settings, subtitles: subtitles))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
-                                        settings: settings, subtitles: subtitles,
-                                        palette: palette))
+                                        segments: segments, settings: settings,
+                                        subtitles: subtitles, palette: palette))
         return commands
     }
 
@@ -873,6 +945,7 @@ enum FFmpeg {
         crop: CGRect,
         regions: [CGRect] = [],
         zoomShots: [ZoomShot] = [],
+        segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil,
         onProgress: @escaping @Sendable (Double) -> Void
@@ -913,9 +986,12 @@ enum FFmpeg {
         }
 
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
-                                      regions: regions, zoomShots: zoomShots,
+                                      regions: regions, zoomShots: zoomShots, segments: segments,
                                       settings: settings, subtitles: subtitles)
         let measuring = needsLoudnessPass(info: info, settings: settings)
+        // Progress is reported against what the export actually writes, which is the
+        // edited timeline rather than the whole source.
+        let progressDuration = segments.map { ClipTimeline(segments: $0).duration } ?? info.duration
 
         // A preparatory pass only decodes, so it finishes well before the encode that
         // follows. The loudness pass reads audio alone and is quicker still. One boundary
@@ -937,7 +1013,8 @@ enum FFmpeg {
             if isEncode, measuring {
                 args = exportArguments(
                     input: input, output: output, info: info, crop: crop,
-                    regions: regions, zoomShots: zoomShots, settings: settings,
+                    regions: regions, zoomShots: zoomShots, segments: segments,
+                    settings: settings,
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
                     loudness: measurement
@@ -949,7 +1026,7 @@ enum FFmpeg {
             let last = args[args.count - 1]
             let target = last == "-" ? nil : URL(fileURLWithPath: last)
             let result = try await runPass(ffmpeg, args, writing: target,
-                                           duration: info.duration,
+                                           duration: progressDuration,
                                            from: bounds[index], to: bounds[index + 1],
                                            onProgress: onProgress)
             if measuring, index == 0 {
@@ -962,7 +1039,7 @@ enum FFmpeg {
     /// Runs one ffmpeg pass, reporting its progress into the `from...to` slice of the whole
     /// job and cleaning up after itself if it fails or is cancelled.
     @discardableResult
-    private static func runPass(
+    static func runPass(
         _ ffmpeg: String,
         _ args: [String],
         writing target: URL?,
