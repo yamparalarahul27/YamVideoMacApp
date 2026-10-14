@@ -10,6 +10,9 @@ struct EditReceipt: Equatable {
     var changed: Bool
     var createdIDs: [UUID]
     var removedZooms: [UUID]
+    /// Blur effects and markers dropped because their footage was cut away.
+    var removedEffects: [UUID] = []
+    var removedMarkers: [UUID] = []
     var removedGraphics: [UUID] = []
     var affectedClips: [UUID]
 }
@@ -106,6 +109,7 @@ extension AppModel {
 
         var receipt = EditReceipt(revision: revision, transactionID: nil, changed: outcome.project != base,
                                   createdIDs: outcome.createdIDs, removedZooms: outcome.removedZooms,
+                                  removedEffects: outcome.removedEffects, removedMarkers: outcome.removedMarkers,
                                   removedGraphics: outcome.removedGraphics,
                                   affectedClips: Self.changedClips(from: base, to: outcome.project))
         guard !dryRun, receipt.changed else { return .success(receipt) }
@@ -202,6 +206,10 @@ extension AppModel {
             elements.formUnion(clip.zoomShots.filter { oldZooms[$0.id] != $0 }.map(\.id))
             let oldAreas = Dictionary(uniqueKeysWithValues: (previous?.blurRegions ?? []).map { ($0.id, $0) })
             elements.formUnion(clip.blurRegions.filter { oldAreas[$0.id] != $0 }.map(\.id))
+            let oldEffects = Dictionary(uniqueKeysWithValues: (previous?.blurEffects ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.blurEffects ?? []).filter { oldEffects[$0.id] != $0 }.map(\.id))
+            let oldMarkers = Dictionary(uniqueKeysWithValues: (previous?.markers ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.markers ?? []).filter { oldMarkers[$0.id] != $0 }.map(\.id))
             let oldGraphics = Dictionary(uniqueKeysWithValues: (previous?.graphics?.items ?? []).map { ($0.id, $0) })
             elements.formUnion((clip.graphics?.items ?? []).filter { oldGraphics[$0.id] != $0 }.map(\.id))
         }
@@ -236,12 +244,14 @@ extension AppModel {
     /// so `commands` always carry absolute values. An invalid intermediate value (a zoom
     /// dragged onto another) is skipped and the last good one stays on screen.
     @discardableResult
-    func updateGesture(_ key: String, label: String, _ commands: [EditCommand]) -> EditError? {
+    /// `keepPreview` leaves the composed Preview up, for edits — like a whole-frame
+    /// effect — that can only be judged there.
+    func updateGesture(_ key: String, label: String, _ commands: [EditCommand], keepPreview: Bool = false) -> EditError? {
         if let open = editSession.gesture, open.key != key { endGesture() }
         if editSession.gesture == nil {
             editSession.gesture = OpenGesture(key: key, base: project, history: historyEntry(label), lastUpdate: Date())
             playback.pause()
-            if showPlayback { showPlayback = false }
+            if showPlayback, !keepPreview { showPlayback = false }
         }
         guard let base = editSession.gesture?.base else { return nil }
         do {
@@ -418,6 +428,8 @@ extension AppModel {
         if let id = selectedShotID, selectedItem?.zoomShots.contains(where: { $0.id == id }) != true { selectedShotID = nil }
         if let id = selectedGraphicID, selectedItem?.graphics?.items.contains(where: { $0.id == id }) != true { selectedGraphicID = nil }
         if let id = selectedRegionID, selectedItem?.blurRegions.contains(where: { $0.id == id }) != true { selectedRegionID = nil }
+        if let id = selectedEffectID, selectedItem?.blurEffects.contains(where: { $0.id == id }) != true { selectedEffectID = nil }
+        if let id = selectedMarkerID, selectedItem?.markers.contains(where: { $0.id == id }) != true { selectedMarkerID = nil }
 
         let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.init), movieSettings, settings)
         if movieBefore != movieAfter { movieOutput = nil }

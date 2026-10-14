@@ -1,6 +1,6 @@
 # Whole-frame blur effects — implementation plan
 
-**Status:** Planned only; implementation is paused pending the owner's review.
+**Status:** Implemented in phase 5 of the co-editing plan (2026-10-14). See section 10.
 **Scope confirmed by the owner:** Whole-frame blur for visual effects, with editable controls.
 **Planning date:** 2026-09-05. **Reconciled:** 2026-10-13.
 **Coordinating plan:** [Local co-editing](local-coediting.md) takes precedence for
@@ -314,3 +314,45 @@ area-redaction behavior; motion/radial/lens blur; arbitrary keyframes; cross-rec
 adjustment layers; third-party effect plugins. These are separate features. This plan
 should not be used as approval to begin implementing them or the blur feature while
 the owner has asked for work to remain paused.
+
+## 10. Implementation status (2026-10-14)
+
+The owner asked to start phase 5. Implemented as planned, with these measured decisions:
+
+- **Model:** `VideoBlurEffect` and `TimelineMarker` (`VisualEffects.swift`), project schema v5
+  shared with markers. Validation, frame snapping, remapping on every timeline edit (start
+  follows its frame; duration and fades stay in playback seconds; fades shrink to fit;
+  collisions keep the earlier block), and removal reporting alongside zooms.
+- **Effect stage colour contract (addendum §1):** both renderers blur and mix on the
+  frame's *encoded* values in float RGB, so there is no linear-versus-gamma divergence and
+  no subsampled chroma blurred twice as far. ffmpeg converts from the frames' own matrix and
+  range to `gbrpf32le`, uses `gblur … steps=3`, and returns to 10-bit BT.709. Core Image
+  matches into the frame's decoding space, blurs with the edge clamped, and dissolves. The
+  measured Core Image radius equals ffmpeg's sigma (`BlurCalibration.coreImageRadiusPerSigma = 1`).
+- **Per-frame weight, not a per-pixel expression (addendum §2):** `blend=all_expr` cost 73 s
+  for 6 s of 1080p. The app writes a `sendcmd` script setting each frame's `all_opacity`
+  from `VideoBlurEffect.weight` (timed half a frame early so rounding cannot shift it), and
+  gates `gblur`/`blend` to the effect's interval: 3.8 s for the same clip, against 1.3 s
+  for the float round trip alone. The fade curve is the plan's smoothstep exactly.
+- **Measured parity** (`./test.sh`, 1280×720 checkerboard and hard-edge clip, amount 24):
+  both renderers' per-frame blur weight matches the timing maths within 0.06 at the frame
+  before the start, the start, mid-fades, the hold, the last frame and the end; hold detail
+  falls to under 1% of the sharp frame in both; the profile across a hard colour edge
+  matches within 4.4/255 and the frame border within 0.8/255 (no halo). Effect-on and
+  effect-off exports have the same frame count; both GIF passes carry the effect; a Movie
+  times the second recording's effect from that recording's start.
+- **HDR (addendum §3):** effects run after tone mapping. An HDR recording kept as HDR is
+  refused with a reason, in export and in the inspector, rather than written blurred and
+  tagged Rec.709.
+- **Editing:** Effects mode shows the composed Preview; dragging a block or its edges shows
+  the new place during the drag and commits one step on release, stopping at neighbours
+  with snapping; sliders commit one step per drag and swap only the video composition, so
+  playback is not rebuilt. Effect edges and markers are snap targets.
+- **Agents:** add/update/remove effect and marker commands with defaults, chosen ids and
+  movie time; state, selection, reveal and highlights include them; `preview` with
+  `composed: true` renders the frame as Preview plays it. Every command is described in the
+  `catalog` request.
+
+Not done: the boundary contact-sheet tool (addendum §4) — its frame set is covered by the
+automated timing checks instead; a 1080p peak-memory measurement; hands-on keyboard focus
+and VoiceOver checks; a saved demo project for owner review.

@@ -108,13 +108,14 @@ enum BlurStyle: String, CaseIterable, Identifiable, Codable {
 }
 
 enum EditorMode: String, CaseIterable, Identifiable {
-    case crop, blur, zoom
+    case crop, blur, zoom, effects
     var id: String { rawValue }
     var label: String {
         switch self {
         case .crop: return "Crop"
         case .blur: return "Blur"
         case .zoom: return "Zoom"
+        case .effects: return "Effects"
         }
     }
 }
@@ -191,6 +192,10 @@ struct VideoItem: Identifiable {
     var color = ClipColorSettings()
     /// Timed motion graphics over the recording. Nil until one is added.
     var graphics: GraphicsTrack?
+    /// Whole-frame blurs, sorted and non-overlapping, in edited-recording seconds.
+    var blurEffects: [VideoBlurEffect] = []
+    /// Named points on the edited timeline, sorted by time.
+    var markers: [TimelineMarker] = []
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

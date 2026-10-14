@@ -86,6 +86,15 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `setColorAdjustments` | `clipID`, any of `exposureEV` (−2–2), `warmth` (−1–1), `contrast` (0.5–1.5), `saturation` (0–2) |
 | `resetColorAdjustments` | `clipID` |
 | `copyColorAdjustments` | `clipID` (from), `targets`: recording IDs, `includeInterpretation`? (also copy profile and conversion) |
+| `addBlurEffect` | `clipID`, `start`, `end` or `duration`? (3), `amount`? (0–80, 24), `mix`? (0–1, 1), `fadeIn`/`fadeOut`? (0.25, shrunk to fit), `enabled`?, `effectID`? |
+| `updateBlurEffect` | `clipID`, `effectID`, any of `start` (keeps the length), `end`, `duration`, `amount`, `mix`, `fadeIn`, `fadeOut`, `enabled` |
+| `removeBlurEffect` | `clipID`, `effectID` |
+| `addMarker` | `clipID`, `time`, `label`?, `color`? (red, orange, yellow, green, blue, purple), `markerID`? |
+| `updateMarker` / `removeMarker` | `clipID`, `markerID`, and for update any of `time`, `label`, `color` |
+
+`yamvideoctl catalog` prints all of this from the app itself, with each field's type,
+unit, range and default and an example per command. Effect starts and marker times
+accept `timeSpace: "movie"` like zoom starts.
 
 A section of an uncut recording has the recording's own ID. A split keeps the left
 section's ID and reports the new right one in `createdIDs`.
@@ -95,7 +104,8 @@ section's ID and reports the new right one in `createdIDs`.
 | command | what it does |
 |---|---|
 | `undo` / `redo --transaction ID` | Undo or redo the named step. Refused (`history_conflict`) if another edit is now on top — an agent never undoes someone else's work by accident. |
-| `preview --clip ID --time T [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--original` leaves the colour correction out. |
+| `preview --clip ID --time T [--composed] [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--composed` renders it as the owner's Preview plays it — crop, zoom, colour, blur areas and whole-frame effects — at the export's frame size. `--original` leaves the colour correction out. |
+| `catalog` | Every command and request, described for an agent: fields, units, ranges, defaults, examples and conventions. |
 | `analyze --kind silence\|zooms --clip ID` | Starts a job that proposes cuts or zooms for the revision it read. It applies nothing. |
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |

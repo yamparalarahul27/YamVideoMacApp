@@ -9,10 +9,11 @@ let usage = """
 yamvideoctl — read and edit the project open in YamVideo on this Mac
 
 Reading
+  yamvideoctl catalog                            every command, with fields, units, ranges and examples
   yamvideoctl sessions
   yamvideoctl state
   yamvideoctl events [--after N] [--limit N]
-  yamvideoctl preview --clip ID --time SECONDS [--cropped] [--original] [--revision N]
+  yamvideoctl preview --clip ID --time SECONDS [--composed] [--cropped] [--original] [--revision N]
   yamvideoctl preview --movie --time SECONDS
   yamvideoctl job JOB [--wait]
 
@@ -24,7 +25,7 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl analyze --kind silence|zooms --clip ID
   yamvideoctl cancel JOB
-  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--graphic ID] [--time SECONDS] [--movie]
+  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--time SECONDS] [--movie]
   yamvideoctl request --file REQUEST.json        send a raw protocol request
 
 EDITS.json is a list of commands, or an object with "commands" and optionally
@@ -51,7 +52,7 @@ struct Arguments {
     var flags: Set<String> = []
     var positional: [String] = []
 
-    static let booleans: Set<String> = ["dry-run", "cropped", "original", "movie", "overwrite", "pretty", "wait", "help"]
+    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "pretty", "wait", "help"]
 
     init(_ raw: [String]) throws {
         var index = 0
@@ -215,6 +216,8 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
     }
 
     switch arguments.command {
+    case "catalog":
+        request["method"] = "catalog"
     case "state":
         request["method"] = "state"
     case "events":
@@ -265,6 +268,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" } else { request["clip"] = try value("clip") }
         if arguments.flags.contains("cropped") { request["cropped"] = true }
         if arguments.flags.contains("original") { request["original"] = true }
+        if arguments.flags.contains("composed") { request["composed"] = true }
     case "job":
         request["method"] = "job"; request["job"] = try job()
     case "cancel":
@@ -274,6 +278,8 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let clip = arguments.values["clip"] { request["clip"] = clip }
         if let section = arguments.values["section"] { request["section"] = section }
         if let zoom = arguments.values["zoom"] { request["zoom"] = zoom }
+        if let effect = arguments.values["effect"] { request["effect"] = effect }
+        if let marker = arguments.values["marker"] { request["marker"] = marker }
         if let graphic = arguments.values["graphic"] { request["graphic"] = graphic }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }

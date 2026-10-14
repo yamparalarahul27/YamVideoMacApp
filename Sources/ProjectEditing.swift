@@ -22,6 +22,8 @@ struct EditHistory {
     let sections: SectionSelection
     let shotID: UUID?
     let regionID: UUID?
+    var effectID: UUID? = nil
+    var markerID: UUID? = nil
     let movieMode: Bool
 }
 
@@ -52,7 +54,8 @@ extension AppModel {
     func historyEntry(_ name: String, transaction: UUID = UUID(), origin: EditOrigin = .human) -> EditHistory {
         EditHistory(name: name, transactionID: transaction, origin: origin, project: project,
                     fileURL: projectURL, savedProject: savedProject, sections: sectionSelection,
-                    shotID: selectedShotID, regionID: selectedRegionID, movieMode: isMovieMode)
+                    shotID: selectedShotID, regionID: selectedRegionID, effectID: selectedEffectID,
+                    markerID: selectedMarkerID, movieMode: isMovieMode)
     }
 
     /// Restores a history step. With `navigation` off — an agent's undo — the document
@@ -65,6 +68,7 @@ extension AppModel {
         if navigation {
             sectionSelection = entry.sections
             selectedShotID = entry.shotID; selectedRegionID = entry.regionID
+            selectedEffectID = entry.effectID; selectedMarkerID = entry.markerID
             isMovieMode = entry.movieMode
         } else {
             if let id = kept.0, items.contains(where: { $0.id == id }) { selection = id }
@@ -363,12 +367,11 @@ extension AppModel {
         case .success(let receipt):
             guard receipt.changed else { return false }
             sectionSelection = select(receipt)
-            let removed = receipt.removedZooms.count, removedGraphics = receipt.removedGraphics.count
-            var lost: [String] = []
-            if removed > 0 { lost.append("\(removed) zoom(s)") }
-            if removedGraphics > 0 { lost.append("\(removedGraphics) graphic(s)") }
-            statusMessage = lost.isEmpty ? name
-                : "\(name). Removed \(lost.joined(separator: " and ")) whose footage or space was removed; Undo restores them." 
+            let removed = [(receipt.removedZooms.count, "zoom"), (receipt.removedEffects.count, "blur effect"),
+                           (receipt.removedMarkers.count, "marker"), (receipt.removedGraphics.count, "graphic")]
+                .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+            statusMessage = removed.isEmpty ? name
+                : "\(name). Removed \(removed.joined(separator: ", ")) whose footage or space was cut; Undo restores them."
             return true
         case .failure(let error):
             statusMessage = failure ?? error.message

@@ -1,0 +1,317 @@
+import Foundation
+
+/// Everything an agent can ask the app to do, described for an agent to read: each edit
+/// command's fields with type, unit, range and default, a worked example, and the rules
+/// every request follows. Served by the `catalog` method, so an agent learns the app
+/// from the app rather than from prose that may be out of date; `./test.sh` keeps it in
+/// step with the commands `apply` actually accepts.
+struct AgentCatalog: Encodable {
+    struct Field: Encodable {
+        var name: String
+        var type: String
+        var required: Bool
+        var description: String
+        var unit: String?
+        var range: [Double]?
+        var defaultValue: JSONValue?
+        var values: [String]?
+
+        enum CodingKeys: String, CodingKey { case name, type, required, description, unit, range, defaultValue = "default", values }
+    }
+
+    struct Command: Encodable {
+        var type: String
+        var group: String
+        var summary: String
+        var fields: [Field]
+        var example: JSONValue
+    }
+
+    struct Method: Encodable {
+        var method: String
+        var summary: String
+        var fields: [Field]
+    }
+
+    var protocolVersion = AgentProtocol.version
+    var conventions: [String]
+    var workflow: [String]
+    var commands: [Command]
+    var methods: [Method]
+}
+
+extension AgentCatalog {
+    static let current: AgentCatalog = {
+        func field(_ name: String, _ type: String, _ description: String, required: Bool = true, unit: String? = nil,
+                   range: ClosedRange<Double>? = nil, default value: JSONValue? = nil, values: [String]? = nil) -> Field {
+            Field(name: name, type: type, required: required, description: description, unit: unit,
+                  range: range.map { [$0.lowerBound, $0.upperBound] }, defaultValue: value, values: values)
+        }
+        /// Examples are written with readable placeholders and served with well-formed
+        /// made-up ids, so a copied example is at least a valid command.
+        func example(_ json: String) -> JSONValue {
+            let ids = ["OTHER-CLIP-ID": "0", "SECOND-CLIP-ID": "2", "FIRST-CLIP-ID": "1", "CLIP-ID": "1", "SECTION-ID": "5",
+                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c"]
+            var text = json
+            for (placeholder, digit) in ids.sorted(by: { $0.key.count > $1.key.count }) {
+                text = text.replacingOccurrences(of: placeholder, with: "00000000-0000-4000-8000-00000000000\(digit)")
+            }
+            return (try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))) ?? .null
+        }
+        let clip = field("clipID", "uuid", "A recording's id from state.clips[].id.")
+        let section = field("sectionID", "uuid", "A section's id from state.clips[].sections[].id.")
+        let rect = "rect {x, y, width, height}"
+        let timeSpace = field("timeSpace", "string", "\"movie\" to give a movie time instead; the recording is then found from it and clipID may be left out.",
+                              required: false, default: .string("recording"), values: ["recording", "movie"])
+        let editedSeconds = "seconds of the edited recording"
+        var commands: [Command] = []
+        func add(_ type: String, _ group: String, _ summary: String, _ fields: [Field], _ json: String) {
+            commands.append(Command(type: type, group: group, summary: summary, fields: fields, example: example(json)))
+        }
+
+        // Sections
+        add("splitSection", "sections", "Cut the section under a time into two. The left half keeps its id; the right half's id is in createdIDs.",
+            [clip, field("at", "number", "Where to cut.", unit: editedSeconds), timeSpace],
+            #"{"type": "splitSection", "clipID": "CLIP-ID", "at": 4.5}"#)
+        add("trimSection", "sections", "Move a section's in or out point. Snaps to source frames; stops being valid if it would overlap a neighbouring section's footage.",
+            [clip, section, field("start", "number", "New in point.", required: false, unit: "seconds of the source file"),
+             field("end", "number", "New out point.", required: false, unit: "seconds of the source file")],
+            #"{"type": "trimSection", "clipID": "CLIP-ID", "sectionID": "SECTION-ID", "start": 1.2}"#)
+        add("deleteSection", "sections", "Remove a section; the gap closes. At least one section must remain.", [clip, section],
+            #"{"type": "deleteSection", "clipID": "CLIP-ID", "sectionID": "SECTION-ID"}"#)
+        add("moveSection", "sections", "Move a section to another position in the recording.",
+            [clip, section, field("index", "integer", "The position it should end up at, from 0.")],
+            #"{"type": "moveSection", "clipID": "CLIP-ID", "sectionID": "SECTION-ID", "index": 0}"#)
+        add("setSectionSpeed", "sections", "Play a section faster or slower. Audio keeps its pitch.",
+            [clip, section, field("speed", "number", "Playback rate.", unit: "× normal", range: 0.25...4)],
+            #"{"type": "setSectionSpeed", "clipID": "CLIP-ID", "sectionID": "SECTION-ID", "speed": 1.5}"#)
+        add("replaceSections", "sections", "Replace every section at once, in play order — how silence removal applies its cuts.",
+            [clip, field("sections", "array", "[{id?, start, end, speed?}] in play order; start and end in seconds of the source file.")],
+            #"{"type": "replaceSections", "clipID": "CLIP-ID", "sections": [{"start": 0, "end": 3.2}, {"start": 4.1, "end": 9, "speed": 1.25}]}"#)
+
+        // Frame
+        add("setCrop", "frame", "Crop the recording. Snaps to even pixels.",
+            [clip, field("rect", rect, "The area to keep, at least 16×16.", unit: "source pixels, origin top-left")],
+            #"{"type": "setCrop", "clipID": "CLIP-ID", "rect": {"x": 0, "y": 140, "width": 1920, "height": 800}}"#)
+        add("setAspect", "frame", "Lock future crop drags to a shape. Does not move the crop by itself.",
+            [clip, field("preset", "string", "The shape.", values: AspectPreset.all.map(\.label))],
+            #"{"type": "setAspect", "clipID": "CLIP-ID", "preset": "9:16"}"#)
+
+        // Blur areas
+        let area = field("areaID", "uuid", "A blur area's id from state.clips[].blurAreas[].id.")
+        add("addBlurArea", "blur areas", "Hide part of the picture for the whole recording (a face, a name). Style and strength are export settings.",
+            [clip, field("rect", rect, "The area to hide.", unit: "source pixels, origin top-left"),
+             field("areaID", "uuid", "Choose the new area's id, to refer to it later in the same request.", required: false)],
+            #"{"type": "addBlurArea", "clipID": "CLIP-ID", "rect": {"x": 40, "y": 40, "width": 320, "height": 120}}"#)
+        add("updateBlurArea", "blur areas", "Move or resize a blur area.", [clip, area, field("rect", rect, "Its new place.", unit: "source pixels")],
+            #"{"type": "updateBlurArea", "clipID": "CLIP-ID", "areaID": "AREA-ID", "rect": {"x": 60, "y": 40, "width": 320, "height": 120}}"#)
+        add("removeBlurArea", "blur areas", "Remove a blur area.", [clip, area],
+            #"{"type": "removeBlurArea", "clipID": "CLIP-ID", "areaID": "AREA-ID"}"#)
+        add("replaceBlurAreas", "blur areas", "Replace every blur area at once.",
+            [clip, field("areas", "array", "[{id?, rect}] in source pixels.")],
+            #"{"type": "replaceBlurAreas", "clipID": "CLIP-ID", "areas": []}"#)
+
+        // Zooms
+        let zoom = field("zoomID", "uuid", "A zoom's id from state.clips[].zooms[].id.")
+        add("addZoom", "zooms", "Push in on a point: half a second easing in, a hold, half a second easing out. Zooms may not overlap.",
+            [clip, field("start", "number", "When the ease-in begins.", unit: editedSeconds),
+             field("target", "point {x, y}", "What to zoom towards.", unit: "source pixels, origin top-left"),
+             field("hold", "number", "How long it holds at full zoom, at least 0.2.", required: false, unit: "seconds", default: .number(2)),
+             field("level", "number", "Magnification at the peak.", required: false, unit: "×", range: 1...10, default: .number(2)),
+             field("zoomID", "uuid", "Choose the new zoom's id.", required: false), timeSpace],
+            #"{"type": "addZoom", "clipID": "CLIP-ID", "start": 3, "target": {"x": 960, "y": 540}, "level": 1.5}"#)
+        add("updateZoom", "zooms", "Change any of a zoom's start, hold, level or target; the rest stay.",
+            [clip, zoom, field("start", "number", "New start.", required: false, unit: editedSeconds),
+             field("hold", "number", "New hold, at least 0.2.", required: false, unit: "seconds"),
+             field("level", "number", "New level.", required: false, unit: "×", range: 1...10),
+             field("target", "point {x, y}", "New target.", required: false, unit: "source pixels")],
+            #"{"type": "updateZoom", "clipID": "CLIP-ID", "zoomID": "ZOOM-ID", "hold": 3}"#)
+        add("removeZoom", "zooms", "Remove a zoom.", [clip, zoom], #"{"type": "removeZoom", "clipID": "CLIP-ID", "zoomID": "ZOOM-ID"}"#)
+        add("replaceZooms", "zooms", "Replace every zoom at once.",
+            [clip, field("zooms", "array", "[{id?, start, target, hold?, level?}].")],
+            #"{"type": "replaceZooms", "clipID": "CLIP-ID", "zooms": []}"#)
+
+        // Whole-frame blur effects
+        let effect = field("effectID", "uuid", "An effect's id from state.clips[].blurEffects[].id.")
+        let effectFields = [
+            field("amount", "number", "Blur strength: the Gaussian standard deviation on a picture 1080 pixels on its long side, scaled to the real frame.",
+                  required: false, range: VideoBlurEffect.amountRange, default: .number(VideoBlurEffect.defaultAmount)),
+            field("mix", "number", "Share of the blurred picture at full strength: 0 none, 1 all of it.", required: false,
+                  range: VideoBlurEffect.mixRange, default: .number(1)),
+            field("fadeIn", "number", "Ease in from no blur. fadeIn + fadeOut must fit in the duration.", required: false, unit: "seconds",
+                  default: .number(VideoBlurEffect.defaultFade)),
+            field("fadeOut", "number", "Ease back out.", required: false, unit: "seconds", default: .number(VideoBlurEffect.defaultFade)),
+            field("enabled", "boolean", "false keeps the block and its place but draws nothing.", required: false, default: .bool(true)),
+        ]
+        add("addBlurEffect", "effects", "Blur the whole visible picture for a while, fading in and out — a transition, a private moment, a backdrop for a title. Runs [start, end); effects on one recording may touch but not overlap. Times snap to frames. Default fades shrink to fit a short effect.",
+            [clip, field("start", "number", "When it begins.", unit: editedSeconds),
+             field("end", "number", "When it ends (exclusive). Give end or duration.", required: false, unit: editedSeconds),
+             field("duration", "number", "Instead of end.", required: false, unit: "seconds", default: .number(VideoBlurEffect.defaultDuration))]
+            + effectFields + [field("effectID", "uuid", "Choose the new effect's id.", required: false), timeSpace],
+            #"{"type": "addBlurEffect", "clipID": "CLIP-ID", "start": 2, "duration": 3, "amount": 30, "fadeIn": 0.5, "fadeOut": 0.5}"#)
+        add("updateBlurEffect", "effects", "Change any of an effect's timing or settings; the rest stay. Moving start keeps the duration.",
+            [clip, effect, field("start", "number", "New start; the end moves with it.", required: false, unit: editedSeconds),
+             field("end", "number", "New end.", required: false, unit: editedSeconds),
+             field("duration", "number", "New length from the start.", required: false, unit: "seconds")] + effectFields,
+            #"{"type": "updateBlurEffect", "clipID": "CLIP-ID", "effectID": "EFFECT-ID", "mix": 0.6, "enabled": true}"#)
+        add("removeBlurEffect", "effects", "Remove an effect.", [clip, effect],
+            #"{"type": "removeBlurEffect", "clipID": "CLIP-ID", "effectID": "EFFECT-ID"}"#)
+
+        // Markers
+        let marker = field("markerID", "uuid", "A marker's id from state.clips[].markers[].id.")
+        let colors = TimelineMarker.Color.allCases.map(\.rawValue)
+        add("addMarker", "markers", "Name a moment on the timeline — a note to the owner, or a place to come back to. Markers follow their frame through cuts.",
+            [clip, field("time", "number", "Where.", unit: editedSeconds),
+             field("label", "string", "A short name, one line.", required: false, default: .string("")),
+             field("color", "string", "Flag colour.", required: false, default: .string("blue"), values: colors),
+             field("markerID", "uuid", "Choose the new marker's id.", required: false), timeSpace],
+            #"{"type": "addMarker", "clipID": "CLIP-ID", "time": 12.4, "label": "Best take", "color": "green"}"#)
+        add("updateMarker", "markers", "Move, rename or recolour a marker.",
+            [clip, marker, field("time", "number", "New place.", required: false, unit: editedSeconds),
+             field("label", "string", "New name.", required: false), field("color", "string", "New colour.", required: false, values: colors)],
+            #"{"type": "updateMarker", "clipID": "CLIP-ID", "markerID": "MARKER-ID", "label": "Check the audio here"}"#)
+        add("removeMarker", "markers", "Remove a marker.", [clip, marker],
+            #"{"type": "removeMarker", "clipID": "CLIP-ID", "markerID": "MARKER-ID"}"#)
+
+        // Graphics
+        let graphicID = field("graphicID", "uuid", "A graphic's id from state.clips[].graphics.items[].id.")
+        let kinds = GraphicKind.allCases.map(\.rawValue)
+        let graphicObject = field("graphic", "object",
+            "{kind, start, end, props, look?, id?}. kind is one of the values; namePlate, featureList, titleCard, phoneScreens, route, link and endCard sit in the right-hand column, panelTitle, rule and checklist in the side panel. start and end are edited-recording seconds; props is the template's data (see Tools/Graphics/README.md and docs/plans/graphics-track.md section 3): beat times in it (at, …At) are seconds after start, and image values are absolute paths to files that exist. look is glass or ink for this graphic alone.",
+            values: kinds)
+        let styleKeys = "Only the keys to change: accent (\"#F5C42C\"), panel (shade|solid), moveVideo (slide the picture aside while a panel shows), edge (soft edge of the shade, 0–400 px, default 170), look (glass|ink|mix; mix writes panel graphics in ink)."
+        let styleObject = field("graphicsStyle", "object", styleKeys)
+        add("addGraphic", "graphics", "Add a timed motion graphic over the recording. Two graphics in the same place (column or panel) may not overlap; a graphic shows for at least 0.5 s and ends inside the recording.",
+            [clip, graphicObject, timeSpace],
+            #"{"type": "addGraphic", "clipID": "CLIP-ID", "graphic": {"kind": "namePlate", "start": 0.3, "end": 4.3, "props": {"kicker": "Yamparala Media", "title": "Yamparala Rahul", "detail": "UX Design Engineer"}}}"#)
+        add("updateGraphic", "graphics", "Change a graphic. Give only the fields to change; moving start keeps the length; props, when given, replaces all props; look \"\" goes back to the style's choice.",
+            [clip, graphicID, field("graphic", "object", "{kind?, start?, end?, props?, look?}")],
+            #"{"type": "updateGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID", "graphic": {"start": 12.0}}"#)
+        add("removeGraphic", "graphics", "Remove a graphic.", [clip, graphicID],
+            #"{"type": "removeGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID"}"#)
+        add("replaceGraphics", "graphics", "Set every graphic on the recording at once, and the style too when given.",
+            [clip, field("graphics", "array", "Graphics as in addGraphic."), field("graphicsStyle", "object", styleKeys, required: false)],
+            #"{"type": "replaceGraphics", "clipID": "CLIP-ID", "graphics": [], "graphicsStyle": {"look": "mix"}}"#)
+        add("setGraphicsStyle", "graphics", "Change how every graphic on the recording looks.",
+            [clip, styleObject],
+            #"{"type": "setGraphicsStyle", "clipID": "CLIP-ID", "graphicsStyle": {"panel": "shade", "edge": 170}}"#)
+        add("importGraphics", "graphics", "Read a graphics.json file (the format Tools/Graphics uses) onto the recording, replacing its graphics and style. Image paths in the file are relative to it and must exist.",
+            [clip, field("path", "string", "A local graphics.json file.")],
+            #"{"type": "importGraphics", "clipID": "CLIP-ID", "path": "/Users/me/Desktop/recut/graphics.json"}"#)
+
+        // Colour
+        add("setInputProfile", "colour", "Say how the recording's colour was recorded. A profile the conversion does not fit removes it. HLG/PQ only for files tagged so; D-Log M never for a file tagged HDR.",
+            [clip, field("profile", "string", "Auto decides only from HDR tags and leaves a DJI file as recorded until told.",
+                         values: ColorInputProfile.allCases.map(\.rawValue))],
+            #"{"type": "setInputProfile", "clipID": "CLIP-ID", "profile": "pocket3DLogM"}"#)
+        add("importTechnicalLUT", "colour", "Read, check and attach DJI's Pocket 3 D-Log M to Rec.709 .cube conversion. Needs profile pocket3DLogM (set it earlier in the same request). state reports whether it is DJI's official file.",
+            [clip, field("path", "string", "A local .cube file.")],
+            #"{"type": "importTechnicalLUT", "clipID": "CLIP-ID", "path": "~/Downloads/DJI OSMO Pocket 3 D-Log M to Rec.709 V1.cube"}"#)
+        add("clearTechnicalLUT", "colour", "Detach the conversion; Natural colour turns off with it.", [clip],
+            #"{"type": "clearTechnicalLUT", "clipID": "CLIP-ID"}"#)
+        add("setColorCorrection", "colour", "Natural colour: apply the D-Log M conversion, or show the recording as recorded.",
+            [clip, field("enabled", "boolean", "true to correct.")],
+            #"{"type": "setColorCorrection", "clipID": "CLIP-ID", "enabled": true}"#)
+        add("setColorAdjustments", "colour", "Set any of the four beginner controls; the rest stay. Applied in linear light after any conversion.",
+            [clip, field("exposureEV", "number", "Brightness.", required: false, unit: "stops", range: ColorAdjustments.exposureRange, default: .number(0)),
+             field("warmth", "number", "Cooler below 0, warmer above.", required: false, range: ColorAdjustments.warmthRange, default: .number(0)),
+             field("contrast", "number", "About 18% grey.", required: false, unit: "×", range: ColorAdjustments.contrastRange, default: .number(1)),
+             field("saturation", "number", "Colour strength.", required: false, unit: "×", range: ColorAdjustments.saturationRange, default: .number(1))],
+            #"{"type": "setColorAdjustments", "clipID": "CLIP-ID", "exposureEV": 0.3, "warmth": 0.15}"#)
+        add("resetColorAdjustments", "colour", "The four controls back to neutral; the conversion stays.", [clip],
+            #"{"type": "resetColorAdjustments", "clipID": "CLIP-ID"}"#)
+        add("copyColorAdjustments", "colour", "Copy one recording's look to others in one step.",
+            [field("clipID", "uuid", "The recording to copy from."),
+             field("targets", "uuid[]", "The recordings to copy to."),
+             field("includeInterpretation", "boolean", "Also copy the recorded colour and conversion — only for footage recorded the same way.",
+                   required: false, default: .bool(false))],
+            #"{"type": "copyColorAdjustments", "clipID": "CLIP-ID", "targets": ["OTHER-CLIP-ID"]}"#)
+
+        // Movie and project
+        add("setMovieOrder", "movie", "Order the recordings in the movie.", [field("order", "uuid[]", "Every recording's id, each once.")],
+            #"{"type": "setMovieOrder", "order": ["SECOND-CLIP-ID", "FIRST-CLIP-ID"]}"#)
+        add("setIncludedInMovie", "movie", "Leave a recording out of the movie, or put it back.",
+            [clip, field("included", "boolean", "false to leave it out.")],
+            #"{"type": "setIncludedInMovie", "clipID": "CLIP-ID", "included": false}"#)
+        add("setMovieCanvas", "movie", "The movie's frame shape.",
+            [field("canvas", "string", "firstClip matches the first recording's crop.", values: MovieCanvas.allCases.map(\.rawValue))],
+            #"{"type": "setMovieCanvas", "canvas": "portrait"}"#)
+        add("setExportSettings", "project", "Change export settings; only the keys given change.",
+            [field("settings", "object", "Keys to change.", values: AgentCatalog.exportSettingKeys.sorted())],
+            #"{"type": "setExportSettings", "settings": {"format": "gif", "frameRate": 12}}"#)
+        add("setSubtitles", "project", "Burn a caption file into a recording.",
+            [clip, field("path", "string", "A local .srt, .vtt or .ass file.")],
+            #"{"type": "setSubtitles", "clipID": "CLIP-ID", "path": "~/Movies/talk.srt"}"#)
+        add("clearSubtitles", "project", "Stop burning captions into a recording.", [clip],
+            #"{"type": "clearSubtitles", "clipID": "CLIP-ID"}"#)
+        add("addMedia", "project", "Add recordings; each is probed first. New ids are in createdIDs.",
+            [field("paths", "string[]", "Local video files.")], #"{"type": "addMedia", "paths": ["~/Movies/take2.mov"]}"#)
+        add("removeMedia", "project", "Remove a recording from the project (the file is untouched).", [clip],
+            #"{"type": "removeMedia", "clipID": "CLIP-ID"}"#)
+        add("relinkMedia", "project", "Point a recording at a moved copy of the same video, keeping every edit.",
+            [clip, field("path", "string", "The moved file; same size and length.")],
+            #"{"type": "relinkMedia", "clipID": "CLIP-ID", "path": "~/Movies/moved.mov"}"#)
+
+        let session = [field("sessionID", "uuid", "From sessions or state.", required: false),
+                       field("projectID", "uuid", "From sessions or state.", required: false)]
+        let methods = [
+            Method(method: "catalog", summary: "This description.", fields: []),
+            Method(method: "sessions", summary: "Running YamVideo windows and their open projects.", fields: []),
+            Method(method: "state", summary: "The project as last committed: revision, recordings with ids and timing, colour, effects, markers, the owner's selection and playhead.", fields: session),
+            Method(method: "apply", summary: "1–100 commands as one undo step, all or nothing.", fields: session + [
+                field("expectedRevision", "integer", "The revision you read. A newer one refuses with revision_conflict: read state again."),
+                field("commands", "array", "The commands, in order."),
+                field("label", "string", "What the Undo menu should call the step, at most 80 characters.", required: false),
+                field("dryRun", "boolean", "Check everything and report what would happen, changing nothing.", required: false, default: .bool(false)),
+                field("requestID", "string", "Retrying the same id returns the first answer instead of applying twice.", required: false)]),
+            Method(method: "preview", summary: "Render one frame to a PNG on this Mac.", fields: [
+                field("clip", "uuid", "The recording (or use timeSpace movie).", required: false),
+                field("time", "number", "When.", unit: editedSeconds), timeSpace,
+                field("composed", "boolean", "As the owner's Preview plays it: crop, zoom, colour, blur areas and effects (captions are export-only). Use this to see an effect or a zoom.", required: false, default: .bool(false)),
+                field("cropped", "boolean", "Apply the crop to a source-frame preview.", required: false, default: .bool(false)),
+                field("original", "boolean", "Leave the colour correction out, to compare.", required: false, default: .bool(false)),
+                field("expectedRevision", "integer", "Refuse if the project has moved on.", required: false)]),
+            Method(method: "events", summary: "What changed since a cursor, and who changed it.", fields: [
+                field("after", "integer", "The last sequence you saw.", required: false), field("limit", "integer", "At most 100.", required: false)]),
+            Method(method: "undo", summary: "Undo a step you made, by its transactionID; refused if another edit is now on top.", fields: session + [
+                field("transactionID", "uuid", "From apply's result."), field("expectedRevision", "integer", "The revision you read.")]),
+            Method(method: "redo", summary: "Redo it.", fields: session + [
+                field("transactionID", "uuid", "From undo's result."), field("expectedRevision", "integer", "The revision you read.")]),
+            Method(method: "analyze", summary: "Propose silence cuts or zooms as a job; applies nothing.", fields: session + [
+                field("clip", "uuid", "The recording."), field("kind", "string", "What to look for.", values: ["silence", "zooms"])]),
+            Method(method: "export", summary: "Export one recording or the movie as a job.", fields: session + [
+                field("path", "string", "Where to write."), field("scope", "string", "What.", values: ["recording", "movie"]),
+                field("clip", "uuid", "For scope recording.", required: false), field("overwrite", "boolean", "Replace an existing file.", required: false, default: .bool(false))]),
+            Method(method: "job", summary: "A job's status and result.", fields: [field("job", "uuid", "From analyze or export.")]),
+            Method(method: "cancel", summary: "Cancel a job.", fields: [field("job", "uuid", "From analyze or export.")]),
+            Method(method: "save", summary: "Save without a dialog: in place, first save, or a copy to another path.", fields: session + [
+                field("path", "string", "Where, for a first save or a copy.", required: false)]),
+            Method(method: "reveal", summary: "Show the owner something: select it and move the playhead there. Changes no edits.", fields: [
+                field("clip", "uuid", "A recording.", required: false), field("section", "uuid", "A section.", required: false),
+                field("zoom", "uuid", "A zoom.", required: false), field("effect", "uuid", "A blur effect.", required: false),
+                field("marker", "uuid", "A marker.", required: false), field("time", "number", "A time.", required: false, unit: editedSeconds), timeSpace]),
+        ]
+
+        return AgentCatalog(
+            conventions: [
+                "Recording times are seconds of the edited recording — after cuts, reordering and speed changes. Trim bounds and section ranges are seconds of the source file. Movie times are only used where timeSpace is \"movie\".",
+                "Values are checked, never clamped: an out-of-range value is refused with a message saying what is allowed. Times snap to whole frames and rectangles to even pixels; state shows exactly what was stored.",
+                "Rectangles are {x, y, width, height} and points {x, y} in source pixels with the origin at the top left of the displayed (rotation-applied) frame.",
+                "Examples use made-up ids (00000000-…); use real ids from state.",
+                "Commands in one apply all see the state you read, not each other's results. To refer to something you add in the same request, choose its id yourself (areaID, zoomID, effectID, markerID).",
+                "Effects, zooms and markers follow the footage they are on: cutting that footage removes them (apply's result lists removedZooms, removedEffects and removedMarkers; undo restores them).",
+                "The owner edits too. Every apply names the revision you read; revision_conflict means read state again and re-plan, not retry blindly. agents_paused means the owner has paused agents.",
+            ],
+            workflow: [
+                "Read state.",
+                "Plan, then apply with dryRun to check the batch.",
+                "Apply for real with a label the owner will understand in the Undo menu.",
+                "Look at the result with preview (composed: true to see effects and zooms).",
+                "Undo your own step by transactionID if it is not right; reveal to show the owner what you did.",
+            ],
+            commands: commands, methods: methods)
+    }()
+
+    /// Kept here rather than read from `AppModel` so the catalog needs no instance.
+    static let exportSettingKeys: Set<String> = AppModel.exportSettingKeys
+}

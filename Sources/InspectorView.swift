@@ -53,6 +53,16 @@ struct InspectorPane: View {
                 GraphicInspector(item: item, graphic: graphic)
                 Divider()
             }
+        case .effect:
+            if let effect = model.selectedEffect {
+                EffectInspector(item: item, effect: effect)
+                Divider()
+            }
+        case .marker:
+            if let marker = model.selectedMarker {
+                MarkerInspector(marker: marker).id(marker.id)
+                Divider()
+            }
         case .recording:
             EmptyView()
         }
@@ -325,6 +335,7 @@ private struct RecordingInspector: View {
             GraphicsSection(item: item)
             subtitles
             ColorInspector(item: item, info: info)
+            EffectsAndMarkersSection(item: item)
         }
     }
 

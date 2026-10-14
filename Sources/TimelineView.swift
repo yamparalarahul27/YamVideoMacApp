@@ -16,6 +16,7 @@ struct TimelineView: View {
     private static let sectionHeight = 48.0
     private static let waveformHeight = 28.0
     private static let zoomHeight = 28.0
+    private static let effectHeight = 24.0
     /// Two rows: column graphics above, panel graphics below.
     private static let graphicsRowHeight = 18.0
     private static let graphicsHeight = graphicsRowHeight * 2 + 4
@@ -25,6 +26,7 @@ struct TimelineView: View {
         var lanes = [Self.rulerHeight, Self.sectionHeight]
         if overview != nil { lanes.append(Self.waveformHeight) }
         lanes.append(Self.zoomHeight)
+        lanes.append(Self.effectHeight)
         lanes.append(Self.graphicsHeight)
         return lanes
     }
@@ -62,6 +64,7 @@ struct TimelineView: View {
                                 .gesture(scrubGesture(width: width, pixels: pixels))
                         }
                         zoomLane(width: width, pixels: pixels)
+                        effectLane(width: width, pixels: pixels)
                         graphicsLane(width: width, pixels: pixels)
                     }
                     playhead(width: width)
@@ -138,25 +141,27 @@ struct TimelineView: View {
     // MARK: Snapping
 
     /// The targets for one moment of a drag, or nil while snapping is off or ⌥ is held.
-    private func snapping(playhead: Bool = true, excludingZoom: UUID? = nil) -> TimelineSnapping? {
+    private func snapping(playhead: Bool = true, excluding: UUID? = nil) -> TimelineSnapping? {
         guard model.dragSnaps() else { return nil }
-        return TimelineSnapping(timeline: item.timeline, zooms: item.zoomShots,
-                                playhead: playhead ? model.previewTime : nil, excludingZoom: excludingZoom)
+        return TimelineSnapping(timeline: item.timeline, zooms: item.zoomShots, effects: item.blurEffects, markers: item.markers,
+                                playhead: playhead ? model.previewTime : nil, excluding: excluding)
     }
 
     /// Where a dragged time lands, showing the guide while it is held by a target.
     private func snap(_ time: Double, pixels: Double, playhead: Bool = true,
-                      excludingZoom: UUID? = nil, within range: ClosedRange<Double>? = nil) -> Double {
-        let target = snapping(playhead: playhead, excludingZoom: excludingZoom)?
+                      excluding: UUID? = nil, within range: ClosedRange<Double>? = nil) -> Double {
+        let target = snapping(playhead: playhead, excluding: excluding)?
             .target(for: time, pixelsPerSecond: pixels, within: range)
         showGuide(at: target?.time)
         return target?.time ?? time
     }
 
     /// Where a zoom being moved whole lands: by whichever of its edges is nearer a target.
-    private func snapZoom(_ shot: ZoomShot, to start: Double, pixels: Double) -> Double {
-        guard let snapping = snapping(excludingZoom: shot.id) else { showGuide(at: nil); return start }
-        let landed = snapping.snapSpan(start: start, duration: shot.duration, pixelsPerSecond: pixels)
+    /// Where a block moved whole lands — a zoom or an effect — by whichever of its edges
+    /// is nearer a target.
+    private func snapSpan(_ id: UUID, start: Double, duration: Double, pixels: Double) -> Double {
+        guard let snapping = snapping(excluding: id) else { showGuide(at: nil); return start }
+        let landed = snapping.snapSpan(start: start, duration: duration, pixelsPerSecond: pixels)
         showGuide(at: landed.target?.time)
         return landed.start
     }
@@ -252,6 +257,13 @@ struct TimelineView: View {
             }
         }
         .frame(width: width, height: Self.rulerHeight, alignment: .leading)
+        .overlay(alignment: .topLeading) {
+            // Markers fly in the ruler, not a lane of their own.
+            ForEach(item.markers.filter { viewport.contains($0.time) }) { marker in
+                MarkerFlag(marker: marker, selected: model.selectedMarkerID == marker.id) { model.selectMarker(marker) }
+                    .offset(x: viewport.x(of: marker.time, across: width) - 7, y: 3)
+            }
+        }
         .clipped()
         .contentShape(Rectangle())
         .gesture(scrubGesture(width: width, pixels: pixels))
@@ -306,8 +318,8 @@ struct TimelineView: View {
             ForEach(item.zoomShots.filter { viewport.intersects($0.start, $0.start + $0.duration) }) { shot in
                 ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id,
                           highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
-                          snapStart: { snapZoom(shot, to: $0, pixels: pixels) },
-                          snapEnd: { snap($0, pixels: pixels, excludingZoom: shot.id) },
+                          snapStart: { snapSpan(shot.id, start: $0, duration: shot.duration, pixels: pixels) },
+                          snapEnd: { snap($0, pixels: pixels, excluding: shot.id) },
                           endSnap: endSnap,
                           onSelect: { model.selectedShotID = shot.id; model.editorMode = .zoom },
                           onMove: { model.setZoomStart(shot.id, $0) },
@@ -317,6 +329,33 @@ struct TimelineView: View {
             }
         }
         .frame(width: width, height: Self.zoomHeight, alignment: .leading)
+        .clipped()
+    }
+
+    private func effectLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
+            if item.blurEffects.isEmpty {
+                Text("Effects · add a full-frame blur in the inspector")
+                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 5)
+            }
+            ForEach(item.blurEffects.filter { viewport.intersects($0.start, $0.end) }) { effect in
+                EffectBlock(effect: effect, selected: model.selectedEffectID == effect.id,
+                            highlighted: model.agentHighlight?.elements.contains(effect.id) == true, pixels: pixels,
+                            snapStart: { snapSpan(effect.id, start: $0, duration: effect.duration, pixels: pixels) },
+                            snapEdge: { snap($0, pixels: pixels, excluding: effect.id) },
+                            endSnap: endSnap,
+                            onSelect: { model.selectedEffectID = effect.id; model.editorMode = .effects },
+                            onMove: { start in model.updateEffect(effect.id) { $0.end = start + $0.duration; $0.start = start } },
+                            onTrim: { start, end in
+                                model.updateEffect(effect.id) { if let start { $0.start = start }; if let end { $0.end = end } }
+                            })
+                    .frame(height: Self.effectHeight)
+                    .offset(x: viewport.x(of: effect.start, across: width))
+            }
+        }
+        .frame(width: width, height: Self.effectHeight, alignment: .leading)
         .clipped()
     }
 

@@ -189,6 +189,26 @@ func run() async throws {
     await render(window(), size: size, to: output.appendingPathComponent("11-compare.png"))
     await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
            to: output.appendingPathComponent("12-compare-minimum.png"))
+
+    // Effects mode: a blur selected at its hold, with two named markers in the ruler.
+    model.colorComparison = .corrected
+    model.setPreviewFraction(1.0 / max(1, model.items[0].editedDuration))
+    model.addMarkerAtPlayhead()
+    if let marker = model.selectedMarkerID { model.updateMarker(marker) { $0.label = "Intro ends"; $0.color = .green } }
+    model.setPreviewFraction(6.0 / max(1, model.items[0].editedDuration))
+    model.addMarkerAtPlayhead()
+    model.setPreviewFraction(4.0 / max(1, model.items[0].editedDuration))
+    model.addBlurEffect()
+    model.editorMode = .effects
+    if let effect = model.selectedEffect { model.jumpToEffect(effect) }
+    await pump(3)
+    await render(window(), size: size, to: output.appendingPathComponent("13-effects.png"))
+    await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
+           to: output.appendingPathComponent("14-effects-minimum.png"))
+    if let marker = model.selectedItem?.markers.first { model.selectMarker(marker) }
+    await pump(1)
+    await render(InspectorPane().environmentObject(model).frame(width: inspector.width, height: inspector.height), size: inspector,
+           to: output.appendingPathComponent("15-marker.png"))
 }
 
 Task { @MainActor in

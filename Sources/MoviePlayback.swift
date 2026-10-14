@@ -71,7 +71,7 @@ final class MovieCompositor: NSObject, AVVideoCompositing {
                                      regions: instruction.clip.blurRegions, shots: instruction.clip.zoomShots,
                                      settings: instruction.settings,
                                      time: request.compositionTime.seconds - instruction.timeRange.start.seconds,
-                                     color: instruction.color)
+                                     color: instruction.color, effects: instruction.clip.blurEffects)
             let canvas = instruction.canvas
             let factor = min(canvas.width / crop.width, canvas.height / crop.height)
             let width = max(2, floor(crop.width * factor / 2) * 2)

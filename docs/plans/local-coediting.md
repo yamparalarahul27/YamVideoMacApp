@@ -23,7 +23,7 @@ that branch so all planning links work on main.
 | Area | Observed state / revised decision |
 |---|---|
 | Editing foundation | Native preview, cuts, speed, movie assembly, waveform, silence review, suggested zooms, undo and recovery exist on the inspected editor branch. Reuse them. |
-| Timeline navigation | Adaptive ruler, anchored zoom, shared lane sizing, snapping and multi-section selection are implemented. Markers remain planned. |
+| Timeline navigation | Adaptive ruler, anchored zoom, shared lane sizing, snapping, multi-section selection and markers are implemented. |
 | Simplified layout | Promote selection inspector + separate export sheet into the next implementation phase; replace the earlier Inspector/Export tab proposal. |
 | Agent editing | Promote to a first-class local workflow. The earlier rejection of an agent-facing edit representation no longer applies. |
 | Colour | Add a per-recording Pocket 3 D-Log M workflow before creative effects; see the dedicated colour plan. |
@@ -507,4 +507,13 @@ Implemented: colour engine and renderer parity, version 4 persistence, human and
 colour commands, the Colour inspector and comparison, Movie paths and project assets.
 Remaining: native HDR tone mapping and checks with real Pocket 3 footage. See section 6
 of [Pocket 3 colour](pocket-3-colour.md).
+
+### Phase 5 status (2026-10-14)
+
+Implemented: whole-frame blur effects and markers (schema v5) through the shared commands,
+inspector and timeline, with measured preview/export parity — see section 10 of the
+[blur plan](full-frame-blur-effects.md). For agents: every new feature has commands,
+state, reveal and highlights; `preview` gains `composed`; and a `catalog` request (MCP
+`yamvideo_describe`, `yamvideoctl catalog`) describes every command with its fields,
+units, ranges, defaults and an example, kept in step with `apply` by the suite.
 
