@@ -198,8 +198,20 @@ enum FFmpeg {
             fps: parseRate(frameRateExpression(video)) ?? 30,
             fpsExpression: frameRateExpression(video),
             rotation: rotation,
-            colorTransfer: video["color_transfer"] as? String
+            colorTransfer: video["color_transfer"] as? String,
+            colorSpace: video["color_space"] as? String,
+            colorRange: video["color_range"] as? String,
+            cameraMake: cameraMake(root)
         )
+    }
+
+    /// QuickTime and MP4 keep the maker under a few different keys.
+    private static func cameraMake(_ root: [String: Any]) -> String? {
+        let tags = ((root["format"] as? [String: Any])?["tags"] as? [String: Any]) ?? [:]
+        for key in ["com.apple.quicktime.make", "make", "Make", "com.android.manufacturer"] {
+            if let value = tags[key] as? String, !value.isEmpty { return value }
+        }
+        return nil
     }
 
     private static func rotationDegrees(from stream: [String: Any]) -> Int {
@@ -254,6 +266,7 @@ enum FFmpeg {
         style: BlurStyle = .blur,
         strength: Double = 24,
         toneMap: Bool = false,
+        color: [String] = [],
         subtitles: URL? = nil,
         subtitleStyle: String = ExportSettings().subtitleForceStyle,
         maxWidth: Int = 1400
@@ -279,7 +292,7 @@ enum FFmpeg {
         }
 
         let graph = filterGraph(
-            head: toneMap ? [toneMapChain] : [],
+            head: (toneMap ? [toneMapChain] : []) + color,
             regions: regions,
             style: style,
             strength: strength,
@@ -346,10 +359,10 @@ enum FFmpeg {
         "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
         + "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
 
-    /// Filters that have to run before anything else. Empty for an ordinary SDR clip.
-    static func videoHead(info: MediaInfo, settings: ExportSettings) -> [String] {
-        guard info.isHDR, settings.toneMapHDR else { return [] }
-        return [toneMapChain]
+    /// Filters that have to run before anything else: HDR tone mapping, then the colour
+    /// stage (`ColorPipeline.ffmpegFilters`). Empty for an ordinary SDR clip.
+    static func videoHead(info: MediaInfo, settings: ExportSettings, color: [String] = []) -> [String] {
+        (info.isHDR && settings.toneMapHDR ? [toneMapChain] : []) + color
     }
 
     /// The filter that obscures one already-cropped region.
@@ -688,9 +701,11 @@ enum FFmpeg {
         settings: ExportSettings,
         subtitles: URL? = nil,
         palette: URL? = nil,
-        loudness: LoudnessMeasurement? = nil
+        loudness: LoudnessMeasurement? = nil,
+        color: [String] = []
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
+        let head = videoHead(info: info, settings: settings, color: color)
         let tail = videoTail(info: info, crop: cropRect, zoomShots: zoomShots,
                              settings: settings, subtitles: subtitles)
 
@@ -698,7 +713,7 @@ enum FFmpeg {
         if let palette { args += ["-i", palette.path] }
 
         let graph = editedFilterGraph(
-            head: videoHead(info: info, settings: settings),
+            head: head,
             segments: segments, audio: info.hasAudio && settings.audio != .none && !settings.format.isAnimation,
             regions: regions.map { $0.evenClamped(in: info.fullFrame) },
             style: settings.blurStyle,
@@ -737,9 +752,10 @@ enum FFmpeg {
             args += ["-pix_fmt", "yuv420p"]
 
             // The frames are Rec.709 now. Saying so matters: without these the muxer
-            // copies the source's HDR tags onto SDR pixels and players stretch them back.
-            if !videoHead(info: info, settings: settings).isEmpty {
-                args += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+            // copies the source's HDR tags onto SDR pixels and players stretch them back,
+            // and a D-Log M file's own tags no longer describe the corrected picture.
+            if !head.isEmpty {
+                args += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             }
 
             switch settings.audio {
@@ -804,7 +820,8 @@ enum FFmpeg {
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
-        subtitles: URL? = nil
+        subtitles: URL? = nil,
+        color: [String] = []
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         // Both GIF passes must see exactly the same frames, captions included, or the
@@ -818,7 +835,7 @@ enum FFmpeg {
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         args += mapped(
             editedFilterGraph(
-                head: videoHead(info: info, settings: settings),
+                head: videoHead(info: info, settings: settings, color: color),
                 segments: segments, audio: false,
                 regions: regions.map { $0.evenClamped(in: info.fullFrame) },
                 style: settings.blurStyle,
@@ -907,7 +924,8 @@ enum FFmpeg {
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
-        subtitles: URL? = nil
+        subtitles: URL? = nil,
+        color: [String] = []
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
@@ -918,12 +936,12 @@ enum FFmpeg {
             commands.append(paletteArguments(input: input, palette: palette, info: info,
                                              crop: crop, regions: regions,
                                              zoomShots: zoomShots, segments: segments,
-                                             settings: settings, subtitles: subtitles))
+                                             settings: settings, subtitles: subtitles, color: color))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
                                         segments: segments, settings: settings,
-                                        subtitles: subtitles, palette: palette))
+                                        subtitles: subtitles, palette: palette, color: color))
         return commands
     }
 
@@ -948,11 +966,15 @@ enum FFmpeg {
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
         subtitles: URL? = nil,
+        color: ColorStage = .none,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
         guard let ffmpeg = ffmpegPath else {
             throw FFmpegError(message: "ffmpeg was not found.")
         }
+        // An uncorrected file reported as a success is worse than no file.
+        if let problem = color.problem { throw FFmpegError(message: problem) }
+        let color = try ColorPipeline.ffmpegFilters(color, info: info, toneMapped: info.isHDR && settings.toneMapHDR)
         // Fail with something actionable instead of ffmpeg's "Unknown encoder 'libwebp'"
         // four passes into the error log.
         if settings.format == .webp, await !supportsWebP() {
@@ -987,7 +1009,7 @@ enum FFmpeg {
 
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, segments: segments,
-                                      settings: settings, subtitles: subtitles)
+                                      settings: settings, subtitles: subtitles, color: color)
         let measuring = needsLoudnessPass(info: info, settings: settings)
         // Progress is reported against what the export actually writes, which is the
         // edited timeline rather than the whole source.
@@ -1017,7 +1039,7 @@ enum FFmpeg {
                     settings: settings,
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
-                    loudness: measurement
+                    loudness: measurement, color: color
                 )
             }
 

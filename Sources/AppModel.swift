@@ -17,7 +17,19 @@ final class AppModel: ObservableObject {
     @Published var selection: VideoItem.ID?
     @Published var settings = ExportSettings()
     @Published var previewImage: NSImage?
+    /// The same frame without its colour stage, while comparing side by side.
+    @Published var previewOriginalImage: NSImage?
     @Published var previewIsLoading = false
+    /// How the picture shows colour correction. View state: never saved, never exported.
+    @Published var colorComparison: ColorComparison = .corrected {
+        didSet {
+            guard colorComparison != oldValue else { return }
+            refreshPreview()
+            if showPlayback, let item = selectedItem, !isMovieMode {
+                playback.prepare(item, settings: settings, at: previewTime, play: false, original: colorComparison == .original)
+            }
+        }
+    }
     @Published var isConverting = false
     @Published var toolsAvailable = FFmpeg.isAvailable
     /// Whether the located ffmpeg can write WebP at all — libwebp is an optional build flag.
@@ -279,6 +291,7 @@ final class AppModel: ObservableObject {
         previewTask?.cancel()
         guard let item = selectedItem, let info = item.info, info.duration >= 0 else {
             previewImage = nil
+            previewOriginalImage = nil
             previewIsLoading = false
             return
         }
@@ -297,12 +310,21 @@ final class AppModel: ObservableObject {
         let subtitles = item.subtitles
         let subtitleStyle = settings.subtitleForceStyle
         let subtitleKey = subtitles.map { "\($0.path)-\(subtitleStyle)" } ?? "none"
-        let key = "\(item.id)-\(Int((seconds * max(1, info.fps)).rounded()))-\(blurKey)-\(toneMap)-\(subtitleKey)"
-        if let cached = thumbnailCache[key] {
-            previewImage = cached
+        let frameKey = "\(item.id)-\(Int((seconds * max(1, info.fps)).rounded()))-\(blurKey)-\(toneMap)-\(subtitleKey)"
+        // The colour stage changes every pixel too. Original is the frame without it;
+        // with no stage to compare there is only one picture to show.
+        let stage = item.colorStage(settings)
+        let compared = stage.render == nil ? ColorComparison.corrected : colorComparison
+        let corrected = (key: "\(frameKey)-\(stage.render?.key ?? "none")", filters: item.colorFilters(settings))
+        let original = (key: "\(frameKey)-none", filters: [String]())
+        let wanted = compared == .original ? [original] : compared == .split ? [corrected, original] : [corrected]
+        func show(_ images: [NSImage]) {
+            previewImage = images[0]
+            previewOriginalImage = compared == .split ? images[1] : nil
             previewIsLoading = false
-            return
         }
+        let cached = wanted.compactMap { thumbnailCache[$0.key] }
+        if cached.count == wanted.count { show(cached); return }
 
         previewIsLoading = true
         let url = item.url
@@ -314,17 +336,21 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 130_000_000)
             if Task.isCancelled { return }
             do {
-                let data = try await FFmpeg.thumbnail(
-                    url: url, at: seconds, duration: duration,
-                    regions: regions, style: style, strength: strength, toneMap: toneMap,
-                    subtitles: subtitles, subtitleStyle: subtitleStyle
-                )
-                if Task.isCancelled { return }
-                guard let image = NSImage(data: data) else { return }
-                thumbnailCache[key] = image
-                if thumbnailCache.count > 80 { thumbnailCache.removeAll() }
-                previewImage = image
-                previewIsLoading = false
+                var images: [NSImage] = []
+                for request in wanted {
+                    if let image = thumbnailCache[request.key] { images.append(image); continue }
+                    let data = try await FFmpeg.thumbnail(
+                        url: url, at: seconds, duration: duration,
+                        regions: regions, style: style, strength: strength, toneMap: toneMap,
+                        color: request.filters, subtitles: subtitles, subtitleStyle: subtitleStyle
+                    )
+                    if Task.isCancelled { return }
+                    guard let image = NSImage(data: data) else { return }
+                    thumbnailCache[request.key] = image
+                    if thumbnailCache.count > 80 { thumbnailCache.removeAll() }
+                    images.append(image)
+                }
+                show(images)
             } catch {
                 if !Task.isCancelled { previewIsLoading = false }
             }
@@ -705,7 +731,8 @@ final class AppModel: ObservableObject {
                         zoomShots: item.zoomShots,
                         segments: item.segments,
                         settings: exportSettings,
-                        subtitles: item.subtitles
+                        subtitles: item.subtitles,
+                        color: item.colorStage(exportSettings)
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -775,7 +802,8 @@ final class AppModel: ObservableObject {
         return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
-            segments: item.segments, settings: settings, subtitles: item.subtitles
+            segments: item.segments, settings: settings, subtitles: item.subtitles,
+            color: item.colorFilters(settings)
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 

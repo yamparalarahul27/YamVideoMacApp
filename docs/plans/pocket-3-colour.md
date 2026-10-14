@@ -1,6 +1,7 @@
 # Pocket 3 colour for beginners — implementation plan
 
-**Updated:** 2026-10-13. **Status:** Planned, no colour feature implemented by this PR.
+**Updated:** 2026-10-14. **Status:** In progress: colour engine, rendering parity and v4
+persistence are implemented; controls and commands are not. See section 6.
 **Owner context:** Newly purchased DJI Osmo Pocket 3; little colour-grading knowledge;
 wants an understandable UI and help from local Codex/Claude sessions.
 **Parent plan:** [Local co-editing](local-coediting.md). This colour phase precedes
@@ -221,3 +222,82 @@ Acceptance:
 Later: assisted exposure/balance suggestions, reusable personal looks, shot matching,
 advanced highlights/shadows, optional scopes and 10-bit HDR delivery. None is required to
 make the first D-Log M correction understandable and usable.
+
+## 6. Implementation status (2026-10-14)
+
+Implemented (implementation order steps 1–2 and the data half of step 3):
+
+- **DJI table checked.** The official "DJI OSMO Pocket 3 D-Log M to Rec.709 V1.cube" from
+  the download page is a 33³ table with CRLF line endings, `#` comments, no `TITLE` or
+  domain lines, and every entry within 0–1. It fits the planned subset unchanged. Its
+  SHA-256 is `b18162854ab47702068410c33afa98a8cb6eef159fc5a04ce0e65fad0fd8947e`
+  (`LUTStore.officialPocket3`). Its header says it was generated from DJI's Mavic 3 Pro
+  D-Log M table. It is not bundled or committed.
+- **`Sources/ColorLUT.swift`:** the `.cube` parser (rules as in section 3; `LUT_3D_INPUT_RANGE`
+  is read as a domain), trilinear sampling, unit-domain folding, and text and Core Image
+  forms of a table.
+- **`Sources/ColorAdjustments.swift`:** `ClipColorSettings` (flat fields as in section 3),
+  `ColorAdjustments` with algorithm 1 exactly as in section 2, validation including
+  file-dependent rules (HLG/PQ need HDR tags; D-Log M is refused on an HDR-tagged file),
+  and Auto: only HDR transfer tags are proof; a `DJI_` file name or DJI maker tag leaves
+  the profile undecided and the picture unchanged.
+- **`Sources/ColorPipeline.swift`:** a content-addressed table store (Application Support,
+  or `YAMVIDEO_LUT_STORE`); a compiled colour stage that bakes the technical table and the
+  adjustments into one table at the technical table's grid (33³ when there is none), cached
+  by settings; ffmpeg filters (source matrix and range to float RGB, `lut3d` trilinear, back
+  to 10-bit BT.709 limited range); and a Core Image filter applying the same table.
+- **Wiring:** the stage runs first, before area obscuring, in the still preview, single
+  recording export (including the GIF palette pass), recording playback and agent previews.
+  Exports with a stage carry BT.709 tags and limited range. A stage that cannot run (missing
+  table, adjustments on HDR without tone mapping) shows the picture as recorded in previews
+  and makes export fail with the reason. Agents can request an uncorrected preview
+  (`original: true`). Playback swaps only the video composition when only colour changed.
+- **Persistence:** project version 4 with `ProjectClip.color`, omitted while a recording's
+  colour is untouched; older versions with colour data are refused. `MediaInfo` now records
+  the YUV matrix, range and camera maker.
+
+Measured parity, from `./test.sh` on a 10-bit 4:4:4 ProRes chart of 48 flat patches (8-bit
+code values, patch interiors):
+
+| Comparison | Mean | p99 |
+|---|---|---|
+| Native vs ffmpeg decode, no colour | 0.50 | 1.42 |
+| ffmpeg vs reference maths, test conversion + adjustments | 0.14 | 0.75 |
+| Native vs reference maths, same | 0.50 | 2.72 |
+| Native vs ffmpeg, same | 0.52 | 2.95 |
+| Native vs ffmpeg, DJI's table (`YAMVIDEO_DJI_LUT=… ./test.sh`) | 0.58 | 2.39 |
+
+Findings that changed the design:
+
+- macOS decodes Rec.709-tagged video into `kCGColorSpaceCoreMedia709`, not
+  `CGColorSpace.itur_709`. Converting through the textbook curve moved mid-grey by about 19
+  code values. The Core Image filter now works in the source frame's own colour space,
+  which hands the table exactly the encoded values ffmpeg gives `lut3d`. The public
+  constant needs macOS 15, so the space is named by string, falling back to `itur_709`.
+- Compiled tables clip their entries to 0–1. ffmpeg clips there anyway, converting to YUV
+  straight after the table, but Core Image carried negative entries through as a visible
+  tint, up to 14 code values. Section 2's "clamp only at the SDR delivery boundary" now
+  means at the end of the colour stage.
+- Table files for ffmpeg are named by the hash of their own text, so a file left over from
+  an older build is never reused.
+- Native single-recording preview is 8-bit only in its final display buffer; the table runs
+  on float data.
+
+Remaining for phase 4:
+
+1. Edit commands and agent commands: `setInputProfile`, `importTechnicalLUT`,
+   `setColorAdjustments`, `resetColorAdjustments`, `copyColorAdjustments`, and colour state
+   in `state`.
+2. The Colour inspector: recorded colour, Get DJI conversion and Import, Natural colour,
+   the four sliders with reset, Details, Reset Adjustments, Remove Correction, Copy colour…
+   The `colorComparison` view state and split preview images exist in `AppModel`, but
+   nothing sets them yet.
+3. Movie paths: per-recording stage in `movieArguments` (which also lacks HDR tone mapping
+   today) and in `MovieCompositor` (8-bit BGRA sources and a device RGB output space).
+4. Save, Save As and open copying tables to `YamVideo Assets/LUTs/<hash>.cube` beside the
+   project (`LUTStore.export` and `adopt` exist but are not called yet), and relinking a
+   missing table.
+5. Native HDR: Core Image does not tone-map, so an adjusted HLG/PQ recording previews
+   differently from its export.
+6. Slider latency against the 150 ms target, 4K performance, and real Pocket 3 footage
+   (none available yet).

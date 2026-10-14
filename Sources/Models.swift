@@ -16,8 +16,30 @@ struct MediaInfo: Equatable, Codable {
     var rotation: Int
     /// ffprobe's `color_transfer`, verbatim. Nil when the file does not say.
     var colorTransfer: String?
+    /// ffprobe's `color_space` (the YUV matrix) and `color_range`, verbatim. Nil when the
+    /// file does not say; see `yuvMatrix` and `isFullRange` for what is assumed then.
+    var colorSpace: String?
+    var colorRange: String?
+    /// The camera maker from the container's metadata, when it names one.
+    var cameraMake: String?
 
     var hasAudio: Bool { audioCodec != nil }
+
+    /// The matrix the YUV samples were encoded with, as ffmpeg's scale filter names it.
+    /// An untagged file gets what macOS assumes for its size — BT.709 from 720 lines up,
+    /// BT.601 below — so both renderers read it the same way. ffmpeg on its own would
+    /// assume BT.601 for every size.
+    var yuvMatrix: String {
+        switch colorSpace {
+        case "bt709": return "bt709"
+        case "bt2020nc", "bt2020c": return "bt2020"
+        case "smpte170m", "bt470bg": return "bt601"
+        default: return min(width, height) >= 720 ? "bt709" : "bt601"
+        }
+    }
+
+    /// Full-range ("pc"/JPEG) samples rather than the usual limited video range.
+    var isFullRange: Bool { colorRange == "pc" }
 
     /// True for PQ (HDR10) and HLG sources. Both need tone mapping on the way to SDR:
     /// converting one to 8-bit yuv420p without it produces a file that is still tagged
@@ -165,6 +187,8 @@ struct VideoItem: Identifiable {
     var zoomShots: [ZoomShot] = []
     /// A subtitle file to burn in, picked by the user or found next to the source.
     var subtitles: URL?
+    /// How the recording's colour is read and adjusted.
+    var color = ClipColorSettings()
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

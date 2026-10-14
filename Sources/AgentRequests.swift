@@ -37,6 +37,8 @@ struct AgentRequest: Codable {
     var kind: String?
     var job: UUID?
     var cropped: Bool?
+    /// A preview without the recording's colour stage, to pair with a corrected one.
+    var original: Bool?
     var threshold: Double?
     var minimum: Double?
     var padding: Double?
@@ -264,6 +266,8 @@ struct AgentPreview: Encodable {
     var width: Int
     var height: Int
     var cropped: Bool
+    /// True when the colour stage was left out on request.
+    var original: Bool
 }
 
 struct AgentSaveResult: Encodable {
@@ -841,6 +845,7 @@ extension AppModel {
             let data = try await FFmpeg.thumbnail(
                 url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.map(\.rect),
                 style: settings.blurStyle, strength: settings.blurStrength, toneMap: info.isHDR && settings.toneMapHDR,
+                color: clip.item().colorFilters(settings, original: request.original ?? false),
                 subtitles: clip.subtitles, subtitleStyle: settings.subtitleForceStyle,
                 maxWidth: cropped ? info.width : min(info.width, 1600))
             guard let bitmap = NSBitmapImageRep(data: data), var image = bitmap.cgImage else {
@@ -862,7 +867,8 @@ extension AppModel {
                 "preview-r\(requestedRevision)-\(clipID.uuidString.prefix(8))-\(Int((local * 1000).rounded()))ms-\(UUID().uuidString.prefix(6)).png")
             try png.write(to: file, options: .atomic)
             return .success(AgentPreview(path: file.path, revision: requestedRevision, clip: clipID, time: local,
-                                         sourceTime: source, width: image.width, height: image.height, cropped: cropped))
+                                         sourceTime: source, width: image.width, height: image.height, cropped: cropped,
+                                         original: request.original ?? false))
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid("The frame could not be rendered: \(error.localizedDescription)")) }
     }
@@ -1021,7 +1027,7 @@ extension AppModel {
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.subtitles,
-                                            onProgress: progress)
+                                            color: item.colorStage(exportSettings), onProgress: progress)
                 case .movie(let plan):
                     try await FFmpeg.exportMovie(plan: plan, settings: exportSettings, output: temporary, onProgress: progress)
                 }

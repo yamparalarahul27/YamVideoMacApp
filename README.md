@@ -144,9 +144,9 @@ or understand which part of your content matters. Quiet footage may yield no sug
   separate project. **⌘⇧O** opens a project, and **⌘N** starts a new one. Opening/starting
   a project can also be undone. If the project file changed on disk since you opened it,
   ⌘S asks before replacing it.
-  Projects are saved as version 3, which adds a project identity and the chosen subtitle
-  file; this build opens versions 1–3, and older builds refuse version 3 files rather
-  than dropping edits they do not understand.
+  Projects are saved as version 4, which adds per-recording colour settings (version 3
+  added a project identity and the chosen subtitle file). This build opens versions 1–4;
+  older builds refuse a newer file rather than dropping edits they do not understand.
 - **Recover:** edits autosave after a short idle period and when quitting. The next launch
   restores the session, including its named save destination. Recovery lives in
   `~/Library/Application Support/YamVideo/Recovery.yamvideo`; it does not overwrite a named

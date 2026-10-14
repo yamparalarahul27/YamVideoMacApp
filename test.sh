@@ -12,6 +12,9 @@ xcrun swiftc \
 	-o "$BIN" \
 	"$ROOT/Sources/Models.swift" \
 	"$ROOT/Sources/Timeline.swift" \
+	"$ROOT/Sources/ColorLUT.swift" \
+	"$ROOT/Sources/ColorAdjustments.swift" \
+	"$ROOT/Sources/ColorPipeline.swift" \
 	"$ROOT/Sources/AudioAnalysis.swift" \
 	"$ROOT/Sources/Movie.swift" \
 	"$ROOT/Sources/ZoomSuggestions.swift" \
