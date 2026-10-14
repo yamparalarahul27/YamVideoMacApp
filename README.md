@@ -115,6 +115,14 @@ or understand which part of your content matters. Quiet footage may yield no sug
 - **Delete:** select a section, then click the trash button or press **⌘⌫**. The gap closes
   automatically. At least one section stays; remove the sidebar item to discard a recording.
 - **Reorder:** drag a section onto another, or use the earlier/later arrow buttons.
+- **Snapping:** with **Snapping** on (the button above the timeline, or Timeline ▸
+  Snapping), dragged edges line up with the playhead, section boundaries, zoom edges and
+  the start and end of the timeline once they come within 8 points of one. An accent
+  line shows what an edge is holding to. It applies to trims, moving and resizing zooms,
+  and dragging the playhead. A trim snaps only to things over its own section, since
+  those are the frames it can cut at. Hold **⌥** while dragging to place freely. The
+  reach is fixed on screen, so zooming in weakens it until it disappears at frame level.
+  The setting is remembered.
 - **Arrange zooms:** use Zoom mode to add one at the playhead. Drag a cyan timeline block
   to move its start; drag its right handle to change the hold duration. Zooms stay inside
   the edited duration and cannot overlap. When cutting or reordering, their start frames

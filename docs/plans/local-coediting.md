@@ -23,7 +23,7 @@ that branch so all planning links work on main.
 | Area | Observed state / revised decision |
 |---|---|
 | Editing foundation | Native preview, cuts, speed, movie assembly, waveform, silence review, suggested zooms, undo and recovery exist on the inspected editor branch. Reuse them. |
-| Timeline navigation | Adaptive ruler and anchored zoom are implemented. Snapping, markers, multi-selection and shared lane sizing remain planned. |
+| Timeline navigation | Adaptive ruler, anchored zoom, shared lane sizing and snapping are implemented. Markers and multi-selection remain planned. |
 | Simplified layout | Promote selection inspector + separate export sheet into the next implementation phase; replace the earlier Inspector/Export tab proposal. |
 | Agent editing | Promote to a first-class local workflow. The earlier rejection of an agent-facing edit representation no longer applies. |
 | Colour | Add a per-recording Pocket 3 D-Log M workflow before creative effects; see the dedicated colour plan. |
@@ -470,10 +470,20 @@ Implemented:
   including at the minimum window size.
 - Recovery files and preview folders are separated per running instance.
 
+- **Snapping** (`TimelineSnapping` in `Timeline.swift`): trims, zoom moves and resizes,
+  and playhead drags snap within 8 points to the playhead, section boundaries, zoom edges
+  and the timeline's ends, with an accent guide while an edge holds. ⌥ suspends it for the
+  drag; a Snapping button and Timeline menu toggle switch it off, remembered as a
+  preference rather than an edit. Decisions: the nearest target wins and the playhead
+  wins a draw (half a point or less), so every target stays reachable rather than one
+  kind shadowing another; a trim snaps only to targets over its own section, since the
+  frame under the edge is what it keeps; section drags reorder by position and have
+  nothing to snap to. Markers join the targets when they arrive.
+
 Remaining for phase 3:
 
-- **Navigation:** snapping (8 pt) and multi-section selection. Shared lane sizing and the
-  adaptive ruler and anchored zoom were already on the editor branch.
+- **Navigation:** multi-section selection. Shared lane sizing and the adaptive ruler and
+  anchored zoom were already on the editor branch.
 - **Live acceptance:** a scripted headless Claude Code 2.1.241 session, with a scratch
   instance and MCP config, was set up. It stopped before any tool call because the
   Claude Code login on the development Mac had expired. The Codex CLI is not installed

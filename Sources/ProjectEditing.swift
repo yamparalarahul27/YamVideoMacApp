@@ -438,4 +438,10 @@ extension AppModel {
     func followPlayhead() {
         viewport.reveal(previewTime)
     }
+
+    /// Whether a drag happening now snaps: snapping is on and ⌥ is not held. Read on
+    /// every step of a drag, so pressing or releasing ⌥ mid-drag takes effect at once.
+    func dragSnaps(modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags) -> Bool {
+        timelineSnapping && !modifiers.contains(.option)
+    }
 }

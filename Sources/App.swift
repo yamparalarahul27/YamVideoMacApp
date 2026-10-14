@@ -125,6 +125,8 @@ struct YamVideoApp: App {
                 Button("Zoom to Fit") { model.zoomTimelineToFit() }
                     .keyboardShortcut("z", modifiers: .shift)
                     .disabled(model.viewport.scale <= 1.0001)
+                Divider()
+                Toggle("Snapping", isOn: $model.timelineSnapping)
                 }.disabled(model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
             }
             CommandGroup(after: .newItem) {

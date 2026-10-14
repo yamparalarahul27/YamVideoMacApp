@@ -426,3 +426,96 @@ struct TimelineViewport: Equatable {
         start = min(total - visible, max(0, start.isFinite ? start : 0))
     }
 }
+
+// MARK: - Snapping
+
+/// What a dragged edge lines up with as it nears it.
+///
+/// The pull is a fixed distance on screen, not a time. Across a whole recording it
+/// reaches a second or more; zoomed in to frames it reaches less than one, so snapping
+/// fades out exactly where you are placing things by hand.
+struct TimelineSnapping {
+    /// What a target is. When two are equally close the earlier kind wins: the playhead
+    /// is the one thing deliberately put somewhere to be lined up with.
+    enum Kind: Int, Comparable {
+        case playhead, sectionBoundary, zoomEdge, timelineEnd
+        static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    struct Target: Equatable {
+        var time: Double
+        var kind: Kind
+    }
+
+    /// How close, in points, an edge comes before it is pulled in.
+    static let threshold = 8.0
+    /// Distances closer than this, in points, are a tie decided by `Kind`: below what
+    /// a screen can show, the nearer of two is an accident of arithmetic.
+    static let tie = 0.5
+
+    let targets: [Target]
+
+    /// Everything on the timeline as drawn. `playhead` is nil while the playhead itself
+    /// is what is moving; `excludingZoom` leaves out the zoom being dragged, whose own
+    /// edges travel with it.
+    init(timeline: ClipTimeline, zooms: [ZoomShot], playhead: Double?, excludingZoom: UUID? = nil) {
+        var targets: [Target] = []
+        if let playhead, playhead.isFinite { targets.append(Target(time: playhead, kind: .playhead)) }
+        var offset = 0.0
+        for segment in timeline.segments.dropLast() {
+            offset += segment.duration
+            targets.append(Target(time: offset, kind: .sectionBoundary))
+        }
+        for shot in zooms where shot.id != excludingZoom {
+            targets.append(Target(time: shot.start, kind: .zoomEdge))
+            targets.append(Target(time: shot.end, kind: .zoomEdge))
+        }
+        targets.append(Target(time: 0, kind: .timelineEnd))
+        targets.append(Target(time: timeline.duration, kind: .timelineEnd))
+        self.targets = targets
+    }
+
+    /// How far snapping reaches, in seconds, at this magnification.
+    static func reach(pixelsPerSecond: Double) -> Double {
+        pixelsPerSecond > 0 && pixelsPerSecond.isFinite ? threshold / pixelsPerSecond : 0
+    }
+
+    /// The target `time` is pulled to, or nil when none is within reach. `within` limits
+    /// the targets to a span, inclusive of its ends.
+    func target(for time: Double, pixelsPerSecond: Double, within range: ClosedRange<Double>? = nil) -> Target? {
+        let reach = Self.reach(pixelsPerSecond: pixelsPerSecond)
+        guard reach > 0, time.isFinite else { return nil }
+        let tie = Self.tie / pixelsPerSecond
+        var best: (target: Target, distance: Double)?
+        for target in targets {
+            if let range, target.time < range.lowerBound - 0.000001 || target.time > range.upperBound + 0.000001 { continue }
+            let distance = abs(target.time - time)
+            guard distance <= reach else { continue }
+            if let current = best {
+                let closer = distance < current.distance - tie
+                let tied = abs(distance - current.distance) <= tie
+                guard closer || (tied && target.kind < current.target.kind) else { continue }
+            }
+            best = (target, distance)
+        }
+        return best?.target
+    }
+
+    /// A span moved whole, such as a zoom: whichever edge is nearer a target is pulled
+    /// to it, and the span keeps its length. `target` is nil when neither edge snapped.
+    func snapSpan(start: Double, duration: Double, pixelsPerSecond: Double) -> (start: Double, target: Target?) {
+        let leading = target(for: start, pixelsPerSecond: pixelsPerSecond)
+        let trailing = target(for: start + duration, pixelsPerSecond: pixelsPerSecond)
+        switch (leading, trailing) {
+        case let (lead?, trail?):
+            let leadDistance = abs(lead.time - start), trailDistance = abs(trail.time - (start + duration))
+            let tie = Self.tie / pixelsPerSecond
+            let trailWins = trailDistance < leadDistance - tie
+                || (abs(trailDistance - leadDistance) <= tie && trail.kind < lead.kind)
+            return trailWins ? (trail.time - duration, trail) : (lead.time, lead)
+        case let (lead?, nil): return (lead.time, lead)
+        case let (nil, trail?): return (trail.time - duration, trail)
+        case (nil, nil): return (start, nil)
+        }
+    }
+}

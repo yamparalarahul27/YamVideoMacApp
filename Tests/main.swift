@@ -1622,6 +1622,80 @@ for fps in [24.0, 25.0, 30.0, 60.0] {
     check(whole, "every sub-second rung is a whole number of frames at \(Int(fps))fps")
 }
 
+print("\nTimeline snapping")
+
+// Sections of 4s, 3s (6s of source at 2×) and 5s: boundaries at 4 and 7, 12 in all.
+// One zoom spans 8–10, and the playhead is parked at 5.5.
+let snapTimeline = ClipTimeline(segments: [
+    TimelineSegment(start: 0, end: 4),
+    TimelineSegment(start: 10, end: 16, speed: 2),
+    TimelineSegment(start: 20, end: 25),
+])
+let snapZoom = ZoomShot(start: 8, hold: 1, target: .zero)
+let snaps = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: 5.5)
+let snapPPS = 100.0     // the 8pt reach is 0.08s
+func landing(_ time: Double, _ snapping: TimelineSnapping = snaps, pps: Double = snapPPS,
+             within range: ClosedRange<Double>? = nil) -> TimelineSnapping.Target? {
+    snapping.target(for: time, pixelsPerSecond: pps, within: range)
+}
+
+equal(landing(4.07), .init(time: 4, kind: .sectionBoundary), "a time just inside the reach snaps to the section boundary")
+check(landing(4.09) == nil, "and one just outside it does not")
+equal(landing(5.44)?.time, 5.5, "the playhead is a target")
+equal(landing(9.95), .init(time: 10, kind: .zoomEdge), "so are zoom edges")
+equal(landing(0.03), .init(time: 0, kind: .timelineEnd), "and both ends of the timeline")
+equal(landing(11.99)?.time, 12, "including the end, which is the edited length rather than the source's")
+check(landing(2) == nil, "open timeline away from everything stays where it is")
+
+// The reach is fixed on screen, so it shrinks in seconds as the view zooms in.
+check(TimelineSnapping.reach(pixelsPerSecond: 800) < TimelineSnapping.reach(pixelsPerSecond: 100),
+      "the reach in seconds shrinks as pixels per second rise")
+equal(TimelineSnapping.reach(pixelsPerSecond: 100), 0.08, "8 points at 100 points a second is 0.08s")
+check(landing(4.02, pps: 100) != nil && landing(4.02, pps: 800) == nil,
+      "so a time that snaps across the whole view is placed freely zoomed in")
+check(landing(4, pps: 0) == nil && landing(4, pps: .nan) == nil && landing(.nan) == nil,
+      "a degenerate scale or time never snaps")
+
+// Nearest wins; a draw goes to the playhead.
+let crowded = TimelineSnapping(timeline: snapTimeline, zooms: [], playhead: 7.06)
+equal(landing(7.02, crowded), .init(time: 7, kind: .sectionBoundary), "the nearer of two targets in reach wins")
+equal(landing(7.04, crowded), .init(time: 7.06, kind: .playhead), "whichever it is")
+equal(landing(7.03, crowded), .init(time: 7.06, kind: .playhead), "and an even draw goes to the playhead")
+equal(landing(7.0302, crowded)?.kind, .playhead, "as does a gap too small to see")
+
+// What a gesture leaves out.
+let scrubbing = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: nil)
+check(!scrubbing.targets.contains { $0.kind == .playhead }, "dragging the playhead does not snap it to itself")
+let movingZoom = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: 5.5, excludingZoom: snapZoom.id)
+check(!movingZoom.targets.contains { $0.kind == .zoomEdge }, "a zoom being dragged does not snap to its own edges")
+check(landing(5.45, within: 4...7) != nil, "a trim snaps to targets over its own section")
+equal(landing(4.05, within: 4...7)?.time, 4, "including its own edges, which leave it as it was")
+check(landing(7.05, within: 0...4) == nil, "but not to those beyond it")
+
+// A zoom moved whole snaps by whichever edge is nearer a target, keeping its length.
+let leading = movingZoom.snapSpan(start: 6.96, duration: 2, pixelsPerSecond: snapPPS)
+check(leading.start == 7 && leading.target?.time == 7, "a moved zoom's start lines up with a boundary", "\(leading)")
+let trailing = movingZoom.snapSpan(start: 9.95, duration: 2, pixelsPerSecond: snapPPS)
+check(trailing.start == 10 && trailing.target?.time == 12, "and its end lines up with the end of the timeline", "\(trailing)")
+let both = movingZoom.snapSpan(start: 3.94, duration: 3.1, pixelsPerSecond: snapPPS)
+check(abs(both.start - 3.9) < 0.000001 && both.target?.time == 7,
+      "when both edges are in reach the nearer one wins", "\(both)")
+let free = movingZoom.snapSpan(start: 1, duration: 2, pixelsPerSecond: snapPPS)
+check(free.start == 1 && free.target == nil, "a zoom nowhere near a target moves freely")
+
+// ⌥ suspends snapping for the drag, and the switch itself is remembered.
+let snappingModel = AppModel(recoveryURL: nil)
+let savedSnapping = snappingModel.timelineSnapping
+snappingModel.timelineSnapping = true
+check(snappingModel.dragSnaps(modifiers: []), "a drag snaps while snapping is on")
+check(!snappingModel.dragSnaps(modifiers: [.option]), "holding ⌥ suspends it")
+check(snappingModel.dragSnaps(modifiers: [.shift, .command]), "other modifiers do not")
+snappingModel.timelineSnapping = false
+check(!snappingModel.dragSnaps(modifiers: []), "switching snapping off stops every drag snapping")
+equal(UserDefaults.standard.object(forKey: AppModel.snappingKey) as? Bool, false, "and the choice is remembered")
+equal(AppModel(recoveryURL: nil).timelineSnapping, false, "by the next window too")
+snappingModel.timelineSnapping = savedSnapping
+
 print("\nTimeline and projects")
 let wholeTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 10)])
 var splitTimeline = wholeTimeline
