@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The toolbar's "Local agents" item. Editing never needs it: it reports who has
@@ -32,9 +33,38 @@ struct AgentsToolbarButton: View {
     }
 }
 
+/// Copyable commands that register the YamVideo MCP server with Claude Code or Codex.
+/// They are only offered when this build sits next to its `yamvideoctl` and the adapter,
+/// and are never written into either client's configuration by the app.
+enum AgentSetup {
+    static var paths: (ctl: String, server: String)? {
+        let build = Bundle.main.bundleURL.deletingLastPathComponent()
+        let ctl = build.appendingPathComponent("yamvideoctl").path
+        let server = build.deletingLastPathComponent().appendingPathComponent("Tools/AgentBridge/server.mjs").path
+        guard FileManager.default.isExecutableFile(atPath: ctl), FileManager.default.fileExists(atPath: server) else { return nil }
+        return (ctl, server)
+    }
+
+    static func claudeCommand(ctl: String, server: String) -> String {
+        "claude mcp add yamvideo -s user -e YAMVIDEO_CLIENT=Claude -e YAMVIDEO_CTL=\(quoted(ctl)) -- node \(quoted(server))"
+    }
+
+    static func codexCommand(ctl: String, server: String) -> String {
+        "codex mcp add yamvideo --env YAMVIDEO_CLIENT=Codex --env YAMVIDEO_CTL=\(quoted(ctl)) -- node \(quoted(server))"
+    }
+
+    /// Single-quoted for the shell, so paths with spaces paste correctly.
+    static func quoted(_ text: String) -> String {
+        text.allSatisfy { $0.isLetter || $0.isNumber || "/._-".contains($0) }
+            ? text : "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
 struct AgentActivityView: View {
     @EnvironmentObject var model: AppModel
     @State private var showActivity = true
+    @State private var showSetup: Bool?
+    @State private var copied: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -52,9 +82,8 @@ struct AgentActivityView: View {
 
             Divider()
             if model.agentClients.isEmpty {
-                Text("No agent has connected yet. Connect a Codex or Claude session with yamvideoctl or the YamVideo MCP server; the setup guide explains how.")
+                Text("No agent has connected yet.")
                     .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(model.agentClients) { client in
@@ -73,6 +102,12 @@ struct AgentActivityView: View {
                     }
                 }
             }
+
+            DisclosureGroup("Connect an agent", isExpanded: Binding(
+                get: { showSetup ?? model.agentClients.isEmpty }, set: { showSetup = $0 })) {
+                setup.padding(.top, 6)
+            }
+            .font(.callout)
 
             DisclosureGroup("Recent activity", isExpanded: $showActivity) {
                 if model.recentActivity.isEmpty {
@@ -93,6 +128,37 @@ struct AgentActivityView: View {
         }
         .padding(14)
         .frame(width: 400)
+    }
+
+    @ViewBuilder
+    private var setup: some View {
+        if let paths = AgentSetup.paths {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Copy a command, paste it into Terminal, then start a new session in that app. Run npm ci in Tools/AgentBridge once first.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    copyButton("Copy for Claude Code", AgentSetup.claudeCommand(ctl: paths.ctl, server: paths.server))
+                    copyButton("Copy for Codex", AgentSetup.codexCommand(ctl: paths.ctl, server: paths.server))
+                }
+                Text("Scripts can use \(paths.ctl) directly.")
+                    .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+        } else {
+            Text("Connect Claude Code or Codex with the YamVideo MCP server or yamvideoctl. Tools/AgentBridge/README.md in the YamVideo source explains how.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func copyButton(_ title: String, _ command: String) -> some View {
+        Button(copied == title ? "Copied" : title) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            copied = title
+        }
+        .controlSize(.small)
+        .help(command)
     }
 
     private func activityRow(_ event: EditEvent) -> some View {

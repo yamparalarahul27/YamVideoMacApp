@@ -7,3 +7,6 @@ build/
 # Browser tooling scratch
 .playwright-cli/
 output/
+
+# MCP adapter dependencies — install with npm ci in Tools/AgentBridge
+Tools/AgentBridge/node_modules/
