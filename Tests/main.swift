@@ -3236,7 +3236,7 @@ check(grading.project.clips[0].color == nil, "a recording back at the defaults s
 grading.applyNaturalColor(conversion)
 grading.setColorAdjustments(ColorAdjustments(exposureEV: 0.25, warmth: -0.2, contrast: 1.1, saturation: 0.9))
 let gradedProject = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(grading.project))
-check(gradedProject == grading.project && gradedProject.version == 4, "colour survives a version 4 round trip")
+check(gradedProject == grading.project && gradedProject.version == VideoProject.currentVersion, "colour survives a round trip")
 var olderWithColour = gradedProject; olderWithColour.version = 3
 check((try? olderWithColour.validate()) == nil, "a version 3 file carrying colour is refused")
 var unknownAlgorithm = gradedProject; unknownAlgorithm.clips[0].color?.algorithmVersion = 9
@@ -3389,6 +3389,179 @@ _ = ColorPipeline.quickPreview(fourKFrame, movieStage.render!)
 let quickMilliseconds = Date().timeIntervalSince(quickStart) * 1000
 check(quickMilliseconds < 150, "a slider's instant preview of a 4K frame takes under 150 ms", String(format: "%.0f ms", quickMilliseconds))
 print(String(format: "       instant preview, 4K frame: %.0f ms", quickMilliseconds))
+
+// MARK: - Whole-frame blur
+
+print("\nBlur effect timing")
+let timed = VideoBlurEffect(start: 1, end: 2, fadeIn: 0.25, fadeOut: 0.25)
+equal(timed.weight(at: 0.99), 0, "no blur before the effect starts")
+equal(timed.weight(at: 1), 0, "it starts from nothing")
+check(abs(timed.weight(at: 1.125) - 0.5) < 0.000001, "and is half in at the middle of its fade")
+equal(timed.weight(at: 1.5), 1, "full through the hold")
+check(timed.weight(at: 1.99) > 0 && timed.weight(at: 1.99) < 0.01, "almost gone just before the end")
+equal(timed.weight(at: 2), 0, "and gone at the end, which belongs to whatever follows")
+var hardEdged = timed; hardEdged.fadeIn = 0; hardEdged.fadeOut = 0
+check(hardEdged.weight(at: 1) == 1 && hardEdged.weight(at: 1.999) == 1 && hardEdged.weight(at: 2) == 0,
+      "zero fades switch cleanly without dividing by zero")
+var halfMix = timed; halfMix.mix = 0.5
+equal(halfMix.weight(at: 1.5), 0.5, "mix scales the hold")
+var switchedOff = timed; switchedOff.isEnabled = false
+check(switchedOff.weight(at: 1.5) == 0 && !switchedOff.isVisible, "a switched-off effect draws nothing")
+var noAmount = timed; noAmount.amount = 0
+check(!noAmount.isVisible, "nor does one with no amount")
+check(abs(timed.sigma(for: CGSize(width: 1920, height: 1080)) - 24 * 1920 / 1080) < 0.000001,
+      "strength scales with the frame's long side")
+for fps in [24.0, 30.0, 30000.0 / 1001.0] {
+    let snapped = VideoBlurEffect(start: 1.01, end: 2.37).snapped(fps: fps)
+    let onFrames = [snapped.start, snapped.end].allSatisfy { abs(($0 * fps).rounded() - $0 * fps) < 0.000001 }
+    check(onFrames, "times snap to whole frames at \(String(format: "%.3f", fps)) fps")
+}
+check(VideoBlurEffect(start: 1, end: 1.01).problem(duration: 10, fps: 30) != nil, "an effect shorter than a frame is refused")
+check(VideoBlurEffect(start: 1, end: 1.4, fadeIn: 0.25, fadeOut: 0.25).problem(duration: 10, fps: 30) != nil,
+      "fades that do not fit are refused")
+check(VideoBlurEffect(start: 9, end: 10.5).problem(duration: 10, fps: 30) != nil, "an effect past the end is refused")
+var badAmount = timed; badAmount.amount = 81
+check(badAmount.problem(duration: 10, fps: 30) != nil, "an amount above 80 is refused")
+var badMix = timed; badMix.mix = .nan
+check(badMix.problem(duration: 10, fps: 30) != nil, "a non-finite mix is refused")
+
+print("\nBlur effects follow the footage")
+let effectTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 4), TimelineSegment(start: 4, end: 8)])
+let earlyBlur = VideoBlurEffect(start: 1, end: 3), lateBlur = VideoBlurEffect(start: 5, end: 7)
+var splitEffects = effectTimeline
+_ = splitEffects.split(at: 2, fps: 30)
+equal(splitEffects.remap([earlyBlur, lateBlur], from: effectTimeline, fps: 30).map(\.start), [1, 5],
+      "a split that keeps every frame leaves effects where they were")
+let withoutFirst = ClipTimeline(segments: [effectTimeline.segments[1]])
+equal(withoutFirst.remap([earlyBlur, lateBlur], from: effectTimeline, fps: 30).map(\.id), [lateBlur.id],
+      "deleting the footage an effect starts on removes it")
+equal(withoutFirst.remap([lateBlur], from: effectTimeline, fps: 30).first?.start, 1, "and the rest move with their footage")
+var faster = effectTimeline; faster.segments[1].speed = 2
+let sped = faster.remap([VideoBlurEffect(start: 5, end: 5.6, fadeIn: 0.1, fadeOut: 0.1)], from: effectTimeline, fps: 30).first
+check(sped.map { abs($0.start - 4.5) < 0.000001 && abs($0.duration - 0.6) < 0.000001 } == true,
+      "a speed change moves the start with its frame and keeps the duration in seconds")
+// Three sections; moving the last into the middle lands its effect inside one that
+// already runs across that cut.
+let threeParts = ClipTimeline(segments: [TimelineSegment(start: 0, end: 2), TimelineSegment(start: 2, end: 4), TimelineSegment(start: 4, end: 6)])
+let longFirst = VideoBlurEffect(start: 1, end: 3.5), lateShort = VideoBlurEffect(start: 4.5, end: 5.5)
+let middleMoved = ClipTimeline(segments: [threeParts.segments[0], threeParts.segments[2], threeParts.segments[1]])
+let collided = middleMoved.remap([longFirst, lateShort], from: threeParts, fps: 30)
+equal(collided.map(\.id), [longFirst.id], "a reorder that makes two effects collide keeps the earlier one")
+var shortTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 1.2)])
+let squeezed = shortTimeline.remap([VideoBlurEffect(start: 0.5, end: 2, fadeIn: 0.5, fadeOut: 0.5)],
+                                   from: ClipTimeline(segments: [TimelineSegment(start: 0, end: 3)]), fps: 30).first
+check(squeezed.map { abs($0.end - 1.2) < 0.000001 && abs($0.fadeIn + $0.fadeOut - $0.duration) < 0.000001 } == true,
+      "an effect cut short ends with the recording and its fades shrink to fit")
+shortTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 4)])
+let marked = [TimelineMarker(time: 1), TimelineMarker(time: 5), TimelineMarker(time: 8)]
+equal(ClipTimeline(segments: [effectTimeline.segments[1]]).remap(marked, from: effectTimeline).map(\.time), [1, 4],
+      "markers follow their frames, go with removed footage, and the very end stays the end")
+
+print("\nBlur effect rendering")
+// A fine checkerboard, whose contrast says how blurred a frame is, beside two flat
+// colours meeting at a hard edge, whose profile says what shape the blur is.
+let fxWidth = 1280, fxHeight = 720
+var fxBytes = Data(capacity: fxWidth * fxHeight * 6)
+for y in 0..<fxHeight {
+    for x in 0..<fxWidth {
+        let color: SIMD3<Double> = x < 640 ? SIMD3(repeating: (x / 2 + y / 2) % 2 == 0 ? 0.1 : 0.9)
+            : x < 960 ? SIMD3(0.8, 0.15, 0.1) : SIMD3(0.1, 0.25, 0.8)
+        for channel in [color.x, color.y, color.z] {
+            let value = UInt16((channel * 65535).rounded())
+            fxBytes.append(UInt8(value & 0xFF)); fxBytes.append(UInt8(value >> 8))
+        }
+    }
+}
+let fxRaw = colorScratch.appendingPathComponent("fx.rgb48")
+try fxBytes.write(to: fxRaw)
+let fxSource = colorScratch.appendingPathComponent("fx.mov")
+let fxEncode = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y",
+    "-stream_loop", "-1", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", "\(fxWidth)x\(fxHeight)", "-r", "30", "-i", fxRaw.path,
+    "-t", "3", "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv444p10le",
+    "-c:v", "prores_ks", "-profile:v", "4444", "-color_primaries", "bt709", "-color_trc", "bt709",
+    "-colorspace", "bt709", "-color_range", "tv", fxSource.path])
+check(fxEncode.status == 0, "made a checkerboard-and-edge test clip", fxEncode.stderrText)
+let fxInfo = try await FFmpeg.probe(url: fxSource)
+var fxItem = VideoItem(url: fxSource); fxItem.info = fxInfo; fxItem.crop = fxInfo.fullFrame
+fxItem.blurEffects = [timed]
+
+func fxFFmpegFrame(_ frameNumber: Int, effects: [VideoBlurEffect]) async throws -> RGBFrame {
+    let stage = try FFmpeg.effectStage(effects, frame: fxInfo.fullFrame.size, fps: 30, matrix: "bt709", fullRange: false)
+    let graph = FFmpeg.filterGraph(regions: [], style: .blur, strength: 1, tail: [], effects: stage,
+                                   delivery: ["select='eq(n,\(frameNumber))'",
+                                              "scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=accurate_rnd+full_chroma_int,format=rgb48le"])!
+    let result = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", fxSource.path,
+                                              "-filter_complex", graph.spec, "-map", "[\(graph.outputLabel!)]",
+                                              "-frames:v", "1", "-f", "rawvideo", "-"])
+    let words = result.stdout.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }
+    return RGBFrame(width: fxWidth, height: fxHeight, values: words.map { Double(UInt16(littleEndian: $0)) / 65535 })
+}
+func fxNativeFrame(_ frameNumber: Int, item: VideoItem) async throws -> RGBFrame {
+    let player = try await PlaybackController.makeItem(item, settings: ExportSettings())
+    let generator = AVAssetImageGenerator(asset: player.asset)
+    generator.videoComposition = player.videoComposition
+    generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+    let image = try await generator.image(at: CMTime(value: CMTimeValue(frameNumber), timescale: 30)).image
+    var words = [UInt16](repeating: 0, count: image.width * image.height * 4)
+    let context = CGContext(data: &words, width: image.width, height: image.height, bitsPerComponent: 16,
+                            bytesPerRow: image.width * 8, space: ColorPipeline.videoSpace,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    var values: [Double] = []; values.reserveCapacity(image.width * image.height * 3)
+    for pixel in stride(from: 0, to: words.count, by: 4) {
+        values += [Double(words[pixel]) / 65535, Double(words[pixel + 1]) / 65535, Double(words[pixel + 2]) / 65535]
+    }
+    return RGBFrame(width: image.width, height: image.height, values: values)
+}
+/// Luma standard deviation over the checkerboard's centre, where the blur's own edge
+/// handling cannot reach.
+func checkerContrast(_ frame: RGBFrame) -> Double {
+    var lumas: [Double] = []
+    for y in 260..<460 { for x in 200..<440 {
+        let i = (y * frame.width + x) * 3
+        lumas.append(0.2126 * frame.values[i] + 0.7152 * frame.values[i + 1] + 0.0722 * frame.values[i + 2])
+    } }
+    let mean = lumas.reduce(0, +) / Double(lumas.count)
+    return (lumas.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(lumas.count)).squareRoot()
+}
+var plainFxItem = fxItem; plainFxItem.blurEffects = []
+let sharpContrast = checkerContrast(try await fxNativeFrame(45, item: plainFxItem))
+let ffmpegHold = try await fxFFmpegFrame(45, effects: [timed])
+let nativeHold = try await fxNativeFrame(45, item: fxItem)
+let ffmpegHoldContrast = checkerContrast(ffmpegHold), nativeHoldContrast = checkerContrast(nativeHold)
+check(ffmpegHoldContrast < 0.25 * sharpContrast && nativeHoldContrast < 0.25 * sharpContrast,
+      "at full strength the blur removes most of the fine detail in both renderers",
+      String(format: "ffmpeg %.4f, native %.4f, sharp %.4f", ffmpegHoldContrast, nativeHoldContrast, sharpContrast))
+
+// The weight each frame shows, read back from how much checkerboard survives, against
+// the weight the timing maths says it should have. Covers the frame before the start,
+// the start, the fades, the hold, the last frame and the end.
+var timingErrors: [String] = []
+for frame in [29, 30, 31, 33, 35, 37, 38, 45, 52, 54, 56, 59, 60, 61] {
+    let expected = timed.weight(at: Double(frame) / 30)
+    let shownFFmpeg = 1 - checkerContrast(try await fxFFmpegFrame(frame, effects: [timed])) / sharpContrast
+    let shownNative = 1 - checkerContrast(try await fxNativeFrame(frame, item: fxItem)) / sharpContrast
+    if abs(shownFFmpeg - expected) > 0.06 || abs(shownNative - expected) > 0.06 {
+        timingErrors.append(String(format: "frame %d: expected %.2f, ffmpeg %.2f, native %.2f", frame, expected, shownFFmpeg, shownNative))
+    }
+}
+check(timingErrors.isEmpty, "both renderers fade in and out on the same frames as the timing maths",
+      timingErrors.joined(separator: "; "))
+
+// Shape: the profile across the hard colour edge, and the frame's own left edge.
+func row(_ frame: RGBFrame, y: Int, _ xs: Range<Int>) -> [SIMD3<Double>] {
+    xs.map { x in let i = (y * frame.width + x) * 3; return SIMD3(frame.values[i], frame.values[i + 1], frame.values[i + 2]) }
+}
+let edgeNative = row(nativeHold, y: 360, 880..<1040), edgeFFmpeg = row(ffmpegHold, y: 360, 880..<1040)
+let edgeError = zip(edgeNative, edgeFFmpeg).map { abs($0 - $1).max() * 255 }.max() ?? 0
+check(edgeError <= 8, "the blur has the same shape across a hard edge in both renderers",
+      String(format: "worst %.1f of 255", edgeError))
+let borderNative = row(nativeHold, y: 360, 0..<24), borderFFmpeg = row(ffmpegHold, y: 360, 0..<24)
+let borderError = zip(borderNative, borderFFmpeg).map { abs($0 - $1).max() * 255 }.max() ?? 0
+check(borderError <= 8, "and the frame's own edge gets no dark or bright halo in either",
+      String(format: "worst %.1f of 255", borderError))
+print(String(format: "       blur at hold: sharp %.4f, ffmpeg %.4f, native %.4f; edge %.1f, border %.1f of 255",
+             sharpContrast, ffmpegHoldContrast, nativeHoldContrast, edgeError, borderError))
 
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)

@@ -748,7 +748,8 @@ final class AppModel: ObservableObject {
                         segments: item.segments,
                         settings: exportSettings,
                         subtitles: item.subtitles,
-                        color: item.colorStage(exportSettings)
+                        color: item.colorStage(exportSettings),
+                        effects: item.blurEffects
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -819,7 +820,7 @@ final class AppModel: ObservableObject {
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.subtitles,
-            color: item.colorFilters(settings)
+            color: item.colorFilters(settings), effects: item.blurEffects
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 

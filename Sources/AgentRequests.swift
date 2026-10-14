@@ -1110,7 +1110,8 @@ extension AppModel {
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.subtitles,
-                                            color: item.colorStage(exportSettings), onProgress: progress)
+                                            color: item.colorStage(exportSettings), effects: item.blurEffects,
+                                            onProgress: progress)
                 case .movie(let plan):
                     try await FFmpeg.exportMovie(plan: plan, settings: exportSettings, output: temporary, onProgress: progress)
                 }

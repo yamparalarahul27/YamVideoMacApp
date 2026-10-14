@@ -10,6 +10,9 @@ struct EditReceipt: Equatable {
     var changed: Bool
     var createdIDs: [UUID]
     var removedZooms: [UUID]
+    /// Blur effects and markers dropped because their footage was cut away.
+    var removedEffects: [UUID] = []
+    var removedMarkers: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -105,6 +108,7 @@ extension AppModel {
 
         var receipt = EditReceipt(revision: revision, transactionID: nil, changed: outcome.project != base,
                                   createdIDs: outcome.createdIDs, removedZooms: outcome.removedZooms,
+                                  removedEffects: outcome.removedEffects, removedMarkers: outcome.removedMarkers,
                                   affectedClips: Self.changedClips(from: base, to: outcome.project))
         guard !dryRun, receipt.changed else { return .success(receipt) }
 

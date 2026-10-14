@@ -363,9 +363,11 @@ extension AppModel {
         case .success(let receipt):
             guard receipt.changed else { return false }
             sectionSelection = select(receipt)
-            let removed = receipt.removedZooms.count
-            statusMessage = removed > 0
-                ? "\(name). Removed \(removed) zoom(s) whose footage or space was removed; Undo restores them." : name
+            let removed = [(receipt.removedZooms.count, "zoom"), (receipt.removedEffects.count, "blur effect"),
+                           (receipt.removedMarkers.count, "marker")]
+                .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+            statusMessage = removed.isEmpty ? name
+                : "\(name). Removed \(removed.joined(separator: ", ")) whose footage or space was cut; Undo restores them."
             return true
         case .failure(let error):
             statusMessage = failure ?? error.message

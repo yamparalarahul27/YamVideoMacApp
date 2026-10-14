@@ -189,6 +189,10 @@ struct VideoItem: Identifiable {
     var subtitles: URL?
     /// How the recording's colour is read and adjusted.
     var color = ClipColorSettings()
+    /// Whole-frame blurs, sorted and non-overlapping, in edited-recording seconds.
+    var blurEffects: [VideoBlurEffect] = []
+    /// Named points on the edited timeline, sorted by time.
+    var markers: [TimelineMarker] = []
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

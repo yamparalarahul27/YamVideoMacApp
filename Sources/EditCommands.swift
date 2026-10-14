@@ -76,6 +76,16 @@ enum EditCommand: Equatable {
     /// One recording's adjustments onto others. The recorded colour, table and Natural
     /// colour come too only when asked, and only where the destination file allows them.
     case copyColor(from: UUID, to: [UUID], includeInterpretation: Bool)
+    /// A whole-frame blur. Start and end snap to the frame cadence; it may not overlap
+    /// another blur on the same recording.
+    case addBlurEffect(clip: UUID, effect: VideoBlurEffect)
+    /// Replaces the blur with the same ID.
+    case updateBlurEffect(clip: UUID, effect: VideoBlurEffect)
+    case removeBlurEffect(clip: UUID, effect: UUID)
+    case addMarker(clip: UUID, marker: TimelineMarker)
+    /// Replaces the marker with the same ID.
+    case updateMarker(clip: UUID, marker: TimelineMarker)
+    case removeMarker(clip: UUID, marker: UUID)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -110,6 +120,12 @@ enum EditCommand: Equatable {
         case .setColorAdjustments: return "Adjust Colour"
         case .resetColorAdjustments: return "Reset Colour"
         case .copyColor: return "Copy Colour"
+        case .addBlurEffect: return "Add Blur Effect"
+        case .updateBlurEffect: return "Adjust Blur Effect"
+        case .removeBlurEffect: return "Delete Blur Effect"
+        case .addMarker: return "Add Marker"
+        case .updateMarker: return "Edit Marker"
+        case .removeMarker: return "Delete Marker"
         }
     }
 }
@@ -174,6 +190,8 @@ struct EditOutcome: Equatable {
     /// Zooms dropped because the footage they were anchored to was cut away or no
     /// longer leaves room for them. Undo restores them.
     var removedZooms: [UUID] = []
+    var removedEffects: [UUID] = []
+    var removedMarkers: [UUID] = []
 }
 
 /// Applies a batch of commands to a project value. Pure: no UI state, no selection, no
@@ -493,6 +511,56 @@ enum ProjectReducer {
                     color.correctionEnabled = from.correctionEnabled
                 }
             }
+
+        case .addBlurEffect(let clip, let effect):
+            try editEffects(clip, in: &outcome) { effects, _ in
+                guard !effects.contains(where: { $0.id == effect.id }) else {
+                    throw EditError.invalid("A blur effect with that ID already exists.")
+                }
+                effects.append(effect)
+            } placing: { effect }
+            outcome.createdIDs.append(effect.id)
+
+        case .updateBlurEffect(let clip, let effect):
+            try editEffects(clip, in: &outcome) { effects, _ in
+                guard let index = effects.firstIndex(where: { $0.id == effect.id }) else {
+                    throw EditError.notFound("No blur effect with that ID on this recording.")
+                }
+                effects[index] = effect
+            } placing: { effect }
+
+        case .removeBlurEffect(let clip, let id):
+            try editEffects(clip, in: &outcome) { effects, _ in
+                guard effects.contains(where: { $0.id == id }) else {
+                    throw EditError.notFound("No blur effect with that ID on this recording.")
+                }
+                effects.removeAll { $0.id == id }
+            } placing: { nil }
+
+        case .addMarker(let clip, let marker):
+            try editMarkers(clip, in: &outcome) { markers in
+                guard !markers.contains(where: { $0.id == marker.id }) else {
+                    throw EditError.invalid("A marker with that ID already exists.")
+                }
+                markers.append(marker)
+            }
+            outcome.createdIDs.append(marker.id)
+
+        case .updateMarker(let clip, let marker):
+            try editMarkers(clip, in: &outcome) { markers in
+                guard let index = markers.firstIndex(where: { $0.id == marker.id }) else {
+                    throw EditError.notFound("No marker with that ID on this recording.")
+                }
+                markers[index] = marker
+            }
+
+        case .removeMarker(let clip, let id):
+            try editMarkers(clip, in: &outcome) { markers in
+                guard markers.contains(where: { $0.id == id }) else {
+                    throw EditError.notFound("No marker with that ID on this recording.")
+                }
+                markers.removeAll { $0.id == id }
+            }
         }
     }
 
@@ -515,22 +583,70 @@ enum ProjectReducer {
         try body(&outcome.project.clips[index], info)
     }
 
-    /// Edits a recording's sections, then carries its zooms across: each zoom follows
-    /// the frame it began on, and is dropped when that footage is gone.
+    /// Edits a recording's sections, then carries its zooms, blur effects and markers
+    /// across: each follows the frame it began on, and is dropped when that footage is gone.
     private static func editTimeline(_ id: UUID, in outcome: inout EditOutcome,
                                      _ body: (inout ClipTimeline, MediaInfo) throws -> Void) throws {
-        var removed: [UUID] = []
+        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID]) = ([], [], [])
         try editClip(id, in: &outcome) { record, info in
             let old = record.timeline
             var timeline = old
             try body(&timeline, info)
             guard timeline != old else { return }
             let kept = timeline.remap(record.zoomShots, from: old)
-            removed = record.zoomShots.map(\.id).filter { id in !kept.contains { $0.id == id } }
+            removed.zooms = record.zoomShots.map(\.id).filter { id in !kept.contains { $0.id == id } }
             record.zoomShots = kept
+            let effects = record.blurEffects ?? []
+            let keptEffects = timeline.remap(effects, from: old, fps: info.fps)
+            removed.effects = effects.map(\.id).filter { id in !keptEffects.contains { $0.id == id } }
+            record.blurEffects = keptEffects.isEmpty ? nil : keptEffects
+            let markers = record.markers ?? []
+            let keptMarkers = timeline.remap(markers, from: old)
+            removed.markers = markers.map(\.id).filter { id in !keptMarkers.contains { $0.id == id } }
+            record.markers = keptMarkers.isEmpty ? nil : keptMarkers
             record.segments = timeline.segments
         }
-        outcome.removedZooms += removed
+        outcome.removedZooms += removed.zooms
+        outcome.removedEffects += removed.effects
+        outcome.removedMarkers += removed.markers
+    }
+
+    /// Edits a recording's blur effects. `placing` names the block being placed, whose
+    /// timing is snapped to frames and checked against the timeline and its neighbours.
+    private static func editEffects(_ id: UUID, in outcome: inout EditOutcome,
+                                    _ body: (inout [VideoBlurEffect], MediaInfo) throws -> Void,
+                                    placing: () -> VideoBlurEffect?) throws {
+        try editClip(id, in: &outcome) { record, info in
+            var effects = record.blurEffects ?? []
+            try body(&effects, info)
+            if let placed = placing(), let index = effects.firstIndex(where: { $0.id == placed.id }) {
+                let effect = placed.snapped(fps: info.fps)
+                if let problem = effect.problem(duration: record.timeline.duration, fps: info.fps) {
+                    throw EditError.invalid(problem)
+                }
+                if let other = effects.first(where: { $0.id != effect.id && $0.overlaps(effect) }) {
+                    throw EditError.invalid(String(format: "That overlaps the blur effect at %.2f–%.2f s. Effects on one recording may touch but not overlap.",
+                                                   other.start, other.end))
+                }
+                effects[index] = effect
+            }
+            effects.sort { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
+            record.blurEffects = effects.isEmpty ? nil : effects
+        }
+    }
+
+    private static func editMarkers(_ id: UUID, in outcome: inout EditOutcome,
+                                    _ body: (inout [TimelineMarker]) throws -> Void) throws {
+        try editClip(id, in: &outcome) { record, _ in
+            var markers = record.markers ?? []
+            try body(&markers)
+            let duration = record.timeline.duration
+            if let problem = markers.lazy.compactMap({ $0.problem(duration: duration) }).first {
+                throw EditError.invalid(problem)
+            }
+            markers.sort { $0.time < $1.time }
+            record.markers = markers.isEmpty ? nil : markers
+        }
     }
 
     /// Edits one probed recording's colour settings, checks them against its file, and
