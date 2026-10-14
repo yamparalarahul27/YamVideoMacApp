@@ -35,28 +35,23 @@ extension AppModel {
 
     func changeMovieCanvas(_ canvas: MovieCanvas) {
         guard canvas != movieSettings.canvas else { return }
-        beginEdit("Movie Canvas", invalidatesExport: false)
-        movieSettings.canvas = canvas; movieOutput = nil
-        if isMovieMode { prepareMovie(play: false) }
+        perform([.setMovieCanvas(canvas)])
     }
 
     func includeInMovie(_ id: UUID, included: Bool) {
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].includedInMovie != included else { return }
-        beginEdit(included ? "Include Recording" : "Exclude Recording", invalidatesExport: false)
-        items[index].includedInMovie = included; movieOutput = nil
         playback.clear()
-        if isMovieMode { prepareMovie(play: false) }
+        perform([.setIncludedInMovie(clip: id, included: included)])
     }
 
     func moveMovieClip(_ id: UUID, by distance: Int) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         let target = min(max(0, index + distance), items.count - 1)
         guard target != index else { return }
-        beginEdit("Reorder Recordings", invalidatesExport: false)
-        let item = items.remove(at: index)
-        items.insert(item, at: target)
-        movieTime = 0; movieOutput = nil
-        if isMovieMode { prepareMovie(play: false) }
+        var order = items.map(\.id)
+        order.insert(order.remove(at: index), at: target)
+        movieTime = 0
+        perform([.setMovieOrder(order)])
     }
 
     func editMovieClip(_ id: UUID) {

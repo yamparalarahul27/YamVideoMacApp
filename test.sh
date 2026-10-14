@@ -20,6 +20,8 @@ xcrun swiftc \
 	"$ROOT/Sources/Playback.swift" \
 	"$ROOT/Sources/AppModel.swift" \
 	"$ROOT/Sources/ProjectEditing.swift" \
+	"$ROOT/Sources/EditCommands.swift" \
+	"$ROOT/Sources/ProjectCommandDispatcher.swift" \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
 	"$ROOT/Sources/CropEditor.swift" \

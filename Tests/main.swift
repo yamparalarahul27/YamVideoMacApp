@@ -1762,6 +1762,207 @@ check(legacyResumed.savedProject?.projectID == legacyResumed.projectID,
       "a legacy recovery file upgrades its saved copy to the same identity")
 check(!legacyResumed.hasUnsavedChanges, "an upgraded recovery file is not mistaken for unsaved edits")
 
+// MARK: - Shared edit commands
+
+print("\nShared edit commands")
+func refusal(_ result: Result<EditReceipt, EditError>) -> EditError.Code? {
+    if case .failure(let error) = result { return error.code }
+    return nil
+}
+func receipt(_ result: Result<EditReceipt, EditError>) -> EditReceipt? {
+    if case .success(let value) = result { return value }
+    return nil
+}
+func reducerRefusal(_ commands: [EditCommand], _ project: VideoProject = roundTripProject) -> EditError.Code? {
+    do { _ = try ProjectReducer.apply(commands, to: project); return nil }
+    catch let error as EditError { return error.code }
+    catch { return .invalidCommand }
+}
+@MainActor func freshEditor() -> AppModel {
+    let model = AppModel(recoveryURL: nil)
+    model.restore(roundTripProject)
+    return model
+}
+let commandClip = roundTripProject.clips[0]
+let sectionA = commandClip.timeline.segments[0], sectionB = commandClip.timeline.segments[1]
+let anchoredZoom = commandClip.zoomShots[0]
+
+// The reducer: pure, strict, all or nothing.
+equal(reducerRefusal([
+    .setSectionSpeed(clip: commandClip.id, section: sectionA.id, speed: 2),
+    .setCrop(clip: commandClip.id, rect: CGRect(x: 0, y: 0, width: 640, height: 360)),
+    .setSectionSpeed(clip: commandClip.id, section: sectionB.id, speed: 9),
+]), .invalidCommand, "a batch with one invalid command is refused as a whole")
+equal(reducerRefusal([.trimSection(clip: commandClip.id, section: UUID(), start: 0, end: nil)]), .notFound,
+      "an unknown section is reported as not found")
+equal(reducerRefusal([.trimSection(clip: commandClip.id, section: sectionA.id, start: nil, end: 99)]), .invalidCommand,
+      "a trim past the source is refused, not clamped")
+equal(reducerRefusal([.trimSection(clip: commandClip.id, section: sectionB.id, start: nil, end: 1.6)]), .invalidCommand,
+      "a trim into a neighbouring section's footage is refused")
+let snapped = try ProjectReducer.apply([.trimSection(clip: commandClip.id, section: sectionA.id, start: 1.517, end: nil)],
+                                       to: roundTripProject)
+check(abs(snapped.project.clips[0].segments![0].start - 46.0 / 30) < 0.000001, "trim bounds snap to a source frame")
+let splitOutcome = try ProjectReducer.apply([.splitSection(clip: commandClip.id, at: 0.5)], to: roundTripProject)
+check(splitOutcome.createdIDs.count == 1 && splitOutcome.project.clips[0].segments!.count == 3,
+      "a split reports the new section's ID")
+equal(reducerRefusal([.splitSection(clip: commandClip.id, at: 0)]), .invalidCommand, "splitting on a boundary is refused")
+let cutZoom = try ProjectReducer.apply([.deleteSection(clip: commandClip.id, section: sectionA.id)], to: roundTripProject)
+equal(cutZoom.removedZooms, [anchoredZoom.id], "deleting a zoom's footage reports the zoom it removed")
+var edgeZoom = anchoredZoom; edgeZoom.target = CGPoint(x: 1280, y: 720)
+equal(reducerRefusal([.updateZoom(clip: commandClip.id, zoom: edgeZoom)]), nil, "a zoom may aim at the frame's far edge")
+equal(reducerRefusal([.addZoom(clip: commandClip.id, zoom: ZoomShot(start: 0.3, hold: 0.5, target: .zero))]),
+      .invalidCommand, "an overlapping zoom is refused")
+equal(reducerRefusal([.setMovieOrder([])]), .invalidCommand, "a movie order must list every recording")
+var badSettings = ExportSettings(); badSettings.quality = 150
+equal(reducerRefusal([.setExportSettings(badSettings)]), .invalidCommand, "out-of-range export settings are refused")
+equal(reducerRefusal([.setAspect(clip: commandClip.id, preset: "7:3")]), .invalidCommand, "an unknown aspect is refused")
+
+// Revisions: one per transaction, none for a no-op.
+let revisions = freshEditor()
+let clipID = revisions.items[0].id
+let firstRevision = revisions.revision
+revisions.perform([.setSectionSpeed(clip: clipID, section: sectionA.id, speed: 1.5)])
+equal(revisions.revision, firstRevision + 1, "a transaction advances the revision once")
+let historyDepth = revisions.undoEntries.count
+revisions.perform([.setSectionSpeed(clip: clipID, section: sectionA.id, speed: 1.5)])
+check(revisions.revision == firstRevision + 1 && revisions.undoEntries.count == historyDepth,
+      "a no-op changes neither the revision nor history")
+
+// Two agents planning against the same revision: one wins, one is told to reread.
+let atRevision = revisions.revision
+let wide = CGRect(x: 0, y: 0, width: 640, height: 360)
+let codexCrop = revisions.perform([.setCrop(clip: clipID, rect: wide)], origin: .agent("Codex"), expectedRevision: atRevision)
+let claudeCrop = revisions.perform([.setCrop(clip: clipID, rect: CGRect(x: 100, y: 100, width: 320, height: 180))],
+                                   origin: .agent("Claude"), expectedRevision: atRevision)
+check(receipt(codexCrop) != nil, "the first agent's edit at a revision commits")
+equal(refusal(claudeCrop), .revisionConflict, "the second agent's edit at the same revision conflicts")
+equal(revisions.items[0].crop, wide, "the conflicting edit did not overwrite the first")
+check(receipt(revisions.perform([.setAspect(clip: clipID, preset: "16:9")], origin: .agent("Claude"),
+                                expectedRevision: revisions.revision)) != nil, "after rereading, the second agent succeeds")
+
+// Dry run: the same validation and remap report, nothing committed or reserved.
+let dryEditor = freshEditor()
+let dryBefore = dryEditor.project, dryRevision = dryEditor.revision, dryHistory = dryEditor.undoEntries.count
+let dry = receipt(dryEditor.perform([.deleteSection(clip: clipID, section: sectionA.id)], origin: .agent("Codex"),
+                                    expectedRevision: dryRevision, dryRun: true))
+check(dryEditor.project == dryBefore && dryEditor.revision == dryRevision && dryEditor.undoEntries.count == dryHistory,
+      "a dry run commits nothing")
+let wet = receipt(dryEditor.perform([.deleteSection(clip: clipID, section: sectionA.id)], origin: .agent("Codex"),
+                                    expectedRevision: dryRevision))
+check(dry?.removedZooms == [anchoredZoom.id] && wet?.removedZooms == dry?.removedZooms,
+      "a dry run reports the same zoom losses as the real edit")
+
+// A drag is one gesture: live while held, one transaction when released.
+let dragging = freshEditor()
+let dragStart = dragging.revision, dragHistory = dragging.undoEntries.count
+let heldCrop = CGRect(x: 10, y: 10, width: 900, height: 500)
+dragging.updateCrop(CGRect(x: 0, y: 0, width: 1000, height: 600), live: true)
+dragging.updateCrop(heldCrop, live: true)
+equal(dragging.items[0].crop, heldCrop, "a drag is visible while it lasts")
+equal(dragging.revision, dragStart, "live drag updates commit nothing")
+equal(dragging.committedProject.clips[0].crop, commandClip.crop, "agents see the committed crop during a drag")
+dragging.editSession.gesture?.lastUpdate = Date().addingTimeInterval(-0.9)
+equal(refusal(dragging.perform([.setAspect(clip: clipID, preset: "1:1")], origin: .agent("Claude"),
+                               expectedRevision: dragging.revision)),
+      .interactionInProgress, "an agent edit during a held drag is refused clearly")
+dragging.updateCrop(CGRect(x: 20, y: 20, width: 800, height: 400), live: true)
+dragging.updateCrop(.null, live: false)
+check(dragging.revision == dragStart + 1 && dragging.undoEntries.count == dragHistory + 1,
+      "a drag held past 0.6 s is still one revision and one undo step")
+check(receipt(dragging.perform([.setAspect(clip: clipID, preset: "1:1")], origin: .agent("Claude"),
+                               expectedRevision: dragging.revision)) != nil,
+      "after the drag ends, the agent's edit succeeds on rereading")
+dragging.undoEdit(); dragging.undoEdit()
+equal(dragging.items[0].crop, commandClip.crop, "undo restores the crop from before the whole drag")
+let cancelStart = dragging.revision, cancelHistory = dragging.undoEntries.count
+dragging.updateCrop(heldCrop, live: true)
+dragging.cancelGesture()
+check(dragging.revision == cancelStart && dragging.undoEntries.count == cancelHistory
+          && dragging.items[0].crop == commandClip.crop, "a cancelled drag leaves no history or revision")
+dragging.updateCrop(heldCrop, live: true)
+dragging.editSession.gesture?.lastUpdate = .distantPast
+check(receipt(dragging.perform([.setAspect(clip: clipID, preset: "4:3")], origin: .agent("Claude"),
+                               expectedRevision: dragging.revision)) == nil,
+      "an abandoned drag is committed first, so the agent's old revision no longer matches")
+equal(dragging.items[0].crop, heldCrop, "an abandoned drag is kept rather than lost")
+let gestureHistory = dragging.undoEntries.count
+dragging.setPreviewFraction(0.3)
+dragging.updateCrop(wide, live: true)
+dragging.splitAtPlayhead()
+equal(dragging.undoEntries.count, gestureHistory + 2, "a separate command closes an open drag as its own step")
+let sliderHistory = dragging.undoEntries.count
+var sliding = dragging.settings
+for quality in [40.0, 45, 50] { sliding.quality = quality; dragging.updateSettings(sliding, live: true) }
+dragging.endGesture()
+check(dragging.undoEntries.count == sliderHistory + 1 && dragging.settings.quality == 50,
+      "a slider drag is one undo step with its final value")
+
+// Human and agent edits interleave in one history.
+let mixed = freshEditor()
+mixed.perform([.setCrop(clip: clipID, rect: wide)])
+let afterCrop = mixed.project.clips
+let blur = BlurRegion(rect: CGRect(x: 40, y: 40, width: 100, height: 60))
+let agentBlur = receipt(mixed.perform([.addBlurArea(clip: clipID, area: blur)], origin: .agent("Claude"),
+                                      expectedRevision: mixed.revision))!
+let afterBlur = mixed.project.clips
+mixed.perform([.setAspect(clip: clipID, preset: "1:1")])
+equal(mixed.undoTitle, "Undo Crop Aspect", "the menu names the owner's own step plainly")
+mixed.undoEdit()
+equal(mixed.project.clips, afterBlur, "Cmd-Z restores the exact previous document")
+equal(mixed.undoTitle, "Undo Add Blur (Claude)", "the menu names an agent's step and who made it")
+check(receipt(mixed.undo(origin: .agent("Claude"), expectedTransaction: agentBlur.transactionID,
+                         expectedRevision: mixed.revision)) != nil, "an agent can undo its own step when it is on top")
+equal(mixed.project.clips, afterCrop, "the agent's undo restores the document before its edit")
+mixed.redoEdit()
+equal(mixed.project.clips, afterBlur, "redo restores the agent's edit")
+mixed.perform([.setAspect(clip: clipID, preset: "4:3")])
+check(mixed.redoEntries.isEmpty, "a new edit clears redo")
+equal(refusal(mixed.undo(origin: .agent("Claude"), expectedTransaction: agentBlur.transactionID,
+                         expectedRevision: mixed.revision)),
+      .historyConflict, "an agent cannot undo across somebody else's later edit")
+let ownStep = receipt(mixed.perform([.setAspect(clip: clipID, preset: "1:1")], origin: .agent("Codex"),
+                                    expectedRevision: mixed.revision))!
+mixed.setPreviewFraction(0.7)
+mixed.selectedSegmentID = sectionB.id
+mixed.undo(origin: .agent("Codex"), expectedTransaction: ownStep.transactionID, expectedRevision: mixed.revision)
+check(abs(mixed.items[0].previewFraction - 0.7) < 0.000001 && mixed.selectedSegmentID == sectionB.id,
+      "an agent's undo leaves the owner's playhead and selection alone")
+check(mixed.editSession.events.contains { $0.kind == .undo && $0.origin == .agent("Codex") },
+      "the change feed records an agent's undo and who asked")
+
+mixed.agentsPaused = true
+equal(refusal(mixed.perform([.setAspect(clip: clipID, preset: "Free")], origin: .agent("Codex"),
+                            expectedRevision: mixed.revision)), .agentsPaused, "paused agents cannot edit")
+mixed.agentsPaused = false
+mixed.isConverting = true
+equal(refusal(mixed.perform([.setAspect(clip: clipID, preset: "Free")], origin: .agent("Codex"),
+                            expectedRevision: mixed.revision)), .exportInProgress, "agents cannot edit during an export")
+mixed.isConverting = false
+
+// Sessions: a different document, or the same file opened afresh, is a new session.
+let firstSession = mixed.editSession.sessionID
+mixed.newProject()
+check(mixed.editSession.sessionID != firstSession, "a new project starts a new session")
+let emptySession = mixed.editSession.sessionID
+mixed.undoEdit()
+check(mixed.editSession.sessionID != emptySession, "undoing back to the previous project starts another session")
+mixed.openProject(at: namedProject)
+let openedSession = mixed.editSession.sessionID
+mixed.openProject(at: namedProject)
+check(mixed.editSession.sessionID != openedSession, "reopening the same file is a new session")
+for _ in 0..<1100 { mixed.appendEvent(.edit, origin: .human, label: "filler") }
+equal(mixed.editSession.events.count, EditSessionState.eventLimit, "the change feed keeps a bounded history")
+
+// A probe that finishes after Add is a fact about the file, not an undo step.
+let probing = AppModel(recoveryURL: nil)
+probing.perform([.addMedia([ProjectClip(VideoItem(url: landscape))])])
+let probedID = probing.items[0].id
+let probeHistory = probing.undoEntries.count
+probing.resolveMedia(probedID, info: info, subtitles: nil)
+equal(probing.undoEntries.count, probeHistory, "a finished probe adds no undo step")
+probing.undoEdit(); probing.redoEdit()
+equal(probing.items.first?.info, info, "undo and redo do not forget a probe that finished after Add")
+
 // MARK: - Actual reordered video/audio exports and native playback
 
 print("\nEdited video and playback")
@@ -2035,10 +2236,16 @@ check(!detected.isEmpty, "local FFmpeg analysis produces a reviewable zoom sugge
 let suggestionEditor = AppModel(recoveryURL: nil)
 suggestionEditor.restore(VideoProject(clips: [ProjectClip(activityClip)], settings: ExportSettings(), selection: activityClip.id))
 suggestionEditor.zoomSuggestions = detected
+suggestionEditor.zoomSuggestionTimeline = suggestionEditor.items[0].timeline
 suggestionEditor.applyZoomSuggestions()
 equal(suggestionEditor.items[0].zoomShots.count, detected.count, "selected suggestions become ordinary editable zooms")
 suggestionEditor.undoEdit()
 check(suggestionEditor.items[0].zoomShots.isEmpty, "one undo removes the applied suggestions")
+suggestionEditor.setPreviewFraction(0.5)
+suggestionEditor.splitAtPlayhead()
+suggestionEditor.zoomSuggestions = detected
+suggestionEditor.applyZoomSuggestions()
+check(suggestionEditor.items[0].zoomShots.isEmpty, "suggestions made before a recut are refused, not misplaced")
 activityClip.zoomShots = detected.map(\.shot)
 var mixedSettings = ExportSettings(); mixedSettings.audio = .none
 let mixedPlan = try MoviePlan(items: [nativeClip, activityClip], movieSettings: MovieSettings(), settings: mixedSettings)

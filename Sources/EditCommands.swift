@@ -1,0 +1,491 @@
+import CoreGraphics
+import Foundation
+
+// MARK: - Commands
+
+/// Who made an edit. Attribution is informational, not proof of which model or person
+/// is on the other end of a connection.
+enum EditOrigin: Hashable, Codable {
+    case human
+    case agent(String)
+
+    var label: String {
+        switch self {
+        case .human: return "You"
+        case .agent(let name): return name
+        }
+    }
+
+    var isHuman: Bool { self == .human }
+}
+
+/// One typed change to a project. Every human control and every local agent edits
+/// through these, so there is exactly one set of rules for what a valid edit is.
+///
+/// Times: `splitSection.at` and zoom starts are edited-recording seconds; trim bounds
+/// and section ranges are source seconds. Values are never clamped into range — an
+/// out-of-range value is an error, so a caller never gets a silently different edit.
+/// Times are snapped to the source frame and rectangles to even pixels, the same
+/// rounding the export applies; the resulting state reports what was stored.
+enum EditCommand: Equatable {
+    case splitSection(clip: UUID, at: Double)
+    case trimSection(clip: UUID, section: UUID, start: Double?, end: Double?)
+    case deleteSection(clip: UUID, section: UUID)
+    case moveSection(clip: UUID, section: UUID, to: Int)
+    case setSectionSpeed(clip: UUID, section: UUID, speed: Double)
+    /// The whole ordered section list at once, as silence removal produces it.
+    case replaceSections(clip: UUID, sections: [TimelineSegment])
+    case setCrop(clip: UUID, rect: CGRect)
+    /// An `AspectPreset` label. Locks future crop drags to that shape; it does not move
+    /// the crop by itself.
+    case setAspect(clip: UUID, preset: String)
+    case addBlurArea(clip: UUID, area: BlurRegion)
+    case updateBlurArea(clip: UUID, area: UUID, rect: CGRect)
+    case removeBlurArea(clip: UUID, area: UUID)
+    case replaceBlurAreas(clip: UUID, areas: [BlurRegion])
+    case addZoom(clip: UUID, zoom: ZoomShot)
+    /// Replaces the zoom with the same ID.
+    case updateZoom(clip: UUID, zoom: ZoomShot)
+    case removeZoom(clip: UUID, zoom: UUID)
+    case replaceZooms(clip: UUID, zooms: [ZoomShot])
+    /// A permutation of every recording's ID.
+    case setMovieOrder([UUID])
+    case setIncludedInMovie(clip: UUID, included: Bool)
+    case setMovieCanvas(MovieCanvas)
+    case setExportSettings(ExportSettings)
+    case setSubtitles(clip: UUID, url: URL?)
+    /// Recordings to append. Agents add probed media; the app's own Add can add a
+    /// recording whose probe is still running (no `info`, so nothing can edit it yet).
+    case addMedia([ProjectClip])
+    case removeMedia(clip: UUID)
+    /// Points a recording at a moved copy of the same video, keeping every edit.
+    case relinkMedia(clip: UUID, url: URL, info: MediaInfo)
+
+    /// Undo-menu wording when a caller does not name the transaction itself.
+    var defaultLabel: String {
+        switch self {
+        case .splitSection: return "Split Section"
+        case .trimSection: return "Trim Section"
+        case .deleteSection: return "Delete Section"
+        case .moveSection: return "Move Section"
+        case .setSectionSpeed: return "Change Section Speed"
+        case .replaceSections: return "Edit Sections"
+        case .setCrop: return "Crop"
+        case .setAspect: return "Crop Aspect"
+        case .addBlurArea: return "Add Blur"
+        case .updateBlurArea: return "Move Blur"
+        case .removeBlurArea: return "Delete Blur"
+        case .replaceBlurAreas: return "Edit Blurs"
+        case .addZoom: return "Add Zoom"
+        case .updateZoom: return "Adjust Zoom"
+        case .removeZoom: return "Delete Zoom"
+        case .replaceZooms: return "Edit Zooms"
+        case .setMovieOrder: return "Reorder Recordings"
+        case .setIncludedInMovie(_, let included): return included ? "Include Recording" : "Exclude Recording"
+        case .setMovieCanvas: return "Movie Canvas"
+        case .setExportSettings: return "Export Settings"
+        case .setSubtitles(_, let url): return url == nil ? "Remove Subtitles" : "Choose Subtitles"
+        case .addMedia: return "Add Videos"
+        case .removeMedia: return "Remove Video"
+        case .relinkMedia: return "Locate Source"
+        }
+    }
+}
+
+// MARK: - Errors
+
+/// A refusal with a stable machine-readable code, a sentence a person can act on, and
+/// whether simply retrying (after rereading state) can succeed.
+struct EditError: Error, Equatable, LocalizedError {
+    enum Code: String, Codable {
+        case invalidCommand = "invalid_command"
+        case notFound = "not_found"
+        case revisionConflict = "revision_conflict"
+        case wrongSession = "wrong_session"
+        case interactionInProgress = "interaction_in_progress"
+        case exportInProgress = "export_in_progress"
+        case missingMedia = "missing_media"
+        case unsupportedCapability = "unsupported_capability"
+        case requestIDReused = "request_id_reused"
+        case diskConflict = "disk_conflict"
+        case resyncRequired = "resync_required"
+        case agentsPaused = "agents_paused"
+        case historyConflict = "history_conflict"
+        case nothingToUndo = "nothing_to_undo"
+        case sessionFull = "session_full"
+    }
+
+    var code: Code
+    var message: String
+    var errorDescription: String? { message }
+
+    var retryable: Bool {
+        switch code {
+        case .revisionConflict, .interactionInProgress, .exportInProgress, .agentsPaused,
+             .historyConflict, .resyncRequired: return true
+        default: return false
+        }
+    }
+
+    static func invalid(_ message: String) -> EditError { EditError(code: .invalidCommand, message: message) }
+    static func notFound(_ message: String) -> EditError { EditError(code: .notFound, message: message) }
+}
+
+// MARK: - Reducer
+
+extension ProjectClip {
+    /// An uncut recording is one section spanning the source, whose ID is the clip's own
+    /// — stable, so a section can be named before anything has been cut.
+    var timeline: ClipTimeline {
+        ClipTimeline(segments: segments ?? [TimelineSegment(id: id, start: 0, end: info?.duration ?? 0)])
+    }
+}
+
+/// What a batch did, beyond the new document itself.
+struct EditOutcome: Equatable {
+    var project: VideoProject
+    /// IDs the batch generated, in command order: the right half of a split, new blur
+    /// areas and zooms without a caller-supplied ID.
+    var createdIDs: [UUID] = []
+    /// Zooms dropped because the footage they were anchored to was cut away or no
+    /// longer leaves room for them. Undo restores them.
+    var removedZooms: [UUID] = []
+}
+
+/// Applies a batch of commands to a project value. Pure: no UI state, no selection, no
+/// playhead, no I/O. Either every command applies and the result validates, or it
+/// throws and the caller's document is untouched.
+enum ProjectReducer {
+    static func apply(_ commands: [EditCommand], to project: VideoProject) throws -> EditOutcome {
+        var outcome = EditOutcome(project: project)
+        for command in commands {
+            try apply(command, to: &outcome)
+        }
+        do { try outcome.project.validate() } catch {
+            throw EditError.invalid(error.localizedDescription)
+        }
+        return outcome
+    }
+
+    private static func apply(_ command: EditCommand, to outcome: inout EditOutcome) throws {
+        switch command {
+        case .splitSection(let clip, let at):
+            var created: UUID?
+            try editTimeline(clip, in: &outcome) { timeline, info in
+                try requireFinite(at, "split time")
+                guard (0...timeline.duration).contains(at) else {
+                    throw EditError.invalid("The split time is outside the edited recording (0–\(seconds(timeline.duration))).")
+                }
+                created = timeline.split(at: at, fps: info.fps)
+                guard created != nil else {
+                    throw EditError.invalid("Split inside a section, at least one frame from its edges.")
+                }
+            }
+            if let created { outcome.createdIDs.append(created) }
+
+        case .trimSection(let clip, let section, let start, let end):
+            try editTimeline(clip, in: &outcome) { timeline, info in
+                let index = try sectionIndex(section, in: timeline)
+                let rate = max(1, info.fps)
+                var segment = timeline.segments[index]
+                if let start {
+                    try requireFinite(start, "trim start")
+                    segment.start = (start * rate).rounded() / rate
+                }
+                if let end {
+                    try requireFinite(end, "trim end")
+                    segment.end = (end * rate).rounded() / rate
+                }
+                guard segment.start >= 0, segment.end <= info.duration + 0.000001 else {
+                    throw EditError.invalid("Trim bounds must stay within the source (0–\(seconds(info.duration))).")
+                }
+                guard segment.end - segment.start >= ceil(max(1, segment.speed)) / rate - 0.000001 else {
+                    throw EditError.invalid("A section must keep at least one output frame.")
+                }
+                let overlaps = timeline.segments.enumerated().contains { other in
+                    other.offset != index && segment.start < other.element.end - 0.000001
+                        && other.element.start < segment.end - 0.000001
+                }
+                guard !overlaps else {
+                    throw EditError.invalid("Sections cannot share footage; trim stops at the neighbouring section.")
+                }
+                timeline.segments[index] = segment
+            }
+
+        case .deleteSection(let clip, let section):
+            try editTimeline(clip, in: &outcome) { timeline, _ in
+                let index = try sectionIndex(section, in: timeline)
+                guard timeline.segments.count > 1 else {
+                    throw EditError.invalid("Keep at least one section. Remove the recording to discard it.")
+                }
+                timeline.segments.remove(at: index)
+            }
+
+        case .moveSection(let clip, let section, let destination):
+            try editTimeline(clip, in: &outcome) { timeline, _ in
+                let index = try sectionIndex(section, in: timeline)
+                guard timeline.segments.indices.contains(destination) else {
+                    throw EditError.invalid("Move a section to a position from 0 to \(timeline.segments.count - 1).")
+                }
+                let moved = timeline.segments.remove(at: index)
+                timeline.segments.insert(moved, at: destination)
+            }
+
+        case .setSectionSpeed(let clip, let section, let speed):
+            try editTimeline(clip, in: &outcome) { timeline, info in
+                let index = try sectionIndex(section, in: timeline)
+                guard speed.isFinite, (0.25...4).contains(speed) else {
+                    throw EditError.invalid("Speed must be between 0.25× and 4×.")
+                }
+                guard timeline.segments[index].sourceDuration / speed >= 1 / max(1, info.fps) - 0.000001 else {
+                    throw EditError.invalid("This section is too short for that speed; keep at least one output frame.")
+                }
+                timeline.segments[index].speed = speed
+            }
+
+        case .replaceSections(let clip, let sections):
+            try editTimeline(clip, in: &outcome) { timeline, _ in
+                guard !sections.isEmpty else { throw EditError.invalid("Keep at least one section.") }
+                timeline.segments = sections
+            }
+
+        case .setCrop(let clip, let rect):
+            try editClip(clip, in: &outcome) { record, info in
+                try requireRect(rect, in: info, minimumSide: 16, what: "crop")
+                record.crop = rect.evenClamped(in: info.fullFrame)
+            }
+
+        case .setAspect(let clip, let preset):
+            try editClip(clip, in: &outcome) { record, _ in
+                guard let match = AspectPreset.all.first(where: { $0.label == preset }) else {
+                    throw EditError.invalid("Unknown aspect \"\(preset)\". Use one of: "
+                        + AspectPreset.all.map(\.label).joined(separator: ", ") + ".")
+                }
+                record.aspectLock = match.ratio
+                record.aspectLabel = match.label
+            }
+
+        case .addBlurArea(let clip, let area):
+            try editClip(clip, in: &outcome) { record, info in
+                guard !record.blurRegions.contains(where: { $0.id == area.id }) else {
+                    throw EditError.invalid("A blur area with that ID already exists.")
+                }
+                try requireRect(area.rect, in: info, minimumSide: 1, what: "blur area")
+                record.blurRegions.append(BlurRegion(id: area.id, rect: area.rect.evenClamped(in: info.fullFrame)))
+            }
+            outcome.createdIDs.append(area.id)
+
+        case .updateBlurArea(let clip, let id, let rect):
+            try editClip(clip, in: &outcome) { record, info in
+                guard let index = record.blurRegions.firstIndex(where: { $0.id == id }) else {
+                    throw EditError.notFound("No blur area with that ID on this recording.")
+                }
+                try requireRect(rect, in: info, minimumSide: 1, what: "blur area")
+                record.blurRegions[index].rect = rect.evenClamped(in: info.fullFrame)
+            }
+
+        case .removeBlurArea(let clip, let id):
+            try editClip(clip, in: &outcome) { record, _ in
+                guard record.blurRegions.contains(where: { $0.id == id }) else {
+                    throw EditError.notFound("No blur area with that ID on this recording.")
+                }
+                record.blurRegions.removeAll { $0.id == id }
+            }
+
+        case .replaceBlurAreas(let clip, let areas):
+            try editClip(clip, in: &outcome) { record, info in
+                for area in areas { try requireRect(area.rect, in: info, minimumSide: 1, what: "blur area") }
+                record.blurRegions = areas.map { BlurRegion(id: $0.id, rect: $0.rect.evenClamped(in: info.fullFrame)) }
+            }
+
+        case .addZoom(let clip, let zoom):
+            try editClip(clip, in: &outcome) { record, info in
+                guard !record.zoomShots.contains(where: { $0.id == zoom.id }) else {
+                    throw EditError.invalid("A zoom with that ID already exists.")
+                }
+                try requireZoom(zoom, in: record, info: info, excluding: nil)
+                record.zoomShots.append(zoom)
+                record.zoomShots.sort { $0.start < $1.start }
+            }
+            outcome.createdIDs.append(zoom.id)
+
+        case .updateZoom(let clip, let zoom):
+            try editClip(clip, in: &outcome) { record, info in
+                guard let index = record.zoomShots.firstIndex(where: { $0.id == zoom.id }) else {
+                    throw EditError.notFound("No zoom with that ID on this recording.")
+                }
+                try requireZoom(zoom, in: record, info: info, excluding: zoom.id)
+                record.zoomShots[index] = zoom
+                record.zoomShots.sort { $0.start < $1.start }
+            }
+
+        case .removeZoom(let clip, let id):
+            try editClip(clip, in: &outcome) { record, _ in
+                guard record.zoomShots.contains(where: { $0.id == id }) else {
+                    throw EditError.notFound("No zoom with that ID on this recording.")
+                }
+                record.zoomShots.removeAll { $0.id == id }
+            }
+
+        case .replaceZooms(let clip, let zooms):
+            try editClip(clip, in: &outcome) { record, info in
+                record.zoomShots = []
+                for zoom in zooms.sorted(by: { $0.start < $1.start }) {
+                    try requireZoom(zoom, in: record, info: info, excluding: nil)
+                    record.zoomShots.append(zoom)
+                }
+            }
+
+        case .setMovieOrder(let order):
+            let current = outcome.project.clips.map(\.id)
+            guard order.count == current.count, Set(order) == Set(current) else {
+                throw EditError.invalid("The movie order must list every recording exactly once.")
+            }
+            let byID = Dictionary(uniqueKeysWithValues: outcome.project.clips.map { ($0.id, $0) })
+            outcome.project.clips = order.compactMap { byID[$0] }
+
+        case .setIncludedInMovie(let clip, let included):
+            let index = try clipIndex(clip, in: outcome.project)
+            outcome.project.clips[index].includedInMovie = included
+
+        case .setMovieCanvas(let canvas):
+            var movie = outcome.project.movieSettings ?? MovieSettings()
+            movie.canvas = canvas
+            outcome.project.movieSettings = movie
+
+        case .setExportSettings(let settings):
+            guard settings.quality.isFinite, (0...100).contains(settings.quality),
+                  settings.blurStrength.isFinite, (1...100).contains(settings.blurStrength),
+                  ExportSettings.presets.contains(settings.preset) else {
+                throw EditError.invalid("Quality must be 0–100, blur strength 1–100, and the speed preset one of "
+                    + ExportSettings.presets.joined(separator: ", ") + ".")
+            }
+            guard settings.outputFolder?.isFileURL ?? true else {
+                throw EditError.invalid("The output folder must be a local folder.")
+            }
+            outcome.project.settings = settings
+
+        case .setSubtitles(let clip, let url):
+            let index = try clipIndex(clip, in: outcome.project)
+            guard url?.isFileURL ?? true else { throw EditError.invalid("Subtitle files must be local.") }
+            if let url, !FFmpeg.subtitleExtensions.contains(url.pathExtension.lowercased()) {
+                throw EditError.invalid("Subtitles must be one of: " + FFmpeg.subtitleExtensions.joined(separator: ", ") + ".")
+            }
+            outcome.project.clips[index].subtitles = url
+
+        case .addMedia(let clips):
+            var paths = Set(outcome.project.clips.map { $0.url.standardizedFileURL.path })
+            for var clip in clips {
+                guard clip.url.isFileURL else { throw EditError.invalid("Recordings must be local files.") }
+                guard paths.insert(clip.url.standardizedFileURL.path).inserted else {
+                    throw EditError.invalid("\(clip.url.lastPathComponent) is already in the project.")
+                }
+                guard !outcome.project.clips.contains(where: { $0.id == clip.id }) else {
+                    throw EditError.invalid("A recording with that ID already exists.")
+                }
+                if let info = clip.info, clip.crop == nil { clip.crop = info.fullFrame }
+                outcome.project.clips.append(clip)
+                outcome.createdIDs.append(clip.id)
+            }
+
+        case .removeMedia(let clip):
+            let index = try clipIndex(clip, in: outcome.project)
+            outcome.project.clips.remove(at: index)
+
+        case .relinkMedia(let clip, let url, let info):
+            let index = try clipIndex(clip, in: outcome.project)
+            guard url.isFileURL else { throw EditError.invalid("Recordings must be local files.") }
+            if let original = outcome.project.clips[index].info {
+                guard info.width == original.width, info.height == original.height,
+                      abs(info.duration - original.duration) < 0.1, abs(info.fps - original.fps) < 0.01 else {
+                    throw EditError.invalid("Choose the original video with matching dimensions and duration.")
+                }
+            }
+            outcome.project.clips[index].url = url
+            outcome.project.clips[index].info = info
+            if outcome.project.clips[index].crop == nil { outcome.project.clips[index].crop = info.fullFrame }
+        }
+    }
+
+    // MARK: Helpers
+
+    private static func clipIndex(_ id: UUID, in project: VideoProject) throws -> Int {
+        guard let index = project.clips.firstIndex(where: { $0.id == id }) else {
+            throw EditError.notFound("No recording with that ID in this project.")
+        }
+        return index
+    }
+
+    /// Runs `body` on one recording that has finished probing.
+    private static func editClip(_ id: UUID, in outcome: inout EditOutcome,
+                                 _ body: (inout ProjectClip, MediaInfo) throws -> Void) throws {
+        let index = try clipIndex(id, in: outcome.project)
+        guard let info = outcome.project.clips[index].info else {
+            throw EditError(code: .missingMedia, message: "That recording is still loading; edit it once it has been probed.")
+        }
+        try body(&outcome.project.clips[index], info)
+    }
+
+    /// Edits a recording's sections, then carries its zooms across: each zoom follows
+    /// the frame it began on, and is dropped when that footage is gone.
+    private static func editTimeline(_ id: UUID, in outcome: inout EditOutcome,
+                                     _ body: (inout ClipTimeline, MediaInfo) throws -> Void) throws {
+        var removed: [UUID] = []
+        try editClip(id, in: &outcome) { record, info in
+            let old = record.timeline
+            var timeline = old
+            try body(&timeline, info)
+            guard timeline != old else { return }
+            let kept = timeline.remap(record.zoomShots, from: old)
+            removed = record.zoomShots.map(\.id).filter { id in !kept.contains { $0.id == id } }
+            record.zoomShots = kept
+            record.segments = timeline.segments
+        }
+        outcome.removedZooms += removed
+    }
+
+    private static func sectionIndex(_ id: UUID, in timeline: ClipTimeline) throws -> Int {
+        guard let index = timeline.segments.firstIndex(where: { $0.id == id }) else {
+            throw EditError.notFound("No section with that ID on this recording.")
+        }
+        return index
+    }
+
+    private static func requireFinite(_ value: Double, _ what: String) throws {
+        guard value.isFinite else { throw EditError.invalid("The \(what) must be a finite number.") }
+    }
+
+    private static func requireRect(_ rect: CGRect, in info: MediaInfo, minimumSide: CGFloat, what: String) throws {
+        guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
+              rect.width >= minimumSide, rect.height >= minimumSide else {
+            throw EditError.invalid("The \(what) needs a finite size of at least \(Int(minimumSide)) pixels.")
+        }
+        guard info.fullFrame.contains(rect) else {
+            throw EditError.invalid("The \(what) must lie inside the \(info.width)×\(info.height) frame.")
+        }
+    }
+
+    private static func requireZoom(_ zoom: ZoomShot, in record: ProjectClip, info: MediaInfo,
+                                    excluding: UUID?) throws {
+        let duration = record.timeline.duration
+        guard zoom.start.isFinite, zoom.hold.isFinite, zoom.level.isFinite,
+              zoom.target.x.isFinite, zoom.target.y.isFinite else {
+            throw EditError.invalid("Zoom values must be finite numbers.")
+        }
+        guard zoom.start >= 0, zoom.end <= duration + 0.001 else {
+            throw EditError.invalid("The zoom must fit inside the edited recording (\(seconds(duration))), "
+                + "including its \(seconds(ZoomShot.ease)) ease in and out.")
+        }
+        guard zoom.hold >= 0.2 else { throw EditError.invalid("A zoom must hold for at least 0.2 s.") }
+        guard (1...10).contains(zoom.level) else { throw EditError.invalid("Zoom level must be between 1× and 10×.") }
+        // Inclusive of the far edges: the app clamps a dragged target onto the edge.
+        guard (0...CGFloat(info.width)).contains(zoom.target.x), (0...CGFloat(info.height)).contains(zoom.target.y) else {
+            throw EditError.invalid("The zoom target must be inside the \(info.width)×\(info.height) frame.")
+        }
+        guard !record.zoomShots.contains(where: { $0.id != excluding && $0.overlaps(zoom) }) else {
+            throw EditError.invalid("That overlaps an existing zoom.")
+        }
+    }
+
+    private static func seconds(_ value: Double) -> String { String(format: "%.2f s", value) }
+}

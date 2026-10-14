@@ -6,9 +6,16 @@ extension UTType {
     static let yamVideoProject = UTType(exportedAs: "com.equicomtech.yamvideo.project", conformingTo: .json)
 }
 
+/// One undo step: the document as it was before a transaction, plus where the person
+/// was looking, so undo returns both.
 struct EditHistory {
     let name: String
-    let project: VideoProject
+    /// The transaction this step undoes. Redo keeps the same ID, so an agent can name
+    /// exactly which step it means.
+    let transactionID: UUID
+    let origin: EditOrigin
+    /// Mutable only so a finished probe can be written into history; see `resolveMedia`.
+    var project: VideoProject
     let fileURL: URL?
     let savedProject: VideoProject?
     let segmentID: UUID?
@@ -35,34 +42,32 @@ extension AppModel {
             .appendingPathComponent("YamVideo", isDirectory: true).appendingPathComponent("Recovery.yamvideo")
     }
 
-    func historyEntry(_ name: String) -> EditHistory {
-        EditHistory(name: name, project: project, fileURL: projectURL, savedProject: savedProject,
-                    segmentID: selectedSegmentID, shotID: selectedShotID, regionID: selectedRegionID, movieMode: isMovieMode)
+    func historyEntry(_ name: String, transaction: UUID = UUID(), origin: EditOrigin = .human) -> EditHistory {
+        EditHistory(name: name, transactionID: transaction, origin: origin, project: project,
+                    fileURL: projectURL, savedProject: savedProject, segmentID: selectedSegmentID,
+                    shotID: selectedShotID, regionID: selectedRegionID, movieMode: isMovieMode)
     }
 
-    func restoreHistory(_ entry: EditHistory) {
+    /// Restores a history step. With `navigation` off — an agent's undo — the document
+    /// comes back but the person's selection, workspace and playhead stay where they are.
+    func restoreHistory(_ entry: EditHistory, navigation: Bool = true) {
+        let kept = (selection, isMovieMode, selectedSegmentID, selectedShotID, selectedRegionID,
+                    Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.previewFraction) }))
         restore(entry.project)
         projectURL = entry.fileURL; savedProject = entry.savedProject
-        selectedSegmentID = entry.segmentID
-        selectedShotID = entry.shotID; selectedRegionID = entry.regionID
-        isMovieMode = entry.movieMode
-    }
-
-    /// Continuous drags form one undo step; separate commands always start a new step.
-    func beginEdit(_ name: String, key: String? = nil, invalidatesExport: Bool = true) {
-        let now = Date()
-        let scopedKey = key.map { "\(selection?.uuidString ?? "")-\($0)" }
-        if scopedKey == nil || lastEditKey != scopedKey || now.timeIntervalSince(lastEditTime) > 0.6 {
-            undoEntries.append(historyEntry(name))
-            if undoEntries.count > 100 { undoEntries.removeFirst() }
+        if navigation {
+            selectedSegmentID = entry.segmentID
+            selectedShotID = entry.shotID; selectedRegionID = entry.regionID
+            isMovieMode = entry.movieMode
+        } else {
+            if let id = kept.0, items.contains(where: { $0.id == id }) { selection = id }
+            isMovieMode = kept.1
+            for index in items.indices { if let fraction = kept.5[items[index].id] { items[index].previewFraction = fraction } }
+            if let id = kept.2, selectedItem?.timeline.segments.contains(where: { $0.id == id }) == true { selectedSegmentID = id }
+            if let id = kept.3, selectedItem?.zoomShots.contains(where: { $0.id == id }) == true { selectedShotID = id }
+            if let id = kept.4, selectedItem?.blurRegions.contains(where: { $0.id == id }) == true { selectedRegionID = id }
+            refreshPreview()
         }
-        lastEditKey = scopedKey; lastEditTime = now
-        redoEntries.removeAll()
-        hasUnsavedChanges = true
-        playback.pause()
-        if showPlayback { showPlayback = false; refreshPreview() }
-        if invalidatesExport, let index = selectedIndex, items[index].info != nil, !items[index].status.isBusy { items[index].status = .ready }
-        scheduleAutosave()
     }
 
     func scheduleAutosave() {
@@ -144,24 +149,14 @@ extension AppModel {
         if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable {
             text.undoManager?.undo(); return
         }
-        guard !isConverting, let entry = undoEntries.popLast() else { return }
-        redoEntries.append(historyEntry(entry.name))
-        restoreHistory(entry)
-        lastEditKey = nil
-        hasUnsavedChanges = project != savedProject
-        scheduleAutosave()
+        undo()
     }
 
     func redoEdit() {
         if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable {
             text.undoManager?.redo(); return
         }
-        guard !isConverting, let entry = redoEntries.popLast() else { return }
-        undoEntries.append(historyEntry(entry.name))
-        restoreHistory(entry)
-        lastEditKey = nil
-        hasUnsavedChanges = project != savedProject
-        scheduleAutosave()
+        redo()
     }
 
     func saveProject(asCopy: Bool = false) {
@@ -185,6 +180,7 @@ extension AppModel {
         do {
             try writeProject(project, to: destination)
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
+            if projectID != previousID { rotateSession() }
             scheduleAutosave()
             statusMessage = "Saved \(destination.lastPathComponent)."
         } catch {
@@ -195,13 +191,10 @@ extension AppModel {
 
     func newProject() {
         guard !isConverting else { return }
-        beginEdit("New Project", invalidatesExport: false)
-        playback.clear(); showPlayback = false
-        projectID = UUID()
-        items.removeAll(); selection = nil; selectedSegmentID = nil
-        projectURL = nil; savedProject = nil
-        isMovieMode = false; movieSettings = MovieSettings()
-        refreshPreview()
+        // Export settings carry over; recordings, edits and the movie do not.
+        replaceDocument(VideoProject(projectID: UUID(), clips: [], settings: settings, selection: nil, movieSettings: nil),
+                        label: "New Project", fileURL: nil, saved: nil)
+        isMovieMode = false
         statusMessage = "New project. Previous work is available with Undo."
     }
 
@@ -216,10 +209,8 @@ extension AppModel {
         guard !isConverting else { statusMessage = "Finish or stop the export before opening a project."; return }
         do {
             let opened = try VideoProject.decodeMigrating(from: Data(contentsOf: url))
-            beginEdit("Open Project", invalidatesExport: false)
-            restore(opened)
-            projectURL = url; savedProject = opened; hasUnsavedChanges = false
-            scheduleAutosave()
+            replaceDocument(opened, label: "Open Project", fileURL: url, saved: opened)
+            hasUnsavedChanges = false
             statusMessage = "Opened \(url.lastPathComponent). Previous work is available with Undo."
         } catch { statusMessage = "Could not open project: \(error.localizedDescription)" }
     }
@@ -233,29 +224,23 @@ extension AppModel {
         Task {
             do {
                 let info = try await FFmpeg.probe(url: url)
-                if let original = old.info {
-                    guard info.width == original.width, info.height == original.height,
-                          abs(info.duration - original.duration) < 0.1, abs(info.fps - original.fps) < 0.01 else {
-                        throw FFmpegError(message: "Choose the original video with matching dimensions and duration.")
-                    }
+                if case .failure(let error) = perform([.relinkMedia(clip: id, url: url, info: info)]) {
+                    statusMessage = error.message
                 }
-                guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-                beginEdit("Locate Source")
-                items[index].url = url; items[index].info = info
-                items[index].crop = old.crop ?? info.fullFrame; items[index].status = .ready
-                refreshPreview()
             } catch { statusMessage = error.localizedDescription }
         }
     }
 
-    func updateSettings(_ value: ExportSettings) {
-        guard value != settings else { return }
-        beginEdit("Export Settings", key: "settings")
-        settings = value
-        for index in items.indices where items[index].info != nil && !items[index].status.isBusy {
-            items[index].status = .ready
+    /// `live` is a slider or text field still being changed: shown at once, committed as
+    /// one undo step when `endGesture` is called or the next separate edit arrives.
+    func updateSettings(_ value: ExportSettings, live: Bool = false) {
+        if live { updateGesture("settings", label: "Export Settings", [.setExportSettings(value)]); return }
+        if isGestureOpen("settings") {
+            updateGesture("settings", label: "Export Settings", [.setExportSettings(value)])
+            endGesture(); return
         }
-        refreshPreview()
+        guard value != settings else { return }
+        if case .failure(let error) = perform([.setExportSettings(value)]) { statusMessage = error.message }
     }
 
     func togglePlayback() {
@@ -296,58 +281,63 @@ extension AppModel {
         setPreviewFraction(item.timeline.offset(of: id) / max(0.001, item.editedDuration))
     }
 
+    /// A section edit on the selected recording, then the selection and status line the
+    /// timeline expects. `failure` replaces the reducer's wording where the timeline has
+    /// a more specific hint for a person.
+    @discardableResult
+    private func editSections(_ command: EditCommand, name: String? = nil, failure: String? = nil,
+                              select: (EditReceipt) -> UUID?) -> Bool {
+        let name = name ?? command.defaultLabel
+        switch perform([command], label: name) {
+        case .success(let receipt):
+            guard receipt.changed else { return false }
+            selectedSegmentID = select(receipt)
+            let removed = receipt.removedZooms.count
+            statusMessage = removed > 0
+                ? "\(name). Removed \(removed) zoom(s) whose footage or space was removed; Undo restores them." : name
+            return true
+        case .failure(let error):
+            statusMessage = failure ?? error.message
+            return false
+        }
+    }
+
+    /// Replaces the selected recording's sections wholesale — silence removal's path.
     func commitTimeline(_ timeline: ClipTimeline, name: String, selection newSelection: UUID?) {
-        guard let index = selectedIndex, !timeline.segments.isEmpty,
-              timeline != items[index].timeline else { return }
-        let old = items[index].timeline
-        let oldTime = previewTime
-        let sourceTime = old.location(at: oldTime)?.source ?? 0
-        beginEdit(name)
-        let oldCount = items[index].zoomShots.count
-        items[index].zoomShots = timeline.remap(items[index].zoomShots, from: old)
-        items[index].segments = timeline.segments
-        items[index].previewFraction = (timeline.time(forSource: sourceTime) ?? min(oldTime, timeline.duration)) / max(0.001, timeline.duration)
-        selectedSegmentID = newSelection
-        let removed = oldCount - items[index].zoomShots.count
-        statusMessage = removed > 0 ? "\(name). Removed \(removed) zoom(s) whose footage or space was removed; Undo restores them." : name
-        refreshPreview()
+        guard let item = selectedItem, !timeline.segments.isEmpty, timeline != item.timeline else { return }
+        editSections(.replaceSections(clip: item.id, sections: timeline.segments), name: name) { _ in newSelection }
     }
 
     func splitAtPlayhead() {
-        guard let item = selectedItem, let info = item.info else { return }
-        var timeline = item.timeline
-        guard let id = timeline.split(at: previewTime, fps: info.fps) else {
-            statusMessage = "Move the playhead inside a section to split it."; return
-        }
-        commitTimeline(timeline, name: "Split Section", selection: id)
+        guard let item = selectedItem, item.info != nil else { return }
+        editSections(.splitSection(clip: item.id, at: previewTime),
+                     failure: "Move the playhead inside a section to split it.") { $0.createdIDs.first }
     }
 
     func deleteSegment() {
-        guard let item = selectedItem, let id = selectedSegmentID else { return }
-        var timeline = item.timeline
-        guard timeline.segments.count > 1 else {
+        guard let item = selectedItem, let id = selectedSegmentID,
+              let index = item.timeline.segments.firstIndex(where: { $0.id == id }) else { return }
+        guard item.timeline.segments.count > 1 else {
             statusMessage = "Keep at least one section. Remove the video from the sidebar to discard it."; return
         }
-        guard let index = timeline.segments.firstIndex(where: { $0.id == id }) else { return }
-        timeline.segments.remove(at: index)
-        commitTimeline(timeline, name: "Delete Section", selection: timeline.segments[min(index, timeline.segments.count - 1)].id)
+        editSections(.deleteSection(clip: item.id, section: id)) { _ in
+            guard let segments = self.selectedItem?.timeline.segments, !segments.isEmpty else { return nil }
+            return segments[min(index, segments.count - 1)].id
+        }
     }
 
     func moveSegment(_ id: UUID, to index: Int) {
-        guard let item = selectedItem else { return }
-        var timeline = item.timeline
-        guard let old = timeline.segments.firstIndex(where: { $0.id == id }) else { return }
-        let destination = min(max(0, index), timeline.segments.count - 1)
+        guard let item = selectedItem, let old = item.timeline.segments.firstIndex(where: { $0.id == id }) else { return }
+        let destination = min(max(0, index), item.timeline.segments.count - 1)
         guard old != destination else { return }
-        let segment = timeline.segments.remove(at: old)
-        timeline.segments.insert(segment, at: destination)
-        commitTimeline(timeline, name: "Move Section", selection: id)
+        editSections(.moveSection(clip: item.id, section: id, to: destination)) { _ in id }
     }
 
+    /// The timeline's trim: unlike an agent's, a drag past a limit stops at it.
     func trimSegment(_ id: UUID, start: Double? = nil, end: Double? = nil) {
-        guard let item = selectedItem, let info = item.info else { return }
-        var timeline = item.timeline
-        guard let index = timeline.segments.firstIndex(where: { $0.id == id }) else { return }
+        guard let item = selectedItem, let info = item.info,
+              let index = item.timeline.segments.firstIndex(where: { $0.id == id }) else { return }
+        let timeline = item.timeline
         let rate = max(1, info.fps)
         var segment = timeline.segments[index]
         // Restore hidden footage only as far as the nearest other retained source range.
@@ -357,8 +347,8 @@ extension AppModel {
         let minimum = ceil(max(1, segment.speed)) / rate
         if let start, start.isFinite { segment.start = min(segment.end - minimum, max(lower, (start * rate).rounded() / rate)) }
         if let end, end.isFinite { segment.end = max(segment.start + minimum, min(upper, (end * rate).rounded() / rate)) }
-        timeline.segments[index] = segment
-        commitTimeline(timeline, name: "Trim Section", selection: id)
+        guard segment != timeline.segments[index] else { return }
+        editSections(.trimSection(clip: item.id, section: id, start: segment.start, end: segment.end)) { _ in id }
     }
 
     func trimToPlayhead(start: Bool) {
@@ -368,14 +358,8 @@ extension AppModel {
     }
 
     func setSegmentSpeed(_ id: UUID, speed: Double) {
-        guard speed.isFinite, (0.25...4).contains(speed), let item = selectedItem else { return }
-        var timeline = item.timeline
-        guard let index = timeline.segments.firstIndex(where: { $0.id == id }) else { return }
-        guard item.timeline.segments[index].sourceDuration / speed >= 1 / max(1, item.info?.fps ?? 30) - 0.000001 else {
-            statusMessage = "This section is too short for that speed. Keep at least one output frame."; return
-        }
-        timeline.segments[index].speed = speed
-        commitTimeline(timeline, name: "Change Section Speed", selection: id)
+        guard let item = selectedItem else { return }
+        editSections(.setSectionSpeed(clip: item.id, section: id, speed: speed)) { _ in id }
     }
 }
 

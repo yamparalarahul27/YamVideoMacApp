@@ -62,9 +62,9 @@ struct YamVideoApp: App {
                 Button("Save Project As…") { model.saveProject(asCopy: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .undoRedo) {
-                Button(model.undoEntries.last.map { "Undo \($0.name)" } ?? "Undo") { model.undoEdit() }
+                Button(model.undoTitle) { model.undoEdit() }
                     .keyboardShortcut("z").disabled(model.undoEntries.isEmpty || model.isConverting)
-                Button(model.redoEntries.last.map { "Redo \($0.name)" } ?? "Redo") { model.redoEdit() }
+                Button(model.redoTitle) { model.redoEdit() }
                     .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(model.redoEntries.isEmpty || model.isConverting)
             }
             CommandMenu("Timeline") {
