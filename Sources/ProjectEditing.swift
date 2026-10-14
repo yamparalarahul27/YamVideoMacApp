@@ -26,8 +26,8 @@ struct SessionRecovery: Codable {
 @MainActor
 extension AppModel {
     var project: VideoProject {
-        VideoProject(version: items.contains(where: { $0.timeline.segments.contains(where: { $0.speed != 1 }) }) ? 2 : 1,
-                     clips: items.map(ProjectClip.init), settings: settings, selection: selection, movieSettings: movieSettings)
+        VideoProject(projectID: projectID, clips: items.map(ProjectClip.init), settings: settings,
+                     selection: selection, movieSettings: movieSettings)
     }
 
     nonisolated static var recoveryURL: URL {
@@ -106,10 +106,14 @@ extension AppModel {
         do {
             let data = try Data(contentsOf: recovery)
             let session = try? JSONDecoder().decode(SessionRecovery.self, from: data)
-            let recovered = try session?.project ?? JSONDecoder().decode(VideoProject.self, from: data)
-            try recovered.validate()
+            let stored = try session?.project ?? JSONDecoder().decode(VideoProject.self, from: data)
+            try stored.validate()
+            let recovered = stored.migrated(identity: UUID(deterministicFrom: data))
             restore(recovered)
-            projectURL = session?.fileURL; savedProject = session?.savedProject
+            projectURL = session?.fileURL
+            // A pre-identity recovery file holds the saved copy without an identity too;
+            // give it the recovered one, or the two could never compare equal again.
+            savedProject = session?.savedProject.map { $0.migrated(identity: recovered.projectID ?? UUID()) }
             hasUnsavedChanges = recovered != savedProject && !items.isEmpty
             if !items.isEmpty { statusMessage = "Restored your last editing session." }
         } catch { statusMessage = "Could not restore the last session: \(error.localizedDescription)" }
@@ -117,6 +121,7 @@ extension AppModel {
 
     func restore(_ snapshot: VideoProject) {
         playback.clear(); showPlayback = false
+        projectID = snapshot.projectID ?? UUID()
         let previous = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         items = snapshot.clips.map { record in
             var item = record.item()
@@ -160,28 +165,39 @@ extension AppModel {
     }
 
     func saveProject(asCopy: Bool = false) {
-        var destination = asCopy ? nil : projectURL
-        if destination == nil {
-            let panel = NSSavePanel()
-            panel.allowedContentTypes = [.yamVideoProject]
-            panel.nameFieldStringValue = projectURL?.lastPathComponent ?? "Untitled.yamvideo"
-            panel.title = "Save YamVideo Project"
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            destination = url
+        if !asCopy, let projectURL { save(to: projectURL, asCopy: false); return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.yamVideoProject]
+        panel.nameFieldStringValue = projectURL?.lastPathComponent ?? "Untitled.yamvideo"
+        panel.title = "Save YamVideo Project"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        save(to: url, asCopy: asCopy)
+    }
+
+    func save(to destination: URL, asCopy: Bool) {
+        // Save As forks the document: the copy is a different project, so nothing still
+        // addressing the original can edit the copy by mistake. A first save of an
+        // untitled project, or saving over the same file, keeps its identity.
+        let previousID = projectID
+        if asCopy, let current = projectURL, current.standardizedFileURL != destination.standardizedFileURL {
+            projectID = UUID()
         }
-        guard let destination else { return }
         do {
             try writeProject(project, to: destination)
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             scheduleAutosave()
             statusMessage = "Saved \(destination.lastPathComponent)."
-        } catch { statusMessage = "Could not save project: \(error.localizedDescription)" }
+        } catch {
+            projectID = previousID
+            statusMessage = "Could not save project: \(error.localizedDescription)"
+        }
     }
 
     func newProject() {
         guard !isConverting else { return }
         beginEdit("New Project", invalidatesExport: false)
         playback.clear(); showPlayback = false
+        projectID = UUID()
         items.removeAll(); selection = nil; selectedSegmentID = nil
         projectURL = nil; savedProject = nil
         isMovieMode = false; movieSettings = MovieSettings()
@@ -199,8 +215,7 @@ extension AppModel {
     func openProject(at url: URL) {
         guard !isConverting else { statusMessage = "Finish or stop the export before opening a project."; return }
         do {
-            let opened = try JSONDecoder().decode(VideoProject.self, from: Data(contentsOf: url))
-            try opened.validate()
+            let opened = try VideoProject.decodeMigrating(from: Data(contentsOf: url))
             beginEdit("Open Project", invalidatesExport: false)
             restore(opened)
             projectURL = url; savedProject = opened; hasUnsavedChanges = false

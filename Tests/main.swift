@@ -1674,6 +1674,94 @@ try editor.writeProject(roundTripProject, to: namedProject)
 editor.openProject(at: namedProject)
 equal(editor.project.clips, roundTripProject.clips, "opening a saved project restores edit data")
 
+// MARK: - Project identity and the version 3 schema
+
+print("\nProject identity")
+var legacy = roundTripProject
+legacy.version = 2; legacy.projectID = nil
+let legacyData = try JSONEncoder().encode(legacy)
+let migrated = try VideoProject.decodeMigrating(from: legacyData)
+equal(migrated.version, VideoProject.currentVersion, "a version 2 file is upgraded on open")
+check(migrated.projectID != nil, "an upgraded file gains an identity")
+equal(try VideoProject.decodeMigrating(from: legacyData).projectID, migrated.projectID,
+      "the same legacy bytes always get the same identity")
+var otherLegacy = legacy; otherLegacy.settings.quality = 10
+check(try VideoProject.decodeMigrating(from: JSONEncoder().encode(otherLegacy)).projectID != migrated.projectID,
+      "different legacy files get different identities")
+equal(migrated.clips, legacy.clips, "upgrading changes no edit data")
+
+var newerFields = legacy; newerFields.clips[0].subtitles = srt
+check((try? newerFields.validate()) == nil, "an older version carrying subtitles is rejected")
+newerFields = legacy; newerFields.projectID = UUID()
+check((try? newerFields.validate()) == nil, "an older version carrying an identity is rejected")
+var anonymous = roundTripProject; anonymous.projectID = nil
+check((try? anonymous.validate()) == nil, "a version 3 file without an identity is rejected")
+var future = roundTripProject; future.version = VideoProject.currentVersion + 1
+do {
+    try future.validate()
+    check(false, "a newer version is rejected")
+} catch {
+    check(error.localizedDescription.contains("newer version"), "a newer version is rejected with a clear reason",
+          error.localizedDescription)
+}
+
+let identityEditor = AppModel(recoveryURL: nil)
+let legacyFile = scratch.appendingPathComponent("legacy.yamvideo")
+try legacyData.write(to: legacyFile)
+identityEditor.openProject(at: legacyFile)
+equal(identityEditor.projectID, migrated.projectID, "opening a legacy file adopts its derived identity")
+check(!identityEditor.hasUnsavedChanges, "upgrading on open is not an unsaved edit")
+identityEditor.saveProject()
+let resaved = try JSONDecoder().decode(VideoProject.self, from: Data(contentsOf: legacyFile))
+equal(resaved.version, VideoProject.currentVersion, "saving writes the current version")
+equal(resaved.projectID, migrated.projectID, "saving persists the identity")
+identityEditor.openProject(at: legacyFile)
+equal(identityEditor.projectID, migrated.projectID, "the identity survives save and reopen")
+
+// The subtitle file is project data now: undoable, saved, recovered.
+identityEditor.setSubtitles(srt, for: identityEditor.selectedItem!.id)
+equal(identityEditor.project.clips[0].subtitles, srt, "the chosen subtitle file is part of the project")
+check(identityEditor.hasUnsavedChanges, "choosing subtitles marks the project changed")
+identityEditor.undoEdit()
+equal(identityEditor.selectedItem!.subtitles, nil, "undo removes the subtitle choice")
+identityEditor.redoEdit()
+identityEditor.saveProject()
+identityEditor.openProject(at: legacyFile)
+equal(identityEditor.selectedItem!.subtitles, srt, "the subtitle choice survives save and reopen")
+
+// Save As forks the document; saving in place does not.
+let originalID = identityEditor.projectID
+let copyFile = scratch.appendingPathComponent("copy.yamvideo")
+identityEditor.save(to: copyFile, asCopy: true)
+check(identityEditor.projectID != originalID, "Save As gives the copy its own identity")
+equal(identityEditor.projectURL, copyFile, "Save As continues editing the copy")
+check(!identityEditor.hasUnsavedChanges, "the forked copy is saved")
+equal(try JSONDecoder().decode(VideoProject.self, from: Data(contentsOf: legacyFile)).projectID, originalID,
+      "the original file keeps its identity")
+let copyID = identityEditor.projectID
+identityEditor.saveProject()
+equal(identityEditor.projectID, copyID, "saving in place keeps the identity")
+identityEditor.newProject()
+check(identityEditor.projectID != copyID, "a new project has its own identity")
+identityEditor.undoEdit()
+equal(identityEditor.projectID, copyID, "undoing New Project restores the previous identity")
+
+let identityRecovery = scratch.appendingPathComponent("identity-recovery.yamvideo")
+let recoveringIdentity = AppModel(recoveryURL: identityRecovery)
+recoveringIdentity.restore(identityEditor.project)
+recoveringIdentity.flushRecovery()
+let resumedIdentity = AppModel(recoveryURL: identityRecovery)
+equal(resumedIdentity.projectID, identityEditor.projectID, "recovery keeps the project identity")
+equal(resumedIdentity.selectedItem?.subtitles, srt, "recovery keeps the subtitle choice")
+
+let legacyRecovery = scratch.appendingPathComponent("legacy-recovery.yamvideo")
+try JSONEncoder().encode(SessionRecovery(project: legacy, fileURL: legacyFile, savedProject: legacy))
+    .write(to: legacyRecovery)
+let legacyResumed = AppModel(recoveryURL: legacyRecovery)
+check(legacyResumed.savedProject?.projectID == legacyResumed.projectID,
+      "a legacy recovery file upgrades its saved copy to the same identity")
+check(!legacyResumed.hasUnsavedChanges, "an upgraded recovery file is not mistaken for unsaved edits")
+
 // MARK: - Actual reordered video/audio exports and native playback
 
 print("\nEdited video and playback")
@@ -1988,7 +2076,8 @@ equal(try JSONDecoder().decode(TimelineSegment.self, from: legacySection).speed,
 let speedEditor = AppModel(recoveryURL: nil)
 speedEditor.restore(VideoProject(clips: [ProjectClip(nativeClip)], settings: ExportSettings(), selection: nativeClip.id))
 speedEditor.setSegmentSpeed(speedEditor.items[0].timeline.segments[0].id, speed: 2)
-equal(speedEditor.project.version, 2, "projects with speed edits use version 2")
+equal(speedEditor.project.version, VideoProject.currentVersion,
+      "projects with speed edits are written at the current version, never downgraded")
 let speedSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(speedEditor.project))
 try speedSaved.validate()
 equal(speedSaved.clips[0].segments![0].speed, 2, "project round trip retains section speed")

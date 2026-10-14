@@ -50,6 +50,8 @@ final class AppModel: ObservableObject {
     var lastEditTime = Date.distantPast
     var autosaveTask: Task<Void, Never>?
     var savedProject: VideoProject?
+    /// The open document's persistent identity; see `VideoProject.projectID`.
+    var projectID = UUID()
 
     private var previewTask: Task<Void, Never>?
     private var conversionTask: Task<Void, Never>?
@@ -192,7 +194,8 @@ final class AppModel: ObservableObject {
                 guard let index = items.firstIndex(where: { $0.id == id }) else { return }
                 items[index].info = info
                 items[index].crop = items[index].crop?.evenClamped(in: info.fullFrame) ?? info.fullFrame
-                items[index].subtitles = Self.siblingSubtitles(for: url)
+                // A project can now carry its own choice; only fill in a missing one.
+                items[index].subtitles = items[index].subtitles ?? Self.siblingSubtitles(for: url)
                 items[index].status = .ready
                 ensureSelection()
                 scheduleAutosave()
@@ -226,16 +229,21 @@ final class AppModel: ObservableObject {
         panel.message = "Choose a subtitle file to burn into this clip."
         panel.prompt = "Use"
         panel.directoryURL = selectedItem?.url.deletingLastPathComponent()
-        guard panel.runModal() == .OK, let url = panel.url,
-              let index = items.firstIndex(where: { $0.id == id })
-        else { return }
-        items[index].subtitles = url
-        refreshPreview()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setSubtitles(url, for: id)
     }
 
     func clearSubtitles() {
-        guard let id = selection, let index = items.firstIndex(where: { $0.id == id }) else { return }
-        items[index].subtitles = nil
+        guard let id = selection else { return }
+        setSubtitles(nil, for: id)
+    }
+
+    /// The subtitle file is part of the project, so choosing or clearing it is an edit:
+    /// it can be undone, marks the project changed and reaches the recovery file.
+    func setSubtitles(_ url: URL?, for id: VideoItem.ID) {
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].subtitles != url else { return }
+        beginEdit(url == nil ? "Remove Subtitles" : "Choose Subtitles")
+        items[index].subtitles = url
         refreshPreview()
     }
 

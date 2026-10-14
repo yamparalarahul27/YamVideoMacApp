@@ -763,7 +763,7 @@ struct SettingsPane: View {
                             .controlSize(.small)
                         if model.settings.outputFolder != nil {
                             Button {
-                                model.settings.outputFolder = nil
+                                settingsBinding.wrappedValue.outputFolder = nil
                             } label: {
                                 Image(systemName: "xmark.circle")
                             }
@@ -882,7 +882,7 @@ struct SettingsPane: View {
     private var colourSection: some View {
         if let info = model.selectedItem?.info, info.isHDR {
             section("Colour") {
-                Toggle("Convert HDR to SDR", isOn: $model.settings.toneMapHDR)
+                Toggle("Convert HDR to SDR", isOn: settingsBinding.toneMapHDR)
                     .onChange(of: model.settings.toneMapHDR) { _, _ in model.refreshPreview() }
 
                 Text(model.settings.toneMapHDR
@@ -930,7 +930,7 @@ struct SettingsPane: View {
                     .help("Export without captions")
                 }
 
-                Picker("Placement", selection: $model.settings.subtitlePlacement) {
+                Picker("Placement", selection: settingsBinding.subtitlePlacement) {
                     ForEach(SubtitlePlacement.allCases) { Text($0.label).tag($0) }
                 }
                 .labelsHidden()
@@ -940,7 +940,7 @@ struct SettingsPane: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Picker("Size", selection: $model.settings.subtitleSize) {
+                Picker("Size", selection: settingsBinding.subtitleSize) {
                     ForEach(SubtitleSize.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
