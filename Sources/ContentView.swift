@@ -366,7 +366,7 @@ struct CropEditorPane: View {
             Divider()
 
             if model.showPlayback {
-                PlaybackCanvas(playback: model.playback).frame(maxHeight: .infinity)
+                PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay).frame(maxHeight: .infinity)
             } else {
             CropCanvas(
                 image: model.previewImage,
@@ -398,12 +398,23 @@ struct CropEditorPane: View {
         .onChange(of: model.editorMode) { _, _ in model.setPlaybackVisible(false) }
         .onDeleteCommand {
             guard !model.isConverting else { return }
+            if model.inspectorFocus == .graphic { model.removeSelectedGraphic(); return }
             switch model.editorMode {
             case .blur: model.removeSelectedRegion()
             case .zoom: model.removeSelectedZoom()
             case .crop: break
             }
         }
+    }
+
+    /// Graphics are drawn at the 1920×1080 design size on a 16:9 picture. Other shapes wait
+    /// for the vertical layouts of a later phase.
+    private var graphicsOverlay: GraphicsOverlayInput? {
+        guard let track = item.graphics, !track.items.isEmpty else { return nil }
+        let frame = crop.size
+        guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
+        return GraphicsOverlayInput(clip: item.id, track: track, duration: item.editedDuration,
+                                    fps: info.fpsExpression, frame: frame, time: model.previewTime)
     }
 
     /// Original / Corrected / Compare, under the picture while the recording has a colour

@@ -183,7 +183,7 @@ extension AppModel {
         movieSettings = snapshot.movieSettings ?? MovieSettings()
         movieTime = 0; movieOutput = nil
         selection = items.contains(where: { $0.id == snapshot.selection }) ? snapshot.selection : items.first?.id
-        selectedSegmentID = nil; selectedShotID = nil; selectedRegionID = nil
+        selectedSegmentID = nil; selectedShotID = nil; selectedRegionID = nil; selectedGraphicID = nil
         refreshPreview()
         for item in items where item.info == nil { retry(item.id) }
     }
@@ -363,9 +363,12 @@ extension AppModel {
         case .success(let receipt):
             guard receipt.changed else { return false }
             sectionSelection = select(receipt)
-            let removed = receipt.removedZooms.count
-            statusMessage = removed > 0
-                ? "\(name). Removed \(removed) zoom(s) whose footage or space was removed; Undo restores them." : name
+            let removed = receipt.removedZooms.count, removedGraphics = receipt.removedGraphics.count
+            var lost: [String] = []
+            if removed > 0 { lost.append("\(removed) zoom(s)") }
+            if removedGraphics > 0 { lost.append("\(removedGraphics) graphic(s)") }
+            statusMessage = lost.isEmpty ? name
+                : "\(name). Removed \(lost.joined(separator: " and ")) whose footage or space was removed; Undo restores them." 
             return true
         case .failure(let error):
             statusMessage = failure ?? error.message

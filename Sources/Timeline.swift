@@ -111,6 +111,8 @@ struct ProjectClip: Codable, Equatable {
     /// Version 4 onwards. Nil when the recording has never had its colour touched, so an
     /// untouched recording reads exactly as it did before colour existed.
     var color: ClipColorSettings?
+    /// Version 5 onwards. Nil when the recording has no graphics.
+    var graphics: GraphicsTrack?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -118,6 +120,7 @@ struct ProjectClip: Codable, Equatable {
         blurRegions = item.blurRegions; zoomShots = item.zoomShots; segments = item.segments
         includedInMovie = item.includedInMovie; subtitles = item.subtitles
         color = item.color.isDefault ? nil : item.color
+        graphics = item.graphics?.isEmpty == false ? item.graphics : nil
     }
 
     func item() -> VideoItem {
@@ -127,6 +130,7 @@ struct ProjectClip: Codable, Equatable {
         item.blurRegions = blurRegions; item.zoomShots = zoomShots; item.segments = segments
         item.includedInMovie = includedInMovie ?? true; item.subtitles = subtitles
         item.color = color ?? ClipColorSettings()
+        item.graphics = graphics
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -135,10 +139,10 @@ struct ProjectClip: Codable, Equatable {
 
 struct VideoProject: Codable, Equatable {
     /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
-    /// and the per-recording subtitle file. 4: adds per-recording colour. Every edited
-    /// project is written as the current version; older builds reject it rather than
-    /// silently dropping edits.
-    static let currentVersion = 4
+    /// and the per-recording subtitle file. 4: adds per-recording colour. 5: adds
+    /// per-recording graphics. Every edited project is written as the current version;
+    /// older builds reject it rather than silently dropping edits.
+    static let currentVersion = 5
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -188,6 +192,9 @@ struct VideoProject: Codable, Equatable {
         if version < 4, clips.contains(where: { $0.color != nil }) {
             try reject("The project claims an older format but contains colour settings."); return
         }
+        if version < 5, clips.contains(where: { $0.graphics != nil }) {
+            try reject("The project claims an older format but contains graphics."); return
+        }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
         }
@@ -206,7 +213,8 @@ struct VideoProject: Codable, Equatable {
                 if let info = clip.info { try color.validate(against: info) }
             }
             guard let info = clip.info else {
-                guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty else {
+                guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
+                      clip.graphics == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -247,6 +255,9 @@ struct VideoProject: Codable, Equatable {
                       $0.end <= duration + 0.01 && $0.target.x.isFinite && $0.target.y.isFinite }),
                   zip(shots, shots.dropFirst()).allSatisfy({ !$0.overlaps($1) }) else {
                 try reject("The project contains invalid zoom timing."); return
+            }
+            if let graphics = clip.graphics, let problem = graphics.problem(duration: duration) {
+                try reject(problem); return
             }
             for rect in [clip.crop].compactMap({ $0 }) + clip.blurRegions.map(\.rect) {
                 guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,

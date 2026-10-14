@@ -189,6 +189,8 @@ struct VideoItem: Identifiable {
     var subtitles: URL?
     /// How the recording's colour is read and adjusted.
     var color = ClipColorSettings()
+    /// Timed motion graphics over the recording. Nil until one is added.
+    var graphics: GraphicsTrack?
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

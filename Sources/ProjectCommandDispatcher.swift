@@ -10,6 +10,7 @@ struct EditReceipt: Equatable {
     var changed: Bool
     var createdIDs: [UUID]
     var removedZooms: [UUID]
+    var removedGraphics: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -105,6 +106,7 @@ extension AppModel {
 
         var receipt = EditReceipt(revision: revision, transactionID: nil, changed: outcome.project != base,
                                   createdIDs: outcome.createdIDs, removedZooms: outcome.removedZooms,
+                                  removedGraphics: outcome.removedGraphics,
                                   affectedClips: Self.changedClips(from: base, to: outcome.project))
         guard !dryRun, receipt.changed else { return .success(receipt) }
 
@@ -200,6 +202,8 @@ extension AppModel {
             elements.formUnion(clip.zoomShots.filter { oldZooms[$0.id] != $0 }.map(\.id))
             let oldAreas = Dictionary(uniqueKeysWithValues: (previous?.blurRegions ?? []).map { ($0.id, $0) })
             elements.formUnion(clip.blurRegions.filter { oldAreas[$0.id] != $0 }.map(\.id))
+            let oldGraphics = Dictionary(uniqueKeysWithValues: (previous?.graphics?.items ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.graphics?.items ?? []).filter { oldGraphics[$0.id] != $0 }.map(\.id))
         }
         let highlight = AgentHighlight(origin: origin.label, label: label, clips: clips, elements: elements)
         agentHighlight = highlight
@@ -412,6 +416,7 @@ extension AppModel {
         let sections = sectionSelection.keeping(selectedItem?.timeline)
         if sections != sectionSelection { sectionSelection = sections }
         if let id = selectedShotID, selectedItem?.zoomShots.contains(where: { $0.id == id }) != true { selectedShotID = nil }
+        if let id = selectedGraphicID, selectedItem?.graphics?.items.contains(where: { $0.id == id }) != true { selectedGraphicID = nil }
         if let id = selectedRegionID, selectedItem?.blurRegions.contains(where: { $0.id == id }) != true { selectedRegionID = nil }
 
         let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.init), movieSettings, settings)

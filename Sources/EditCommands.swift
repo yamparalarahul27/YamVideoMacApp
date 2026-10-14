@@ -76,6 +76,14 @@ enum EditCommand: Equatable {
     /// One recording's adjustments onto others. The recorded colour, table and Natural
     /// colour come too only when asked, and only where the destination file allows them.
     case copyColor(from: UUID, to: [UUID], includeInterpretation: Bool)
+    case addGraphic(clip: UUID, graphic: Graphic)
+    /// Replaces the graphic with the same ID.
+    case updateGraphic(clip: UUID, graphic: Graphic)
+    case removeGraphic(clip: UUID, graphic: UUID)
+    /// Every graphic at once, and the style too when given — what an import produces.
+    case replaceGraphics(clip: UUID, graphics: [Graphic], style: GraphicsStyle?)
+    /// The look of every graphic on the recording: accent, panel, move aside, edge, look.
+    case setGraphicsStyle(clip: UUID, style: GraphicsStyle)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -110,6 +118,11 @@ enum EditCommand: Equatable {
         case .setColorAdjustments: return "Adjust Colour"
         case .resetColorAdjustments: return "Reset Colour"
         case .copyColor: return "Copy Colour"
+        case .addGraphic: return "Add Graphic"
+        case .updateGraphic: return "Edit Graphic"
+        case .removeGraphic: return "Delete Graphic"
+        case .replaceGraphics: return "Edit Graphics"
+        case .setGraphicsStyle: return "Graphics Style"
         }
     }
 }
@@ -174,6 +187,8 @@ struct EditOutcome: Equatable {
     /// Zooms dropped because the footage they were anchored to was cut away or no
     /// longer leaves room for them. Undo restores them.
     var removedZooms: [UUID] = []
+    /// Graphics dropped for the same reason.
+    var removedGraphics: [UUID] = []
 }
 
 /// Applies a batch of commands to a project value. Pure: no UI state, no selection, no
@@ -478,6 +493,40 @@ enum ProjectReducer {
         case .resetColorAdjustments(let clip):
             try editColor(clip, in: &outcome) { color, _ in color.adjustments = .neutral }
 
+        case .addGraphic(let clip, let graphic):
+            try editGraphics(clip, in: &outcome) { track in
+                guard !track.items.contains(where: { $0.id == graphic.id }) else {
+                    throw EditError.invalid("A graphic with that ID already exists.")
+                }
+                track.items.append(graphic)
+            }
+            outcome.createdIDs.append(graphic.id)
+
+        case .updateGraphic(let clip, let graphic):
+            try editGraphics(clip, in: &outcome) { track in
+                guard let index = track.items.firstIndex(where: { $0.id == graphic.id }) else {
+                    throw EditError.notFound("No graphic with that ID on this recording.")
+                }
+                track.items[index] = graphic
+            }
+
+        case .removeGraphic(let clip, let id):
+            try editGraphics(clip, in: &outcome) { track in
+                guard track.items.contains(where: { $0.id == id }) else {
+                    throw EditError.notFound("No graphic with that ID on this recording.")
+                }
+                track.items.removeAll { $0.id == id }
+            }
+
+        case .replaceGraphics(let clip, let graphics, let style):
+            try editGraphics(clip, in: &outcome) { track in
+                track.items = graphics
+                if let style { track.style = style }
+            }
+
+        case .setGraphicsStyle(let clip, let style):
+            try editGraphics(clip, in: &outcome) { track in track.style = style }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -515,11 +564,12 @@ enum ProjectReducer {
         try body(&outcome.project.clips[index], info)
     }
 
-    /// Edits a recording's sections, then carries its zooms across: each zoom follows
-    /// the frame it began on, and is dropped when that footage is gone.
+    /// Edits a recording's sections, then carries its zooms and graphics across: each
+    /// follows the frame it began on, and is dropped when that footage is gone.
     private static func editTimeline(_ id: UUID, in outcome: inout EditOutcome,
                                      _ body: (inout ClipTimeline, MediaInfo) throws -> Void) throws {
         var removed: [UUID] = []
+        var removedGraphics: [UUID] = []
         try editClip(id, in: &outcome) { record, info in
             let old = record.timeline
             var timeline = old
@@ -528,9 +578,28 @@ enum ProjectReducer {
             let kept = timeline.remap(record.zoomShots, from: old)
             removed = record.zoomShots.map(\.id).filter { id in !kept.contains { $0.id == id } }
             record.zoomShots = kept
+            if let graphics = record.graphics {
+                let remapped = timeline.remap(graphics, from: old)
+                record.graphics = remapped.track
+                removedGraphics = remapped.removed
+            }
             record.segments = timeline.segments
         }
         outcome.removedZooms += removed
+        outcome.removedGraphics += removedGraphics
+    }
+
+    /// Edits one probed recording's graphics and checks the whole track against its
+    /// edited length. An empty track with the default style is stored as nothing.
+    private static func editGraphics(_ id: UUID, in outcome: inout EditOutcome,
+                                     _ body: (inout GraphicsTrack) throws -> Void) throws {
+        try editClip(id, in: &outcome) { record, _ in
+            var track = record.graphics ?? GraphicsTrack()
+            try body(&track)
+            track.items.sort { $0.start < $1.start }
+            if let problem = track.problem(duration: record.timeline.duration) { throw EditError.invalid(problem) }
+            record.graphics = track.isEmpty ? nil : track
+        }
     }
 
     /// Edits one probed recording's colour settings, checks them against its file, and

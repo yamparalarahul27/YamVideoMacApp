@@ -24,7 +24,7 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl analyze --kind silence|zooms --clip ID
   yamvideoctl cancel JOB
-  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--time SECONDS] [--movie]
+  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--graphic ID] [--time SECONDS] [--movie]
   yamvideoctl request --file REQUEST.json        send a raw protocol request
 
 EDITS.json is a list of commands, or an object with "commands" and optionally
@@ -274,6 +274,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let clip = arguments.values["clip"] { request["clip"] = clip }
         if let section = arguments.values["section"] { request["section"] = section }
         if let zoom = arguments.values["zoom"] { request["zoom"] = zoom }
+        if let graphic = arguments.values["graphic"] { request["graphic"] = graphic }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }
     case "request":

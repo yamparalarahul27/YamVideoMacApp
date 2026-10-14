@@ -66,7 +66,16 @@ final class PlaybackController: ObservableObject {
         requestedTime = time
         playWhenReady = play
         let record = ProjectClip(clip)
-        if loadedClip == record, loadedSettings == settings, loadedOriginal == original, error == nil {
+        if let loaded = loadedClip, loaded.withoutGraphics == record.withoutGraphics,
+           loadedSettings == settings, loadedOriginal == original, error == nil {
+            // Graphics draw in their own layer; only a change to the move aside needs a
+            // new picture, and that is a composition swap, not a new movie.
+            if GraphicsMotion(loaded.graphics) != GraphicsMotion(record.graphics),
+               let item = player.currentItem, !isLoading, let info = clip.info {
+                item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
+                                                              settings: settings, original: original)
+            }
+            loadedClip = record
             seek(to: time)
             if !isLoading, play { player.play(); isPlaying = true }
             return
@@ -76,7 +85,7 @@ final class PlaybackController: ObservableObject {
         var recolored = loadedClip
         recolored?.color = record.color
         if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
-           recolored == record, loadedSettings == settings, let info = clip.info {
+           recolored?.withoutGraphics == record.withoutGraphics, loadedSettings == settings, let info = clip.info {
             item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
                                                           settings: settings, original: original)
             loadedClip = record; loadedOriginal = original
@@ -215,10 +224,11 @@ final class PlaybackController: ObservableObject {
         let regions = clip.blurRegions
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
                                         toneMapHDR: settings.toneMapHDR, original: original).render
+        let motion = GraphicsMotion(clip.graphics)
         let videoComposition = AVMutableVideoComposition(asset: asset) { request in
             let result = renderFrame(request.sourceImage, info: info, crop: crop,
                                      regions: regions, shots: shots, settings: settings,
-                                     time: request.compositionTime.seconds, color: color)
+                                     time: request.compositionTime.seconds, color: color, motion: motion)
             request.finish(with: result, context: nil)
         }
         videoComposition.renderSize = crop.size
@@ -237,7 +247,8 @@ final class PlaybackController: ObservableObject {
 /// Order follows the shared rendering contract: colour first, on the whole frame, then
 /// area obscuring, crop and zoom. A black area therefore stays black whatever the grade.
 func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurRegion],
-                 shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil) -> CIImage {
+                 shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil,
+                 motion: GraphicsMotion? = nil) -> CIImage {
     var image = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
     if let color { image = ColorPipeline.apply(color, to: image, space: source.colorSpace) }
     for region in regions {
@@ -272,15 +283,81 @@ func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [Blu
         image = image.transformed(by: CGAffineTransform(translationX: -x, y: -y))
             .transformed(by: CGAffineTransform(scaleX: zoom, y: zoom))
     }
+    if let motion { image = moveAside(image, size: crop.size, motion: motion, time: time) }
     return image.cropped(to: CGRect(origin: .zero, size: crop.size))
+}
+
+/// While a side panel shows, the picture slides left by a quarter of its width. A larger,
+/// blurred, darker copy of the same frame fills the space it leaves, the moved picture's
+/// right edge fades into that copy, and a frost fades in under the panel. Sizes are in
+/// design pixels of a 1920-wide frame, scaled to the real width. The export draws the same.
+func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Double) -> CIImage {
+    let (amount, span) = motion.progress(at: time)
+    guard amount > 0.0001, let span else { return image }
+    let frame = CGRect(origin: .zero, size: size)
+    let w = size.width, h = size.height, unit = w / 1920
+    let base = image.cropped(to: frame)
+
+    let grow = CGAffineTransform(translationX: -w / 2, y: -h / 2)
+        .concatenating(CGAffineTransform(scaleX: 1.3, y: 1.3))
+        .concatenating(CGAffineTransform(translationX: w / 2, y: h / 2))
+    let fill = base.clampedToExtent().transformed(by: grow)
+        .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 36 * unit])
+        .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.9])
+        .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: log2(0.72)])
+        .cropped(to: frame)
+    let black = CIImage(color: .black).cropped(to: frame)
+    let behind = fill.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: amount)])
+        .composited(over: black)
+
+    let shift = w * GraphicsTrack.shiftFraction * amount
+    let moved = base.transformed(by: CGAffineTransform(translationX: -shift, y: 0))
+    let fade = 220 * unit * amount
+    var result = moved.applyingFilter("CIBlendWithMask", parameters: [
+        kCIInputBackgroundImageKey: behind,
+        kCIInputMaskImageKey: horizontalRamp(from: w - shift - fade, to: w - shift, rising: false, strength: 1, frame: frame),
+    ])
+
+    if let ramp = motion.frostRamp(for: span) {
+        let frosted = result.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: ramp.blur * unit]).cropped(to: frame)
+        result = frosted.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: result,
+            kCIInputMaskImageKey: horizontalRamp(from: ramp.from * w, to: ramp.to * w, rising: true, strength: amount, frame: frame),
+        ])
+    }
+    return result.cropped(to: frame)
+}
+
+/// A left-to-right grey ramp for CIBlendWithMask: 0 before `from` and `strength` after
+/// `to` when rising, the reverse otherwise.
+private func horizontalRamp(from: CGFloat, to: CGFloat, rising: Bool, strength: Double, frame: CGRect) -> CIImage {
+    let low = CIColor(red: 0, green: 0, blue: 0), high = CIColor(red: strength, green: strength, blue: strength)
+    return CIFilter(name: "CILinearGradient", parameters: [
+        "inputPoint0": CIVector(x: from, y: 0), "inputPoint1": CIVector(x: max(to, from + 0.5), y: 0),
+        "inputColor0": rising ? low : high, "inputColor1": rising ? high : low,
+    ])!.outputImage!.cropped(to: frame)
 }
 
 struct PlaybackCanvas: View {
     @ObservedObject var playback: PlaybackController
+    /// The selected recording's graphics, drawn over the picture.
+    var graphics: GraphicsOverlayInput? = nil
     var body: some View {
         ZStack {
             Color.black
             PlayerSurface(player: playback.player)
+            if let graphics, graphics.frame.width > 0, graphics.frame.height > 0 {
+                GeometryReader { geo in
+                    // The player fits the picture inside its bounds; the overlay matches it.
+                    let scale = min(geo.size.width / graphics.frame.width, geo.size.height / graphics.frame.height)
+                    let size = CGSize(width: graphics.frame.width * scale, height: graphics.frame.height * scale)
+                    GraphicsOverlay(input: graphics)
+                        .frame(width: size.width, height: size.height)
+                        .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                        .allowsHitTesting(false)
+                }
+            }
             if playback.isLoading { ProgressView("Preparing preview…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)) }
             if let error = playback.error {
                 Text(error).font(.callout).multilineTextAlignment(.center)
