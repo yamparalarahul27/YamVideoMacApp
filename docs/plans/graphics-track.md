@@ -1,9 +1,9 @@
 # Graphics track — implementation plan
 
-**Updated:** 2026-10-14. **Status:** Phase G0 (the template engine, outside the app) is
-implemented; see section 8. Phases G1 and later wait for phase 5 of
-[local co-editing](local-coediting.md) to merge, because they change the same files and
-the project schema.
+**Updated:** 2026-10-14. **Status:** G0 (the template engine) and G1 part 1 (graphics in
+the app: data, commands, preview, timeline, inspector) are implemented; see sections 8
+and 9. G1 part 2 (export with graphics from the app) is next. Phase 5 of
+[local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
 
@@ -159,7 +159,7 @@ custom ease, Core Image, FFmpeg expression) so that they agree to the frame.
 
 | Area | Files | Change |
 |---|---|---|
-| Model and schema | `Models.swift`, `Timeline.swift` | `Graphic`, `GraphicsTrack`, `GraphicsStyle`, typed props. `graphics` is optional in `ProjectClip`. Schema version is the next number after phase 5, with a gate that refuses graphics in older versions. Remap through cuts beside zooms; report `removedGraphics`. |
+| Model and schema | `Models.swift`, `Timeline.swift` | `Graphic`, `GraphicsTrack`, `GraphicsStyle`, typed props. `graphics` is optional in `ProjectClip`. Schema version 6 (phase 5 took 5), with a gate that refuses graphics in older versions. Remap through cuts beside zooms; report `removedGraphics`. |
 | Commands | `EditCommands.swift`, `ProjectCommandDispatcher.swift` | `addGraphic`, `updateGraphic` (patch), `removeGraphic`, `replaceGraphics`, `setGraphicsStyle`. Validate per kind: times in range, beats inside the graphic, no overlap in a zone, text length limits, known icons, image paths exist. Undo labels such as "Edit Graphic Text". |
 | Agents | `AgentRequests.swift`, `Tools/YamVideoCLI`, `Tools/AgentBridge` | Wire types, `state` shows `graphics`, `reveal --graphic`, the activity highlight diff. |
 | Preview | `Playback.swift`, new `GraphicsOverlay.swift` | `WKWebView` (transparent, no input) over `PlayerSurface`, fitted to `AVPlayerView.videoBounds`. The app calls `seek(previewTime)` on every playhead change and at 30 Hz while playing. Edits call `load` with new JSON. The move-aside transform goes into `renderFrame`. |
@@ -240,3 +240,29 @@ need Node.js to export" and offers to export without them.
   count-up goes both ways. It is not yet tested inside `WKWebView`.
 - Not done: automated tests for the engine (G1 adds a Node check that seeks out of order
   and compares DOM state).
+
+## 9. G1 part 1 status (2026-10-14)
+
+- **Data and schema:** `Sources/Graphics.swift` has `Graphic`, `GraphicsTrack`,
+  `GraphicsStyle`, panel spans, the move curve and the engine's files and page writer.
+  Props stay `JSONValue`, so a new template field needs no schema change. Project
+  version 6 stores `graphics` per recording.
+- **Commands:** `addGraphic`, `updateGraphic`, `removeGraphic`, `replaceGraphics` (with an
+  optional style) and `setGraphicsStyle`, plus `importGraphics` for agents. Cuts remap
+  graphics like zooms and report `removedGraphics`. The command catalog describes all six.
+- **Preview:** `GraphicsOverlay.swift` loads the engine page in a transparent `WKWebView`
+  over the player and seeks it to the playhead. `moveAside` in `Playback.swift` does the
+  move, the blurred fill and the frost in Core Image. A graphics-only edit does not
+  reload the video; a change to the move swaps only the video composition.
+- **Timeline and inspector:** a Graphics lane under Effects (column row, panel row; drag to
+  move, drag the right edge to change the length). The inspector edits the selected
+  graphic's times, look, text, numbers and images from its data, and the recording's
+  style, and imports a graphics file.
+- **Tests:** 44 checks, including Swift and JavaScript agreeing on panel spans, cut remap,
+  version gates, import, the page, agents, and move-aside pixels. Suite: 900/900.
+- **Real use:** the first video's 13 graphics imported into its project with one agent
+  command (one undo step) and saved as version 6.
+- **Known:** graphics show in **Preview**, not in Edit frame. Each rebuild of the ad-hoc
+  signed app can make macOS ask again for Desktop access; the first image read waits on it.
+- **Next (part 2):** export. Render each unit to a cached PNG sequence with HyperFrames,
+  overlay in ffmpeg, and port `moveAside` to an ffmpeg graph with a parity test.

@@ -172,6 +172,7 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Pick the frame you work against** | Drag the scrubber under the preview |
 | **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
+| **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest |
 | **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector. Choose where it sits and how big it is |
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
 | **Correct Pocket 3 D-Log M colour** | In the inspector's **Colour** section set **Recorded colour** to **DJI Pocket 3 D-Log M**. The first time, **Get DJI Conversion** opens DJI's download page and **Import Conversion File…** takes the `.cube` you saved. After that, **Natural Colour** is one click, and one Undo. Auto never assumes D-Log M: a `DJI_` file name only makes it ask |
@@ -369,6 +370,8 @@ Sources/
   ColorEditing.swift / ColorInspector.swift colour actions and the Colour inspector
   VisualEffects.swift whole-frame blur and markers: timing, validation, remapping
   VisualEffectsEditing.swift / VisualEffectsView.swift effect and marker actions, lane and inspectors
+  Graphics.swift    graphics data, validation, remapping, the move aside and the engine page
+  GraphicsEditing.swift / GraphicsInspector.swift / GraphicsOverlay.swift graphics actions, inspector and preview layer
   AgentCatalog.swift every agent command described for agents, served by `catalog`
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
   ProjectCommandDispatcher.swift revisions, gestures, shared undo, sessions, change feed
