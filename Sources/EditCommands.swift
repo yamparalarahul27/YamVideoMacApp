@@ -113,6 +113,8 @@ struct EditError: Error, Equatable, LocalizedError {
         case historyConflict = "history_conflict"
         case nothingToUndo = "nothing_to_undo"
         case sessionFull = "session_full"
+        case invalidRequest = "invalid_request"
+        case requestInProgress = "request_in_progress"
     }
 
     var code: Code
@@ -122,7 +124,7 @@ struct EditError: Error, Equatable, LocalizedError {
     var retryable: Bool {
         switch code {
         case .revisionConflict, .interactionInProgress, .exportInProgress, .agentsPaused,
-             .historyConflict, .resyncRequired: return true
+             .historyConflict, .resyncRequired, .requestInProgress: return true
         default: return false
         }
     }

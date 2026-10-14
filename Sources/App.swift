@@ -4,7 +4,11 @@ import SwiftUI
 /// Handles files opened from Finder ("Open With…") or dropped onto the Dock icon.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyboardMonitor: Any?
+    /// Lets local Codex/Claude sessions edit the open project; see `LocalAgentServer`.
+    private var agentServer: LocalAgentServer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        startAgentBridge()
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard NSApp.modalWindow == nil, NSApp.keyWindow?.sheetParent == nil,
                   !(NSApp.keyWindow?.firstResponder is NSTextView),
@@ -24,7 +28,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func startAgentBridge() {
+        // Previews from an earlier run are of no use to anyone now.
+        try? FileManager.default.removeItem(at: AppModel.artifactsDirectory)
+        let instance = UUID()
+        let server = LocalAgentServer(instanceID: instance) { line in
+            await AppModel.shared.handleAgentRequest(line, instanceID: instance)
+        }
+        do {
+            try server.start()
+            agentServer = server
+        } catch {
+            // Editing never depends on the bridge; say why agents cannot connect and carry on.
+            MainActor.assumeIsolated {
+                AppModel.shared.statusMessage = "Local agents cannot connect: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        agentServer?.stop()
         MainActor.assumeIsolated { AppModel.shared.flushRecovery() }
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }
     }

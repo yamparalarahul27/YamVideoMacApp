@@ -22,6 +22,16 @@ xcrun swiftc \
 	-o "$APP/Contents/MacOS/YamVideo" \
 	"$ROOT"/Sources/*.swift
 
+# The local agent CLI: the shared protocol file and its own, nothing else from the app.
+echo "==> Compiling yamvideoctl"
+xcrun swiftc \
+	-O \
+	-target "${ARCH}-apple-macos${DEPLOY_TARGET}" \
+	-sdk "$SDK" \
+	-o "$BUILD/yamvideoctl" \
+	"$ROOT/Sources/AgentProtocol.swift" "$ROOT/Tools/YamVideoCLI/main.swift"
+codesign --force --sign - --timestamp=none "$BUILD/yamvideoctl" >/dev/null 2>&1 || true
+
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
@@ -58,3 +68,4 @@ else
 	echo "NOTE: ffmpeg is not installed. Run: brew install ffmpeg"
 fi
 echo "Open it with:  open \"$APP\""
+echo "Local agents:  $BUILD/yamvideoctl --help"

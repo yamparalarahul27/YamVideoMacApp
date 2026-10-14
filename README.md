@@ -120,12 +120,17 @@ or understand which part of your content matters. Quiet footage may yield no sug
   the edited duration and cannot overlap. When cutting or reordering, their start frames
   anchor them to retained footage. Zooms whose start was removed, or which no longer fit,
   are removed with a status message; Undo restores them.
-- **Undo / redo:** **⌘Z / ⌘⇧Z** restore timeline, crop, blur, zoom and export-setting edits.
-  Continuous drags are grouped into one step. History is kept for the current session.
-- **Save:** **⌘S** saves a `.yamvideo` project; **⌘⇧S** saves a copy. **⌘⇧O** opens a project,
-  and **⌘N** starts a new one. Opening/starting a project can also be undone.
-  Projects containing speed edits use version 2 and require this build; older version 1
-  projects open with normal-speed sections.
+- **Undo / redo:** **⌘Z / ⌘⇧Z** restore timeline, crop, blur, zoom, subtitle and
+  export-setting edits. A drag or slider is one step however long it is held; it ends when
+  you let go. History is kept for the current session, and steps made by a local agent
+  are named with the agent's name in the Edit menu.
+- **Save:** **⌘S** saves a `.yamvideo` project; **⌘⇧S** saves it under a new name as a
+  separate project. **⌘⇧O** opens a project, and **⌘N** starts a new one. Opening/starting
+  a project can also be undone. If the project file changed on disk since you opened it,
+  ⌘S asks before replacing it.
+  Projects are saved as version 3, which adds a project identity and the chosen subtitle
+  file; this build opens versions 1–3, and older builds refuse version 3 files rather
+  than dropping edits they do not understand.
 - **Recover:** edits autosave after a short idle period and when quitting. The next launch
   restores the session, including its named save destination. Recovery lives in
   `~/Library/Application Support/YamVideo/Recovery.yamvideo`; it does not overwrite a named
@@ -280,6 +285,17 @@ A few things this handles that are easy to get wrong:
   `ffmpeg -encoders` up front and explains itself instead of surfacing ffmpeg's
   "Unknown encoder 'libwebp'" after the export has already started.
 
+## Local agents
+
+A Codex or Claude session on the same Mac can edit the open project alongside you with
+`build/yamvideoctl`: read the project, apply typed edits against the revision it read,
+undo its own steps, render preview frames, analyze silence or motion, and export. Its
+edits land on the real timeline as ordinary undo steps, and an edit planned against an
+out-of-date revision is refused instead of overwriting yours. Everything stays on this
+Mac: the app listens only on a private socket that other users cannot reach. See
+[Tools/YamVideoCLI/README.md](Tools/YamVideoCLI/README.md), and run
+`Tools/YamVideoCLI/demo.sh` with a recording open to watch two clients edit at once.
+
 ## Layout
 
 ```
@@ -290,7 +306,12 @@ Sources/
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges and project serialization
+  Timeline.swift    ordered source ranges and project serialization (schema v3)
+  EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
+  ProjectCommandDispatcher.swift revisions, gestures, shared undo, sessions, change feed
+  AgentProtocol.swift wire types and socket helpers shared with yamvideoctl
+  LocalAgentServer.swift private Unix-socket listener and discovery record
+  AgentRequests.swift every agent request: state, apply, preview, jobs, save
   TimelineView.swift timeline, section trim handles and zoom blocks
   Playback.swift    native video/audio composition and live effects
   ProjectEditing.swift undo history, project files and session recovery
@@ -303,6 +324,7 @@ Sources/
   Shell.swift       process runner with streamed output
 Tests/main.swift    end-to-end checks (./test.sh)
 Tools/makeicon.swift  draws the app icon at build time
+Tools/YamVideoCLI/    yamvideoctl, its guide and the two-client demo
 ```
 
 ## Implementation plans
@@ -311,5 +333,7 @@ The [local co-editing plan](docs/plans/local-coediting.md) coordinates the next 
 work: a simpler selection inspector, shared local edits from Codex/Claude, and a
 [beginner Pocket 3 D-Log M colour workflow](docs/plans/pocket-3-colour.md). It reconciles
 the earlier [timeline navigation](docs/plans/timeline-navigation.md) and
-[whole-frame blur](docs/plans/full-frame-blur-effects.md) plans. These documents describe
-planned work, not features available in this build.
+[whole-frame blur](docs/plans/full-frame-blur-effects.md) plans. Its foundation and
+shared-command phases (project identity, one edit path with revisions and gestures, the
+local socket and `yamvideoctl`) are implemented; the remaining phases describe planned
+work, not features available in this build.

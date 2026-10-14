@@ -55,6 +55,13 @@ final class AppModel: ObservableObject {
     @Published var agentsPaused = false
     /// Finished agent requests by request ID, for idempotent retries within a session.
     var agentRequests: [String: AgentRequestRecord] = [:]
+    /// Request IDs currently being answered, so a duplicate sent meanwhile is not run twice.
+    var agentPendingRequests: Set<String> = []
+    /// Preview, analysis and export work requested by agents, by job ID.
+    var agentJobs: [UUID: AgentJob] = [:]
+    var agentJobTasks: [UUID: Task<Void, Never>] = [:]
+    /// Fingerprint of the named project file as last opened or saved.
+    var savedFingerprint: Data?
     var autosaveTask: Task<Void, Never>?
     var savedProject: VideoProject?
     /// The open document's persistent identity; see `VideoProject.projectID`.
@@ -702,6 +709,8 @@ final class AppModel: ObservableObject {
     func cancelConversion() {
         movieExportTask?.cancel()
         conversionTask?.cancel()
+        // Stop also stops an export a local agent started; the owner stays in charge.
+        for (id, job) in agentJobs where job.kind == "export" { agentJobTasks[id]?.cancel() }
     }
 
     func reveal(_ url: URL) {

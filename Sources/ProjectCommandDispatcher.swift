@@ -16,7 +16,7 @@ struct EditReceipt: Equatable {
 /// One entry in the change feed agents poll. Job progress shares the feed, which is why
 /// its sequence is separate from the document revision.
 struct EditEvent: Equatable, Codable {
-    enum Kind: String, Codable { case edit, undo, redo, document, media, session }
+    enum Kind: String, Codable { case edit, undo, redo, document, media, session, job }
     var sequence: Int
     var revision: Int
     var kind: Kind
@@ -99,7 +99,7 @@ extension AppModel {
 
     /// Whether `origin` may change the document right now. A human command first closes
     /// any open gesture — a separate action always starts a new undo step.
-    private func admit(_ origin: EditOrigin, expectedRevision: Int?) -> EditError? {
+    func admit(_ origin: EditOrigin, expectedRevision: Int?) -> EditError? {
         guard !origin.isHuman else { endGesture(); return nil }
         if agentsPaused {
             return EditError(code: .agentsPaused, message: "Agent edits are paused in YamVideo. Ask the owner to resume them.")

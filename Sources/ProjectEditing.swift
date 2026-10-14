@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -28,6 +29,8 @@ struct SessionRecovery: Codable {
     var project: VideoProject
     var fileURL: URL?
     var savedProject: VideoProject?
+    /// SHA-256 of the named file as last opened or saved; see `diskConflict(at:)`.
+    var savedFingerprint: Data?
 }
 
 @MainActor
@@ -84,12 +87,25 @@ extension AppModel {
         }
     }
 
-    func writeProject(_ project: VideoProject, to url: URL) throws {
+    /// Writes atomically and returns the file's fingerprint.
+    @discardableResult
+    func writeProject(_ project: VideoProject, to url: URL) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(project)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+        return Self.fingerprint(data)
+    }
+
+    nonisolated static func fingerprint(_ data: Data) -> Data { Data(SHA256.hash(data: data)) }
+
+    /// True when the named file is no longer what this window last opened or saved —
+    /// another app, a sync service or a person changed it. Saving over it would discard
+    /// their change, so callers ask first (people) or refuse (agents).
+    func diskConflict(at url: URL) -> Bool {
+        guard let savedFingerprint, let data = try? Data(contentsOf: url) else { return false }
+        return Self.fingerprint(data) != savedFingerprint
     }
 
     func flushRecovery() {
@@ -100,7 +116,8 @@ extension AppModel {
     }
 
     private func writeRecovery(to destination: URL) throws {
-        let recovery = SessionRecovery(project: project, fileURL: projectURL, savedProject: savedProject)
+        let recovery = SessionRecovery(project: project, fileURL: projectURL, savedProject: savedProject,
+                                       savedFingerprint: savedFingerprint)
         let data = try JSONEncoder().encode(recovery)
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: destination, options: .atomic)
@@ -119,6 +136,7 @@ extension AppModel {
             // A pre-identity recovery file holds the saved copy without an identity too;
             // give it the recovered one, or the two could never compare equal again.
             savedProject = session?.savedProject.map { $0.migrated(identity: recovered.projectID ?? UUID()) }
+            savedFingerprint = session?.savedFingerprint
             hasUnsavedChanges = recovered != savedProject && !items.isEmpty
             if !items.isEmpty { statusMessage = "Restored your last editing session." }
         } catch { statusMessage = "Could not restore the last session: \(error.localizedDescription)" }
@@ -127,6 +145,9 @@ extension AppModel {
     func restore(_ snapshot: VideoProject) {
         playback.clear(); showPlayback = false
         projectID = snapshot.projectID ?? UUID()
+        // A different document is a different session from the moment it appears, not
+        // from its next edit — otherwise that edit would end the session it was sent in.
+        if projectID != editSession.projectID { rotateSession() }
         let previous = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         items = snapshot.clips.map { record in
             var item = record.item()
@@ -160,7 +181,22 @@ extension AppModel {
     }
 
     func saveProject(asCopy: Bool = false) {
-        if !asCopy, let projectURL { save(to: projectURL, asCopy: false); return }
+        if !asCopy, let projectURL {
+            if diskConflict(at: projectURL) {
+                let alert = NSAlert()
+                alert.messageText = "\(projectURL.lastPathComponent) changed on disk"
+                alert.informativeText = "Something else saved this project since you opened it. Saving now replaces that version."
+                alert.addButton(withTitle: "Save a Copy…")
+                alert.addButton(withTitle: "Replace")
+                alert.addButton(withTitle: "Cancel")
+                switch alert.runModal() {
+                case .alertFirstButtonReturn: saveProject(asCopy: true); return
+                case .alertSecondButtonReturn: break
+                default: return
+                }
+            }
+            save(to: projectURL, asCopy: false); return
+        }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.yamVideoProject]
         panel.nameFieldStringValue = projectURL?.lastPathComponent ?? "Untitled.yamvideo"
@@ -178,7 +214,7 @@ extension AppModel {
             projectID = UUID()
         }
         do {
-            try writeProject(project, to: destination)
+            savedFingerprint = try writeProject(project, to: destination)
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             if projectID != previousID { rotateSession() }
             scheduleAutosave()
@@ -208,8 +244,10 @@ extension AppModel {
     func openProject(at url: URL) {
         guard !isConverting else { statusMessage = "Finish or stop the export before opening a project."; return }
         do {
-            let opened = try VideoProject.decodeMigrating(from: Data(contentsOf: url))
+            let data = try Data(contentsOf: url)
+            let opened = try VideoProject.decodeMigrating(from: data)
             replaceDocument(opened, label: "Open Project", fileURL: url, saved: opened)
+            savedFingerprint = Self.fingerprint(data)
             hasUnsavedChanges = false
             statusMessage = "Opened \(url.lastPathComponent). Previous work is available with Undo."
         } catch { statusMessage = "Could not open project: \(error.localizedDescription)" }

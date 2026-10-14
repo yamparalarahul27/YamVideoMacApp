@@ -1,6 +1,6 @@
 # Local co-editing and the simplified editor — implementation plan
 
-**Updated:** 2026-10-14. **Status:** Planning only; this change implements no app features.
+**Updated:** 2026-10-14. **Status:** Phases 1–2 implemented (see section 10); phases 3–6 planned.
 **Owner intent:** Edit videos in the native Mac app while Codex or Claude edits the same
 open project on the same Mac. The owner also needs beginner-friendly DJI Osmo Pocket 3
 colour correction. No cloud collaboration service is required.
@@ -205,13 +205,14 @@ Illustrative wire request (IDs stand for values returned by `state`):
   "protocolVersion": 1,
   "requestID": "request-uuid",
   "method": "apply",
+  "client": "Codex",
   "sessionID": "open-session-uuid",
   "projectID": "project-uuid",
   "expectedRevision": 12,
   "label": "Speed up the intro",
   "dryRun": false,
   "commands": [
-    {"type": "setSegmentSpeed", "clipID": "clip-uuid", "segmentID": "section-uuid", "speed": 1.5}
+    {"type": "setSectionSpeed", "clipID": "clip-uuid", "sectionID": "section-uuid", "speed": 1.5}
   ]
 }
 ```
@@ -411,3 +412,40 @@ Deliver as separately reviewable implementation changes:
 
 No new tests or app binaries are required for this documentation-only change. Validate
 Markdown links, code examples, baseline references and `git diff --check` before publishing.
+
+## 10. Implementation status (2026-10-14)
+
+Phases 1 and 2 are implemented. The editor branch was integrated in PR #6; the rest is
+one change. The suite has 585 checks. Decisions taken while building them:
+
+- **Schema v3** adds `projectID` and the per-recording subtitle file. Every edited project
+  is written as v3. A legacy file gets an identity derived from its own bytes, so reopening
+  it unsaved gives the same project; saving persists it. Save As forks the identity; a
+  first save or saving in place keeps it.
+- **One mutation path.** `EditCommand` and a pure `ProjectReducer` (`EditCommands.swift`);
+  `perform`, gestures, shared undo, sessions and the change feed
+  (`ProjectCommandDispatcher.swift`). Every UI write uses it, including the settings
+  controls that previously bypassed undo. `beginEdit` and its 0.6 s coalescing window are
+  gone. The crop overlay and zoom-target drag now report their end. A drag whose end event
+  never arrives is committed once it has been idle for a second with no mouse button down,
+  so it cannot lock agents out.
+- **Probes are facts, not edits.** A probe that finishes after Add is recorded without an
+  undo step and also written into history, so undo and redo never forget it.
+- **Media for agents** is probed inside `apply` before anything is decided. The revision is
+  checked only at commit, so a probe can never land over an edit made while it ran. This
+  gives the plan's "probe as a job" guarantee without a separate job type.
+- **Saving** for agents: in place (refused with `disk_conflict` if the file changed on disk),
+  to a first location for an untitled project, or to any other path as a copy with its
+  own identity while the open project keeps its file. People get the same disk check as a
+  Replace / Save a Copy prompt.
+- **Previews** go through the app's FFmpeg preview path, so they include blur areas, tone
+  mapping and captions. `cropped` applies the crop; zooms are not rendered into previews yet.
+- **Jobs.** `analyze` (silence or zooms) and `export` (one recording or the movie) are
+  implemented; `job` and `cancel` work for both. An agent's export locks editing and is
+  cancelled by the owner's Stop, as the owner's own export is.
+- **Pause** exists as a model flag (`agentsPaused`) and is honoured. Its control, the
+  activity panel and agent highlighting come with the phase 3 interface.
+- The MCP adapter (`Tools/AgentBridge/`) and a live Codex/Claude session are phase 3. The
+  two-client acceptance gate is covered by real `yamvideoctl` processes in the suite and by
+  `Tools/YamVideoCLI/demo.sh` against the running app.
+
