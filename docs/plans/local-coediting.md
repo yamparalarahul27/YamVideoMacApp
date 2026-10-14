@@ -15,9 +15,10 @@ protocol, file names and milestones below are implementation decisions for revie
 Inspected application baseline: `timeline-editing` at `98a6789`. Published `main` is
 `cd431a3`. The former contains five additional commits, including the editor foundation
 (`a07829c`), the Filmora study, the HDR fixture correction, adaptive ruler and anchored
-zoom. This documentation PR is based on published main and deliberately includes only
-Markdown. Integrate/review the editor branch before implementing this plan. The timeline
-plan is carried into this PR from that branch so all planning links work on main.
+zoom. This planning PR is based on published main and changes only Markdown plans and an
+isolated browser prototype; it changes no native source. Integrate/review the editor
+branch before implementing this plan. The timeline plan is carried into this PR from
+that branch so all planning links work on main.
 
 | Area | Observed state / revised decision |
 |---|---|

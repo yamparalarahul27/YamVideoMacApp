@@ -32,3 +32,8 @@ errors were reported in these flows. Reviewed the 1360 × 880 desktop layout and
 390 px width for horizontal overflow. JavaScript syntax and local document/asset links
 were checked separately. The standalone Playwright CLI could not launch because Google
 Chrome is not installed; browser verification used the available in-app browser instead.
+
+Rechecked on 2026-10-14 after fixing slider undo: ⌘Z/⇧⌘Z work directly from a focused
+slider and keep its focus; a held arrow key or one drag is one undo step; a drag released
+at its starting value records nothing and cannot fold a later edit into another's undo.
+⌘Z inside the trim fields stays with the field.

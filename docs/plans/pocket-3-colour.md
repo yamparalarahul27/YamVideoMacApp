@@ -56,7 +56,7 @@ A later Suggest Balance feature must show a reversible preview and numeric chang
 
 | Control | Stored value | Range / default | Meaning |
 |---|---|---|---|
-| Brightness | `exposureEV` | -2…2 / 0 | Multiply normalized linear RGB by `2^EV`. Display plain label with stops in Details. |
+| Brightness | `exposureEV` | -2…2 / 0 | Multiply normalized linear RGB (BT.1886-decoded, see section 4) by `2^EV`. Display plain label with stops in Details. |
 | Warmth | `warmth` | -1…1 / 0 | Gentle warm/cool creative adjustment, not a claim to recover camera Kelvin. |
 | Contrast | `contrast` | 0.5…1.5 / 1 | Linear RGB contrast about 0.18, following exposure/warmth. |
 | Colour strength | `saturation` | 0…2 / 1 | Interpolate each channel from Rec.709 linear luminance to its RGB value. |
@@ -150,7 +150,13 @@ source's precision. Existing HEVC availability does not itself prove 10-bit outp
 For the technical LUT, decode RGB values representing the camera's encoded signal,
 without an implicit sRGB/linear conversion before LUT lookup. Resolve limited/full range
 and YCbCr matrix from verified metadata/fixtures; do not infer transfer solely from codec
-tags. Convert LUT Rec.709 output to linear before adjustments. Core Image's implicit colour
+tags. Linearize the LUT's Rec.709 output with the BT.1886 reference EOTF (pure 2.4 power,
+black 0, normalized white 1) and re-encode with its exact inverse after the adjustments, so
+neutral settings round-trip exactly and the 0.18 contrast pivot sits near mid-grey. Do not
+use the inverse Rec.709 OETF, the sRGB curve or an implied display gamma in either renderer;
+compute decode → adjust → encode once in the shared transform baked for both paths, never
+through renderer colour management. If review chooses another curve, change it in that one
+place and bump `algorithmVersion` with refreshed fixtures. Core Image's implicit colour
 management is a parity risk: explicitly configure source/intermediate/output spaces and
 prove the decoder delivers the intended LUT input. Preview must not double-transform it.
 

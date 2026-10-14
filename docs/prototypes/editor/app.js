@@ -82,7 +82,16 @@ function activity(origin, label, detail = "Just now") {
   renderActivity();
   $("statusText").textContent = `${origin}: ${label}`;
 }
+function endGesture() {
+  if (!gesture) return;
+  const { before, label } = gesture;
+  gesture = null;
+  // A drag released at its starting value changes nothing and records nothing.
+  commit(label, () => {}, "You", before);
+}
 function commit(label, mutate, origin = "You", before = null) {
+  // Close any open slider gesture first so its snapshot never spans this edit.
+  if (!before) endGesture();
   const previous = before || clone(clips);
   mutate();
   if (JSON.stringify(previous) === JSON.stringify(clips)) return;
@@ -93,6 +102,8 @@ function commit(label, mutate, origin = "You", before = null) {
   render();
 }
 function history(redo = false) {
+  endGesture();
+  const focused = document.activeElement?.id;
   const from = redo ? redoStack : undoStack,
     to = redo ? undoStack : redoStack,
     entry = from.pop();
@@ -109,6 +120,7 @@ function history(redo = false) {
     entry.label,
   );
   render();
+  if (focused) $(focused)?.focus({ preventScroll: true });
 }
 function choose(id) {
   selected = id;
@@ -268,19 +280,36 @@ function renderInspector() {
 }
 function bindSlider(id, set, format, label) {
   const element = $(id);
+  // A held arrow key repeats input/change; keep it one gesture until keyup.
+  let keyHeld = false;
+  const finish = () => {
+    if (gesture?.id !== id) return;
+    endGesture();
+    $(id)?.focus({ preventScroll: true });
+  };
   element.oninput = () => {
-    if (!gesture) gesture = { before: clone(clips), id };
+    if (gesture?.id !== id) {
+      endGesture();
+      gesture = { before: clone(clips), id, label };
+    }
     set(Number(element.value));
     $(id + "Value").textContent = format(Number(element.value));
     renderFrame();
   };
-  element.onchange = () => {
-    if (!gesture) return;
-    const before = gesture.before;
-    gesture = null;
-    commit(label, () => {}, "You", before);
-    $(id)?.focus({ preventScroll: true });
+  element.onkeydown = (e) => {
+    if (!e.metaKey && !e.ctrlKey && /^(Arrow|Page|Home|End)/.test(e.key))
+      keyHeld = true;
   };
+  element.onkeyup = () => {
+    if (!keyHeld) return;
+    keyHeld = false;
+    finish();
+  };
+  element.onchange = () => {
+    if (!keyHeld) finish();
+  };
+  // A drag released at its starting value fires no change event.
+  element.onpointerup = element.onpointercancel = finish;
 }
 function clampEffects(c) {
   const d = duration(c);
@@ -680,22 +709,22 @@ $("fileInput").onchange = (e) => {
   e.target.value = "";
 };
 document.addEventListener("keydown", (e) => {
+  if (document.querySelector("dialog[open]")) return;
+  const command = (e.metaKey || e.ctrlKey) && e.key.toLowerCase();
+  // Sliders and menus have no undo of their own; text fields keep theirs.
   if (
-    e.target.closest("input,select,textarea") ||
-    document.querySelector("dialog[open]")
-  )
+    (command === "z" || command === "b") &&
+    !e.target.closest("textarea, input:not([type=range])")
+  ) {
+    e.preventDefault();
+    if (command === "z") history(e.shiftKey);
+    else split();
     return;
+  }
+  if (e.target.closest("input,select,textarea")) return;
   if (e.code === "Space" && !e.target.closest("button")) {
     e.preventDefault();
     togglePlay();
-  }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-    e.preventDefault();
-    history(e.shiftKey);
-  }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
-    e.preventDefault();
-    split();
   }
   if (e.key === "Escape") agents(false);
 });
