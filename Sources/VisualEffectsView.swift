@@ -21,6 +21,13 @@ struct EffectInspector: View {
             Text("Blurs the whole visible picture after crop and zoom. Blur areas stay hidden throughout.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let info = item.info, let problem = FFmpeg.effectProblem([effect], info: info, settings: model.settings) {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(problem).fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
             DisclosureGroup("Details") {
                 VStack(alignment: .leading, spacing: 6) {
                     TimelineTimeField(label: "Start", value: effect.start) { start in

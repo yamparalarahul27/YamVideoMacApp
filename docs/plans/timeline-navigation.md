@@ -208,6 +208,10 @@ Hold `⌥` to suspend snapping for the duration of a gesture. A snapped edge dra
 
 ### 4.4 Markers
 
+*Implemented 2026-10-14 (phase 5): as specified, sharing schema v5 with whole-frame blur;
+markers are also snap targets, can be added and edited by agents, and are listed in the
+recording inspector.*
+
 A new `Marker { id: UUID, time: Double, label: String, colour: MarkerColour }` stored on
 `VideoItem` and persisted in `ProjectClip`. Times are in **edited-timeline space**, and
 must be remapped by the same mechanism `ClipTimeline.remap` already uses for zoom shots

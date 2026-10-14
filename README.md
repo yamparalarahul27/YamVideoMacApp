@@ -178,6 +178,8 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Adjust the look** | **Brightness**, **Warmth**, **Contrast** and **Colour strength**, each with its own reset. Exact values are under **Details**. A drag is one undo step, and the picture follows it straight away |
 | **Compare before and after** | **Corrected / Original / Compare** under the picture. Compare shows the original on the left half and the corrected picture on the right, at the same frame. It never changes the project or the export |
 | **Copy colour to other recordings** | **Copy Colour…** copies the look. Tick **Also copy the recorded colour and conversion** only for recordings made the same way |
+| **Blur the whole picture for a moment** | **Effects** mode (or **Add Blur Effect** in the inspector) adds a full-frame blur at the playhead that fades in and out, for a transition, a private moment or a backdrop for a title. Drag its block on the Effects lane to move it, or its edges to retime it; it stops at its neighbours. The inspector sets **Amount**, **Mix**, **Fade in/out**, exact times, and **On** to bypass it without deleting it. Effects mode shows the composed Preview so you see the result |
+| **Mark a moment** | Press **M** to drop a marker at the playhead; **⇧M** names the selected one; **⇧↑ / ⇧↓** jump between markers. Markers fly in the ruler, follow their footage through cuts, and are snap targets. They are also how you and an agent can point at the same moment |
 | **Export** | **Export…** opens a sheet for the selected recording, all recordings or the movie, with format, quality, audio and destination. ⌘R still exports all recordings (or the movie in Movie). ⌘. stops |
 
 Individual clip output lands next to each source file as `<name>-converted.<ext>` (`.mp4`, `.gif` or
@@ -248,6 +250,13 @@ A few things this handles that are easy to get wrong:
 - **The tone map runs at the head of the graph.** Before the blur regions, not after, so
   the blur sees the same pixels the export writes — and so does the preview, which shares
   the graph builder.
+- **A whole-frame blur fades per frame, not per pixel.** ffmpeg's `blend` with an
+  expression evaluates it for every sample and took 73 s for six seconds of 1080p.
+  The fade only changes once a frame, so the app computes each frame's weight itself
+  (the same function the preview uses) and hands ffmpeg a `sendcmd` script setting a
+  plain opacity per frame: 3.8 s for the same clip. Both renderers blur after crop and
+  zoom, before scaling, on encoded RGB in float with no subsampled chroma; on a test
+  clip they fade on the same frames and match within 4.4 of 255 across a hard edge.
 - **Colour is one table, applied the same way twice.** A recording's DJI conversion and
   its four adjustments are compiled into a single 3D table. ffmpeg applies it with `lut3d`
   (trilinear, float RGB, from the source's own YUV matrix and range, back to 10-bit
@@ -331,6 +340,15 @@ Mac: the app listens only on a private socket that other users cannot reach. See
 [Tools/YamVideoCLI/README.md](Tools/YamVideoCLI/README.md), and run
 `Tools/YamVideoCLI/demo.sh` with a recording open to watch two clients edit at once.
 
+Everything in the editor is open to agents: sections, crop, blur areas, zooms,
+whole-frame blur effects, markers, colour, the movie and export. An agent does not need
+to know the app in advance. `yamvideoctl catalog` (the MCP tool `yamvideo_describe`)
+returns every command with its fields, types, units, ranges and defaults, a worked
+example, and the rules every request follows, straight from the app; the test suite keeps
+it in step with what the app accepts. `preview --composed` renders a frame exactly as your
+Preview shows it, so an agent can look at a zoom or an effect it just added, and `reveal`
+selects something to show it to you.
+
 ## Layout
 
 ```
@@ -338,13 +356,20 @@ Sources/
   App.swift         @main, menu commands, Finder open-file handling
   AppModel.swift    queue, selection, preview, conversion driver
   ContentView.swift window layout: media list, picture and inspector over a full-width timeline
-  InspectorView.swift selection-following inspector: section, zoom, blur area, recording
+  InspectorView.swift selection-following inspector: section, zoom, blur area, effect, marker, recording
   ExportSheet.swift scope, format, quality, audio and destination for one Export button
   AgentActivityView.swift Local agents status, pause switch, activity and setup commands
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges and project serialization (schema v3)
+  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v5)
+  ColorLUT.swift    .cube parser and trilinear sampling
+  ColorAdjustments.swift colour settings, the four adjustments and Auto's inference
+  ColorPipeline.swift table store and the colour stage shared by ffmpeg and Core Image
+  ColorEditing.swift / ColorInspector.swift colour actions and the Colour inspector
+  VisualEffects.swift whole-frame blur and markers: timing, validation, remapping
+  VisualEffectsEditing.swift / VisualEffectsView.swift effect and marker actions, lane and inspectors
+  AgentCatalog.swift every agent command described for agents, served by `catalog`
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
   ProjectCommandDispatcher.swift revisions, gestures, shared undo, sessions, change feed
   AgentProtocol.swift wire types and socket helpers shared with yamvideoctl

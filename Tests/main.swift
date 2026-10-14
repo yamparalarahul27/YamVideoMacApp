@@ -2442,7 +2442,7 @@ if FileManager.default.fileExists(atPath: "\(adapter)/node_modules/@modelcontext
     let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "node"
     let smoke = try await Shell.run("/usr/bin/env", ["YAMVIDEO_AGENT_BRIDGE_DIR=\(bridgeDir.path)", "YAMVIDEO_CTL=\(ctl)",
                                                       "YAMVIDEO_CLIENT=Claude", node, "\(adapter)/smoke.mjs"])
-    check(smoke.status == 0, "the MCP adapter lists tools, reads, dry-runs, applies, conflicts, previews and undoes",
+    check(smoke.status == 0, "the MCP adapter lists tools, describes the app, reads, dry-runs, applies, conflicts, previews and undoes",
           smoke.stdoutText + smoke.stderrText)
     check(sharedEditor.recentActivity.contains { $0.origin == .agent("Claude") && $0.label == "Smoke test blur" },
           "an edit through MCP is credited to the client named in its config")
@@ -3748,6 +3748,12 @@ func movieDetail(_ time: Double) async throws -> Double {
 let movieSharp = try await movieDetail(secondStart + 0.5), movieBlurred = try await movieDetail(secondStart + 1.5)
 check(movieBlurred < 0.25 * movieSharp, "in a movie the second recording's blur starts at its own one second",
       String(format: "%.3f at its 1.5 s vs %.3f at its 0.5 s", movieBlurred, movieSharp))
+
+var hdrFxInfo = fxInfo; hdrFxInfo.colorTransfer = "arib-std-b67"
+var keepHDR = ExportSettings(); keepHDR.toneMapHDR = false
+check(FFmpeg.effectProblem([VideoBlurEffect(start: 1, end: 2)], info: hdrFxInfo, settings: keepHDR) != nil
+          && FFmpeg.effectProblem([VideoBlurEffect(start: 1, end: 2)], info: hdrFxInfo, settings: ExportSettings()) == nil,
+      "an effect on HDR kept as HDR is refused, not exported mislabelled; tone-mapped it is fine")
 
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)

@@ -23,6 +23,12 @@ try {
   await client.connect(transport);
   const tools = (await client.listTools()).tools.map((tool) => tool.name);
   steps.tools = tools.length;
+  // The catalog is how an agent learns the app; it has to come through the MCP client whole.
+  const catalog = parse(await client.callTool({ name: "yamvideo_describe", arguments: {} })).result;
+  if (!catalog?.commands?.some((command) => command.type === "addBlurEffect" && command.example?.type === "addBlurEffect")) {
+    throw new Error("yamvideo_describe did not describe addBlurEffect with an example.");
+  }
+  steps.catalog = catalog.commands.length;
 
   steps.sessions = parse(await client.callTool({ name: "yamvideo_list_sessions", arguments: {} })).ok;
   const state = parse(await client.callTool({ name: "yamvideo_get_state", arguments: {} })).result;

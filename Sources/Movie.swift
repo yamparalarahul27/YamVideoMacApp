@@ -167,6 +167,9 @@ extension FFmpeg {
         guard let executable = ffmpegPath else { throw FFmpegError(message: "ffmpeg was not found.") }
         for clip in plan.clips {
             if let problem = clip.colorStage(settings).problem { throw FFmpegError(message: "\(clip.name): \(problem)") }
+            if let info = clip.info, let problem = effectProblem(clip.blurEffects, info: info, settings: settings) {
+                throw FFmpegError(message: "\(clip.name): \(problem)")
+            }
         }
         if settings.format == .webp, await !supportsWebP() { throw FFmpegError(message: "This ffmpeg build cannot export WebP.") }
         let palette = settings.format == .gif ? paletteURL(for: output) : nil

@@ -695,6 +695,13 @@ enum FFmpeg {
         return EffectStage(parts: parts)
     }
 
+    /// Why a recording's effects cannot be exported as asked, if they cannot. The effect
+    /// stage writes Rec.709; HDR kept as HDR would come out blurred and mislabelled.
+    static func effectProblem(_ effects: [VideoBlurEffect], info: MediaInfo, settings: ExportSettings) -> String? {
+        guard effects.contains(where: \.isVisible), info.isHDR, !settings.toneMapHDR else { return nil }
+        return "Whole-frame effects work on standard colour. Turn on Convert HDR to SDR to export this \(info.hdrLabel ?? "HDR") recording with its effects."
+    }
+
     /// The effect stage for one recording's export: frames reach it at the cropped size,
     /// in BT.709 limited range once anything converted them, otherwise as recorded.
     static func effectStage(_ effects: [VideoBlurEffect], info: MediaInfo, crop: CGRect, converted: Bool,
@@ -1076,6 +1083,7 @@ enum FFmpeg {
         }
         // An uncorrected file reported as a success is worse than no file.
         if let problem = color.problem { throw FFmpegError(message: problem) }
+        if let problem = effectProblem(effects, info: info, settings: settings) { throw FFmpegError(message: problem) }
         let color = try ColorPipeline.ffmpegFilters(color, info: info, toneMapped: info.isHDR && settings.toneMapHDR)
         // Fail with something actionable instead of ffmpeg's "Unknown encoder 'libwebp'"
         // four passes into the error log.
