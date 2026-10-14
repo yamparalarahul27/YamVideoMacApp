@@ -20,9 +20,21 @@ xcrun swiftc \
 	"$ROOT/Sources/Playback.swift" \
 	"$ROOT/Sources/AppModel.swift" \
 	"$ROOT/Sources/ProjectEditing.swift" \
+	"$ROOT/Sources/EditCommands.swift" \
+	"$ROOT/Sources/ProjectCommandDispatcher.swift" \
+	"$ROOT/Sources/AgentProtocol.swift" \
+	"$ROOT/Sources/LocalAgentServer.swift" \
+	"$ROOT/Sources/AgentRequests.swift" \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
 	"$ROOT/Sources/CropEditor.swift" \
 	"$ROOT/Tests/main.swift"
 
-"$BIN"
+# The CLI too, so the checks can drive a real separate process over the socket.
+xcrun swiftc \
+	-target "$(uname -m)-apple-macos14.0" \
+	-sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+	-o "$ROOT/build/yamvideoctl" \
+	"$ROOT/Sources/AgentProtocol.swift" "$ROOT/Tools/YamVideoCLI/main.swift"
+
+YAMVIDEO_ROOT="$ROOT" YAMVIDEO_CTL="$ROOT/build/yamvideoctl" "$BIN"

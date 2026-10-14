@@ -111,6 +111,7 @@ extension AppModel {
                     statusMessage = "The recording changed during analysis. Run Suggest Zooms again."; return
                 }
                 zoomSuggestions = suggestions
+                zoomSuggestionTimeline = current.timeline
                 if suggestions.isEmpty { statusMessage = "No clear local activity found. Add manual zooms at the moments you want to emphasize." }
                 else { showingZoomSuggestions = true }
             } catch is CancellationError { statusMessage = "Zoom analysis cancelled." }
@@ -130,19 +131,26 @@ extension AppModel {
         guard let index = selectedIndex else { return }
         let selected = zoomSuggestions.filter(\.included).map(\.shot)
         guard !selected.isEmpty else { return }
-        beginEdit("Apply Zoom Suggestions")
+        // Suggestions are timed against the sections they were analysed on. If anyone —
+        // the owner or a local agent — has recut the recording since, they no longer fit.
+        guard items[index].timeline == zoomSuggestionTimeline else {
+            showingZoomSuggestions = false
+            statusMessage = "The recording changed since these suggestions were made. Run Suggest Zooms again."; return
+        }
         var added: [ZoomShot] = []
         for shot in selected where shot.end <= items[index].editedDuration + 0.001 {
-            if !items[index].zoomShots.contains(where: { $0.overlaps(shot) }) {
-                items[index].zoomShots.append(shot); added.append(shot)
-            }
+            if !(items[index].zoomShots + added).contains(where: { $0.overlaps(shot) }) { added.append(shot) }
         }
-        items[index].zoomShots.sort { $0.start < $1.start }
-        selectedShotID = added.first?.id
         showingZoomSuggestions = false
         playback.clear(); showPlayback = false
-        statusMessage = "Added \(added.count) editable zoom suggestions."
-        refreshPreview()
+        guard !added.isEmpty else { statusMessage = "Every selected suggestion overlaps an existing zoom."; return }
+        switch perform(added.map { .addZoom(clip: items[index].id, zoom: $0) }, label: "Apply Zoom Suggestions") {
+        case .success:
+            selectedShotID = added.first?.id
+            statusMessage = "Added \(added.count) editable zoom suggestions."
+        case .failure(let error):
+            statusMessage = error.message
+        }
     }
 }
 

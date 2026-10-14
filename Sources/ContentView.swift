@@ -359,12 +359,13 @@ struct CropEditorPane: View {
                 selectedRegionID: model.selectedRegionID,
                 shots: item.zoomShots,
                 selectedShotID: model.selectedShotID,
-                onChange: { model.updateCrop($0) },
+                onChange: { model.updateCrop($0, live: $1) },
                 onSelectRegion: { model.selectedRegionID = $0 },
                 onChangeRegion: { model.updateRegion($0, rect: $1, live: $2) },
                 onAddRegion: { model.addRegion($0); model.refreshPreview() },
                 onSelectShot: { model.selectedShotID = $0 },
                 onMoveShot: { model.moveZoomTarget($0, to: $1) },
+                onMoveShotEnded: { model.endGesture() },
                 onAddShot: { model.addZoom(at: $0) }
             )
             .frame(maxHeight: .infinity)
@@ -620,9 +621,10 @@ struct CropEditorPane: View {
                     Slider(
                         value: Binding(
                             get: { shot.hold },
-                            set: { model.setZoomHold(shot.id, $0) }
+                            set: { model.setZoomHold(shot.id, $0, live: true) }
                         ),
-                        in: 0.5...8, step: 0.5
+                        in: 0.5...8, step: 0.5,
+                        onEditingChanged: { editing in if !editing { model.endGesture() } }
                     )
                     .frame(width: 110)
                     .accessibilityLabel("Zoom hold length")
@@ -671,6 +673,11 @@ struct SettingsPane: View {
     @Binding var showCommand: Bool
     private var settingsBinding: Binding<ExportSettings> {
         Binding(get: { model.settings }, set: { model.updateSettings($0) })
+    }
+    /// For sliders and text: shown live, one undo step when the slider is released or
+    /// the field is submitted (or the next separate edit closes it).
+    private var liveSettingsBinding: Binding<ExportSettings> {
+        Binding(get: { model.settings }, set: { model.updateSettings($0, live: true) })
     }
 
     var body: some View {
@@ -728,7 +735,8 @@ struct SettingsPane: View {
                                     .font(.system(.caption, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
-                            Slider(value: settingsBinding.blurStrength, in: 4...80, step: 2)
+                            Slider(value: liveSettingsBinding.blurStrength, in: 4...80, step: 2,
+                                   onEditingChanged: { editing in if !editing { model.endGesture() } })
                                 .onChange(of: model.settings.blurStrength) { _, _ in
                                     model.refreshPreview()
                                 }
@@ -763,7 +771,7 @@ struct SettingsPane: View {
                             .controlSize(.small)
                         if model.settings.outputFolder != nil {
                             Button {
-                                model.settings.outputFolder = nil
+                                settingsBinding.wrappedValue.outputFolder = nil
                             } label: {
                                 Image(systemName: "xmark.circle")
                             }
@@ -773,7 +781,8 @@ struct SettingsPane: View {
                     }
                     HStack(spacing: 6) {
                         Text("Suffix").font(.caption).foregroundStyle(.secondary)
-                        TextField("-converted", text: settingsBinding.suffix)
+                        TextField("-converted", text: liveSettingsBinding.suffix)
+                            .onSubmit { model.endGesture() }
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.caption, design: .monospaced))
                     }
@@ -882,7 +891,7 @@ struct SettingsPane: View {
     private var colourSection: some View {
         if let info = model.selectedItem?.info, info.isHDR {
             section("Colour") {
-                Toggle("Convert HDR to SDR", isOn: $model.settings.toneMapHDR)
+                Toggle("Convert HDR to SDR", isOn: settingsBinding.toneMapHDR)
                     .onChange(of: model.settings.toneMapHDR) { _, _ in model.refreshPreview() }
 
                 Text(model.settings.toneMapHDR
@@ -930,7 +939,7 @@ struct SettingsPane: View {
                     .help("Export without captions")
                 }
 
-                Picker("Placement", selection: $model.settings.subtitlePlacement) {
+                Picker("Placement", selection: settingsBinding.subtitlePlacement) {
                     ForEach(SubtitlePlacement.allCases) { Text($0.label).tag($0) }
                 }
                 .labelsHidden()
@@ -940,7 +949,7 @@ struct SettingsPane: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                Picker("Size", selection: $model.settings.subtitleSize) {
+                Picker("Size", selection: settingsBinding.subtitleSize) {
                     ForEach(SubtitleSize.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -1023,12 +1032,14 @@ struct SettingsPane: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            Slider(value: settingsBinding.quality, in: 0...100, step: 5) {
+            Slider(value: liveSettingsBinding.quality, in: 0...100, step: 5) {
                 EmptyView()
             } minimumValueLabel: {
                 Text("small").font(.caption2).foregroundStyle(.tertiary)
             } maximumValueLabel: {
                 Text("best").font(.caption2).foregroundStyle(.tertiary)
+            } onEditingChanged: { editing in
+                if !editing { model.endGesture() }
             }
         }
     }

@@ -35,6 +35,8 @@ final class AppModel: ObservableObject {
     @Published var isAnalyzingZooms = false
     @Published var showingZoomSuggestions = false
     @Published var zoomSuggestions: [ZoomSuggestion] = []
+    /// The sections `zoomSuggestions` were timed against.
+    var zoomSuggestionTimeline: ClipTimeline?
     var zoomAnalysisTask: Task<Void, Never>?
     var movieExportTask: Task<Void, Never>?
     @Published var selectedSegmentID: UUID?
@@ -46,10 +48,24 @@ final class AppModel: ObservableObject {
     @Published var hasUnsavedChanges = false
     @Published var undoEntries: [EditHistory] = []
     @Published var redoEntries: [EditHistory] = []
-    var lastEditKey: String?
-    var lastEditTime = Date.distantPast
+    /// Revision, session identity, change feed and any open gesture; see
+    /// `ProjectCommandDispatcher.swift`.
+    var editSession = EditSessionState()
+    /// While true, local agents can read but every agent edit is refused.
+    @Published var agentsPaused = false
+    /// Finished agent requests by request ID, for idempotent retries within a session.
+    var agentRequests: [String: AgentRequestRecord] = [:]
+    /// Request IDs currently being answered, so a duplicate sent meanwhile is not run twice.
+    var agentPendingRequests: Set<String> = []
+    /// Preview, analysis and export work requested by agents, by job ID.
+    var agentJobs: [UUID: AgentJob] = [:]
+    var agentJobTasks: [UUID: Task<Void, Never>] = [:]
+    /// Fingerprint of the named project file as last opened or saved.
+    var savedFingerprint: Data?
     var autosaveTask: Task<Void, Never>?
     var savedProject: VideoProject?
+    /// The open document's persistent identity; see `VideoProject.projectID`.
+    var projectID = UUID()
 
     private var previewTask: Task<Void, Never>?
     private var conversionTask: Task<Void, Never>?
@@ -76,6 +92,7 @@ final class AppModel: ObservableObject {
             if duration > 0 { self.items[index].previewFraction = min(1, seconds / duration) }
         }
         recoverSession()
+        editSession.projectID = projectID
     }
 
     /// Asks ffmpeg what it was built with, so the format picker can say up front that a
@@ -131,12 +148,12 @@ final class AppModel: ObservableObject {
             .filter { Self.acceptedExtensions.contains($0.pathExtension.lowercased()) }
             .filter { url in !items.contains { $0.url.path == url.path } }
         guard !fresh.isEmpty else { return }
-
-        beginEdit("Add Videos", invalidatesExport: false)
-        let newItems = fresh.map { VideoItem(url: $0) }
-        items.append(contentsOf: newItems)
+        // Added at once and probed in the background: each probe's result is a fact about
+        // the file, recorded by `resolveMedia`, not a separate undo step.
+        if case .failure(let error) = perform([.addMedia(fresh.map { ProjectClip(VideoItem(url: $0)) })]) {
+            statusMessage = error.message
+        }
         ensureSelection()
-        for item in newItems { probe(item.id) }
     }
 
     /// Accepts a drop, expanding any folders one level deep.
@@ -162,23 +179,13 @@ final class AppModel: ObservableObject {
     func remove(_ id: VideoItem.ID) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         if items[index].status.isBusy, isConverting { return }
-        beginEdit("Remove Video", invalidatesExport: false)
-        playback.clear()
-        items.remove(at: index)
-        if selection == id {
-            selection = items.indices.contains(index) ? items[index].id : items.last?.id
-            refreshPreview()
-        }
+        perform([.removeMedia(clip: id)])
     }
 
     func clearFinished() {
-        guard items.contains(where: { if case .done = $0.status { return true }; return false }) else { return }
-        beginEdit("Clear Finished", invalidatesExport: false)
-        items.removeAll { if case .done = $0.status { return true } else { return false } }
-        if let selection, !items.contains(where: { $0.id == selection }) {
-            self.selection = items.first?.id
-            refreshPreview()
-        }
+        let finished = items.filter { if case .done = $0.status { return true } else { return false } }.map(\.id)
+        guard !finished.isEmpty else { return }
+        perform(finished.map { .removeMedia(clip: $0) }, label: "Clear Finished")
     }
 
     // MARK: - Probing
@@ -189,11 +196,9 @@ final class AppModel: ObservableObject {
                 let url = items.first { $0.id == id }?.url
                 guard let url else { return }
                 let info = try await FFmpeg.probe(url: url)
-                guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-                items[index].info = info
-                items[index].crop = items[index].crop?.evenClamped(in: info.fullFrame) ?? info.fullFrame
-                items[index].subtitles = Self.siblingSubtitles(for: url)
-                items[index].status = .ready
+                guard items.contains(where: { $0.id == id }) else { return }
+                // A project can carry its own subtitle choice; only a missing one is filled in.
+                resolveMedia(id, info: info, subtitles: Self.siblingSubtitles(for: url))
                 ensureSelection()
                 scheduleAutosave()
                 if selection == id { refreshPreview() }
@@ -226,17 +231,19 @@ final class AppModel: ObservableObject {
         panel.message = "Choose a subtitle file to burn into this clip."
         panel.prompt = "Use"
         panel.directoryURL = selectedItem?.url.deletingLastPathComponent()
-        guard panel.runModal() == .OK, let url = panel.url,
-              let index = items.firstIndex(where: { $0.id == id })
-        else { return }
-        items[index].subtitles = url
-        refreshPreview()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setSubtitles(url, for: id)
     }
 
     func clearSubtitles() {
-        guard let id = selection, let index = items.firstIndex(where: { $0.id == id }) else { return }
-        items[index].subtitles = nil
-        refreshPreview()
+        guard let id = selection else { return }
+        setSubtitles(nil, for: id)
+    }
+
+    /// The subtitle file is part of the project, so choosing or clearing it is an edit:
+    /// it can be undone, marks the project changed and reaches the recovery file.
+    func setSubtitles(_ url: URL?, for id: VideoItem.ID) {
+        if case .failure(let error) = perform([.setSubtitles(clip: id, url: url)]) { statusMessage = error.message }
     }
 
     // MARK: - Preview
@@ -299,32 +306,35 @@ final class AppModel: ObservableObject {
 
     // MARK: - Crop editing
 
-    func updateCrop(_ rect: CGRect) {
+    /// `live` while the crop is being dragged. A drag ends with `live` false; a `.null`
+    /// rect there means "the drag ended where the last update left it".
+    func updateCrop(_ rect: CGRect, live: Bool = false) {
         guard let index = selectedIndex, let info = items[index].info else { return }
-        let clamped = rect.evenClamped(in: info.fullFrame)
-        guard clamped != items[index].crop else { return }
-        beginEdit("Crop", key: "crop")
-        items[index].crop = clamped
+        let id = items[index].id, key = "crop-\(id)"
+        if !live, rect.isNull { endGesture(); return }
+        let command = EditCommand.setCrop(clip: id, rect: rect.evenClamped(in: info.fullFrame))
+        if live || isGestureOpen(key) {
+            updateGesture(key, label: "Crop", [command])
+            if !live { endGesture() }
+            return
+        }
+        perform([command])
     }
 
     func applyAspect(_ preset: AspectPreset) {
         guard let index = selectedIndex, let info = items[index].info else { return }
-        beginEdit("Crop Aspect")
-        items[index].aspectLock = preset.ratio
-        items[index].aspectLabel = preset.label
+        let id = items[index].id
+        var commands: [EditCommand] = [.setAspect(clip: id, preset: preset.label)]
         if let ratio = preset.ratio {
-            items[index].crop = CGRect
-                .centered(aspect: ratio, in: info.fullFrame)
-                .evenClamped(in: info.fullFrame)
+            commands.append(.setCrop(clip: id, rect: CGRect.centered(aspect: ratio, in: info.fullFrame).evenClamped(in: info.fullFrame)))
         }
+        perform(commands, label: "Crop Aspect")
     }
 
     func resetCrop() {
         guard let index = selectedIndex, let info = items[index].info else { return }
-        beginEdit("Reset Crop")
-        items[index].crop = info.fullFrame
-        items[index].aspectLock = nil
-        items[index].aspectLabel = "Free"
+        let id = items[index].id
+        perform([.setCrop(clip: id, rect: info.fullFrame), .setAspect(clip: id, preset: "Free")], label: "Reset Crop")
     }
 
     // MARK: - Blur regions
@@ -337,40 +347,35 @@ final class AppModel: ObservableObject {
     func addRegion(_ rect: CGRect) {
         guard let index = selectedIndex, let info = items[index].info else { return }
         let region = BlurRegion(rect: rect.evenClamped(in: info.fullFrame))
-        beginEdit("Add Blur")
-        items[index].blurRegions.append(region)
-        selectedRegionID = region.id
+        if case .success = perform([.addBlurArea(clip: items[index].id, area: region)]) { selectedRegionID = region.id }
     }
 
-    /// `live` is true while a drag is in progress — the preview is only re-rendered on
-    /// release, since each render is an ffmpeg round trip.
+    /// `live` is true while a drag is in progress. The drag is one gesture, and the
+    /// preview is only re-rendered on release, since each render is an ffmpeg round trip.
     func updateRegion(_ id: BlurRegion.ID, rect: CGRect, live: Bool = false) {
         guard let index = selectedIndex, let info = items[index].info,
-              let regionIndex = items[index].blurRegions.firstIndex(where: { $0.id == id })
-        else { return }
-        let clamped = rect.evenClamped(in: info.fullFrame)
-        if clamped != items[index].blurRegions[regionIndex].rect {
-            beginEdit("Move Blur", key: "blur-\(id)")
-            items[index].blurRegions[regionIndex].rect = clamped
+              items[index].blurRegions.contains(where: { $0.id == id }) else { return }
+        let key = "blur-\(id)"
+        let command = EditCommand.updateBlurArea(clip: items[index].id, area: id, rect: rect.evenClamped(in: info.fullFrame))
+        if live || isGestureOpen(key) {
+            updateGesture(key, label: "Move Blur", [command])
+            if !live { endGesture() }
+            return
         }
-        if !live { refreshPreview() }
+        perform([command])
     }
 
     func removeSelectedRegion() {
         guard let index = selectedIndex, let id = selectedRegionID else { return }
-        beginEdit("Delete Blur")
-        items[index].blurRegions.removeAll { $0.id == id }
-        selectedRegionID = items[index].blurRegions.last?.id
-        refreshPreview()
+        let clip = items[index].id
+        if case .success = perform([.removeBlurArea(clip: clip, area: id)]) {
+            selectedRegionID = selectedItem?.blurRegions.last?.id
+        }
     }
 
     func clearRegions() {
-        guard let index = selectedIndex else { return }
-        guard !items[index].blurRegions.isEmpty else { return }
-        beginEdit("Clear Blurs")
-        items[index].blurRegions.removeAll()
-        selectedRegionID = nil
-        refreshPreview()
+        guard let index = selectedIndex, !items[index].blurRegions.isEmpty else { return }
+        perform([.replaceBlurAreas(clip: items[index].id, areas: [])], label: "Clear Blurs")
     }
 
     /// Adds a region covering the middle of the frame, for people who would rather not drag.
@@ -415,12 +420,15 @@ final class AppModel: ObservableObject {
             return false
         }
 
-        beginEdit("Add Zoom")
-        items[index].zoomShots.append(shot)
-        items[index].zoomShots.sort { $0.start < $1.start }
-        selectedShotID = shot.id
-        statusMessage = "Zoom \(shot.levelLabel) at \(formatDuration(shot.start))."
-        return true
+        switch perform([.addZoom(clip: items[index].id, zoom: shot)]) {
+        case .success:
+            selectedShotID = shot.id
+            statusMessage = "Zoom \(shot.levelLabel) at \(formatDuration(shot.start))."
+            return true
+        case .failure(let error):
+            statusMessage = error.message
+            return false
+        }
     }
 
     /// Adds a zoom aimed at the middle of the framing, for keyboard use or when the
@@ -432,7 +440,8 @@ final class AppModel: ObservableObject {
     }
 
     /// Applies an edit only if it keeps the shot inside the clip and clear of the others.
-    private func mutateShot(_ id: ZoomShot.ID, _ transform: (inout ZoomShot) -> Void) {
+    /// With a `gesture` key the change is shown live and committed when the gesture ends.
+    private func mutateShot(_ id: ZoomShot.ID, gesture: String? = nil, _ transform: (inout ZoomShot) -> Void) {
         guard let index = selectedIndex, let info = items[index].info,
               let shotIndex = items[index].zoomShots.firstIndex(where: { $0.id == id })
         else { return }
@@ -453,14 +462,18 @@ final class AppModel: ObservableObject {
             statusMessage = "That would overlap another zoom."
             return
         }
+        let command = EditCommand.updateZoom(clip: items[index].id, zoom: shot)
+        if let gesture {
+            updateGesture(gesture, label: "Adjust Zoom", [command])
+            return
+        }
         guard shot != items[index].zoomShots[shotIndex] else { return }
-        beginEdit("Adjust Zoom", key: "zoom-\(id)")
-        items[index].zoomShots[shotIndex] = shot
-        items[index].zoomShots.sort { $0.start < $1.start }
+        if case .failure(let error) = perform([command]) { statusMessage = error.message }
     }
 
+    /// Dragging a zoom's target on the canvas. The view ends the gesture on release.
     func moveZoomTarget(_ id: ZoomShot.ID, to point: CGPoint) {
-        mutateShot(id) { $0.target = point }
+        mutateShot(id, gesture: "zoom-target-\(id)") { $0.target = point }
     }
 
     func setZoomLevel(_ id: ZoomShot.ID, _ level: Double) {
@@ -468,9 +481,10 @@ final class AppModel: ObservableObject {
         defaultZoomLevel = level
     }
 
-    func setZoomHold(_ id: ZoomShot.ID, _ hold: Double) {
+    /// `live` while the hold slider is being dragged; the slider ends the gesture.
+    func setZoomHold(_ id: ZoomShot.ID, _ hold: Double, live: Bool = false) {
         let duration = selectedItem?.editedDuration ?? 0
-        mutateShot(id) { shot in
+        mutateShot(id, gesture: live ? "zoom-hold-\(id)" : nil) { shot in
             shot.hold = min(max(0.2, hold), max(0.2, duration - shot.start - 2 * ZoomShot.ease))
         }
     }
@@ -487,17 +501,14 @@ final class AppModel: ObservableObject {
 
     func removeSelectedZoom() {
         guard let index = selectedIndex, let id = selectedShotID else { return }
-        beginEdit("Delete Zoom")
-        items[index].zoomShots.removeAll { $0.id == id }
-        selectedShotID = items[index].zoomShots.last?.id
+        if case .success = perform([.removeZoom(clip: items[index].id, zoom: id)]) {
+            selectedShotID = selectedItem?.zoomShots.last?.id
+        }
     }
 
     func clearZooms() {
-        guard let index = selectedIndex else { return }
-        guard !items[index].zoomShots.isEmpty else { return }
-        beginEdit("Clear Zooms")
-        items[index].zoomShots.removeAll()
-        selectedShotID = nil
+        guard let index = selectedIndex, !items[index].zoomShots.isEmpty else { return }
+        perform([.replaceZooms(clip: items[index].id, zooms: [])], label: "Clear Zooms")
     }
 
     /// Jumps the preview to the middle of a shot's hold, so its framing can be checked.
@@ -516,21 +527,23 @@ final class AppModel: ObservableObject {
     /// same dimensions — the coordinates only mean the same thing at the same frame size.
     func applyCropToAll() {
         guard let source = selectedItem, let crop = source.crop, let info = source.info else { return }
-        beginEdit("Apply to All")
+        var commands: [EditCommand] = []
         var applied = 0
-        for index in items.indices where items[index].id != source.id {
-            guard let other = items[index].info, other.width == info.width, other.height == info.height
-            else { continue }
-            items[index].crop = crop
-            items[index].status = .ready
-            items[index].aspectLock = source.aspectLock
-            items[index].aspectLabel = source.aspectLabel
-            // Fresh ids so each clip owns its own regions.
-            items[index].blurRegions = source.blurRegions.map { BlurRegion(rect: $0.rect) }
-            items[index].zoomShots = source.zoomShots.filter { $0.end <= items[index].editedDuration }.map {
-                ZoomShot(start: $0.start, hold: $0.hold, level: $0.level, target: $0.target)
-            }
+        for item in items where item.id != source.id {
+            guard let other = item.info, other.width == info.width, other.height == info.height else { continue }
+            commands += [
+                .setCrop(clip: item.id, rect: crop),
+                .setAspect(clip: item.id, preset: source.aspectLabel),
+                // Fresh ids so each clip owns its own regions and zooms.
+                .replaceBlurAreas(clip: item.id, areas: source.blurRegions.map { BlurRegion(rect: $0.rect) }),
+                .replaceZooms(clip: item.id, zooms: source.zoomShots.filter { $0.end <= item.editedDuration }.map {
+                    ZoomShot(start: $0.start, hold: $0.hold, level: $0.level, target: $0.target)
+                }),
+            ]
             applied += 1
+        }
+        if !commands.isEmpty, case .failure(let error) = perform(commands, label: "Apply to All") {
+            statusMessage = error.message; return
         }
         let what = source.blurRegions.isEmpty ? "crop" : "crop and blur areas"
         statusMessage = applied == 0
@@ -696,6 +709,8 @@ final class AppModel: ObservableObject {
     func cancelConversion() {
         movieExportTask?.cancel()
         conversionTask?.cancel()
+        // Stop also stops an export a local agent started; the owner stays in charge.
+        for (id, job) in agentJobs where job.kind == "export" { agentJobTasks[id]?.cancel() }
     }
 
     func reveal(_ url: URL) {

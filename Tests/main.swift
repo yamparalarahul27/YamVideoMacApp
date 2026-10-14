@@ -1674,6 +1674,562 @@ try editor.writeProject(roundTripProject, to: namedProject)
 editor.openProject(at: namedProject)
 equal(editor.project.clips, roundTripProject.clips, "opening a saved project restores edit data")
 
+// MARK: - Project identity and the version 3 schema
+
+print("\nProject identity")
+var legacy = roundTripProject
+legacy.version = 2; legacy.projectID = nil
+let legacyData = try JSONEncoder().encode(legacy)
+let migrated = try VideoProject.decodeMigrating(from: legacyData)
+equal(migrated.version, VideoProject.currentVersion, "a version 2 file is upgraded on open")
+check(migrated.projectID != nil, "an upgraded file gains an identity")
+equal(try VideoProject.decodeMigrating(from: legacyData).projectID, migrated.projectID,
+      "the same legacy bytes always get the same identity")
+var otherLegacy = legacy; otherLegacy.settings.quality = 10
+check(try VideoProject.decodeMigrating(from: JSONEncoder().encode(otherLegacy)).projectID != migrated.projectID,
+      "different legacy files get different identities")
+equal(migrated.clips, legacy.clips, "upgrading changes no edit data")
+
+var newerFields = legacy; newerFields.clips[0].subtitles = srt
+check((try? newerFields.validate()) == nil, "an older version carrying subtitles is rejected")
+newerFields = legacy; newerFields.projectID = UUID()
+check((try? newerFields.validate()) == nil, "an older version carrying an identity is rejected")
+var anonymous = roundTripProject; anonymous.projectID = nil
+check((try? anonymous.validate()) == nil, "a version 3 file without an identity is rejected")
+var future = roundTripProject; future.version = VideoProject.currentVersion + 1
+do {
+    try future.validate()
+    check(false, "a newer version is rejected")
+} catch {
+    check(error.localizedDescription.contains("newer version"), "a newer version is rejected with a clear reason",
+          error.localizedDescription)
+}
+
+let identityEditor = AppModel(recoveryURL: nil)
+let legacyFile = scratch.appendingPathComponent("legacy.yamvideo")
+try legacyData.write(to: legacyFile)
+identityEditor.openProject(at: legacyFile)
+equal(identityEditor.projectID, migrated.projectID, "opening a legacy file adopts its derived identity")
+check(!identityEditor.hasUnsavedChanges, "upgrading on open is not an unsaved edit")
+identityEditor.saveProject()
+let resaved = try JSONDecoder().decode(VideoProject.self, from: Data(contentsOf: legacyFile))
+equal(resaved.version, VideoProject.currentVersion, "saving writes the current version")
+equal(resaved.projectID, migrated.projectID, "saving persists the identity")
+identityEditor.openProject(at: legacyFile)
+equal(identityEditor.projectID, migrated.projectID, "the identity survives save and reopen")
+
+// The subtitle file is project data now: undoable, saved, recovered.
+identityEditor.setSubtitles(srt, for: identityEditor.selectedItem!.id)
+equal(identityEditor.project.clips[0].subtitles, srt, "the chosen subtitle file is part of the project")
+check(identityEditor.hasUnsavedChanges, "choosing subtitles marks the project changed")
+identityEditor.undoEdit()
+equal(identityEditor.selectedItem!.subtitles, nil, "undo removes the subtitle choice")
+identityEditor.redoEdit()
+identityEditor.saveProject()
+identityEditor.openProject(at: legacyFile)
+equal(identityEditor.selectedItem!.subtitles, srt, "the subtitle choice survives save and reopen")
+
+// Save As forks the document; saving in place does not.
+let originalID = identityEditor.projectID
+let copyFile = scratch.appendingPathComponent("copy.yamvideo")
+identityEditor.save(to: copyFile, asCopy: true)
+check(identityEditor.projectID != originalID, "Save As gives the copy its own identity")
+equal(identityEditor.projectURL, copyFile, "Save As continues editing the copy")
+check(!identityEditor.hasUnsavedChanges, "the forked copy is saved")
+equal(try JSONDecoder().decode(VideoProject.self, from: Data(contentsOf: legacyFile)).projectID, originalID,
+      "the original file keeps its identity")
+let copyID = identityEditor.projectID
+identityEditor.saveProject()
+equal(identityEditor.projectID, copyID, "saving in place keeps the identity")
+identityEditor.newProject()
+check(identityEditor.projectID != copyID, "a new project has its own identity")
+identityEditor.undoEdit()
+equal(identityEditor.projectID, copyID, "undoing New Project restores the previous identity")
+
+let identityRecovery = scratch.appendingPathComponent("identity-recovery.yamvideo")
+let recoveringIdentity = AppModel(recoveryURL: identityRecovery)
+recoveringIdentity.restore(identityEditor.project)
+recoveringIdentity.flushRecovery()
+let resumedIdentity = AppModel(recoveryURL: identityRecovery)
+equal(resumedIdentity.projectID, identityEditor.projectID, "recovery keeps the project identity")
+equal(resumedIdentity.selectedItem?.subtitles, srt, "recovery keeps the subtitle choice")
+
+let legacyRecovery = scratch.appendingPathComponent("legacy-recovery.yamvideo")
+try JSONEncoder().encode(SessionRecovery(project: legacy, fileURL: legacyFile, savedProject: legacy))
+    .write(to: legacyRecovery)
+let legacyResumed = AppModel(recoveryURL: legacyRecovery)
+check(legacyResumed.savedProject?.projectID == legacyResumed.projectID,
+      "a legacy recovery file upgrades its saved copy to the same identity")
+check(!legacyResumed.hasUnsavedChanges, "an upgraded recovery file is not mistaken for unsaved edits")
+
+// MARK: - Shared edit commands
+
+print("\nShared edit commands")
+func refusal(_ result: Result<EditReceipt, EditError>) -> EditError.Code? {
+    if case .failure(let error) = result { return error.code }
+    return nil
+}
+func receipt(_ result: Result<EditReceipt, EditError>) -> EditReceipt? {
+    if case .success(let value) = result { return value }
+    return nil
+}
+func reducerRefusal(_ commands: [EditCommand], _ project: VideoProject = roundTripProject) -> EditError.Code? {
+    do { _ = try ProjectReducer.apply(commands, to: project); return nil }
+    catch let error as EditError { return error.code }
+    catch { return .invalidCommand }
+}
+@MainActor func freshEditor() -> AppModel {
+    let model = AppModel(recoveryURL: nil)
+    model.restore(roundTripProject)
+    return model
+}
+let commandClip = roundTripProject.clips[0]
+let sectionA = commandClip.timeline.segments[0], sectionB = commandClip.timeline.segments[1]
+let anchoredZoom = commandClip.zoomShots[0]
+
+// The reducer: pure, strict, all or nothing.
+equal(reducerRefusal([
+    .setSectionSpeed(clip: commandClip.id, section: sectionA.id, speed: 2),
+    .setCrop(clip: commandClip.id, rect: CGRect(x: 0, y: 0, width: 640, height: 360)),
+    .setSectionSpeed(clip: commandClip.id, section: sectionB.id, speed: 9),
+]), .invalidCommand, "a batch with one invalid command is refused as a whole")
+equal(reducerRefusal([.trimSection(clip: commandClip.id, section: UUID(), start: 0, end: nil)]), .notFound,
+      "an unknown section is reported as not found")
+equal(reducerRefusal([.trimSection(clip: commandClip.id, section: sectionA.id, start: nil, end: 99)]), .invalidCommand,
+      "a trim past the source is refused, not clamped")
+equal(reducerRefusal([.trimSection(clip: commandClip.id, section: sectionB.id, start: nil, end: 1.6)]), .invalidCommand,
+      "a trim into a neighbouring section's footage is refused")
+let snapped = try ProjectReducer.apply([.trimSection(clip: commandClip.id, section: sectionA.id, start: 1.517, end: nil)],
+                                       to: roundTripProject)
+check(abs(snapped.project.clips[0].segments![0].start - 46.0 / 30) < 0.000001, "trim bounds snap to a source frame")
+let splitOutcome = try ProjectReducer.apply([.splitSection(clip: commandClip.id, at: 0.5)], to: roundTripProject)
+check(splitOutcome.createdIDs.count == 1 && splitOutcome.project.clips[0].segments!.count == 3,
+      "a split reports the new section's ID")
+equal(reducerRefusal([.splitSection(clip: commandClip.id, at: 0)]), .invalidCommand, "splitting on a boundary is refused")
+let cutZoom = try ProjectReducer.apply([.deleteSection(clip: commandClip.id, section: sectionA.id)], to: roundTripProject)
+equal(cutZoom.removedZooms, [anchoredZoom.id], "deleting a zoom's footage reports the zoom it removed")
+var edgeZoom = anchoredZoom; edgeZoom.target = CGPoint(x: 1280, y: 720)
+equal(reducerRefusal([.updateZoom(clip: commandClip.id, zoom: edgeZoom)]), nil, "a zoom may aim at the frame's far edge")
+equal(reducerRefusal([.addZoom(clip: commandClip.id, zoom: ZoomShot(start: 0.3, hold: 0.5, target: .zero))]),
+      .invalidCommand, "an overlapping zoom is refused")
+equal(reducerRefusal([.setMovieOrder([])]), .invalidCommand, "a movie order must list every recording")
+var badSettings = ExportSettings(); badSettings.quality = 150
+equal(reducerRefusal([.setExportSettings(badSettings)]), .invalidCommand, "out-of-range export settings are refused")
+equal(reducerRefusal([.setAspect(clip: commandClip.id, preset: "7:3")]), .invalidCommand, "an unknown aspect is refused")
+
+// Revisions: one per transaction, none for a no-op.
+let revisions = freshEditor()
+let clipID = revisions.items[0].id
+let firstRevision = revisions.revision
+revisions.perform([.setSectionSpeed(clip: clipID, section: sectionA.id, speed: 1.5)])
+equal(revisions.revision, firstRevision + 1, "a transaction advances the revision once")
+let historyDepth = revisions.undoEntries.count
+revisions.perform([.setSectionSpeed(clip: clipID, section: sectionA.id, speed: 1.5)])
+check(revisions.revision == firstRevision + 1 && revisions.undoEntries.count == historyDepth,
+      "a no-op changes neither the revision nor history")
+
+// Two agents planning against the same revision: one wins, one is told to reread.
+let atRevision = revisions.revision
+let wide = CGRect(x: 0, y: 0, width: 640, height: 360)
+let codexCrop = revisions.perform([.setCrop(clip: clipID, rect: wide)], origin: .agent("Codex"), expectedRevision: atRevision)
+let claudeCrop = revisions.perform([.setCrop(clip: clipID, rect: CGRect(x: 100, y: 100, width: 320, height: 180))],
+                                   origin: .agent("Claude"), expectedRevision: atRevision)
+check(receipt(codexCrop) != nil, "the first agent's edit at a revision commits")
+equal(refusal(claudeCrop), .revisionConflict, "the second agent's edit at the same revision conflicts")
+equal(revisions.items[0].crop, wide, "the conflicting edit did not overwrite the first")
+check(receipt(revisions.perform([.setAspect(clip: clipID, preset: "16:9")], origin: .agent("Claude"),
+                                expectedRevision: revisions.revision)) != nil, "after rereading, the second agent succeeds")
+
+// Dry run: the same validation and remap report, nothing committed or reserved.
+let dryEditor = freshEditor()
+let dryBefore = dryEditor.project, dryRevision = dryEditor.revision, dryHistory = dryEditor.undoEntries.count
+let dry = receipt(dryEditor.perform([.deleteSection(clip: clipID, section: sectionA.id)], origin: .agent("Codex"),
+                                    expectedRevision: dryRevision, dryRun: true))
+check(dryEditor.project == dryBefore && dryEditor.revision == dryRevision && dryEditor.undoEntries.count == dryHistory,
+      "a dry run commits nothing")
+let wet = receipt(dryEditor.perform([.deleteSection(clip: clipID, section: sectionA.id)], origin: .agent("Codex"),
+                                    expectedRevision: dryRevision))
+check(dry?.removedZooms == [anchoredZoom.id] && wet?.removedZooms == dry?.removedZooms,
+      "a dry run reports the same zoom losses as the real edit")
+
+// A drag is one gesture: live while held, one transaction when released.
+let dragging = freshEditor()
+let dragStart = dragging.revision, dragHistory = dragging.undoEntries.count
+let heldCrop = CGRect(x: 10, y: 10, width: 900, height: 500)
+dragging.updateCrop(CGRect(x: 0, y: 0, width: 1000, height: 600), live: true)
+dragging.updateCrop(heldCrop, live: true)
+equal(dragging.items[0].crop, heldCrop, "a drag is visible while it lasts")
+equal(dragging.revision, dragStart, "live drag updates commit nothing")
+equal(dragging.committedProject.clips[0].crop, commandClip.crop, "agents see the committed crop during a drag")
+dragging.editSession.gesture?.lastUpdate = Date().addingTimeInterval(-0.9)
+equal(refusal(dragging.perform([.setAspect(clip: clipID, preset: "1:1")], origin: .agent("Claude"),
+                               expectedRevision: dragging.revision)),
+      .interactionInProgress, "an agent edit during a held drag is refused clearly")
+dragging.updateCrop(CGRect(x: 20, y: 20, width: 800, height: 400), live: true)
+dragging.updateCrop(.null, live: false)
+check(dragging.revision == dragStart + 1 && dragging.undoEntries.count == dragHistory + 1,
+      "a drag held past 0.6 s is still one revision and one undo step")
+check(receipt(dragging.perform([.setAspect(clip: clipID, preset: "1:1")], origin: .agent("Claude"),
+                               expectedRevision: dragging.revision)) != nil,
+      "after the drag ends, the agent's edit succeeds on rereading")
+dragging.undoEdit(); dragging.undoEdit()
+equal(dragging.items[0].crop, commandClip.crop, "undo restores the crop from before the whole drag")
+let cancelStart = dragging.revision, cancelHistory = dragging.undoEntries.count
+dragging.updateCrop(heldCrop, live: true)
+dragging.cancelGesture()
+check(dragging.revision == cancelStart && dragging.undoEntries.count == cancelHistory
+          && dragging.items[0].crop == commandClip.crop, "a cancelled drag leaves no history or revision")
+dragging.updateCrop(heldCrop, live: true)
+dragging.editSession.gesture?.lastUpdate = .distantPast
+check(receipt(dragging.perform([.setAspect(clip: clipID, preset: "4:3")], origin: .agent("Claude"),
+                               expectedRevision: dragging.revision)) == nil,
+      "an abandoned drag is committed first, so the agent's old revision no longer matches")
+equal(dragging.items[0].crop, heldCrop, "an abandoned drag is kept rather than lost")
+let gestureHistory = dragging.undoEntries.count
+dragging.setPreviewFraction(0.3)
+dragging.updateCrop(wide, live: true)
+dragging.splitAtPlayhead()
+equal(dragging.undoEntries.count, gestureHistory + 2, "a separate command closes an open drag as its own step")
+let sliderHistory = dragging.undoEntries.count
+var sliding = dragging.settings
+for quality in [40.0, 45, 50] { sliding.quality = quality; dragging.updateSettings(sliding, live: true) }
+dragging.endGesture()
+check(dragging.undoEntries.count == sliderHistory + 1 && dragging.settings.quality == 50,
+      "a slider drag is one undo step with its final value")
+
+// Human and agent edits interleave in one history.
+let mixed = freshEditor()
+mixed.perform([.setCrop(clip: clipID, rect: wide)])
+let afterCrop = mixed.project.clips
+let blur = BlurRegion(rect: CGRect(x: 40, y: 40, width: 100, height: 60))
+let agentBlur = receipt(mixed.perform([.addBlurArea(clip: clipID, area: blur)], origin: .agent("Claude"),
+                                      expectedRevision: mixed.revision))!
+let afterBlur = mixed.project.clips
+mixed.perform([.setAspect(clip: clipID, preset: "1:1")])
+equal(mixed.undoTitle, "Undo Crop Aspect", "the menu names the owner's own step plainly")
+mixed.undoEdit()
+equal(mixed.project.clips, afterBlur, "Cmd-Z restores the exact previous document")
+equal(mixed.undoTitle, "Undo Add Blur (Claude)", "the menu names an agent's step and who made it")
+check(receipt(mixed.undo(origin: .agent("Claude"), expectedTransaction: agentBlur.transactionID,
+                         expectedRevision: mixed.revision)) != nil, "an agent can undo its own step when it is on top")
+equal(mixed.project.clips, afterCrop, "the agent's undo restores the document before its edit")
+mixed.redoEdit()
+equal(mixed.project.clips, afterBlur, "redo restores the agent's edit")
+mixed.perform([.setAspect(clip: clipID, preset: "4:3")])
+check(mixed.redoEntries.isEmpty, "a new edit clears redo")
+equal(refusal(mixed.undo(origin: .agent("Claude"), expectedTransaction: agentBlur.transactionID,
+                         expectedRevision: mixed.revision)),
+      .historyConflict, "an agent cannot undo across somebody else's later edit")
+let ownStep = receipt(mixed.perform([.setAspect(clip: clipID, preset: "1:1")], origin: .agent("Codex"),
+                                    expectedRevision: mixed.revision))!
+mixed.setPreviewFraction(0.7)
+mixed.selectedSegmentID = sectionB.id
+mixed.undo(origin: .agent("Codex"), expectedTransaction: ownStep.transactionID, expectedRevision: mixed.revision)
+check(abs(mixed.items[0].previewFraction - 0.7) < 0.000001 && mixed.selectedSegmentID == sectionB.id,
+      "an agent's undo leaves the owner's playhead and selection alone")
+check(mixed.editSession.events.contains { $0.kind == .undo && $0.origin == .agent("Codex") },
+      "the change feed records an agent's undo and who asked")
+
+mixed.agentsPaused = true
+equal(refusal(mixed.perform([.setAspect(clip: clipID, preset: "Free")], origin: .agent("Codex"),
+                            expectedRevision: mixed.revision)), .agentsPaused, "paused agents cannot edit")
+mixed.agentsPaused = false
+mixed.isConverting = true
+equal(refusal(mixed.perform([.setAspect(clip: clipID, preset: "Free")], origin: .agent("Codex"),
+                            expectedRevision: mixed.revision)), .exportInProgress, "agents cannot edit during an export")
+mixed.isConverting = false
+
+// Sessions: a different document, or the same file opened afresh, is a new session.
+let firstSession = mixed.editSession.sessionID
+mixed.newProject()
+check(mixed.editSession.sessionID != firstSession, "a new project starts a new session")
+let emptySession = mixed.editSession.sessionID
+mixed.undoEdit()
+check(mixed.editSession.sessionID != emptySession, "undoing back to the previous project starts another session")
+mixed.openProject(at: namedProject)
+let openedSession = mixed.editSession.sessionID
+mixed.openProject(at: namedProject)
+check(mixed.editSession.sessionID != openedSession, "reopening the same file is a new session")
+for _ in 0..<1100 { mixed.appendEvent(.edit, origin: .human, label: "filler") }
+equal(mixed.editSession.events.count, EditSessionState.eventLimit, "the change feed keeps a bounded history")
+
+// A probe that finishes after Add is a fact about the file, not an undo step.
+let probing = AppModel(recoveryURL: nil)
+probing.perform([.addMedia([ProjectClip(VideoItem(url: landscape))])])
+let probedID = probing.items[0].id
+let probeHistory = probing.undoEntries.count
+probing.resolveMedia(probedID, info: info, subtitles: nil)
+equal(probing.undoEntries.count, probeHistory, "a finished probe adds no undo step")
+probing.undoEdit(); probing.redoEdit()
+equal(probing.items.first?.info, info, "undo and redo do not forget a probe that finished after Add")
+
+// MARK: - Local agent bridge
+
+print("\nLocal agent bridge")
+let bridgeInstance = UUID()
+@MainActor func agentCall(_ model: AppModel, _ request: [String: Any]) async -> [String: Any] {
+    var body = request
+    body["protocolVersion"] = AgentProtocol.version
+    let data = try! JSONSerialization.data(withJSONObject: body)
+    let reply = await model.handleAgentRequest(data, instanceID: bridgeInstance)
+    return (try? JSONSerialization.jsonObject(with: reply) as? [String: Any]) ?? [:]
+}
+func agentError(_ response: [String: Any]) -> String? { (response["error"] as? [String: Any])?["code"] as? String }
+func agentResult(_ response: [String: Any]) -> [String: Any] { response["result"] as? [String: Any] ?? [:] }
+@MainActor func address(_ model: AppModel) -> [String: Any] {
+    ["sessionID": model.editSession.sessionID.uuidString, "projectID": model.projectID.uuidString,
+     "expectedRevision": model.revision]
+}
+@MainActor func waitForJob(_ model: AppModel, _ id: String) async throws -> [String: Any] {
+    for _ in 0..<600 {
+        let job = agentResult(await agentCall(model, ["method": "job", "job": id]))
+        if job["status"] as? String != "running" { return job }
+        try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    return [:]
+}
+
+let agentEditor = freshEditor()
+let agentClip = agentEditor.items[0].id.uuidString
+let firstState = agentResult(await agentCall(agentEditor, ["method": "state"]))
+let stateClips = firstState["clips"] as? [[String: Any]] ?? []
+let stateSections = stateClips.first?["sections"] as? [[String: Any]] ?? []
+check(stateClips.count == 1 && stateSections.count == 2 && (stateClips.first?["zooms"] as? [Any])?.count == 1,
+      "state lists recordings with their sections and zooms")
+check(abs((stateSections.last?["editedStart"] as? Double ?? 0) - 1.5) < 0.0001, "state gives each section's edited start")
+equal(firstState["revision"] as? Int, agentEditor.revision, "state reports the current revision")
+
+var speedUp = address(agentEditor)
+speedUp["method"] = "apply"; speedUp["requestID"] = "speed-1"; speedUp["client"] = "Codex"; speedUp["label"] = "Speed up the intro"
+speedUp["commands"] = [["type": "setSectionSpeed", "clipID": agentClip, "sectionID": sectionA.id.uuidString, "speed": 1.5]]
+let applied = await agentCall(agentEditor, speedUp)
+check(applied["ok"] as? Bool == true && agentEditor.items[0].timeline.segments[0].speed == 1.5, "an agent's apply edits the open project")
+equal(agentEditor.undoTitle, "Undo Speed up the intro (Codex)", "the agent's label and name reach the Undo menu")
+let stepsBeforeRetry = agentEditor.undoEntries.count, revisionBeforeRetry = agentEditor.revision
+let retried = await agentCall(agentEditor, speedUp)
+check(NSDictionary(dictionary: retried).isEqual(to: applied) && agentEditor.undoEntries.count == stepsBeforeRetry
+          && agentEditor.revision == revisionBeforeRetry,
+      "retrying a request ID returns the original answer without applying twice")
+var reused = speedUp
+reused["commands"] = [["type": "setSectionSpeed", "clipID": agentClip, "sectionID": sectionA.id.uuidString, "speed": 2]]
+equal(agentError(await agentCall(agentEditor, reused)), "request_id_reused", "a request ID reused for different edits is refused")
+var stale = speedUp
+stale["requestID"] = "speed-2"; stale["commands"] = [["type": "setAspect", "clipID": agentClip, "preset": "1:1"]]
+let staleAnswer = await agentCall(agentEditor, stale)
+check(agentError(staleAnswer) == "revision_conflict"
+          && (staleAnswer["error"] as? [String: Any])?["currentRevision"] as? Int == agentEditor.revision,
+      "a stale revision is refused with the current one")
+var noID = address(agentEditor)
+noID["method"] = "apply"; noID["commands"] = [["type": "setAspect", "clipID": agentClip, "preset": "1:1"]]
+equal(agentError(await agentCall(agentEditor, noID)), "invalid_request", "an edit without a request ID is refused")
+var otherSession = address(agentEditor)
+otherSession["sessionID"] = UUID().uuidString; otherSession["method"] = "apply"; otherSession["requestID"] = "x-1"
+otherSession["commands"] = [["type": "setAspect", "clipID": agentClip, "preset": "1:1"]]
+equal(agentError(await agentCall(agentEditor, otherSession)), "wrong_session", "an edit for another session is refused")
+var tooMany = address(agentEditor)
+tooMany["method"] = "apply"; tooMany["requestID"] = "many"
+tooMany["commands"] = Array(repeating: ["type": "setAspect", "clipID": agentClip, "preset": "1:1"], count: 101)
+equal(agentError(await agentCall(agentEditor, tooMany)), "invalid_request", "more than 100 commands is refused")
+var unknownType = address(agentEditor)
+unknownType["method"] = "apply"; unknownType["requestID"] = "unknown"; unknownType["commands"] = [["type": "explode"]]
+equal(agentError(await agentCall(agentEditor, unknownType)), "unsupported_capability", "an unknown command type is named as unsupported")
+var missingField = address(agentEditor)
+missingField["method"] = "apply"; missingField["requestID"] = "missing"; missingField["commands"] = [["type": "setCrop", "clipID": agentClip]]
+let missingAnswer = await agentCall(agentEditor, missingField)
+check(((missingAnswer["error"] as? [String: Any])?["message"] as? String ?? "").contains("rect"),
+      "a command missing a field names the field")
+
+var settingsPatch = address(agentEditor)
+settingsPatch["method"] = "apply"; settingsPatch["requestID"] = "gif"
+settingsPatch["commands"] = [["type": "setExportSettings", "settings": ["format": "gif", "frameRate": 12]]]
+check(await agentCall(agentEditor, settingsPatch)["ok"] as? Bool == true && agentEditor.settings.format == .gif
+          && agentEditor.settings.frameRate == .fps12 && agentEditor.settings.quality == ExportSettings().quality,
+      "a settings patch changes only the settings it names")
+var badPatch = address(agentEditor)
+badPatch["method"] = "apply"; badPatch["requestID"] = "bad-gif"
+badPatch["commands"] = [["type": "setExportSettings", "settings": ["colour": "blue"]]]
+equal(agentError(await agentCall(agentEditor, badPatch)), "invalid_command", "an unknown setting is refused")
+
+var movieSplit = address(agentEditor)
+movieSplit["method"] = "apply"; movieSplit["requestID"] = "movie-split"
+movieSplit["commands"] = [["type": "splitSection", "at": 0.5, "timeSpace": "movie"]]
+let movieSplitAnswer = await agentCall(agentEditor, movieSplit)
+check(movieSplitAnswer["ok"] as? Bool == true && agentEditor.items[0].timeline.segments.count == 3,
+      "movie time is mapped to its recording when asked for explicitly")
+
+let undoStep = (agentResult(await agentCall(agentEditor, ["method": "state"]))["history"] as? [String: Any])?["undo"] as? [String: Any]
+var undoMine = address(agentEditor)
+undoMine["method"] = "undo"; undoMine["requestID"] = "undo-split"; undoMine["transactionID"] = undoStep?["transactionID"] ?? ""
+check(await agentCall(agentEditor, undoMine)["ok"] as? Bool == true && agentEditor.items[0].timeline.segments.count == 2,
+      "an agent undoes the step it names from state")
+var undoAcross = address(agentEditor)
+undoAcross["method"] = "undo"; undoAcross["requestID"] = "undo-old"; undoAcross["transactionID"] = UUID().uuidString
+equal(agentError(await agentCall(agentEditor, undoAcross)), "history_conflict", "undoing a step that is not on top is refused")
+
+let feed = agentResult(await agentCall(agentEditor, ["method": "events", "after": 0]))
+check((feed["events"] as? [[String: Any]] ?? []).contains { $0["origin"] as? String == "Codex" && $0["kind"] as? String == "edit" },
+      "the event feed names the agent behind each edit")
+for _ in 0..<1100 { agentEditor.appendEvent(.edit, origin: .human, label: "filler") }
+equal(agentError(await agentCall(agentEditor, ["method": "events", "after": 1])), "resync_required",
+      "a cursor older than the kept feed must resync")
+
+let frame = agentResult(await agentCall(agentEditor, ["method": "preview", "clip": agentClip, "time": 0.4]))
+check(FileManager.default.fileExists(atPath: frame["path"] as? String ?? "") && frame["revision"] as? Int == agentEditor.revision,
+      "a preview is a PNG file tagged with the revision it shows")
+agentEditor.perform([.setCrop(clip: agentEditor.items[0].id, rect: CGRect(x: 100, y: 60, width: 640, height: 360))])
+let croppedFrame = agentResult(await agentCall(agentEditor, ["method": "preview", "clip": agentClip, "time": 0.4, "cropped": true]))
+check(croppedFrame["width"] as? Int == 640 && croppedFrame["height"] as? Int == 360, "a cropped preview has the crop's size")
+
+var firstSave = address(agentEditor)
+firstSave["method"] = "save"; firstSave["requestID"] = "save-0"
+equal(agentError(await agentCall(agentEditor, firstSave)), "invalid_request", "saving an untitled project needs a path")
+let agentProjectFile = scratch.appendingPathComponent("agent.yamvideo")
+firstSave["requestID"] = "save-1"; firstSave["path"] = agentProjectFile.path
+check(await agentCall(agentEditor, firstSave)["ok"] as? Bool == true && agentEditor.projectURL == agentProjectFile,
+      "an agent can give an untitled project its first file")
+var external = try JSONDecoder().decode(VideoProject.self, from: Data(contentsOf: agentProjectFile))
+external.settings.quality = 5
+try JSONEncoder().encode(external).write(to: agentProjectFile)
+var inPlace = address(agentEditor)
+inPlace["method"] = "save"; inPlace["requestID"] = "save-2"
+equal(agentError(await agentCall(agentEditor, inPlace)), "disk_conflict", "saving over a file changed on disk is refused")
+check(agentEditor.diskConflict(at: agentProjectFile), "the app sees the external change too")
+var saveCopy = address(agentEditor)
+saveCopy["method"] = "save"; saveCopy["requestID"] = "save-3"; saveCopy["path"] = scratch.appendingPathComponent("agent-copy.yamvideo").path
+let copied = agentResult(await agentCall(agentEditor, saveCopy))
+check(copied["copy"] as? Bool == true && copied["projectID"] as? String != agentEditor.projectID.uuidString
+          && agentEditor.projectURL == agentProjectFile, "saving to another path writes a copy with its own identity")
+
+var analysis = address(agentEditor)
+analysis["method"] = "analyze"; analysis["requestID"] = "zooms-1"; analysis["kind"] = "zooms"; analysis["clip"] = agentClip
+let analysisJob = agentResult(await agentCall(agentEditor, analysis))
+let analysed = try await waitForJob(agentEditor, analysisJob["id"] as? String ?? "")
+check(analysed["status"] as? String == "succeeded" && (analysed["result"] as? [String: Any])?["suggestions"] is [Any]
+          && analysed["sourceRevision"] as? Int == agentEditor.revision,
+      "zoom analysis runs as a job and returns suggestions for the revision it read")
+let zoomCount = agentEditor.items[0].zoomShots.count
+equal(agentEditor.items[0].zoomShots.count, zoomCount, "analysis applies nothing by itself")
+
+var mp4Again = address(agentEditor)
+mp4Again["method"] = "apply"; mp4Again["requestID"] = "mp4"
+mp4Again["commands"] = [["type": "setExportSettings", "settings": ["format": "mp4"]]]
+_ = await agentCall(agentEditor, mp4Again)
+var exportWrongType = address(agentEditor)
+exportWrongType["method"] = "export"; exportWrongType["requestID"] = "export-1"; exportWrongType["clip"] = agentClip
+exportWrongType["path"] = scratch.appendingPathComponent("agent.gif").path
+equal(agentError(await agentCall(agentEditor, exportWrongType)), "invalid_command", "an export path must match the format")
+let agentExport = scratch.appendingPathComponent("agent-export.mp4")
+var exporting = address(agentEditor)
+exporting["method"] = "export"; exporting["requestID"] = "export-2"; exporting["clip"] = agentClip; exporting["path"] = agentExport.path
+let exportJob = agentResult(await agentCall(agentEditor, exporting))
+check(agentEditor.isConverting, "an agent's export locks editing like the owner's does")
+var duringExport = address(agentEditor)
+duringExport["method"] = "apply"; duringExport["requestID"] = "during"
+duringExport["commands"] = [["type": "setAspect", "clipID": agentClip, "preset": "1:1"]]
+equal(agentError(await agentCall(agentEditor, duringExport)), "export_in_progress", "edits wait for an export to finish")
+let exported = try await waitForJob(agentEditor, exportJob["id"] as? String ?? "")
+check(exported["status"] as? String == "succeeded" && FileManager.default.fileExists(atPath: agentExport.path) && !agentEditor.isConverting,
+      "the export job publishes its file and unlocks editing")
+let agentSourceCopy = scratch.appendingPathComponent("agent-source.mp4")
+try? FileManager.default.removeItem(at: agentSourceCopy)
+try FileManager.default.copyItem(at: landscape, to: agentSourceCopy)
+var agentSourceClip = ProjectClip(VideoItem(url: agentSourceCopy))
+agentSourceClip.info = info; agentSourceClip.crop = info.fullFrame
+agentEditor.perform([.addMedia([agentSourceClip])])
+var replaceSource = address(agentEditor)
+replaceSource["method"] = "export"; replaceSource["requestID"] = "export-3"; replaceSource["clip"] = agentClip
+replaceSource["path"] = agentSourceCopy.path; replaceSource["overwrite"] = true
+let sourceRefusal = await agentCall(agentEditor, replaceSource)
+check(agentError(sourceRefusal) == "invalid_command"
+          && ((sourceRefusal["error"] as? [String: Any])?["message"] as? String ?? "").contains("source recording"),
+      "an export can never replace a source recording, even with overwrite")
+
+let revealed = agentResult(await agentCall(agentEditor, ["method": "reveal", "clip": agentClip, "section": sectionB.id.uuidString]))
+check(agentEditor.selectedSegmentID == sectionB.id && revealed["section"] as? String == sectionB.id.uuidString,
+      "reveal navigates only when an agent asks it to")
+
+// The real transport: a socket, a discovery record and separate yamvideoctl processes.
+let bridgeDir = scratch.appendingPathComponent("bridge", isDirectory: true)
+let sharedEditor = freshEditor()
+let server = LocalAgentServer(instanceID: bridgeInstance) { line in await sharedEditor.handleAgentRequest(line, instanceID: bridgeInstance) }
+try server.start(discoveryDirectory: bridgeDir)
+let socketPath = server.socketPath ?? ""
+check(socketPath.utf8.count <= LocalSocket.maxPathLength, "the socket path fits the platform limit")
+var socketStat = stat()
+check(lstat(socketPath, &socketStat) == 0 && socketStat.st_mode & 0o777 == 0o600, "the socket is private to this user")
+let recordAttributes = try FileManager.default.attributesOfItem(atPath: server.recordURL!.path)
+equal((recordAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o600, "the discovery record is private to this user")
+
+let ctl = ProcessInfo.processInfo.environment["YAMVIDEO_CTL"] ?? "build/yamvideoctl"
+func ctlJSON(_ result: ShellResult) -> [String: Any] {
+    (try? JSONSerialization.jsonObject(with: result.stdout) as? [String: Any]) ?? [:]
+}
+let cliState = try await Shell.run(ctl, ["--bridge-dir", bridgeDir.path, "state"])
+equal(cliState.status, 0, "yamvideoctl reads state over the socket")
+let cliStateResult = agentResult(ctlJSON(cliState))
+let cliSession = cliStateResult["sessionID"] as? String ?? "", cliProject = cliStateResult["projectID"] as? String ?? ""
+let cliRevision = cliStateResult["revision"] as? Int ?? -1
+let editsA = scratch.appendingPathComponent("codex-edits.json"), editsB = scratch.appendingPathComponent("claude-edits.json")
+try JSONSerialization.data(withJSONObject: [["type": "addBlurArea", "clipID": agentClip,
+    "rect": ["x": 40, "y": 40, "width": 200, "height": 120]]]).write(to: editsA)
+try JSONSerialization.data(withJSONObject: [["type": "setAspect", "clipID": agentClip, "preset": "16:9"]]).write(to: editsB)
+func applyArguments(_ file: URL, _ client: String, _ revision: Int) -> [String] {
+    ["--bridge-dir", bridgeDir.path, "apply", "--file", file.path, "--session", cliSession, "--project", cliProject,
+     "--revision", String(revision), "--client", client]
+}
+async let codexRun = Shell.run(ctl, applyArguments(editsA, "Codex", cliRevision))
+async let claudeRun = Shell.run(ctl, applyArguments(editsB, "Claude", cliRevision))
+let (codexResult, claudeResult) = try await (codexRun, claudeRun)
+let statuses = [codexResult.status, claudeResult.status].sorted()
+check(statuses == [0, 1], "two clients editing at the same revision: one commits, one is refused",
+      "\(codexResult.stdoutText) \(claudeResult.stdoutText)")
+let loser = codexResult.status == 1 ? ("Codex", editsA) : ("Claude", editsB)
+equal(agentError(ctlJSON(codexResult.status == 1 ? codexResult : claudeResult)), "revision_conflict",
+      "the refused client is told its revision is stale")
+sharedEditor.splitAtPlayhead()
+sharedEditor.setPreviewFraction(0.3)
+sharedEditor.splitAtPlayhead()
+let reread = agentResult(ctlJSON(try await Shell.run(ctl, ["--bridge-dir", bridgeDir.path, "state"])))
+let retry = try await Shell.run(ctl, applyArguments(loser.1, loser.0, reread["revision"] as? Int ?? -1))
+equal(retry.status, 0, "after rereading, the refused client's edit commits")
+let finalClip = sharedEditor.items[0]
+check(finalClip.blurRegions.count == 1 && finalClip.aspectLabel == "16:9" && finalClip.timeline.segments.count > 2,
+      "the owner and both clients' edits all survive: no lost updates")
+let origins = Set(sharedEditor.undoEntries.map(\.origin))
+check(origins.contains(.agent("Codex")) && origins.contains(.agent("Claude")) && origins.contains(.human),
+      "one shared history credits the owner, Codex and Claude")
+let noArgs = try await Shell.run(ctl, ["--bridge-dir", bridgeDir.path, "apply", "--file", editsA.path])
+check(noArgs.status == 2 && cliState.stdoutText.isEmpty == false, "an edit without session, project and revision is a usage error")
+
+// Endpoint checks: no symlinks, no oversize requests, no stale records.
+let symlink = scratch.appendingPathComponent("bridge-link")
+try? FileManager.default.removeItem(at: symlink)
+try FileManager.default.createSymbolicLink(atPath: symlink.path, withDestinationPath: socketPath)
+do { try LocalSocket.verifyEndpoint(symlink.path); check(false, "a symlinked socket is refused") }
+catch let error as AgentTransportError { equal(error.code, "untrusted_endpoint", "a symlinked socket is refused") }
+let oversize = try await Task.detached {
+    try LocalSocket.request(Data(repeating: 0x20, count: AgentProtocol.maxRequestBytes + 10), socketPath: socketPath, timeout: 10)
+}.value
+check(String(data: oversize, encoding: .utf8)?.contains("request_too_large") == true, "an oversize request gets a bounded error")
+let staleRecord = bridgeDir.appendingPathComponent("\(UUID().uuidString).json")
+try AgentProtocol.encoder.encode(AgentDiscoveryRecord(protocolVersion: 1, instanceID: UUID(), processID: 999_999,
+                                                        socketPath: "/tmp/not-a-socket", startedAt: Date())).write(to: staleRecord)
+LocalAgentServer.removeStaleRecords(in: bridgeDir)
+check(!FileManager.default.fileExists(atPath: staleRecord.path), "a record left by a dead instance is removed")
+check(FileManager.default.fileExists(atPath: server.recordURL!.path), "a live instance's record is kept")
+let repository = ProcessInfo.processInfo.environment["YAMVIDEO_ROOT"] ?? FileManager.default.currentDirectoryPath
+let demo = try await Shell.run("/usr/bin/env", ["YAMVIDEO_AGENT_BRIDGE_DIR=\(bridgeDir.path)", "YAMVIDEO_CTL=\(ctl)",
+                                                 "/bin/bash", "\(repository)/Tools/YamVideoCLI/demo.sh"])
+check(demo.status == 0 && demo.stdoutText.contains("Both edits are in the open project"),
+      "the two-client demo script runs end to end", demo.stdoutText)
+let recordPath = server.recordURL!.path
+server.stop()
+check(!FileManager.default.fileExists(atPath: socketPath) && !FileManager.default.fileExists(atPath: recordPath),
+      "stopping removes the socket and the record")
+let notRunning = try await Shell.run(ctl, ["--bridge-dir", bridgeDir.path, "state"])
+check(notRunning.status == 2 && agentError(ctlJSON(notRunning)) == "app_not_running",
+      "with YamVideo closed, yamvideoctl says so instead of guessing")
+
 // MARK: - Actual reordered video/audio exports and native playback
 
 print("\nEdited video and playback")
@@ -1947,10 +2503,16 @@ check(!detected.isEmpty, "local FFmpeg analysis produces a reviewable zoom sugge
 let suggestionEditor = AppModel(recoveryURL: nil)
 suggestionEditor.restore(VideoProject(clips: [ProjectClip(activityClip)], settings: ExportSettings(), selection: activityClip.id))
 suggestionEditor.zoomSuggestions = detected
+suggestionEditor.zoomSuggestionTimeline = suggestionEditor.items[0].timeline
 suggestionEditor.applyZoomSuggestions()
 equal(suggestionEditor.items[0].zoomShots.count, detected.count, "selected suggestions become ordinary editable zooms")
 suggestionEditor.undoEdit()
 check(suggestionEditor.items[0].zoomShots.isEmpty, "one undo removes the applied suggestions")
+suggestionEditor.setPreviewFraction(0.5)
+suggestionEditor.splitAtPlayhead()
+suggestionEditor.zoomSuggestions = detected
+suggestionEditor.applyZoomSuggestions()
+check(suggestionEditor.items[0].zoomShots.isEmpty, "suggestions made before a recut are refused, not misplaced")
 activityClip.zoomShots = detected.map(\.shot)
 var mixedSettings = ExportSettings(); mixedSettings.audio = .none
 let mixedPlan = try MoviePlan(items: [nativeClip, activityClip], movieSettings: MovieSettings(), settings: mixedSettings)
@@ -1988,7 +2550,8 @@ equal(try JSONDecoder().decode(TimelineSegment.self, from: legacySection).speed,
 let speedEditor = AppModel(recoveryURL: nil)
 speedEditor.restore(VideoProject(clips: [ProjectClip(nativeClip)], settings: ExportSettings(), selection: nativeClip.id))
 speedEditor.setSegmentSpeed(speedEditor.items[0].timeline.segments[0].id, speed: 2)
-equal(speedEditor.project.version, 2, "projects with speed edits use version 2")
+equal(speedEditor.project.version, VideoProject.currentVersion,
+      "projects with speed edits are written at the current version, never downgraded")
 let speedSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(speedEditor.project))
 try speedSaved.validate()
 equal(speedSaved.clips[0].segments![0].speed, 2, "project round trip retains section speed")

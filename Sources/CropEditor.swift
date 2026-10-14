@@ -254,7 +254,9 @@ struct CropOverlay: View {
     let bounds: CGRect
     let ratio: CGFloat?
     let displaySize: CGSize
-    let onChange: (CGRect) -> Void
+    /// (rect, live). The final call has `live` false; its rect may be `.null`, meaning
+    /// the drag ended where the last live update left it.
+    let onChange: (CGRect, Bool) -> Void
 
     private var scale: CGFloat { displaySize.width / max(bounds.width, 1) }
 
@@ -266,14 +268,14 @@ struct CropOverlay: View {
             Color.clear
                 .contentShape(Rectangle())
                 .modifier(DrawRectGesture(bounds: bounds, scale: scale, ratio: ratio) { rect, dragging in
-                    if dragging { onChange(rect) }
+                    onChange(dragging ? rect : .null, dragging)
                 })
 
             RectManipulator(
                 rect: crop, bounds: bounds, ratio: ratio, scale: scale,
                 tint: .white, showsGrid: true
             ) { rect, dragging in
-                if dragging { onChange(rect) }
+                onChange(dragging ? rect : .null, dragging)
             }
         }
         .frame(width: displaySize.width, height: displaySize.height)
@@ -373,6 +375,7 @@ struct ZoomOverlay: View {
     let displaySize: CGSize
     let onSelect: (ZoomShot.ID) -> Void
     let onMove: (ZoomShot.ID, CGPoint) -> Void
+    let onMoveEnded: () -> Void
     let onAdd: (CGPoint) -> Void
 
     private var scale: CGFloat { displaySize.width / max(bounds.width, 1) }
@@ -419,6 +422,7 @@ struct ZoomOverlay: View {
                                 onMove(shot.id, CGPoint(x: value.location.x / scale,
                                                         y: value.location.y / scale))
                             }
+                            .onEnded { _ in onMoveEnded() }
                     )
                     .onTapGesture { onSelect(shot.id) }
             }
@@ -469,12 +473,13 @@ struct CropCanvas: View {
     let selectedRegionID: BlurRegion.ID?
     let shots: [ZoomShot]
     let selectedShotID: ZoomShot.ID?
-    let onChange: (CGRect) -> Void
+    let onChange: (CGRect, Bool) -> Void
     let onSelectRegion: (BlurRegion.ID) -> Void
     let onChangeRegion: (BlurRegion.ID, CGRect, Bool) -> Void
     let onAddRegion: (CGRect) -> Void
     let onSelectShot: (ZoomShot.ID) -> Void
     let onMoveShot: (ZoomShot.ID, CGPoint) -> Void
+    let onMoveShotEnded: () -> Void
     let onAddShot: (CGPoint) -> Void
 
     var body: some View {
@@ -532,6 +537,7 @@ struct CropCanvas: View {
                             displaySize: fitted,
                             onSelect: onSelectShot,
                             onMove: onMoveShot,
+                            onMoveEnded: onMoveShotEnded,
                             onAdd: onAddShot
                         )
                     }

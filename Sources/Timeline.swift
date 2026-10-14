@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct TimelineSegment: Identifiable, Equatable, Codable {
@@ -105,12 +106,14 @@ struct ProjectClip: Codable, Equatable {
     var zoomShots: [ZoomShot]
     var segments: [TimelineSegment]?
     var includedInMovie: Bool?
+    /// Version 3 onwards. Earlier files never stored the burned-in subtitle choice.
+    var subtitles: URL?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
         aspectLock = item.aspectLock; aspectLabel = item.aspectLabel
         blurRegions = item.blurRegions; zoomShots = item.zoomShots; segments = item.segments
-        includedInMovie = item.includedInMovie
+        includedInMovie = item.includedInMovie; subtitles = item.subtitles
     }
 
     func item() -> VideoItem {
@@ -118,7 +121,7 @@ struct ProjectClip: Codable, Equatable {
         item.id = id; item.info = info; item.crop = crop
         item.aspectLock = aspectLock; item.aspectLabel = aspectLabel
         item.blurRegions = blurRegions; item.zoomShots = zoomShots; item.segments = segments
-        item.includedInMovie = includedInMovie ?? true
+        item.includedInMovie = includedInMovie ?? true; item.subtitles = subtitles
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -126,17 +129,61 @@ struct ProjectClip: Codable, Equatable {
 }
 
 struct VideoProject: Codable, Equatable {
-    var version = 1
+    /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
+    /// and the per-recording subtitle file. Every edited project is written as the
+    /// current version; older builds reject it rather than silently dropping edits.
+    static let currentVersion = 3
+    static let supportedVersions = 1...currentVersion
+
+    var version = VideoProject.currentVersion
+    /// Persistent identity, so a local agent can never address the wrong document.
+    /// Nil only in files older than version 3, until `migrated` assigns one; decoding
+    /// never invents it, so validation can tell a legacy file from a damaged one.
+    var projectID: UUID? = UUID()
     var clips: [ProjectClip]
     var settings: ExportSettings
     var selection: UUID?
     var movieSettings: MovieSettings?
 
+    /// Reads, validates and upgrades a project file in one step. A pre-identity file gets
+    /// an identity derived from its own bytes, so opening the same unsaved legacy file
+    /// twice yields the same project rather than a new one each time; saving persists it.
+    static func decodeMigrating(from data: Data) throws -> VideoProject {
+        let decoded = try JSONDecoder().decode(VideoProject.self, from: data)
+        try decoded.validate()
+        return decoded.migrated(identity: UUID(deterministicFrom: data))
+    }
+
+    /// The same project at the current version. Only fields older versions lacked are
+    /// filled in; nothing the file did say is changed.
+    func migrated(identity: @autoclosure () -> UUID = UUID()) -> VideoProject {
+        var upgraded = self
+        if upgraded.projectID == nil { upgraded.projectID = identity() }
+        upgraded.version = Self.currentVersion
+        return upgraded
+    }
+
     func validate() throws {
         func reject(_ message: String) throws { throw FFmpegError(message: message) }
-        guard version == 1 || version == 2 else { try reject("This project version is not supported."); return }
+        guard Self.supportedVersions.contains(version) else {
+            try reject(version > Self.currentVersion
+                ? "This project was saved by a newer version of YamVideo."
+                : "This project version is not supported."); return
+        }
+        if version < 3 {
+            // An older schema cannot carry newer fields; a file claiming otherwise is not
+            // something any build wrote, and reading it either way could lose edits.
+            guard projectID == nil, clips.allSatisfy({ $0.subtitles == nil }) else {
+                try reject("The project claims an older format but contains newer data."); return
+            }
+        } else {
+            guard projectID != nil else { try reject("The project is missing its identity."); return }
+        }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
+        }
+        guard clips.allSatisfy({ $0.subtitles?.isFileURL ?? true }) else {
+            try reject("Subtitle files must be local."); return
         }
         guard settings.quality.isFinite, (0...100).contains(settings.quality),
               settings.blurStrength.isFinite, (1...100).contains(settings.blurStrength),
@@ -195,6 +242,18 @@ struct VideoProject: Codable, Equatable {
                 }
             }
         }
+    }
+}
+
+extension UUID {
+    /// The same bytes always give the same identity: a name-based UUID (RFC 9562 version
+    /// 8) built from SHA-256, used to give a legacy project file one stable identity.
+    init(deterministicFrom data: Data) {
+        var b = Array(SHA256.hash(data: data).prefix(16))
+        b[6] = (b[6] & 0x0F) | 0x80
+        b[8] = (b[8] & 0x3F) | 0x80
+        self.init(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                         b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
     }
 }
 
