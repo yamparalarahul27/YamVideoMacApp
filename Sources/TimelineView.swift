@@ -78,9 +78,11 @@ struct TimelineView: View {
             .frame(height: contentHeight + 12)
             // Section speed, trims and order are in the inspector, which follows the selection.
             HStack(spacing: 10) {
-                Text(model.selectedSegment == nil
-                     ? "Click a section to edit it in the inspector. Drag its edges to trim, or drag it to reorder."
-                     : "Drag a section's edges to trim it, or drag it to reorder.")
+                Text(model.sectionSelection.isEmpty
+                     ? "Click a section to edit it in the inspector; ⇧- or ⌘-click to select several. Drag its edges to trim, or drag it to reorder."
+                     : model.sectionSelection.count > 1
+                     ? "⇧-click selects a range, ⌘-click adds or removes a section, ⌘A selects them all."
+                     : "Drag a section's edges to trim it, or drag it to reorder. ⇧- or ⌘-click to select several.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 0)
                 if item.info?.hasAudio == true {
@@ -262,7 +264,7 @@ struct TimelineView: View {
                     id: \.segment.id) { placed in
                 let span = placed.offset...(placed.offset + placed.segment.duration)
                 SegmentBlock(segment: placed.segment, offset: placed.offset, number: placed.index + 1, name: item.name,
-                             selected: model.selectedSegmentID == placed.segment.id,
+                             selected: model.sectionSelection.contains(placed.segment.id),
                              highlighted: model.agentHighlight?.elements.contains(placed.segment.id) == true,
                              pixels: pixels,
                              // A trim keeps the frame under the edge, so only what lies over
@@ -270,9 +272,9 @@ struct TimelineView: View {
                              snapEdge: { time in snap(time, pixels: pixels, within: span) },
                              endSnap: endSnap,
                              onSelect: { fraction in
-                                 model.selectedSegmentID = placed.segment.id
-                                 playback.pause()
-                                 model.setPreviewFraction((placed.offset + placed.segment.duration * fraction) / total)
+                                 let modifiers = NSEvent.modifierFlags
+                                 model.clickSegment(placed.segment.id, at: placed.offset + placed.segment.duration * fraction,
+                                                    extend: modifiers.contains(.shift), toggle: modifiers.contains(.command))
                              }, onTrim: { start, end in model.trimSegment(placed.segment.id, start: start, end: end) },
                              onMove: { delta in
                                  let time = placed.offset + placed.segment.duration / 2 + delta / pixels

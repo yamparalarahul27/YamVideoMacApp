@@ -519,3 +519,76 @@ struct TimelineSnapping {
         }
     }
 }
+
+// MARK: - Section selection
+
+/// The selected sections of one recording.
+///
+/// A set has no order, so anything that needs one, such as a range or a list of
+/// commands, takes it from the timeline instead. The anchor is the section clicked
+/// last: ⇧-click extends from it, and controls that work on one section act on it.
+struct SectionSelection: Equatable {
+    private(set) var ids: Set<UUID> = []
+    /// One of `ids`, or nil exactly when `ids` is empty.
+    private(set) var anchor: UUID?
+
+    init() {}
+
+    init(_ ids: Set<UUID>, anchor: UUID?) {
+        self.ids = ids
+        self.anchor = anchor.flatMap { ids.contains($0) ? $0 : nil } ?? ids.min { $0.uuidString < $1.uuidString }
+    }
+
+    static func single(_ id: UUID?) -> SectionSelection {
+        SectionSelection(id.map { [$0] } ?? [], anchor: id)
+    }
+
+    var isEmpty: Bool { ids.isEmpty }
+    var count: Int { ids.count }
+    func contains(_ id: UUID) -> Bool { ids.contains(id) }
+
+    /// The selected sections in the order they play.
+    func ordered(in timeline: ClipTimeline) -> [TimelineSegment] {
+        timeline.segments.filter { ids.contains($0.id) }
+    }
+
+    /// A click: plain selects one section, ⇧ selects every section from the anchor to
+    /// this one in timeline order, ⌘ adds or removes one.
+    func clicking(_ id: UUID, extend: Bool, toggle: Bool, in timeline: ClipTimeline) -> SectionSelection {
+        if toggle {
+            guard ids.contains(id) else { return SectionSelection(ids.union([id]), anchor: id) }
+            let remaining = ids.subtracting([id])
+            // Losing the anchor hands it to the nearest section still selected, so the
+            // next ⇧-click extends from somewhere you can see.
+            let anchor = anchor == id ? nearest(to: id, among: remaining, in: timeline) : anchor
+            return SectionSelection(remaining, anchor: anchor)
+        }
+        guard extend, let anchor,
+              let from = timeline.segments.firstIndex(where: { $0.id == anchor }),
+              let to = timeline.segments.firstIndex(where: { $0.id == id }) else { return .single(id) }
+        let range = timeline.segments[min(from, to)...max(from, to)].map(\.id)
+        return SectionSelection(Set(range), anchor: anchor)
+    }
+
+    /// Every section, keeping the anchor where there is one.
+    static func all(in timeline: ClipTimeline, anchor: UUID?) -> SectionSelection {
+        SectionSelection(Set(timeline.segments.map(\.id)), anchor: anchor ?? timeline.segments.first?.id)
+    }
+
+    /// Only the sections `timeline` still has; an edit may have removed some.
+    func keeping(_ timeline: ClipTimeline?) -> SectionSelection {
+        let present = Set(timeline?.segments.map(\.id) ?? [])
+        guard !ids.isSubset(of: present) else { return self }
+        let remaining = ids.intersection(present)
+        return SectionSelection(remaining, anchor: anchor.flatMap { present.contains($0) ? $0 : nil }
+                                ?? timeline?.segments.first { remaining.contains($0.id) }?.id)
+    }
+
+    private func nearest(to id: UUID, among candidates: Set<UUID>, in timeline: ClipTimeline) -> UUID? {
+        guard let index = timeline.segments.firstIndex(where: { $0.id == id }) else { return candidates.first }
+        return timeline.segments.indices
+            .filter { candidates.contains(timeline.segments[$0].id) }
+            .min { abs($0 - index) < abs($1 - index) }
+            .map { timeline.segments[$0].id }
+    }
+}

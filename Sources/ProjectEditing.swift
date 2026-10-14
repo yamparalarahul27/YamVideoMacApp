@@ -19,7 +19,7 @@ struct EditHistory {
     var project: VideoProject
     let fileURL: URL?
     let savedProject: VideoProject?
-    let segmentID: UUID?
+    let sections: SectionSelection
     let shotID: UUID?
     let regionID: UUID?
     let movieMode: Bool
@@ -51,26 +51,26 @@ extension AppModel {
 
     func historyEntry(_ name: String, transaction: UUID = UUID(), origin: EditOrigin = .human) -> EditHistory {
         EditHistory(name: name, transactionID: transaction, origin: origin, project: project,
-                    fileURL: projectURL, savedProject: savedProject, segmentID: selectedSegmentID,
+                    fileURL: projectURL, savedProject: savedProject, sections: sectionSelection,
                     shotID: selectedShotID, regionID: selectedRegionID, movieMode: isMovieMode)
     }
 
     /// Restores a history step. With `navigation` off — an agent's undo — the document
     /// comes back but the person's selection, workspace and playhead stay where they are.
     func restoreHistory(_ entry: EditHistory, navigation: Bool = true) {
-        let kept = (selection, isMovieMode, selectedSegmentID, selectedShotID, selectedRegionID,
+        let kept = (selection, isMovieMode, sectionSelection, selectedShotID, selectedRegionID,
                     Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.previewFraction) }))
         restore(entry.project)
         projectURL = entry.fileURL; savedProject = entry.savedProject
         if navigation {
-            selectedSegmentID = entry.segmentID
+            sectionSelection = entry.sections
             selectedShotID = entry.shotID; selectedRegionID = entry.regionID
             isMovieMode = entry.movieMode
         } else {
             if let id = kept.0, items.contains(where: { $0.id == id }) { selection = id }
             isMovieMode = kept.1
             for index in items.indices { if let fraction = kept.5[items[index].id] { items[index].previewFraction = fraction } }
-            if let id = kept.2, selectedItem?.timeline.segments.contains(where: { $0.id == id }) == true { selectedSegmentID = id }
+            sectionSelection = kept.2.keeping(selectedItem?.timeline)
             if let id = kept.3, selectedItem?.zoomShots.contains(where: { $0.id == id }) == true { selectedShotID = id }
             if let id = kept.4, selectedItem?.blurRegions.contains(where: { $0.id == id }) == true { selectedRegionID = id }
             refreshPreview()
@@ -329,11 +329,17 @@ extension AppModel {
     @discardableResult
     private func editSections(_ command: EditCommand, name: String? = nil, failure: String? = nil,
                               select: (EditReceipt) -> UUID?) -> Bool {
-        let name = name ?? command.defaultLabel
-        switch perform([command], label: name) {
+        editSections([command], name: name ?? command.defaultLabel, failure: failure) { .single(select($0)) }
+    }
+
+    /// Several section edits as one step: one undo restores them all.
+    @discardableResult
+    private func editSections(_ commands: [EditCommand], name: String, failure: String? = nil,
+                              select: (EditReceipt) -> SectionSelection) -> Bool {
+        switch perform(commands, label: name) {
         case .success(let receipt):
             guard receipt.changed else { return false }
-            selectedSegmentID = select(receipt)
+            sectionSelection = select(receipt)
             let removed = receipt.removedZooms.count
             statusMessage = removed > 0
                 ? "\(name). Removed \(removed) zoom(s) whose footage or space was removed; Undo restores them." : name
@@ -356,15 +362,23 @@ extension AppModel {
                      failure: "Move the playhead inside a section to split it.") { $0.createdIDs.first }
     }
 
+    /// Deletes every selected section as one step, then selects the section that took
+    /// the first one's place.
     func deleteSegment() {
-        guard let item = selectedItem, let id = selectedSegmentID,
-              let index = item.timeline.segments.firstIndex(where: { $0.id == id }) else { return }
-        guard item.timeline.segments.count > 1 else {
-            statusMessage = "Keep at least one section. Remove the video from the sidebar to discard it."; return
+        guard let item = selectedItem else { return }
+        let doomed = sectionSelection.ordered(in: item.timeline)
+        guard let first = doomed.first, let index = item.timeline.segments.firstIndex(where: { $0.id == first.id }) else { return }
+        guard doomed.count < item.timeline.segments.count else {
+            statusMessage = item.timeline.segments.count == 1
+                ? "Keep at least one section. Remove the video from the sidebar to discard it."
+                : "Keep at least one section. Leave one unselected, or remove the video from the sidebar to discard it."
+            return
         }
-        editSections(.deleteSection(clip: item.id, section: id)) { _ in
-            guard let segments = self.selectedItem?.timeline.segments, !segments.isEmpty else { return nil }
-            return segments[min(index, segments.count - 1)].id
+        let name = doomed.count == 1 ? EditCommand.deleteSection(clip: item.id, section: first.id).defaultLabel
+            : "Delete \(doomed.count) Sections"
+        editSections(doomed.map { .deleteSection(clip: item.id, section: $0.id) }, name: name) { _ in
+            guard let segments = self.selectedItem?.timeline.segments, !segments.isEmpty else { return SectionSelection() }
+            return .single(segments[min(index, segments.count - 1)].id)
         }
     }
 
@@ -402,6 +416,66 @@ extension AppModel {
     func setSegmentSpeed(_ id: UUID, speed: Double) {
         guard let item = selectedItem else { return }
         editSections(.setSectionSpeed(clip: item.id, section: id, speed: speed)) { _ in id }
+    }
+
+    /// One speed for every selected section, as one step. If any section is too short
+    /// for it, none change.
+    func setSelectedSectionsSpeed(_ speed: Double) {
+        guard let item = selectedItem else { return }
+        let sections = sectionSelection.ordered(in: item.timeline).filter { $0.speed != speed }
+        guard !sections.isEmpty else { return }
+        let kept = sectionSelection
+        editSections(sections.map { .setSectionSpeed(clip: item.id, section: $0.id, speed: speed) },
+                     name: sectionSelection.count == 1 ? "Change Section Speed" : "Change Speed of \(sectionSelection.count) Sections") { _ in kept }
+    }
+
+    // MARK: Selecting sections
+
+    /// A click on a section. ⇧ and ⌘ change the selection without moving the playhead,
+    /// so you can gather sections while keeping your place.
+    func clickSegment(_ id: UUID, at time: Double, extend: Bool = false, toggle: Bool = false) {
+        guard let item = selectedItem else { return }
+        guard extend || toggle else {
+            selectedSegmentID = id
+            playback.pause()
+            setPreviewFraction(time / max(0.001, item.editedDuration))
+            return
+        }
+        sectionSelection = sectionSelection.clicking(id, extend: extend, toggle: toggle, in: item.timeline)
+    }
+
+    /// ⌘A on the timeline.
+    func selectAllSegments() {
+        guard let item = selectedItem, !item.timeline.segments.isEmpty else { return }
+        sectionSelection = .all(in: item.timeline, anchor: sectionSelection.anchor)
+    }
+
+    /// ⌘← / ⌘→: the section before or after the anchor, or the one under the playhead
+    /// when nothing is selected. Stops at either end rather than wrapping.
+    func selectAdjacentSegment(_ step: Int) {
+        guard let item = selectedItem, !item.timeline.segments.isEmpty else { return }
+        let segments = item.timeline.segments
+        let target: Int
+        if let anchor = sectionSelection.anchor, let index = segments.firstIndex(where: { $0.id == anchor }) {
+            target = min(max(0, index + step), segments.count - 1)
+        } else {
+            target = item.timeline.location(at: previewTime)?.index ?? 0
+        }
+        selectSegment(segments[target].id)
+    }
+
+    /// ⇧Home / ⇧End: the playhead to where the selection starts or ends. Over several
+    /// sections that is the first one's start and the last one's end.
+    func movePlayheadToSelection(start: Bool) {
+        guard let item = selectedItem else { return }
+        let sections = sectionSelection.ordered(in: item.timeline)
+        guard let edge = start ? sections.first : sections.last else { return }
+        let offset = item.timeline.offset(of: edge.id)
+        // The end is the last frame shown, not the first frame of whatever follows.
+        let frame = 1 / max(1, item.info?.fps ?? 30)
+        let time = start ? offset : max(offset, offset + edge.duration - frame)
+        playback.pause()
+        setPreviewFraction(time / max(0.001, item.editedDuration))
     }
 }
 

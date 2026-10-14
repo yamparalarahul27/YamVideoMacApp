@@ -194,7 +194,9 @@ struct AgentState: Encodable {
     struct MovieEntry: Encodable { var clip: UUID; var offset: Double; var duration: Double }
     struct Movie: Encodable { var canvas: String; var duration: Double; var clips: [MovieEntry] }
     struct Selection: Encodable {
-        var clip: UUID?, section: UUID?, zoom: UUID?, blurArea: UUID?
+        /// `section` is the one last clicked; `sections` is everything selected, in
+        /// timeline order.
+        var clip: UUID?, section: UUID?, sections: [UUID], zoom: UUID?, blurArea: UUID?
         var playhead: Double, movieMode: Bool, movieTime: Double
     }
     struct Busy: Encodable {
@@ -476,7 +478,9 @@ extension AppModel {
             busy: .init(exporting: isConverting, interactionInProgress: editSession.gesture != nil, agentsPaused: agentsPaused,
                         runningJobs: agentJobs.values.filter { $0.status == "running" }.map(\.id)),
             history: .init(undo: historyStep(undoEntries.last), redo: historyStep(redoEntries.last)),
-            selection: .init(clip: selection, section: selectedSegmentID, zoom: selectedShotID, blurArea: selectedRegionID,
+            selection: .init(clip: selection, section: selectedSegmentID,
+                             sections: selectedItem.map { sectionSelection.ordered(in: $0.timeline).map(\.id) } ?? [],
+                             zoom: selectedShotID, blurArea: selectedRegionID,
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             movie: .init(canvas: (document.movieSettings ?? MovieSettings()).canvas.rawValue, duration: movieOffset, clips: movieClips),

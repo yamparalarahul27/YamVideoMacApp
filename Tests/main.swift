@@ -2052,6 +2052,107 @@ focusing.selectedRegionID = UUID()
 focusing.perform([.setAspect(clip: focusing.items[0].id, preset: "1:1")])
 equal(focusing.inspectorFocus, .recording, "a selection that no longer exists after an edit is cleared from the inspector")
 
+// MARK: - Selecting several sections
+
+print("\nSelecting sections")
+// Four sections played in an order unlike their source order, so anything that orders
+// by source time, insertion or a Set's whim shows up as wrong.
+let pickA = TimelineSegment(start: 2, end: 3), pickB = TimelineSegment(start: 0, end: 0.5)
+let pickC = TimelineSegment(start: 1, end: 2), pickD = TimelineSegment(start: 0.5, end: 1)
+let pickTimeline = ClipTimeline(segments: [pickA, pickB, pickC, pickD])
+let shuffled = ClipTimeline(segments: [pickC, pickA, pickD, pickB])
+
+let ranged = SectionSelection.single(pickA.id).clicking(pickB.id, extend: true, toggle: false, in: shuffled)
+equal(ranged.ordered(in: shuffled).map(\.id), [pickA.id, pickD.id, pickB.id],
+      "⇧-click selects the range by timeline order, not by source or insertion order")
+equal(ranged.anchor, pickA.id, "and the anchor stays where the range began")
+let backwards = SectionSelection.single(pickD.id).clicking(pickC.id, extend: true, toggle: false, in: shuffled)
+equal(backwards.ordered(in: shuffled).map(\.id), [pickC.id, pickA.id, pickD.id], "a range can run backwards")
+equal(SectionSelection().clicking(pickC.id, extend: true, toggle: false, in: shuffled), .single(pickC.id),
+      "⇧-click with nothing selected selects just that section")
+equal(ranged.clicking(pickC.id, extend: false, toggle: false, in: shuffled), .single(pickC.id),
+      "a plain click selects one section again")
+
+let toggled = SectionSelection.single(pickA.id).clicking(pickC.id, extend: false, toggle: true, in: pickTimeline)
+check(toggled.ids == [pickA.id, pickC.id] && toggled.anchor == pickC.id, "⌘-click adds a section and anchors on it")
+let untoggled = toggled.clicking(pickC.id, extend: false, toggle: true, in: pickTimeline)
+check(untoggled.ids == [pickA.id] && untoggled.anchor == pickA.id,
+      "⌘-clicking it again removes it, handing the anchor to a section still selected")
+let emptied = untoggled.clicking(pickA.id, extend: false, toggle: true, in: pickTimeline)
+check(emptied.isEmpty && emptied.anchor == nil, "removing the last one leaves nothing selected")
+
+let everything = SectionSelection.all(in: pickTimeline, anchor: pickC.id)
+check(everything.count == 4 && everything.anchor == pickC.id, "select all keeps the anchor")
+let pruned = everything.keeping(ClipTimeline(segments: [pickA, pickB, pickD]))
+check(pruned.ids == [pickA.id, pickB.id, pickD.id] && pruned.anchor == pickA.id,
+      "sections an edit removed leave the selection, and so does the anchor")
+check(SectionSelection(.init(), anchor: pickA.id).anchor == nil, "an anchor is always one of the selected sections")
+
+// The editor: clicks, keys, and edits on the whole selection as one step.
+var pickItem = VideoItem(url: landscape)
+pickItem.info = info; pickItem.crop = info.fullFrame
+pickItem.segments = pickTimeline.segments
+let picking = AppModel(recoveryURL: nil)
+picking.restore(VideoProject(clips: [ProjectClip(pickItem)], settings: ExportSettings(), selection: pickItem.id))
+let pickTotal = picking.items[0].editedDuration
+picking.clickSegment(pickB.id, at: 1.2)
+check(picking.selectedSegmentID == pickB.id && abs(picking.previewTime - 1.2) < 0.0001,
+      "a plain click selects the section and moves the playhead")
+picking.clickSegment(pickD.id, at: 2.8, extend: true)
+equal(picking.sectionSelection.ordered(in: picking.items[0].timeline).map(\.id), [pickB.id, pickC.id, pickD.id],
+      "⇧-click in the editor extends the range")
+check(abs(picking.previewTime - 1.2) < 0.0001, "without moving the playhead")
+equal(picking.inspectorFocus, .section, "several sections show in the inspector")
+equal(picking.agentState().selection.sections, [pickB.id, pickC.id, pickD.id], "agents see every selected section, in order")
+equal(picking.agentState().selection.section, pickB.id, "and which one is the anchor")
+
+let speedSteps = picking.undoEntries.count
+picking.setSelectedSectionsSpeed(2)
+equal(picking.items[0].timeline.segments.map(\.speed), [1, 2, 2, 2], "a speed applies to every selected section")
+equal(picking.undoEntries.count, speedSteps + 1, "as one undo step")
+equal(picking.undoTitle, "Undo Change Speed of 3 Sections", "named for what it did")
+equal(picking.sectionSelection.count, 3, "and the sections stay selected")
+picking.undoEdit()
+equal(picking.items[0].timeline.segments.map(\.speed), [1, 1, 1, 1], "one undo restores every speed")
+equal(picking.sectionSelection.count, 3, "and the selection as it was")
+
+let deleteSteps = picking.undoEntries.count
+picking.deleteSegment()
+equal(picking.items[0].timeline.segments.map(\.id), [pickA.id], "delete removes every selected section")
+equal(picking.undoEntries.count, deleteSteps + 1, "as one undo step")
+equal(picking.undoTitle, "Undo Delete 3 Sections", "named for how many it removed")
+equal(picking.selectedSegmentID, pickA.id, "and selects what is left in their place")
+picking.undoEdit()
+equal(picking.items[0].timeline.segments.map(\.id), pickTimeline.segments.map(\.id), "one undo brings them all back")
+equal(picking.sectionSelection.count, 3, "selected as they were")
+
+picking.selectAllSegments()
+equal(picking.sectionSelection.count, 4, "⌘A selects every section")
+let refusedSteps = picking.undoEntries.count
+picking.deleteSegment()
+check(picking.items[0].timeline.segments.count == 4 && picking.undoEntries.count == refusedSteps,
+      "deleting every section is refused rather than leaving an empty recording")
+check(picking.statusMessage?.contains("Keep at least one section") == true, "and says why", picking.statusMessage ?? "")
+
+picking.selectedSegmentID = pickB.id
+picking.selectAdjacentSegment(1)
+equal(picking.selectedSegmentID, pickC.id, "⌘→ selects the next section")
+check(abs(picking.previewTime - picking.items[0].timeline.offset(of: pickC.id)) < 0.0001, "and moves the playhead to it")
+picking.selectAdjacentSegment(-1); picking.selectAdjacentSegment(-1); picking.selectAdjacentSegment(-1)
+equal(picking.selectedSegmentID, pickA.id, "⌘← stops at the first section rather than wrapping")
+picking.selectedSegmentID = nil
+picking.setPreviewFraction(2.7 / pickTotal)     // inside D, which plays from 2.5
+picking.selectAdjacentSegment(1)
+equal(picking.selectedSegmentID, pickD.id, "with nothing selected it picks the section under the playhead")
+
+picking.clickSegment(pickB.id, at: 1.1)
+picking.clickSegment(pickC.id, at: 1.6, extend: true)
+picking.movePlayheadToSelection(start: true)
+check(abs(picking.previewTime - 1) < 0.0001, "⇧Home moves the playhead to where the selection starts", "\(picking.previewTime)")
+picking.movePlayheadToSelection(start: false)
+check(abs(picking.previewTime - (2.5 - 1 / info.fps)) < 0.0001,
+      "⇧End to its last frame, inside the selection", "\(picking.previewTime)")
+
 // MARK: - Local agent bridge
 
 print("\nLocal agent bridge")

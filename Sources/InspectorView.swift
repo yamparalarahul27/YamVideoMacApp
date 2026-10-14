@@ -30,7 +30,10 @@ struct InspectorPane: View {
     private func selection(item: VideoItem, info: MediaInfo) -> some View {
         switch model.inspectorFocus {
         case .section:
-            if let segment = model.selectedSegment,
+            if model.sectionSelection.count > 1 {
+                SectionsInspector(item: item, sections: model.sectionSelection.ordered(in: item.timeline))
+                Divider()
+            } else if let segment = model.selectedSegment,
                let index = item.timeline.segments.firstIndex(where: { $0.id == segment.id }) {
                 SectionInspector(item: item, segment: segment, index: index)
                 Divider()
@@ -139,6 +142,54 @@ private struct SectionInspector: View {
                 .padding(.top, 4)
             }
             .font(.caption)
+        }
+    }
+}
+
+/// Several sections at once: what they add up to, and the edits that make sense for
+/// all of them together. Each is one undo step.
+private struct SectionsInspector: View {
+    @EnvironmentObject var model: AppModel
+    let item: VideoItem
+    let sections: [TimelineSegment]
+
+    private static let speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+    /// The speed they share, or nil when they differ.
+    private var speed: Double? {
+        let speeds = Set(sections.map(\.speed))
+        return speeds.count == 1 ? speeds.first : nil
+    }
+
+    var body: some View {
+        InspectorSection("\(sections.count) of \(item.timeline.segments.count) sections") {
+            Text("Play for \(timelineTime(sections.reduce(0) { $0 + $1.duration }))")
+                .font(.callout)
+            Picker("Speed", selection: Binding<Double?>(get: { speed }, set: { if let speed = $0 { model.setSelectedSectionsSpeed(speed) } })) {
+                if speed == nil { Text("Mixed").tag(Double?.none) }
+                ForEach(Self.speeds, id: \.self) { speed in
+                    Text(speed == 1 ? "Normal speed" : "\(speed.formatted())×").tag(Double?.some(speed))
+                }
+            }
+            .accessibilityLabel("Speed of the selected sections")
+            if speed == nil {
+                Text("Choosing a speed sets it for every selected section.").font(.caption2).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Select All") { model.selectAllSegments() }
+                    .disabled(sections.count == item.timeline.segments.count)
+                    .help("Select every section (⌘A)")
+                Spacer()
+                Button(role: .destructive) { model.deleteSegment() } label: { Label("Delete \(sections.count)", systemImage: "trash") }
+                    .disabled(sections.count >= item.timeline.segments.count)
+                    .help(sections.count >= item.timeline.segments.count
+                          ? "Keep at least one section: leave one unselected to delete the rest."
+                          : "Delete the selected sections (⌘⌫)")
+            }
+            .controlSize(.small)
+            Text("⇧-click a section to select a range, ⌘-click to add or remove one. Trims and order are edited one section at a time.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -409,7 +409,8 @@ extension AppModel {
         } else if selection == nil {
             selection = items.first?.id
         }
-        if let id = selectedSegmentID, selectedItem?.timeline.segments.contains(where: { $0.id == id }) != true { selectedSegmentID = nil }
+        let sections = sectionSelection.keeping(selectedItem?.timeline)
+        if sections != sectionSelection { sectionSelection = sections }
         if let id = selectedShotID, selectedItem?.zoomShots.contains(where: { $0.id == id }) != true { selectedShotID = nil }
         if let id = selectedRegionID, selectedItem?.blurRegions.contains(where: { $0.id == id }) != true { selectedRegionID = nil }
 

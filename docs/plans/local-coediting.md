@@ -23,7 +23,7 @@ that branch so all planning links work on main.
 | Area | Observed state / revised decision |
 |---|---|
 | Editing foundation | Native preview, cuts, speed, movie assembly, waveform, silence review, suggested zooms, undo and recovery exist on the inspected editor branch. Reuse them. |
-| Timeline navigation | Adaptive ruler, anchored zoom, shared lane sizing and snapping are implemented. Markers and multi-selection remain planned. |
+| Timeline navigation | Adaptive ruler, anchored zoom, shared lane sizing, snapping and multi-section selection are implemented. Markers remain planned. |
 | Simplified layout | Promote selection inspector + separate export sheet into the next implementation phase; replace the earlier Inspector/Export tab proposal. |
 | Agent editing | Promote to a first-class local workflow. The earlier rejection of an agent-facing edit representation no longer applies. |
 | Colour | Add a per-recording Pocket 3 D-Log M workflow before creative effects; see the dedicated colour plan. |
@@ -479,14 +479,25 @@ Implemented:
   kind shadowing another; a trim snaps only to targets over its own section, since the
   frame under the edge is what it keeps; section drags reorder by position and have
   nothing to snap to. Markers join the targets when they arrive.
+- **Multi-section selection** (`SectionSelection` in `Timeline.swift`): a set plus an
+  anchor, the section clicked last. `selectedSegmentID` became the anchor, so single-section
+  call sites are unchanged. ⇧-click selects the anchor-to-click range in timeline order,
+  ⌘-click toggles, ⌘A selects all; ⌘←/⌘→ step the selection, ⇧Home/⇧End move the playhead
+  to its first frame and last frame. Delete and speed act on the whole selection as one
+  transaction, so one undo step, and are all or nothing. The inspector shows the
+  selection's total length, a shared or "Mixed" speed and Delete. Undo restores the
+  whole selection, and agents see it as `selection.sections` in timeline order. Decisions:
+  modified clicks leave the playhead alone; the keys live in the app's key monitor rather
+  than as menu shortcuts, which would take ⌘A and ⌘←/⌘→ from text fields; deleting every
+  section is refused; trims and reordering stay single-section.
 
 Remaining for phase 3:
 
-- **Navigation:** multi-section selection. Shared lane sizing and the adaptive ruler and
-  anchored zoom were already on the editor branch.
 - **Live acceptance:** a scripted headless Claude Code 2.1.241 session, with a scratch
   instance and MCP config, was set up. It stopped before any tool call because the
   Claude Code login on the development Mac had expired. The Codex CLI is not installed
   there. Both runs still need doing, with the client versions and results recorded.
-- Hands-on checks of keyboard focus and VoiceOver in the new layout.
+- Hands-on checks in the running app: keyboard focus and VoiceOver in the new layout, and
+  the snapping and selection gestures and keys. Their logic is covered by the suite and the
+  layout by `Tools/Snapshot/`, but neither drives a real pointer or keyboard.
 
