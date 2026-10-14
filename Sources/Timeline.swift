@@ -108,12 +108,16 @@ struct ProjectClip: Codable, Equatable {
     var includedInMovie: Bool?
     /// Version 3 onwards. Earlier files never stored the burned-in subtitle choice.
     var subtitles: URL?
+    /// Version 4 onwards. Nil when the recording has never had its colour touched, so an
+    /// untouched recording reads exactly as it did before colour existed.
+    var color: ClipColorSettings?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
         aspectLock = item.aspectLock; aspectLabel = item.aspectLabel
         blurRegions = item.blurRegions; zoomShots = item.zoomShots; segments = item.segments
         includedInMovie = item.includedInMovie; subtitles = item.subtitles
+        color = item.color.isDefault ? nil : item.color
     }
 
     func item() -> VideoItem {
@@ -122,6 +126,7 @@ struct ProjectClip: Codable, Equatable {
         item.aspectLock = aspectLock; item.aspectLabel = aspectLabel
         item.blurRegions = blurRegions; item.zoomShots = zoomShots; item.segments = segments
         item.includedInMovie = includedInMovie ?? true; item.subtitles = subtitles
+        item.color = color ?? ClipColorSettings()
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -130,9 +135,10 @@ struct ProjectClip: Codable, Equatable {
 
 struct VideoProject: Codable, Equatable {
     /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
-    /// and the per-recording subtitle file. Every edited project is written as the
-    /// current version; older builds reject it rather than silently dropping edits.
-    static let currentVersion = 3
+    /// and the per-recording subtitle file. 4: adds per-recording colour. Every edited
+    /// project is written as the current version; older builds reject it rather than
+    /// silently dropping edits.
+    static let currentVersion = 4
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -179,6 +185,9 @@ struct VideoProject: Codable, Equatable {
         } else {
             guard projectID != nil else { try reject("The project is missing its identity."); return }
         }
+        if version < 4, clips.contains(where: { $0.color != nil }) {
+            try reject("The project claims an older format but contains colour settings."); return
+        }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
         }
@@ -192,6 +201,10 @@ struct VideoProject: Codable, Equatable {
         }
         for clip in clips {
             guard clip.url.isFileURL else { try reject("Projects must reference local media."); return }
+            if let color = clip.color {
+                try color.validate()
+                if let info = clip.info { try color.validate(against: info) }
+            }
             guard let info = clip.info else {
                 guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty else {
                     try reject("The project is missing information required by its edits."); return

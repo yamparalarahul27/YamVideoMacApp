@@ -17,6 +17,7 @@ final class PlaybackController: ObservableObject {
     private var loadedCanvas: CGSize?
     private var loadedClip: ProjectClip?
     private var loadedSettings: ExportSettings?
+    private var loadedOriginal = false
     private var requestedTime = 0.0
     private var playWhenReady = false
     private var seekGeneration = 0
@@ -40,7 +41,7 @@ final class PlaybackController: ObservableObject {
 
     func clear() {
         pause(); task?.cancel(); task = nil
-        loadedClip = nil; loadedSettings = nil; loadedMovie = nil
+        loadedClip = nil; loadedSettings = nil; loadedMovie = nil; loadedOriginal = false
         statusObservation = nil
         player.replaceCurrentItem(with: nil)
         isLoading = false; error = nil
@@ -60,23 +61,37 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool) {
+    /// `original` shows the recording without its colour stage, for comparison.
+    func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool, original: Bool = false) {
         requestedTime = time
         playWhenReady = play
         let record = ProjectClip(clip)
-        if loadedClip == record, loadedSettings == settings, error == nil {
+        if loadedClip == record, loadedSettings == settings, loadedOriginal == original, error == nil {
             seek(to: time)
             if !isLoading, play { player.play(); isPlaying = true }
+            return
+        }
+        // A colour change alone needs a new picture, not a new movie: swapping the video
+        // composition keeps the loaded item, its position and its audio.
+        var recolored = loadedClip
+        recolored?.color = record.color
+        if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
+           recolored == record, loadedSettings == settings, let info = clip.info {
+            item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
+                                                          settings: settings, original: original)
+            loadedClip = record; loadedOriginal = original
+            seek(to: time)
+            if play { player.play(); isPlaying = true }
             return
         }
         task?.cancel()
         player.pause(); isPlaying = false
         loadedMovie = nil
-        loadedClip = record; loadedSettings = settings
+        loadedClip = record; loadedSettings = settings; loadedOriginal = original
         error = nil; isLoading = true
         task = Task {
             do {
-                let item = try await Self.makeItem(clip, settings: settings)
+                let item = try await Self.makeItem(clip, settings: settings, original: original)
                 try Task.checkCancellation()
                 player.replaceCurrentItem(with: item)
                 statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -111,7 +126,7 @@ final class PlaybackController: ObservableObject {
             return
         }
         task?.cancel(); player.pause(); isPlaying = false
-        loadedClip = nil; loadedMovie = records; loadedCanvas = plan.size; loadedSettings = settings
+        loadedClip = nil; loadedMovie = records; loadedCanvas = plan.size; loadedSettings = settings; loadedOriginal = false
         isLoading = true; error = nil
         task = Task {
             do {
@@ -137,7 +152,7 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    static func makeItem(_ clip: VideoItem, settings: ExportSettings) async throws -> AVPlayerItem {
+    static func makeItem(_ clip: VideoItem, settings: ExportSettings, original: Bool = false) async throws -> AVPlayerItem {
         guard let info = clip.info else { throw FFmpegError(message: "The video is still loading.") }
         let asset = AVURLAsset(url: clip.url)
         guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else {
@@ -178,24 +193,8 @@ final class PlaybackController: ObservableObject {
                 }
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
         }
-        let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
-        let shots = clip.zoomShots
-        let regions = clip.blurRegions
-        let videoComposition = AVMutableVideoComposition(asset: composition) { request in
-            let result = renderFrame(request.sourceImage, info: info, crop: crop,
-                                     regions: regions, shots: shots, settings: settings,
-                                     time: request.compositionTime.seconds)
-            request.finish(with: result, context: nil)
-        }
-        videoComposition.renderSize = crop.size
-        let rate = info.fpsExpression.split(separator: "/")
-        if rate.count == 2, let numerator = Int32(rate[0]), let denominator = Int64(rate[1]), numerator > 0, denominator > 0 {
-            videoComposition.frameDuration = CMTime(value: denominator, timescale: numerator)
-        } else {
-            videoComposition.frameDuration = CMTime(seconds: 1 / max(1, info.fps), preferredTimescale: 600000)
-        }
         let item = AVPlayerItem(asset: composition)
-        item.videoComposition = videoComposition
+        item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original)
         item.audioTimePitchAlgorithm = .spectral
         let mix = AVMutableAudioMix()
         mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
@@ -206,12 +205,41 @@ final class PlaybackController: ObservableObject {
         item.audioMix = mix
         return item
     }
+
+    /// Everything drawn on top of the assembled sections. A colour stage that cannot be
+    /// applied shows the picture as recorded; the inspector says why.
+    static func videoComposition(for asset: AVAsset, clip: VideoItem, info: MediaInfo,
+                                 settings: ExportSettings, original: Bool) -> AVVideoComposition {
+        let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        let shots = clip.zoomShots
+        let regions = clip.blurRegions
+        let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
+                                        toneMapHDR: settings.toneMapHDR, original: original).render
+        let videoComposition = AVMutableVideoComposition(asset: asset) { request in
+            let result = renderFrame(request.sourceImage, info: info, crop: crop,
+                                     regions: regions, shots: shots, settings: settings,
+                                     time: request.compositionTime.seconds, color: color)
+            request.finish(with: result, context: nil)
+        }
+        videoComposition.renderSize = crop.size
+        let rate = info.fpsExpression.split(separator: "/")
+        if rate.count == 2, let numerator = Int32(rate[0]), let denominator = Int64(rate[1]), numerator > 0, denominator > 0 {
+            videoComposition.frameDuration = CMTime(value: denominator, timescale: numerator)
+        } else {
+            videoComposition.frameDuration = CMTime(seconds: 1 / max(1, info.fps), preferredTimescale: 600000)
+        }
+        return videoComposition
+    }
 }
 
 /// Core Image uses a bottom-left origin; editor/export rectangles use top-left.
+///
+/// Order follows the shared rendering contract: colour first, on the whole frame, then
+/// area obscuring, crop and zoom. A black area therefore stays black whatever the grade.
 func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurRegion],
-                 shots: [ZoomShot], settings: ExportSettings, time: Double) -> CIImage {
+                 shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil) -> CIImage {
     var image = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
+    if let color { image = ColorPipeline.apply(color, to: image, space: source.colorSpace) }
     for region in regions {
         let rect = region.rect.evenClamped(in: info.fullFrame)
         let area = CGRect(x: rect.minX, y: CGFloat(info.height) - rect.maxY, width: rect.width, height: rect.height)

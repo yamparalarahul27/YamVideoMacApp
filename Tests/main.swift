@@ -2895,6 +2895,282 @@ for extreme in [0.25, 4.0] {
     check(abs(Double(try await frameCount(extremeOutput)) - 30 / extreme) <= 0.5, "\(extreme)× speed produces the expected duration")
 }
 
+// MARK: - Colour
+
+print("\nColour tables")
+let colorScratch = scratch.appendingPathComponent("colour", isDirectory: true)
+try FileManager.default.createDirectory(at: colorScratch, withIntermediateDirectories: true)
+setenv("YAMVIDEO_LUT_STORE", colorScratch.appendingPathComponent("store").path, 1)
+check(LUTStore.directory.path == colorScratch.appendingPathComponent("store").path,
+      "the tests keep their own table store", LUTStore.directory.path)
+
+func near(_ a: SIMD3<Double>, _ b: SIMD3<Double>, _ tolerance: Double = 0.000001) -> Bool {
+    abs(a.x - b.x) <= tolerance && abs(a.y - b.y) <= tolerance && abs(a.z - b.z) <= tolerance
+}
+func cubeRefusal(_ text: String) -> String? {
+    do { _ = try ColorCube.parse(Data(text.utf8)); return nil } catch { return error.localizedDescription }
+}
+
+// The file order is red fastest, then green, then blue, and line endings vary.
+let tinyIdentity = "TITLE \"tiny\"\r\nLUT_3D_SIZE 2\r\n# a comment\r\n0 0 0\r\n1 0 0\r\n0 1 0\r\n1 1 0\r\n0 0 1\r\n1 0 1\r\n0 1 1\r\n1 1 1\r\n"
+equal(try ColorCube.parse(Data(tinyIdentity.utf8)), ColorCube.identity(size: 2), "a 2³ identity with CRLF endings and a comment reads as identity")
+equal(try ColorCube.parse(Data(tinyIdentity.replacingOccurrences(of: "\r\n", with: "\r").utf8)), ColorCube.identity(size: 2),
+      "and so does one with old Mac line endings")
+let redOnly = ColorCube.build(size: 2) { SIMD3($0.x, 0, 0) }
+check(near(redOnly.sample(SIMD3(0.25, 0.5, 0.75)), SIMD3(0.25, 0, 0)), "a table that keeps red keeps red, not green or blue")
+let swapped = ColorCube.build(size: 9) { SIMD3($0.z, $0.x, $0.y) }
+check(near(swapped.sample(SIMD3(0.1, 0.2, 0.3)), SIMD3(0.3, 0.1, 0.2)), "channels land where the table puts them")
+check(near(ColorCube.identity(size: 17).sample(SIMD3(0.123, 0.456, 0.789)), SIMD3(0.123, 0.456, 0.789)),
+      "trilinear sampling of an identity is the identity between grid points")
+check(near(ColorCube.identity(size: 5).sample(SIMD3(-0.4, 1.7, .nan)), SIMD3(0, 1, 0)), "inputs outside the domain clamp to its edge")
+let wideDomain = try ColorCube.parse(Data("LUT_3D_SIZE 2\nDOMAIN_MIN -1 -1 -1\nDOMAIN_MAX 3 3 3\n-1 -1 -1\n3 -1 -1\n-1 3 -1\n3 3 -1\n-1 -1 3\n3 -1 3\n-1 3 3\n3 3 3\n".utf8))
+check(near(wideDomain.sample(SIMD3(0.5, 2, -0.5)), SIMD3(0.5, 2, -0.5)), "a declared domain is honoured")
+check(near(wideDomain.unitDomain().sample(SIMD3(0.25, 0.5, 1)), SIMD3(0, 1, 3)),
+      "and folded into a unit-domain table for Core Image")
+let curved = ColorCube.build(size: 7) { SIMD3(pow($0.x, 0.7), $0.y * $0.y, 0.2 + 0.6 * $0.z) }
+equal(try ColorCube.parse(Data(curved.cubeText(title: "round trip").utf8)), curved, "a table written for ffmpeg reads back unchanged")
+
+check(cubeRefusal("0 0 0\n") != nil, "a table without LUT_3D_SIZE is refused")
+check(cubeRefusal("LUT_3D_SIZE 1\n0 0 0\n") != nil, "so is a size below 2")
+check(cubeRefusal("LUT_3D_SIZE 66\n") != nil, "and one above 65")
+check(cubeRefusal("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n") != nil, "an incomplete table is refused")
+check(cubeRefusal(tinyIdentity + "1 1 1\n") != nil, "and so is one with rows to spare")
+check(cubeRefusal(tinyIdentity.replacingOccurrences(of: "1 1 1", with: "1 nan 1")) != nil, "a non-finite entry is refused")
+check(cubeRefusal(tinyIdentity.replacingOccurrences(of: "1 1 1", with: "1 1")) != nil, "a row with two numbers is refused")
+check(cubeRefusal("LUT_1D_SIZE 4\n" + tinyIdentity) != nil, "a 1D table or shaper is refused rather than half-applied")
+check(cubeRefusal("LUT_3D_SIZE 2\nINCLUDE other.cube\n") != nil, "an unknown keyword is refused")
+check(cubeRefusal("LUT_3D_SIZE 2\n0 0 0\nDOMAIN_MIN 0 0 0\n") != nil, "a keyword inside the table is refused")
+check(cubeRefusal("LUT_3D_SIZE 2\nDOMAIN_MIN 1 0 0\nDOMAIN_MAX 1 1 1\n") != nil, "an empty domain is refused")
+check((try? ColorCube.parse(Data(count: ColorCube.maximumBytes + 1))) == nil, "a file over 16 MB is refused unread")
+
+print("\nColour adjustments")
+let neutralSamples = [SIMD3(0.0, 0.0, 0.0), SIMD3(0.18, 0.5, 0.9), SIMD3(1.0, 1.0, 1.0), SIMD3(0.03, 0.7, 0.42)]
+check(neutralSamples.allSatisfy { near(ColorAdjustments.neutral.apply($0), $0, 0.0000001) },
+      "neutral adjustments return the input exactly")
+check(near(ColorAdjustments(exposureEV: 1).apply(SIMD3(repeating: 0.5)), SIMD3(repeating: 0.5 * pow(2, 1 / 2.4))),
+      "one stop brighter doubles linear light through the 2.4 power")
+let warm = ColorAdjustments(warmth: 1).apply(SIMD3(repeating: 0.5))
+let warmLinear = SIMD3(ColorAdjustments.decode(warm.x), ColorAdjustments.decode(warm.y), ColorAdjustments.decode(warm.z))
+check(warm.x > warm.y && warm.y > warm.z, "warmth tips grey towards red and away from blue")
+check(abs((warmLinear * ColorAdjustments.luma).sum() - ColorAdjustments.decode(0.5)) < 0.000001,
+      "without changing grey's luminance")
+let pivot = ColorAdjustments.encode(0.18)
+check(near(ColorAdjustments(contrast: 1.5).apply(SIMD3(repeating: pivot)), SIMD3(repeating: pivot)), "contrast pivots on 18% grey")
+let grey = ColorAdjustments(saturation: 0).apply(SIMD3(0.8, 0.3, 0.1))
+check(abs(grey.x - grey.y) < 0.000001 && abs(grey.y - grey.z) < 0.000001, "no colour strength leaves grey")
+
+var colorSettings = ClipColorSettings()
+check(colorSettings.isDefault && (try? colorSettings.validate()) != nil, "default colour settings are valid and untouched")
+colorSettings.exposureEV = 2.5
+check((try? colorSettings.validate()) == nil, "brightness beyond two stops is refused")
+colorSettings = ClipColorSettings(); colorSettings.saturation = .nan
+check((try? colorSettings.validate()) == nil, "a non-finite colour strength is refused")
+colorSettings = ClipColorSettings(); colorSettings.correctionEnabled = true
+check((try? colorSettings.validate()) == nil, "Natural colour without the conversion table is refused")
+let fakeRef = LUTAssetRef(sha256: String(repeating: "a", count: 64), originalName: "x.cube", role: .pocket3DLogMToRec709)
+colorSettings = ClipColorSettings(); colorSettings.technicalLUT = fakeRef
+check((try? colorSettings.validate()) == nil, "a D-Log M conversion on a recording not set to D-Log M is refused")
+colorSettings.inputProfile = .pocket3DLogM
+check((try? colorSettings.validate()) != nil, "and accepted once it is")
+colorSettings.algorithmVersion = 2
+check((try? colorSettings.validate()) == nil, "an algorithm this build does not know is refused")
+
+// What Auto may conclude. Only HDR tags count as proof; a DJI name asks instead.
+var taggedInfo = info
+taggedInfo.colorTransfer = "smpte2084"
+equal(taggedInfo.inferredColorProfile(fileName: "a.mov").profile, .pq, "Auto reads a PQ tag as PQ")
+taggedInfo.colorTransfer = "arib-std-b67"
+equal(taggedInfo.inferredColorProfile(fileName: "a.mov").profile, .hlg, "and an HLG tag as HLG")
+taggedInfo.colorTransfer = "bt709"
+check(taggedInfo.inferredColorProfile(fileName: "DJI_20261014_0001_D.MP4").profile == nil,
+      "a DJI recording tagged Rec.709 is left for the owner to say, not assumed to be D-Log M")
+taggedInfo.cameraMake = "DJI"
+check(taggedInfo.inferredColorProfile(fileName: "clip.mp4").profile == nil, "and so is one whose metadata names DJI")
+taggedInfo.cameraMake = nil
+equal(taggedInfo.inferredColorProfile(fileName: "screen.mov").profile, .standard, "anything else is standard colour")
+var standardOnly = ClipColorSettings(); standardOnly.inputProfile = .pq
+check((try? standardOnly.validate(against: info)) == nil, "HDR cannot be chosen for a file not tagged HDR")
+var logOnHDR = ClipColorSettings(); logOnHDR.inputProfile = .pocket3DLogM
+taggedInfo.colorTransfer = "smpte2084"
+check((try? logOnHDR.validate(against: taggedInfo)) == nil, "D-Log M cannot be chosen for a file tagged HDR")
+
+print("\nColour stage")
+// A stand-in for a camera's log conversion: smooth, monotonic, and different per
+// channel, so a renderer that swaps axes or skips a transfer step shows up.
+let fakeConversion = ColorCube.build(size: 33) { p in
+    func lift(_ x: Double) -> Double { 0.04 + 0.92 * x * x * (3 - 2 * x) }
+    return SIMD3(lift(0.92 * p.x + 0.08 * p.y), lift(p.y), lift(0.85 * p.z + 0.15 * p.x))
+}
+let conversionFile = colorScratch.appendingPathComponent("Fake D-Log M to Rec709.cube")
+try Data(fakeConversion.cubeText(title: "fake").utf8).write(to: conversionFile)
+let conversion = try LUTStore.importTable(at: conversionFile, role: .pocket3DLogMToRec709)
+check(FileManager.default.fileExists(atPath: LUTStore.url(for: conversion.sha256).path), "an imported table is kept under its hash")
+equal(LUTStore.cube(conversion.sha256), fakeConversion, "and reads back as the same table")
+check(!LUTStore.isOfficial(conversion), "a table that is not DJI's is not called DJI's")
+let brokenCube = colorScratch.appendingPathComponent("broken.cube")
+try Data("LUT_3D_SIZE 2\n0 0 0\n".utf8).write(to: brokenCube)
+check((try? LUTStore.importTable(at: brokenCube, role: .pocket3DLogMToRec709)) == nil, "a malformed table is not imported")
+
+var stagedItem = VideoItem(url: landscape)
+stagedItem.info = info
+check(stagedItem.colorStage(ExportSettings()).render == nil && stagedItem.colorStage(ExportSettings()).problem == nil,
+      "untouched standard footage has no colour stage at all")
+stagedItem.color.inputProfile = .pocket3DLogM
+check(stagedItem.colorStage(ExportSettings()).render == nil, "choosing D-Log M alone converts nothing until Natural colour is on")
+stagedItem.color.technicalLUT = LUTAssetRef(sha256: String(repeating: "b", count: 64), originalName: "gone.cube", role: .pocket3DLogMToRec709)
+stagedItem.color.correctionEnabled = true
+check(stagedItem.colorStage(ExportSettings()).problem?.contains("gone.cube") == true,
+      "a missing conversion table is reported by name, not silently skipped")
+stagedItem.color.technicalLUT = conversion
+equal(stagedItem.colorStage(ExportSettings()).render?.cube, fakeConversion, "with the table present, Natural colour applies it as it is")
+stagedItem.color.adjustments = ColorAdjustments(exposureEV: 0.5, warmth: 0.3, contrast: 1.2, saturation: 1.3)
+let bakedStage = stagedItem.colorStage(ExportSettings())
+let baked = bakedStage.render!
+let gridPoint = SIMD3(Double(5) / 32, Double(20) / 32, Double(31) / 32)
+check(near(baked.cube.sample(gridPoint), stagedItem.color.adjustments.apply(fakeConversion.sample(gridPoint))
+            .clamped(lowerBound: SIMD3(repeating: 0), upperBound: SIMD3(repeating: 1)), 0.000001),
+      "adjustments are baked onto the conversion at its own grid points, clipped to 0–1")
+check(baked.cube.values.allSatisfy { (0...1).contains($0) }, "no compiled table carries a value outside 0–1")
+check(stagedItem.colorStage(ExportSettings()).render === baked, "the same settings reuse the compiled table")
+stagedItem.color.warmth = 0.31
+check(stagedItem.colorStage(ExportSettings()).render?.key != baked.key, "different settings compile a different table")
+check(stagedItem.colorStage(ExportSettings(), original: true).render == nil, "Original leaves the colour stage out")
+let colorFilters = try ColorPipeline.ffmpegFilters(bakedStage, info: info, toneMapped: false)
+check(colorFilters.count == 3 && colorFilters[0].contains("in_color_matrix=bt709") && colorFilters[1].contains("interp=trilinear")
+      && colorFilters[2].contains("yuv420p10le"),
+      "ffmpeg reads the source's own matrix, applies the table trilinearly and stays 10-bit", colorFilters.joined(separator: ","))
+var hdrStageItem = stagedItem
+hdrStageItem.info?.colorTransfer = "arib-std-b67"
+hdrStageItem.color = ClipColorSettings(); hdrStageItem.color.contrast = 1.2
+var passThrough = ExportSettings(); passThrough.toneMapHDR = false
+check(hdrStageItem.colorStage(passThrough).problem != nil, "adjusting HDR that is not tone-mapped is refused, not mislabelled")
+check(hdrStageItem.colorStage(ExportSettings()).render != nil, "and allowed once it is tone-mapped")
+check((try ColorPipeline.ffmpegFilters(hdrStageItem.colorStage(ExportSettings()), info: hdrStageItem.info!, toneMapped: true))
+        .first?.contains("in_color_matrix=bt709:in_range=tv") == true,
+      "after tone mapping the stage reads BT.709 limited range, whatever the source was")
+
+print("\nColour parity")
+// A 10-bit 4:4:4 chart of flat patches tagged Rec.709, so neither renderer has chroma
+// to guess and every patch centre is a known encoded colour.
+let chartColumns = 8, chartRows = 6, patchWidth = 160, patchHeight = 120
+let chartWidth = chartColumns * patchWidth, chartHeight = chartRows * patchHeight
+var seed: UInt32 = 12345
+func nextValue() -> Double { seed = seed &* 1_664_525 &+ 1_013_904_223; return 0.03 + 0.94 * Double(seed >> 8) / Double(1 << 24) }
+var patchColors: [SIMD3<Double>] = (0..<chartColumns).map { SIMD3(repeating: 0.05 + 0.9 * Double($0) / Double(chartColumns - 1)) }
+patchColors += [SIMD3(0.78, 0.57, 0.45), SIMD3(0.55, 0.38, 0.29), SIMD3(0.92, 0.73, 0.62), SIMD3(0.36, 0.24, 0.18)]
+while patchColors.count < chartColumns * chartRows { patchColors.append(SIMD3(nextValue(), nextValue(), nextValue())) }
+var chartBytes = Data(capacity: chartWidth * chartHeight * 6)
+for y in 0..<chartHeight {
+    for x in 0..<chartWidth {
+        let color = patchColors[(y / patchHeight) * chartColumns + x / patchWidth]
+        for channel in [color.x, color.y, color.z] {
+            let value = UInt16((channel * 65535).rounded())
+            chartBytes.append(UInt8(value & 0xFF)); chartBytes.append(UInt8(value >> 8))
+        }
+    }
+}
+let chartRaw = colorScratch.appendingPathComponent("chart.rgb48")
+try chartBytes.write(to: chartRaw)
+let chart = colorScratch.appendingPathComponent("chart.mov")
+let chartEncode = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y",
+    "-stream_loop", "-1", "-f", "rawvideo", "-pix_fmt", "rgb48le", "-s", "\(chartWidth)x\(chartHeight)", "-r", "30", "-i", chartRaw.path,
+    "-t", "1", "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv444p10le",
+    "-c:v", "prores_ks", "-profile:v", "4444", "-color_primaries", "bt709", "-color_trc", "bt709",
+    "-colorspace", "bt709", "-color_range", "tv", chart.path])
+check(chartEncode.status == 0, "made a 10-bit Rec.709 colour chart", chartEncode.stderrText)
+let chartInfo = try await FFmpeg.probe(url: chart)
+check(chartInfo.yuvMatrix == "bt709" && !chartInfo.isFullRange, "the chart probes as BT.709 limited range")
+
+/// Encoded Rec.709 RGB, 0–1, row-major from the top-left.
+struct RGBFrame { let width: Int, height: Int; let values: [Double]
+    func patch(_ index: Int, inset: Int = 40) -> [SIMD3<Double>] {
+        let left = (index % chartColumns) * patchWidth + inset, top = (index / chartColumns) * patchHeight + inset
+        var pixels: [SIMD3<Double>] = []
+        for y in top..<(top + patchHeight - 2 * inset) { for x in left..<(left + patchWidth - 2 * inset) {
+            let i = (y * width + x) * 3
+            pixels.append(SIMD3(values[i], values[i + 1], values[i + 2]))
+        } }
+        return pixels
+    }
+}
+func ffmpegFrame(_ head: [String]) async throws -> RGBFrame {
+    let chain = head + ["scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=accurate_rnd+full_chroma_int,format=rgb48le"]
+    let result = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-ss", "0.5", "-i", chart.path,
+                                              "-frames:v", "1", "-vf", chain.joined(separator: ","), "-f", "rawvideo", "-"])
+    let words = result.stdout.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }
+    return RGBFrame(width: chartWidth, height: chartHeight, values: words.map { Double(UInt16(littleEndian: $0)) / 65535 })
+}
+func nativeFrame(_ item: VideoItem) async throws -> RGBFrame {
+    let player = try await PlaybackController.makeItem(item, settings: ExportSettings())
+    let generator = AVAssetImageGenerator(asset: player.asset)
+    generator.videoComposition = player.videoComposition
+    generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+    let image = try await generator.image(at: CMTime(seconds: 0.5, preferredTimescale: 600)).image
+    // Read in the space macOS decoded the Rec.709 chart into, so the values are the
+    // encoded ones a 709 file would carry, as ffmpeg's are.
+    var words = [UInt16](repeating: 0, count: image.width * image.height * 4)
+    let context = CGContext(data: &words, width: image.width, height: image.height, bitsPerComponent: 16,
+                            bytesPerRow: image.width * 8, space: ColorPipeline.videoSpace,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    var values: [Double] = []; values.reserveCapacity(image.width * image.height * 3)
+    for pixel in stride(from: 0, to: words.count, by: 4) {
+        values += [Double(words[pixel]) / 65535, Double(words[pixel + 1]) / 65535, Double(words[pixel + 2]) / 65535]
+    }
+    return RGBFrame(width: image.width, height: image.height, values: values)
+}
+/// Mean and 99th percentile of the per-channel difference, in 8-bit code values.
+func errorStats(_ a: RGBFrame, _ b: (Int) -> [SIMD3<Double>]) -> (mean: Double, p99: Double) {
+    var errors: [Double] = []
+    for index in 0..<(chartColumns * chartRows) {
+        for (pixel, expected) in zip(a.patch(index), b(index)) {
+            errors += [abs(pixel.x - expected.x), abs(pixel.y - expected.y), abs(pixel.z - expected.z)].map { $0 * 255 }
+        }
+    }
+    errors.sort()
+    return (errors.reduce(0, +) / Double(errors.count), errors[Int(Double(errors.count - 1) * 0.99)])
+}
+func describe(_ stats: (mean: Double, p99: Double)) -> String { String(format: "mean %.2f, p99 %.2f of 255", stats.mean, stats.p99) }
+
+var chartItem = VideoItem(url: chart)
+chartItem.info = chartInfo; chartItem.crop = chartInfo.fullFrame
+let plainFFmpeg = try await ffmpegFrame([])
+let plainNative = try await nativeFrame(chartItem)
+let decodeStats = errorStats(plainNative) { plainFFmpeg.patch($0) }
+check(decodeStats.mean <= 2 && decodeStats.p99 <= 6, "both renderers decode the chart alike before any colour", describe(decodeStats))
+let sourceStats = errorStats(plainFFmpeg) { Array(repeating: patchColors[$0], count: plainFFmpeg.patch($0).count) }
+check(sourceStats.p99 <= 1, "and the chart decodes to the colours it was made from", describe(sourceStats))
+
+chartItem.color.inputProfile = .pocket3DLogM; chartItem.color.technicalLUT = conversion; chartItem.color.correctionEnabled = true
+chartItem.color.adjustments = ColorAdjustments(exposureEV: 0.5, warmth: 0.3, contrast: 1.2, saturation: 1.3)
+let chartStage = chartItem.colorStage(ExportSettings())
+let gradedFFmpeg = try await ffmpegFrame(try ColorPipeline.ffmpegFilters(chartStage, info: chartInfo, toneMapped: false))
+let gradedNative = try await nativeFrame(chartItem)
+let expectedGrade = { (index: Int) in
+    Array(repeating: chartStage.render!.cube.sample(patchColors[index]),
+          count: plainFFmpeg.patch(index).count)
+}
+let ffmpegGrade = errorStats(gradedFFmpeg, expectedGrade)
+let nativeGrade = errorStats(gradedNative, expectedGrade)
+let gradeParity = errorStats(gradedNative) { gradedFFmpeg.patch($0) }
+check(ffmpegGrade.mean <= 2 && ffmpegGrade.p99 <= 6, "ffmpeg applies the colour stage to the encoded values it should", describe(ffmpegGrade))
+check(nativeGrade.mean <= 2 && nativeGrade.p99 <= 6, "so does Core Image, with no extra transfer step", describe(nativeGrade))
+check(gradeParity.mean <= 2 && gradeParity.p99 <= 6, "and the two renderers agree within the release gate", describe(gradeParity))
+print("       colour parity: decode \(describe(decodeStats)); ffmpeg vs maths \(describe(ffmpegGrade)); native vs maths \(describe(nativeGrade)); native vs ffmpeg \(describe(gradeParity))")
+
+// The real DJI conversion, when the person running the suite points at a copy of it.
+if let djiPath = ProcessInfo.processInfo.environment["YAMVIDEO_DJI_LUT"], FileManager.default.fileExists(atPath: djiPath) {
+    let dji = try LUTStore.importTable(at: URL(fileURLWithPath: djiPath), role: .pocket3DLogMToRec709)
+    check(LUTStore.isOfficial(dji), "the supplied DJI table is DJI's official Pocket 3 conversion", dji.sha256)
+    chartItem.color.technicalLUT = dji; chartItem.color.adjustments = .neutral
+    let djiStage = chartItem.colorStage(ExportSettings())
+    let djiFFmpeg = try await ffmpegFrame(try ColorPipeline.ffmpegFilters(djiStage, info: chartInfo, toneMapped: false))
+    let djiNative = try await nativeFrame(chartItem)
+    let djiParity = errorStats(djiNative) { djiFFmpeg.patch($0) }
+    check(djiParity.mean <= 2 && djiParity.p99 <= 6, "with DJI's table the two renderers still agree", describe(djiParity))
+    print("       DJI parity: \(describe(djiParity))")
+}
+
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)
 exit(failures == 0 ? 0 : 1)

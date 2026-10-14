@@ -501,3 +501,9 @@ Remaining for phase 3:
   the snapping and selection gestures and keys. Their logic is covered by the suite and the
   layout by `Tools/Snapshot/`, but neither drives a real pointer or keyboard.
 
+### Phase 4 status (2026-10-14)
+
+Started. The colour engine, renderer parity and version 4 persistence are in; controls,
+commands, Movie paths and project assets are not. See section 6 of
+[Pocket 3 colour](pocket-3-colour.md).
+
