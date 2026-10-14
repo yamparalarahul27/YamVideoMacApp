@@ -1622,6 +1622,80 @@ for fps in [24.0, 25.0, 30.0, 60.0] {
     check(whole, "every sub-second rung is a whole number of frames at \(Int(fps))fps")
 }
 
+print("\nTimeline snapping")
+
+// Sections of 4s, 3s (6s of source at 2×) and 5s: boundaries at 4 and 7, 12 in all.
+// One zoom spans 8–10, and the playhead is parked at 5.5.
+let snapTimeline = ClipTimeline(segments: [
+    TimelineSegment(start: 0, end: 4),
+    TimelineSegment(start: 10, end: 16, speed: 2),
+    TimelineSegment(start: 20, end: 25),
+])
+let snapZoom = ZoomShot(start: 8, hold: 1, target: .zero)
+let snaps = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: 5.5)
+let snapPPS = 100.0     // the 8pt reach is 0.08s
+func landing(_ time: Double, _ snapping: TimelineSnapping = snaps, pps: Double = snapPPS,
+             within range: ClosedRange<Double>? = nil) -> TimelineSnapping.Target? {
+    snapping.target(for: time, pixelsPerSecond: pps, within: range)
+}
+
+equal(landing(4.07), .init(time: 4, kind: .sectionBoundary), "a time just inside the reach snaps to the section boundary")
+check(landing(4.09) == nil, "and one just outside it does not")
+equal(landing(5.44)?.time, 5.5, "the playhead is a target")
+equal(landing(9.95), .init(time: 10, kind: .zoomEdge), "so are zoom edges")
+equal(landing(0.03), .init(time: 0, kind: .timelineEnd), "and both ends of the timeline")
+equal(landing(11.99)?.time, 12, "including the end, which is the edited length rather than the source's")
+check(landing(2) == nil, "open timeline away from everything stays where it is")
+
+// The reach is fixed on screen, so it shrinks in seconds as the view zooms in.
+check(TimelineSnapping.reach(pixelsPerSecond: 800) < TimelineSnapping.reach(pixelsPerSecond: 100),
+      "the reach in seconds shrinks as pixels per second rise")
+equal(TimelineSnapping.reach(pixelsPerSecond: 100), 0.08, "8 points at 100 points a second is 0.08s")
+check(landing(4.02, pps: 100) != nil && landing(4.02, pps: 800) == nil,
+      "so a time that snaps across the whole view is placed freely zoomed in")
+check(landing(4, pps: 0) == nil && landing(4, pps: .nan) == nil && landing(.nan) == nil,
+      "a degenerate scale or time never snaps")
+
+// Nearest wins; a draw goes to the playhead.
+let crowded = TimelineSnapping(timeline: snapTimeline, zooms: [], playhead: 7.06)
+equal(landing(7.02, crowded), .init(time: 7, kind: .sectionBoundary), "the nearer of two targets in reach wins")
+equal(landing(7.04, crowded), .init(time: 7.06, kind: .playhead), "whichever it is")
+equal(landing(7.03, crowded), .init(time: 7.06, kind: .playhead), "and an even draw goes to the playhead")
+equal(landing(7.0302, crowded)?.kind, .playhead, "as does a gap too small to see")
+
+// What a gesture leaves out.
+let scrubbing = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: nil)
+check(!scrubbing.targets.contains { $0.kind == .playhead }, "dragging the playhead does not snap it to itself")
+let movingZoom = TimelineSnapping(timeline: snapTimeline, zooms: [snapZoom], playhead: 5.5, excludingZoom: snapZoom.id)
+check(!movingZoom.targets.contains { $0.kind == .zoomEdge }, "a zoom being dragged does not snap to its own edges")
+check(landing(5.45, within: 4...7) != nil, "a trim snaps to targets over its own section")
+equal(landing(4.05, within: 4...7)?.time, 4, "including its own edges, which leave it as it was")
+check(landing(7.05, within: 0...4) == nil, "but not to those beyond it")
+
+// A zoom moved whole snaps by whichever edge is nearer a target, keeping its length.
+let leading = movingZoom.snapSpan(start: 6.96, duration: 2, pixelsPerSecond: snapPPS)
+check(leading.start == 7 && leading.target?.time == 7, "a moved zoom's start lines up with a boundary", "\(leading)")
+let trailing = movingZoom.snapSpan(start: 9.95, duration: 2, pixelsPerSecond: snapPPS)
+check(trailing.start == 10 && trailing.target?.time == 12, "and its end lines up with the end of the timeline", "\(trailing)")
+let both = movingZoom.snapSpan(start: 3.94, duration: 3.1, pixelsPerSecond: snapPPS)
+check(abs(both.start - 3.9) < 0.000001 && both.target?.time == 7,
+      "when both edges are in reach the nearer one wins", "\(both)")
+let free = movingZoom.snapSpan(start: 1, duration: 2, pixelsPerSecond: snapPPS)
+check(free.start == 1 && free.target == nil, "a zoom nowhere near a target moves freely")
+
+// ⌥ suspends snapping for the drag, and the switch itself is remembered.
+let snappingModel = AppModel(recoveryURL: nil)
+let savedSnapping = snappingModel.timelineSnapping
+snappingModel.timelineSnapping = true
+check(snappingModel.dragSnaps(modifiers: []), "a drag snaps while snapping is on")
+check(!snappingModel.dragSnaps(modifiers: [.option]), "holding ⌥ suspends it")
+check(snappingModel.dragSnaps(modifiers: [.shift, .command]), "other modifiers do not")
+snappingModel.timelineSnapping = false
+check(!snappingModel.dragSnaps(modifiers: []), "switching snapping off stops every drag snapping")
+equal(UserDefaults.standard.object(forKey: AppModel.snappingKey) as? Bool, false, "and the choice is remembered")
+equal(AppModel(recoveryURL: nil).timelineSnapping, false, "by the next window too")
+snappingModel.timelineSnapping = savedSnapping
+
 print("\nTimeline and projects")
 let wholeTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 10)])
 var splitTimeline = wholeTimeline
@@ -1977,6 +2051,107 @@ equal(focusing.inspectorFocus, .recording, "clearing what is shown falls back to
 focusing.selectedRegionID = UUID()
 focusing.perform([.setAspect(clip: focusing.items[0].id, preset: "1:1")])
 equal(focusing.inspectorFocus, .recording, "a selection that no longer exists after an edit is cleared from the inspector")
+
+// MARK: - Selecting several sections
+
+print("\nSelecting sections")
+// Four sections played in an order unlike their source order, so anything that orders
+// by source time, insertion or a Set's whim shows up as wrong.
+let pickA = TimelineSegment(start: 2, end: 3), pickB = TimelineSegment(start: 0, end: 0.5)
+let pickC = TimelineSegment(start: 1, end: 2), pickD = TimelineSegment(start: 0.5, end: 1)
+let pickTimeline = ClipTimeline(segments: [pickA, pickB, pickC, pickD])
+let shuffled = ClipTimeline(segments: [pickC, pickA, pickD, pickB])
+
+let ranged = SectionSelection.single(pickA.id).clicking(pickB.id, extend: true, toggle: false, in: shuffled)
+equal(ranged.ordered(in: shuffled).map(\.id), [pickA.id, pickD.id, pickB.id],
+      "⇧-click selects the range by timeline order, not by source or insertion order")
+equal(ranged.anchor, pickA.id, "and the anchor stays where the range began")
+let backwards = SectionSelection.single(pickD.id).clicking(pickC.id, extend: true, toggle: false, in: shuffled)
+equal(backwards.ordered(in: shuffled).map(\.id), [pickC.id, pickA.id, pickD.id], "a range can run backwards")
+equal(SectionSelection().clicking(pickC.id, extend: true, toggle: false, in: shuffled), .single(pickC.id),
+      "⇧-click with nothing selected selects just that section")
+equal(ranged.clicking(pickC.id, extend: false, toggle: false, in: shuffled), .single(pickC.id),
+      "a plain click selects one section again")
+
+let toggled = SectionSelection.single(pickA.id).clicking(pickC.id, extend: false, toggle: true, in: pickTimeline)
+check(toggled.ids == [pickA.id, pickC.id] && toggled.anchor == pickC.id, "⌘-click adds a section and anchors on it")
+let untoggled = toggled.clicking(pickC.id, extend: false, toggle: true, in: pickTimeline)
+check(untoggled.ids == [pickA.id] && untoggled.anchor == pickA.id,
+      "⌘-clicking it again removes it, handing the anchor to a section still selected")
+let emptied = untoggled.clicking(pickA.id, extend: false, toggle: true, in: pickTimeline)
+check(emptied.isEmpty && emptied.anchor == nil, "removing the last one leaves nothing selected")
+
+let everything = SectionSelection.all(in: pickTimeline, anchor: pickC.id)
+check(everything.count == 4 && everything.anchor == pickC.id, "select all keeps the anchor")
+let pruned = everything.keeping(ClipTimeline(segments: [pickA, pickB, pickD]))
+check(pruned.ids == [pickA.id, pickB.id, pickD.id] && pruned.anchor == pickA.id,
+      "sections an edit removed leave the selection, and so does the anchor")
+check(SectionSelection(.init(), anchor: pickA.id).anchor == nil, "an anchor is always one of the selected sections")
+
+// The editor: clicks, keys, and edits on the whole selection as one step.
+var pickItem = VideoItem(url: landscape)
+pickItem.info = info; pickItem.crop = info.fullFrame
+pickItem.segments = pickTimeline.segments
+let picking = AppModel(recoveryURL: nil)
+picking.restore(VideoProject(clips: [ProjectClip(pickItem)], settings: ExportSettings(), selection: pickItem.id))
+let pickTotal = picking.items[0].editedDuration
+picking.clickSegment(pickB.id, at: 1.2)
+check(picking.selectedSegmentID == pickB.id && abs(picking.previewTime - 1.2) < 0.0001,
+      "a plain click selects the section and moves the playhead")
+picking.clickSegment(pickD.id, at: 2.8, extend: true)
+equal(picking.sectionSelection.ordered(in: picking.items[0].timeline).map(\.id), [pickB.id, pickC.id, pickD.id],
+      "⇧-click in the editor extends the range")
+check(abs(picking.previewTime - 1.2) < 0.0001, "without moving the playhead")
+equal(picking.inspectorFocus, .section, "several sections show in the inspector")
+equal(picking.agentState().selection.sections, [pickB.id, pickC.id, pickD.id], "agents see every selected section, in order")
+equal(picking.agentState().selection.section, pickB.id, "and which one is the anchor")
+
+let speedSteps = picking.undoEntries.count
+picking.setSelectedSectionsSpeed(2)
+equal(picking.items[0].timeline.segments.map(\.speed), [1, 2, 2, 2], "a speed applies to every selected section")
+equal(picking.undoEntries.count, speedSteps + 1, "as one undo step")
+equal(picking.undoTitle, "Undo Change Speed of 3 Sections", "named for what it did")
+equal(picking.sectionSelection.count, 3, "and the sections stay selected")
+picking.undoEdit()
+equal(picking.items[0].timeline.segments.map(\.speed), [1, 1, 1, 1], "one undo restores every speed")
+equal(picking.sectionSelection.count, 3, "and the selection as it was")
+
+let deleteSteps = picking.undoEntries.count
+picking.deleteSegment()
+equal(picking.items[0].timeline.segments.map(\.id), [pickA.id], "delete removes every selected section")
+equal(picking.undoEntries.count, deleteSteps + 1, "as one undo step")
+equal(picking.undoTitle, "Undo Delete 3 Sections", "named for how many it removed")
+equal(picking.selectedSegmentID, pickA.id, "and selects what is left in their place")
+picking.undoEdit()
+equal(picking.items[0].timeline.segments.map(\.id), pickTimeline.segments.map(\.id), "one undo brings them all back")
+equal(picking.sectionSelection.count, 3, "selected as they were")
+
+picking.selectAllSegments()
+equal(picking.sectionSelection.count, 4, "⌘A selects every section")
+let refusedSteps = picking.undoEntries.count
+picking.deleteSegment()
+check(picking.items[0].timeline.segments.count == 4 && picking.undoEntries.count == refusedSteps,
+      "deleting every section is refused rather than leaving an empty recording")
+check(picking.statusMessage?.contains("Keep at least one section") == true, "and says why", picking.statusMessage ?? "")
+
+picking.selectedSegmentID = pickB.id
+picking.selectAdjacentSegment(1)
+equal(picking.selectedSegmentID, pickC.id, "⌘→ selects the next section")
+check(abs(picking.previewTime - picking.items[0].timeline.offset(of: pickC.id)) < 0.0001, "and moves the playhead to it")
+picking.selectAdjacentSegment(-1); picking.selectAdjacentSegment(-1); picking.selectAdjacentSegment(-1)
+equal(picking.selectedSegmentID, pickA.id, "⌘← stops at the first section rather than wrapping")
+picking.selectedSegmentID = nil
+picking.setPreviewFraction(2.7 / pickTotal)     // inside D, which plays from 2.5
+picking.selectAdjacentSegment(1)
+equal(picking.selectedSegmentID, pickD.id, "with nothing selected it picks the section under the playhead")
+
+picking.clickSegment(pickB.id, at: 1.1)
+picking.clickSegment(pickC.id, at: 1.6, extend: true)
+picking.movePlayheadToSelection(start: true)
+check(abs(picking.previewTime - 1) < 0.0001, "⇧Home moves the playhead to where the selection starts", "\(picking.previewTime)")
+picking.movePlayheadToSelection(start: false)
+check(abs(picking.previewTime - (2.5 - 1 / info.fps)) < 0.0001,
+      "⇧End to its last frame, inside the selection", "\(picking.previewTime)")
 
 // MARK: - Local agent bridge
 

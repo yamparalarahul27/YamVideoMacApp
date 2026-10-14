@@ -106,6 +106,8 @@ func run() async throws {
     clip.info = info; clip.crop = info.fullFrame
     model.restore(VideoProject(clips: [clip], settings: ExportSettings(), selection: clip.id))
     let id = model.items[0].id
+    model.setPreviewFraction(0.75)
+    model.splitAtPlayhead()
     model.setPreviewFraction(0.3)
     model.splitAtPlayhead()
     model.addZoom(at: CGPoint(x: info.width / 2, y: info.height / 2))
@@ -123,6 +125,11 @@ func run() async throws {
     model.selectedShotID = nil; model.selectedRegionID = nil
     model.selectedSegmentID = model.items[0].timeline.segments[0].id
     render(window(), size: size, to: output.appendingPathComponent("1-section.png"))
+
+    // Two of three sections, at different speeds.
+    let sections = model.items[0].timeline.segments
+    model.clickSegment(sections[1].id, at: model.items[0].timeline.offset(of: sections[1].id), extend: true)
+    render(window(), size: size, to: output.appendingPathComponent("1b-sections.png"))
 
     model.agentHighlight = nil
     model.editorMode = .zoom

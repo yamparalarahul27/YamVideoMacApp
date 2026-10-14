@@ -9,17 +9,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startAgentBridge()
+        // Keys the timeline answers to. Here rather than as menu shortcuts because a menu
+        // shortcut would take ⌘A, ⌘← and ⌘→ from a text field being typed in; this
+        // monitor steps aside whenever one has the focus.
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard NSApp.modalWindow == nil, NSApp.keyWindow?.sheetParent == nil,
-                  !(NSApp.keyWindow?.firstResponder is NSTextView),
-                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
+                  !(NSApp.keyWindow?.firstResponder is NSTextView) else { return event }
+            let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             let handled = MainActor.assumeIsolated {
                 let model = AppModel.shared
                 guard model.selectedItem?.info != nil, !model.isConverting else { return false }
-                switch event.keyCode {
-                case 49: model.togglePlayback()
-                case 123: model.stepFrame(-1)
-                case 124: model.stepFrame(1)
+                if modifiers.subtracting(.shift).isEmpty {
+                    switch event.keyCode {
+                    case 49: model.togglePlayback(); return true
+                    case 123: model.stepFrame(-1); return true
+                    case 124: model.stepFrame(1); return true
+                    default: break
+                    }
+                }
+                guard !model.isMovieMode else { return false }
+                switch (event.keyCode, modifiers) {
+                case (123, .command): model.selectAdjacentSegment(-1)
+                case (124, .command): model.selectAdjacentSegment(1)
+                case (115, .shift): model.movePlayheadToSelection(start: true)     // Home
+                case (119, .shift): model.movePlayheadToSelection(start: false)    // End
+                case (_, .command) where event.charactersIgnoringModifiers?.lowercased() == "a": model.selectAllSegments()
                 default: return false
                 }
                 return true
@@ -113,8 +127,9 @@ struct YamVideoApp: App {
                 Button("Split at Playhead") { model.splitAtPlayhead() }.keyboardShortcut("b")
                 Button("Trim Section Start to Playhead") { model.trimToPlayhead(start: true) }.keyboardShortcut("[", modifiers: [.command, .shift])
                 Button("Trim Section End to Playhead") { model.trimToPlayhead(start: false) }.keyboardShortcut("]", modifiers: [.command, .shift])
-                Button("Delete Selected Section") { model.deleteSegment() }.keyboardShortcut(.delete)
-                    .disabled(model.selectedSegmentID == nil)
+                Button(model.sectionSelection.count > 1 ? "Delete Selected Sections" : "Delete Selected Section") { model.deleteSegment() }
+                    .keyboardShortcut(.delete)
+                    .disabled(model.sectionSelection.isEmpty)
                 Divider()
                 Button("Zoom In") { model.zoomTimeline(in: true) }
                     .keyboardShortcut("=", modifiers: .command)
@@ -125,6 +140,8 @@ struct YamVideoApp: App {
                 Button("Zoom to Fit") { model.zoomTimelineToFit() }
                     .keyboardShortcut("z", modifiers: .shift)
                     .disabled(model.viewport.scale <= 1.0001)
+                Divider()
+                Toggle("Snapping", isOn: $model.timelineSnapping)
                 }.disabled(model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
             }
             CommandGroup(after: .newItem) {

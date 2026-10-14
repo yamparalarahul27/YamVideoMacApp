@@ -46,11 +46,23 @@ final class AppModel: ObservableObject {
     var zoomSuggestionTimeline: ClipTimeline?
     var zoomAnalysisTask: Task<Void, Never>?
     var movieExportTask: Task<Void, Never>?
-    @Published var selectedSegmentID: UUID? { didSet { focusInspector(selectedSegmentID, .section) } }
+    /// The selected sections of the selected recording.
+    @Published var sectionSelection = SectionSelection() { didSet { focusInspector(sectionSelection.anchor, .section) } }
+    /// One section: the anchor of the selection. Setting it selects that section alone.
+    var selectedSegmentID: UUID? {
+        get { sectionSelection.anchor }
+        set { sectionSelection = .single(newValue) }
+    }
     /// The slice of the edited timeline on screen. It lives here rather than in the
     /// timeline view so the zoom menu commands can reach it and so it survives the view
     /// being rebuilt; `syncViewport` keeps its length matching the selected clip.
     @Published var viewport = TimelineViewport(total: 0)
+    /// Whether timeline drags line up with the playhead, section boundaries and zoom
+    /// edges. A preference rather than an edit: it is remembered, never undone.
+    @Published var timelineSnapping = UserDefaults.standard.object(forKey: AppModel.snappingKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(timelineSnapping, forKey: Self.snappingKey) }
+    }
+    static let snappingKey = "timelineSnapping"
     @Published var projectURL: URL?
     @Published var hasUnsavedChanges = false
     @Published var undoEntries: [EditHistory] = []

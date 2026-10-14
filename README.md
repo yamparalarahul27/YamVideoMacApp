@@ -99,7 +99,8 @@ or understand which part of your content matters. Quiet footage may yield no sug
   all removed sections. Low volume is not necessarily silence, so review quiet speech
   and intentional pauses before applying.
 - **Change speed:** select a video section and choose **Speed**, from **0.25× to 4×**.
-  Split a section first to retime only part of it. Audio preserves pitch in native playback
+  With several sections selected, one choice sets them all as a single undo step; if any
+  is too short for that speed, none change. Split a section first to retime only part of it. Audio preserves pitch in native playback
   and export. Movies, waveforms and time labels follow the new duration. Zoom starts stay
   anchored to their source frames; their hold lengths remain in playback seconds and
   may be shortened or removed if they no longer fit.
@@ -112,9 +113,24 @@ or understand which part of your content matters. Quiet footage may yield no sug
 - **Trim:** drag a section's left/right handle, or select it and enter source seconds in
   **In / Out**. Changes snap to source frames. **⌘⇧[ / ⌘⇧]** trim the current section's
   start/end to the playhead. Hidden footage can be restored up to neighboring retained ranges.
-- **Delete:** select a section, then click the trash button or press **⌘⌫**. The gap closes
-  automatically. At least one section stays; remove the sidebar item to discard a recording.
+- **Select several sections:** **⇧-click** selects every section from the last one clicked
+  to this one, in the order they play. **⌘-click** adds or removes one, and **⌘A** selects
+  them all. Neither moves the playhead. **⌘← / ⌘→** select the previous or next section,
+  and **⇧Home / ⇧End** move the playhead to where the selection starts or to its last
+  frame. These keys leave text fields alone, so ⌘A still selects text while you type.
+  Trims and order are edited one section at a time.
+- **Delete:** select one or more sections, then click the trash button or press **⌘⌫**.
+  Several go as one undo step. The gap closes automatically. At least one section stays;
+  remove the sidebar item to discard a recording.
 - **Reorder:** drag a section onto another, or use the earlier/later arrow buttons.
+- **Snapping:** with **Snapping** on (the button above the timeline, or Timeline ▸
+  Snapping), dragged edges line up with the playhead, section boundaries, zoom edges and
+  the start and end of the timeline once they come within 8 points of one. An accent
+  line shows what an edge is holding to. It applies to trims, moving and resizing zooms,
+  and dragging the playhead. A trim snaps only to things over its own section, since
+  those are the frames it can cut at. Hold **⌥** while dragging to place freely. The
+  reach is fixed on screen, so zooming in weakens it until it disappears at frame level.
+  The setting is remembered.
 - **Arrange zooms:** use Zoom mode to add one at the playhead. Drag a cyan timeline block
   to move its start; drag its right handle to change the hold duration. Zooms stay inside
   the edited duration and cannot overlap. When cutting or reordering, their start frames
