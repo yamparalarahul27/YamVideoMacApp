@@ -1,7 +1,10 @@
 # Timeline navigation — research and implementation plan
 
-**Status:** Planned. Section 4 is approved for implementation; sections 5 and 6 are
-research notes held for later review.
+**Status (2026-10-13):** Partly implemented. Adaptive ruler (4.1), anchored zoom
+(4.2), and the HDR fixture correction have landed on `timeline-editing` at `98a6789`.
+Remaining navigation work is planned. [Local co-editing](local-coediting.md) now governs
+sequence, shared commands, schema versions and layout; historical findings below retain
+their original baseline. This documentation update implements no remaining features.
 **Research date:** 2026-09-06.
 **Baseline inspected:** `cd431a3` (published `main`, HDR tone mapping and burned-in
 subtitles) merged with the local timeline/movie/silence-removal workspace. Suite result
@@ -11,8 +14,8 @@ described in section 7, not a product defect.
 **Reference studied:** Wondershare Filmora's user guide (panel layout, timeline and
 track management, magnetic timeline, auto-ripple, split/trim, speed points, markers,
 selection tools, compound clips, keyboard shortcuts). Filmora is a general-purpose NLE;
-YamVideo is a screen-recording tool. This plan deliberately borrows Filmora's
-*navigation and selection* model and rejects most of its *structural* model. The
+YamVideo is a screen-recording tool. This study borrows Filmora's
+*navigation and selection* model and defers most of its *structural* model for this phase. The
 reasoning is in section 5.
 
 ## 1. What Filmora does
@@ -215,13 +218,17 @@ whenever sections are split, trimmed, reordered, deleted or retimed.
 - Markers draw as narrow flags in the ruler, not as a separate lane.
 - Six colours are enough; Filmora's eight is inventory, not utility.
 
-**This changes the project format.** Bump `VideoProject.version` and add the usual
+**This changes the project format.** Use the next schema version in the parent plan's
+migration registry (v3 is reserved for the shared document foundation, v4 for colour).
+Bump `VideoProject.version` and add the usual
 round-trip and rejection checks alongside the existing speed-edit version-2 tests.
 
 ### 4.5 Selection
 
-Widen `selectedSegmentID: UUID?` to an ordered `Set<UUID>` behind a computed
-single-selection accessor so existing call sites keep working.
+Widen `selectedSegmentID: UUID?` to a `Set<UUID>` behind a computed single-selection
+accessor so existing call sites keep working. Derive ordered selections from timeline
+order; `Set` has no intrinsic ordering. Route multi-selection changes through one shared
+transaction as specified in the local co-editing plan.
 
 - Click selects one section. `⇧`-click extends the range. `⌘`-click toggles one.
 - `⌘←` / `⌘→` select the previous and next section.
@@ -280,9 +287,9 @@ style — no UI harness:
 
 - **Multi-track video.** The export path builds one `concat` chain per clip. Layered
   tracks require compositing, a canvas model, per-track transforms and z-order — a
-  rewrite of `editedFilterGraph`, not an addition to it. Worth doing when there is a
-  concrete need (webcam picture-in-picture is the likely one); not worth doing to
-  resemble an NLE.
+  rewrite of `editedFilterGraph`, not an addition to it. The owner has since requested stacked video/blend modes. Retain this as a later
+  composition-model design gate under the local co-editing plan; it remains outside
+  navigation work.
 - **Magnetic timeline and auto-ripple toggles.** Meaningless in a gapless model. See
   section 2.
 - **Compound clips.** The Movie workspace already fills the composition role. Nesting
@@ -293,7 +300,7 @@ style — no UI harness:
 - **Keyframes and the graph editor.** Zoom shots already have eased push-ins. General
   keyframing is a much larger surface with no current demand.
 
-## 6. Held for review — layout
+## 6. Revised layout direction (2026-10-13)
 
 Filmora's clearest structural lesson is the **property panel**: the right-hand pane
 inspects the *selection*, and project-level export settings are separate. YamVideo
@@ -302,14 +309,14 @@ section properties into a 24-point control strip below the timeline
 (`TimelineView.sectionControls`), which cannot grow to hold marker, snapping or
 multi-selection state.
 
-Proposed for a later phase, not approved here: split the right pane into an **Inspector**
-tab (selected section or zoom shot: in, out, speed, duration, marker, crop, blur) and a
-**Export** tab (the current `SettingsPane`), with the tab following selection
-automatically. This subsumes `sectionControls` and gives sections 4.4 and 4.5 somewhere
-to put their controls. It should be decided before 4.4 lands, since marker editing needs
-a home.
+The coordinating plan now selects an always-available selection Inspector and a separate
+Export sheet, replacing the earlier Inspector/Export tab proposal. Put the active timeline
+across the bottom of the window, move `sectionControls` into the inspector, and include a
+beginner Colour section for Pocket 3 recordings. Finish this before adding marker/effect
+controls. Agent activity is a collapsible status surface; it does not replace the inspector.
+See [local co-editing](local-coediting.md) and [Pocket 3 colour](pocket-3-colour.md).
 
-## 7. Prerequisite defect
+## 7. Historical prerequisite defect — fixed in `23b0301`
 
 Two HDR checks fail at the baseline: "an HLG source is detected as HDR" and "HLG is
 named for the UI". This is a **test fixture defect, not a product defect**. The fixture

@@ -2,9 +2,12 @@
 
 **Status:** Planned only; implementation is paused pending the owner's review.
 **Scope confirmed by the owner:** Whole-frame blur for visual effects, with editable controls.
-**Planning date:** 2026-09-05.
+**Planning date:** 2026-09-05. **Reconciled:** 2026-10-13.
+**Coordinating plan:** [Local co-editing](local-coediting.md) takes precedence for
+implementation order, inspector layout, shared mutations and schema versioning. Colour
+normalization from the [Pocket 3 plan](pocket-3-colour.md) precedes creative blur.
 
-This PR adds this document only. It does not implement an effect or change the app.
+This is a documentation-only plan. It does not implement an effect or change the app.
 The defaults and interaction rules below are implementation proposals for review.
 
 **See also:** [`video-use-enhancements.md`](./video-use-enhancements.md) proposes amendments
@@ -14,16 +17,16 @@ approved change to this document.
 
 ## 1. Prerequisite and repository baseline
 
-The published `main` baseline inspected for this plan is `6cd0440`. It contains the
-original crop/area-blur/zoom editor and GIF/WebP export. The local editing workspace
-also contains completed but uncommitted timeline, native playback, project saving,
-movie assembly, waveform, silence-removal and section-speed work. Its last completed
-suite passed 326 checks; that is a prerequisite result, not validation of this feature.
+The original plan inspected main at `6cd0440`. The current implementation baseline is
+`timeline-editing` at `98a6789`, with timeline/native playback/project/movie/audio work now
+committed in `a07829c`, plus navigation improvements. Published main is `cd431a3`; it has
+HDR tone mapping, loudness normalization and subtitles. Integrate/review the editor branch
+before implementation. Old suite counts are historical, not validation of this feature.
 
-**Before implementation:** commit/review the existing editor work separately and merge
-it into the implementation branch. Reconcile the symbols below against that resulting
-commit. Do not silently include that existing work in this documentation PR. Several
-files listed below are local prerequisite files and are absent from published `main`.
+Then complete the shared command/undo foundation and Pocket 3 colour phase in the
+coordinating plan. Blur UI and agent operations must use that same dispatcher and gesture
+transactions; do not add a second history/coalescing system. Files formerly described as
+local prerequisites below are committed on the editor branch, but absent from main.
 
 The current area blur is `BlurRegion { id, rect }`, controlled by shared
 `ExportSettings.blurStyle` and `blurStrength`. Keep it intact. A visual blur with fades
@@ -73,6 +76,14 @@ unchanged and explain why. Trim changes clamp timing first, then proportionally 
 fades if their sum no longer fits. Editing one fade clamps it to duration minus the
 other fade. Amount/Mix zero and Enabled off are exact visual bypasses.
 
+### Shared local editing integration (2026-10-13)
+
+Expose add/update/remove/toggle effect commands by clip/effect ID through the parent
+plan's dispatcher. Use revision checks, dry-run, remap-loss reporting and one transaction
+per batch/gesture. Effects controls live in the selection inspector. An agent can request
+an effect preview, adjust amount/fades, and have the human continue on the same block.
+Do not steal the human's selection or playhead when an agent edits an effect.
+
 ## 3. Model, validation and project compatibility
 
 Add `Sources/VisualEffects.swift` with a dedicated value type:
@@ -97,11 +108,13 @@ and history snapshots then include effect changes through `ProjectClip` equality
 Add the selected effect ID to `AppModel` and `EditHistory`, restoring it only if the
 corresponding effect still exists.
 
-Use **project version 3** when any blur effect exists, including a disabled effect.
-Otherwise retain current version selection: v2 for speed edits, v1 for older edits.
-Accept versions 1, 2 and 3; older builds must reject v3 rather than silently export
-without its effects. Do not emit a nonempty effects field in v1/v2 output. On loading,
-reject nonempty effects in a file claiming v1/v2.
+Use the **next schema version after the colour phase**, assigned in the coordinating
+plan's migration registry. The earlier independent v3 reservation is superseded: v3
+belongs to document/agent foundations and v4 to colour. Migrate supported older files,
+but write the current schema; never downgrade an edited project merely because it has
+no active blur. Older builds must reject the effect-bearing schema rather than silently
+export without effects. Reject nonempty effect fields in a file claiming a schema that
+does not support them.
 
 Validation must reject nonfinite values, duplicate IDs, negative timing, an end beyond
 the edited duration, duration below one frame (with the existing numeric tolerance),
@@ -153,13 +166,16 @@ this feature.
 The shared order is:
 
 ```text
-source orientation → timeline cuts/speed → existing area obscuring → crop → zoom
+source orientation / input colour normalization → timeline cuts/speed
+→ per-recording colour adjustments → existing area obscuring → crop → zoom
 → whole-frame visual blur → output scaling / Movie fitting and letterbox
-→ GIF palette or final encoder
+→ subtitles / titles → GIF palette or final encoder
 ```
 
-Apply visual blur after crop and zoom, so it covers the visible recording. Movie bars
-remain solid; the effect blurs the recording, not empty space around it. With cropped
+Use the Pocket 3 plan's explicit colour contract and the addendum's renderer-parity
+checks; D-Log M correction and HLG/PQ tone mapping are distinct input paths. Keep
+subtitles after blur. Apply visual blur after crop and zoom, so it covers the visible
+recording. Movie bars remain solid; the effect blurs the recording, not empty space around it. With cropped
 frame size `(W, H)`, use `sigma = amount * max(W, H) / 1080`. Apply blur before final
 scaling so changing export resolution preserves its apparent strength.
 
@@ -226,7 +242,7 @@ at the published baseline described in section 1.
 | `Sources/VisualEffectsView.swift` — new | Inspector and accessible timeline block with both trim handles |
 | `Sources/Models.swift` | Effect collection on VideoItem; Effects case/label in EditorMode |
 | `Sources/AppModel.swift` | Selected effect ID; export argument propagation and displayed command parity |
-| `Sources/Timeline.swift` — local prerequisite | ProjectClip persistence, v3 validation and defaults |
+| `Sources/Timeline.swift` — local prerequisite | ProjectClip persistence, effect-schema validation and defaults |
 | `Sources/ProjectEditing.swift` — local prerequisite | Version selection, history selection, remap on every timeline edit |
 | `Sources/TimelineView.swift` — local prerequisite | Effects lane, selection and drag routing; adapt playhead height |
 | `Sources/ContentView.swift` | Effects mode/inspector, native preview activation, delete routing |
@@ -236,7 +252,7 @@ at the published baseline described in section 1.
 | `Sources/FFmpeg.swift` | Geometry/delivery separation, timed blend graph and all export entry points |
 | `Sources/Movie.swift` — local prerequisite | Insert effect before fit/pad; namespace labels and retain audio |
 | `Tests/main.swift`, `test.sh` | New tests; include non-UI helper source files in the CLI test build |
-| `README.md` | Explain visual blur controls, timing rules, v3 compatibility and preview limits |
+| `README.md` | Explain visual blur controls, timing rules, project compatibility and preview limits |
 
 `build.sh` already compiles `Sources/*.swift`; no Xcode project or new package dependency
 is needed. Avoid unrelated icon, encoder, audio-analysis or video-track changes.
@@ -244,9 +260,10 @@ is needed. Avoid unrelated icon, encoder, audio-analysis or video-track changes.
 ## 7. Implementation sequence and gates
 
 1. **Establish prerequisite baseline.** Review/merge the existing editor work and record
-   its commit. Run its existing suite before changing effect behavior.
+   its commit. Complete the coordinating plan's shared-command and colour prerequisites, then run
+   the existing suite before changing effect behaviour.
 2. **Model and math.** Add serialization, validation, boundary snapping, remapping and
-   weight tests. Gate: old projects round-trip, and v3 cannot be silently misread.
+   weight tests. Gate: old projects round-trip, and the new effect schema cannot be silently misread.
 3. **Renderer prototype.** Implement one effect in native and FFmpeg render paths before
    adding the inspector. Gate: timing, edge handling, fades and frame counts pass on
    real rendered fixtures. Calibrate the two blur kernels here; do not assume equal

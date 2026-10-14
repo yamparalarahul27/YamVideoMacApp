@@ -304,3 +304,12 @@ Sources/
 Tests/main.swift    end-to-end checks (./test.sh)
 Tools/makeicon.swift  draws the app icon at build time
 ```
+
+## Implementation plans
+
+The [local co-editing plan](docs/plans/local-coediting.md) coordinates the next editor
+work: a simpler selection inspector, shared local edits from Codex/Claude, and a
+[beginner Pocket 3 D-Log M colour workflow](docs/plans/pocket-3-colour.md). It reconciles
+the earlier [timeline navigation](docs/plans/timeline-navigation.md) and
+[whole-frame blur](docs/plans/full-frame-blur-effects.md) plans. These documents describe
+planned work, not features available in this build.

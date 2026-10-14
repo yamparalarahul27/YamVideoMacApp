@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>YamVideo · Editor concept</title>
+    <link rel="stylesheet" href="styles.css?v=3" />
+  </head>
+  <body>
+    <svg class="icon-library" aria-hidden="true">
+      <defs>
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path d="m9 5 11 7-11 7Z" />
+        </symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24">
+          <path d="M8 5v14M16 5v14" />
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24">
+          <path d="M12 5v14M5 12h14" />
+        </symbol>
+        <symbol id="i-back" viewBox="0 0 24 24">
+          <path d="M6 5v14m12-14L7 12l11 7Z" />
+        </symbol>
+        <symbol id="i-undo" viewBox="0 0 24 24">
+          <path
+            d="m8 5-5 5 5 5M3 10h11a6 6 0 0 1 0 12"
+            transform="translate(0 -2)"
+          />
+        </symbol>
+        <symbol id="i-redo" viewBox="0 0 24 24">
+          <path
+            d="m16 5 5 5-5 5M21 10H10a6 6 0 0 0 0 12"
+            transform="translate(0 -2)"
+          />
+        </symbol>
+        <symbol id="i-export" viewBox="0 0 24 24">
+          <path d="M5 14v6h14v-6M12 16V3m-5 5 5-5 5 5" />
+        </symbol>
+        <symbol id="i-scissors" viewBox="0 0 24 24">
+          <circle cx="6" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <path d="m8 8 12 12M8 16 20 4" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24">
+          <path d="m8 5 7 7-7 7" />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M18 6 6 18" />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4 10-10" />
+        </symbol>
+        <symbol id="i-image" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="16" rx="3" />
+          <circle cx="8" cy="9" r="1.5" />
+          <path d="m3 17 6-5 4 3 3-4 5 6" />
+        </symbol>
+        <symbol id="i-audio" viewBox="0 0 24 24">
+          <path d="M4 10v4m4-8v12m4-15v18m4-15v12m4-8v4" />
+        </symbol>
+        <symbol id="i-zoom" viewBox="0 0 24 24">
+          <circle cx="10" cy="10" r="6" />
+          <path d="m15 15 6 6M7 10h6m-3-3v6" />
+        </symbol>
+        <symbol id="i-blur" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 4v16M8 5v14M16 5v14" opacity=".5" />
+        </symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24">
+          <path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" />
+        </symbol>
+        <symbol id="i-spark" viewBox="0 0 24 24">
+          <path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z" />
+        </symbol>
+      </defs>
+    </svg>
+    <div class="concept-bar">
+      <span><span class="concept-dot"></span> Interactive concept</span
+      ><span>Sample artwork · Simulated edits</span
+      ><button id="guideBtn">What can I try?</button>
+    </div>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="window-dots" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </div>
+          <span class="brand-mark">y</span><strong>YamVideo</strong>
+        </div>
+        <div class="project-name">
+          Weekend on the coast
+          <span id="dirty" aria-label="Unsaved demo changes" hidden>•</span
+          ><span class="project-meta">Personal project</span>
+        </div>
+        <div class="history-controls">
+          <button
+            class="icon-button"
+            id="undoBtn"
+            aria-label="Undo"
+            title="Undo (⌘Z)"
+            disabled
+          >
+            <svg><use href="#i-undo" /></svg></button
+          ><button
+            class="icon-button"
+            id="redoBtn"
+            aria-label="Redo"
+            title="Redo (⌘⇧Z)"
+            disabled
+          >
+            <svg><use href="#i-redo" /></svg>
+          </button>
+        </div>
+        <button
+          class="agents-toggle"
+          id="agentsBtn"
+          aria-expanded="false"
+          aria-controls="agentsPanel"
+        >
+          <span class="online-dot"></span>Local agents
+          <span class="count">2</span>
+        </button>
+        <button class="primary" id="exportBtn">
+          <svg><use href="#i-export" /></svg>Export
+        </button>
+      </header>
+      <div class="workspace">
+        <aside class="media-panel" aria-label="Media library">
+          <div class="panel-heading">
+            <h2>Media</h2>
+            <span id="mediaCount">3 items</span>
+          </div>
+          <button class="add-media" id="addMediaBtn">
+            <svg><use href="#i-plus" /></svg>Add media</button
+          ><input id="fileInput" type="file" accept="video/*" multiple hidden />
+          <div class="media-list" id="mediaList"></div>
+          <div class="library-note">
+            <svg><use href="#i-image" /></svg>
+            <div>
+              Everything stays on your Mac.<span
+                >This concept uses illustrated scenes.</span
+              >
+            </div>
+          </div>
+          <div class="media-bottom">
+            <span>Project format</span
+            ><strong>16:9 <span>·</span> 30 fps</strong>
+          </div>
+        </aside>
+        <section class="viewer-panel" aria-label="Video preview">
+          <div class="viewer-heading">
+            <div>
+              <h1 id="viewerTitle">Morning coast</h1>
+              <span id="sourceBadge" class="source-badge"
+                >DJI Pocket 3 · D-Log M</span
+              >
+            </div>
+            <span class="viewer-fit">Fit <span>⌄</span></span>
+          </div>
+          <div class="viewer-stage">
+            <div id="picture" class="picture">
+              <img
+                class="scene graded"
+                id="gradedScene"
+                src="coast.svg"
+                alt="Illustrated coastal scene used to demonstrate the editor"
+              />
+              <div class="original-layer" id="originalLayer">
+                <img
+                  class="scene original"
+                  id="originalScene"
+                  src="coast.svg"
+                  alt=""
+                />
+              </div>
+              <div class="title-overlay" id="titleOverlay" hidden>
+                <small>A weekend away</small><strong>By the sea.</strong
+                ><span>October, 2026</span>
+              </div>
+              <div class="compare-label left" id="originalLabel" hidden>
+                Original
+              </div>
+              <div class="compare-label right" id="correctedLabel" hidden>
+                Corrected
+              </div>
+              <div class="compare-divider" id="compareDivider" hidden>
+                <span>‹ ›</span>
+              </div>
+              <input
+                id="compareRange"
+                class="compare-range"
+                type="range"
+                min="5"
+                max="95"
+                value="50"
+                aria-label="Before and after split position"
+                hidden
+              />
+              <div class="frame-label">Example scene</div>
+              <div class="zoom-badge" id="zoomBadge" hidden>1.5× push in</div>
+            </div>
+          </div>
+          <div class="viewer-controls">
+            <div class="segmented compare-modes" aria-label="Colour comparison">
+              <button data-view="corrected" class="active" aria-pressed="true">
+                Corrected</button
+              ><button data-view="original" aria-pressed="false">
+                Original</button
+              ><button data-view="compare" aria-pressed="false">Compare</button>
+            </div>
+            <span class="preview-note" id="previewNote"
+              >Natural colour applied</span
+            >
+          </div>
+          <div class="transport">
+            <button class="icon-button" id="startBtn" aria-label="Go to start">
+              <svg><use href="#i-back" /></svg></button
+            ><button
+              class="play-button"
+              id="playBtn"
+              aria-label="Play simulated preview"
+            >
+              <svg><use href="#i-play" /></svg></button
+            ><span class="timecode"
+              ><strong id="currentTime">00:05.20</strong><span>/</span
+              ><span id="totalTime">00:36.00</span></span
+            ><span class="transport-spacer"></span
+            ><span class="transport-help">Space to play</span>
+          </div>
+        </section>
+        <aside class="inspector" aria-label="Selection inspector">
+          <div class="panel-heading">
+            <h2>Inspector</h2>
+            <span class="selection-pill">Recording</span>
+          </div>
+          <div class="inspector-selection">
+            <span class="selection-swatch"></span
+            ><strong id="inspectorTitle">Morning coast</strong>
+          </div>
+          <div class="inspector-tabs" aria-label="Inspector sections">
+            <button data-tab="colour" class="active" aria-pressed="true">
+              Colour</button
+            ><button data-tab="edit" aria-pressed="false">Edit</button
+            ><button data-tab="effects" aria-pressed="false">Effects</button>
+          </div>
+          <div id="inspectorBody" class="inspector-body"></div>
+        </aside>
+      </div>
+      <section class="timeline" aria-label="Editing timeline">
+        <div class="timeline-toolbar">
+          <div class="segmented workspace-modes">
+            <button id="recordingBtn" class="active" aria-pressed="true">
+              Recording</button
+            ><button id="movieBtn" aria-pressed="false">Movie</button>
+          </div>
+          <span class="toolbar-separator"></span
+          ><button id="splitBtn">
+            <svg><use href="#i-scissors" /></svg>Split <kbd>⌘B</kbd></button
+          ><button
+            class="icon-button"
+            id="deleteBtn"
+            aria-label="Delete selected section"
+          >
+            <svg><use href="#i-trash" /></svg></button
+          ><span class="toolbar-spacer"></span
+          ><button id="snapBtn" aria-pressed="true" class="snap-button">
+            Snapping <span>On</span>
+          </button>
+          <div class="timeline-scale">
+            <span>−</span
+            ><input
+              id="timelineZoom"
+              aria-label="Timeline magnification"
+              type="range"
+              min="1"
+              max="3"
+              value="1"
+              step=".1"
+            /><span>+</span><button id="fitBtn">Fit</button>
+          </div>
+        </div>
+        <div class="timeline-body">
+          <div class="lane-labels">
+            <div class="ruler-label">Time</div>
+            <div class="video-label">
+              <svg><use href="#i-image" /></svg>Video
+            </div>
+            <div class="audio-label">
+              <svg><use href="#i-audio" /></svg>Audio
+            </div>
+            <div>
+              <svg><use href="#i-zoom" /></svg>Zooms
+            </div>
+            <div>
+              <svg><use href="#i-blur" /></svg>Effects
+            </div>
+          </div>
+          <div class="timeline-scroll" id="timelineScroll">
+            <div class="timeline-content" id="timelineContent">
+              <div class="ruler" id="ruler" aria-label="Seek timeline"></div>
+              <div class="video-lane" id="videoLane"></div>
+              <div class="audio-lane" id="audioLane">
+                <svg
+                  id="waveform"
+                  preserveAspectRatio="none"
+                  viewBox="0 0 1000 34"
+                  aria-label="Illustrative audio waveform"
+                ></svg>
+              </div>
+              <div class="effect-lane zoom-lane" id="zoomLane"></div>
+              <div class="effect-lane blur-lane" id="blurLane"></div>
+              <div class="playhead" id="playhead"><span></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <footer class="statusbar">
+        <span id="statusText">Demo project ready</span
+        ><span
+          >Original media is never changed
+          <span class="status-separator">|</span> Local editing concept</span
+        >
+      </footer>
+    </main>
+    <aside
+      class="agents-panel"
+      id="agentsPanel"
+      aria-label="Local agent activity"
+      hidden
+    >
+      <div class="panel-heading">
+        <h2>Editing together</h2>
+        <button
+          class="icon-button"
+          id="closeAgents"
+          aria-label="Close agent activity"
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <p class="agent-intro">
+        Your local sessions work on this timeline. Every edit can be undone.
+      </p>
+      <div class="agent-row">
+        <span class="agent-avatar codex">C</span>
+        <div><strong>Codex</strong><span>Local session · Demo</span></div>
+        <span class="agent-availability">Connected</span>
+      </div>
+      <div class="agent-row">
+        <span class="agent-avatar claude">C</span>
+        <div><strong>Claude</strong><span>Local session · Demo</span></div>
+        <span class="agent-availability">Connected</span>
+      </div>
+      <button id="pauseAgents" class="secondary full-width">
+        Pause agent edits
+      </button>
+      <h3>Activity</h3>
+      <div id="activityList" class="activity-list"></div>
+      <div class="demo-actions">
+        <span>Try the co-editing flow</span
+        ><button id="codexDemo">
+          <svg><use href="#i-zoom" /></svg>Codex: add a gentle zoom</button
+        ><button id="claudeDemo">
+          <svg><use href="#i-spark" /></svg>Claude: warm up the colour</button
+        ><button id="conflictDemo">Preview a conflicting edit</button>
+      </div>
+    </aside>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <dialog id="exportDialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <h2>Export video</h2>
+            <p>A copy, ready to share.</p>
+          </div>
+          <button class="icon-button" aria-label="Close export">
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <div class="export-summary">
+          <img src="coast.svg" alt="" />
+          <div>
+            <strong>Weekend on the coast</strong
+            ><span id="exportSummary">36 seconds · 1920 × 1080</span>
+          </div>
+        </div>
+        <label
+          >Export<select id="exportScope">
+            <option>Selected recording</option>
+            <option>Entire movie</option>
+            <option>All recordings separately</option>
+          </select></label
+        >
+        <div class="field-pair">
+          <label
+            >Format<select id="exportFormat">
+              <option>MP4 video</option>
+              <option>Animated GIF</option>
+              <option>Animated WebP</option>
+            </select></label
+          ><label
+            >Resolution<select>
+              <option>1080p</option>
+              <option>Original size</option>
+              <option>720p</option>
+            </select></label
+          >
+        </div>
+        <label
+          >Quality<select>
+            <option>High · Recommended</option>
+            <option>Smaller file</option>
+          </select></label
+        >
+        <div class="export-colour">
+          <svg><use href="#i-check" /></svg
+          ><span
+            >SDR Rec.709<strong>Includes your colour adjustments</strong></span
+          >
+        </div>
+        <p class="dialog-note">
+          Prototype only. This previews the export flow; it does not render a
+          video.
+        </p>
+        <div class="dialog-actions">
+          <button class="secondary" value="cancel">Cancel</button
+          ><button class="primary" type="button" id="exportDemo">
+            Preview export
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="guideDialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <h2>A calmer way to edit.</h2>
+            <p>Try the proposed YamVideo interface.</p>
+          </div>
+          <button class="icon-button" aria-label="Close guide">
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <ol class="guide-list">
+          <li>
+            <strong>Start with colour.</strong> Switch between Original and
+            Corrected, then drag the Compare divider or adjust the four sliders.
+          </li>
+          <li>
+            <strong>Make a cut.</strong> Click the timeline ruler to seek, then
+            Split. Select a section to change its speed in Edit.
+          </li>
+          <li>
+            <strong>Edit together.</strong> Open Local agents and try a Codex or
+            Claude edit. Undo it with the toolbar or ⌘Z.
+          </li>
+          <li>
+            <strong>Explore later effects.</strong> Add a timed blur from
+            Effects, then adjust its strength.
+          </li>
+          <li>
+            <strong>Finish in Export.</strong> Review the separate export sheet
+            without cluttering the inspector.
+          </li>
+        </ol>
+        <p class="dialog-note">
+          Illustrated sample frames, simulated playback and CSS colour changes.
+          No real media processing, LUT conversion or agent connection. Changes
+          reset on reload.
+        </p>
+        <button class="primary full-width">Explore the editor</button>
+      </form>
+    </dialog>
+    <script src="app.js?v=4"></script>
+  </body>
+</html>
