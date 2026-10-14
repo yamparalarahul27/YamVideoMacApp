@@ -1,6 +1,6 @@
 # Local co-editing and the simplified editor — implementation plan
 
-**Updated:** 2026-10-13. **Status:** Planning only; this change implements no app features.
+**Updated:** 2026-10-14. **Status:** Planning only; this change implements no app features.
 **Owner intent:** Edit videos in the native Mac app while Codex or Claude edits the same
 open project on the same Mac. The owner also needs beginner-friendly DJI Osmo Pocket 3
 colour correction. No cloud collaboration service is required.
@@ -253,6 +253,55 @@ Implement shared lane sizing before adding markers/effects. Keep viewport clippi
 adaptive ruler behaviour from `98a6789`; don't recreate the old wide-ZStack layout bug.
 Snapping uses the existing 8-point proposal. Store multi-selection as a `Set<UUID>` and
 derive order from the timeline; a Swift Set itself is not ordered.
+
+### Reviewable UI prototype
+
+![Desktop editor prototype with before/after colour comparison](../prototypes/editor/editor-preview.png)
+
+Open [the interactive HTML prototype](../prototypes/editor/index.html) in a browser.
+It is a self-contained design demonstration with local sample artwork and simulated
+editing; it does not connect to the app, agents, real footage, DJI LUTs or an encoder.
+Colour and blur previews illustrate control behaviour, not grading accuracy. The
+prototype includes planned later blur controls, labeled as such; phase order above
+still governs implementation.
+
+```text
++----------------------------------------------------------------------------+
+| YamVideo   Weekend on the coast      Undo / Redo     Local agents    Export  |
++--------------+-----------------------------------------+-------------------+
+| Media        | Morning coast                           | Inspector         |
+|              |                                         | Colour / Edit /   |
+| + Add media  |             Video viewer                | Effects           |
+|              |                                         |                   |
+| Morning coast|      Original / Corrected / Compare      | Recorded colour   |
+| Coffee stop  |                                         | Natural colour    |
+| Opening title|      Play       00:05 / 00:36            | Brightness        |
+|              |                                         | Warmth / Contrast |
+|              |                                         | Colour strength   |
++--------------+-----------------------------------------+-------------------+
+| Recording / Movie       Split      Snapping          Timeline zoom         |
+|              00:00       00:05       00:10       00:15       00:20           |
+| Video        [ section 1       ][ section 2             ][ section 3      ] |
+| Audio        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  |
+| Zooms                 [ Push in ]                                          |
+| Effects                         [ Full-frame blur ]  (later phase)         |
++----------------------------------------------------------------------------+
+| Project status                       Local agents: activity expands here   |
++----------------------------------------------------------------------------+
+```
+
+Design tokens: Graphite `#202126` canvas, Panel `#292b31`, Raised `#353841`, Text
+`#eceef3`, Secondary `#adb2bf`, and Iris `#a6afff` for selection and primary actions.
+Use the Mac system font for controls, tabular numerals for time, and clear 12–14 px
+labels. Neutral chrome keeps the image useful for colour judgement. Media and controls
+align left; the viewer sits centrally; the timeline aligns across the full window.
+
+Review of the design direction: avoid a dashboard/card layout or a chat-first editor.
+Use compact media rows, a continuous inspector and ordinary toolbar controls. Spend
+visual emphasis on the preview and selected timeline range. The activity panel is
+closed by default; protocol details remain absent from the editing surface. At narrow
+browser widths the prototype stacks panels for review; native layout acceptance remains
+at the Mac app's supported minimum size.
 
 ## 6. Persistence and current gaps that must be fixed first
 
