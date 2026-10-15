@@ -2,9 +2,9 @@
 
 **Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
 the app: data, commands, preview, timeline, inspector), G1 part 2 (export with graphics
-from the app), G2b (move and resize on the picture), the Publish panel and the thumbnail
-maker (G3) are implemented; see sections 8 to 13. Feature 5 of section 6a (the end screen
-layout) is next. Phase 5 of
+from the app), G2b (move and resize on the picture), the Publish panel, the thumbnail
+maker and the end screen layout (G3) are implemented; see sections 8 to 14. Feature 6 of
+section 6a (Auto edit options) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -126,6 +126,7 @@ graphics closer than 1.0 s share one panel, so the shade does not flash between 
 | `rule` | panel | kicker, number, title, subtitle?; points [{text, at}]; demo? (below) |
 | `checklist` | panel | kicker, title, footer; items [{text, at}] |
 | `endCard` | column | kicker, title, detail, button |
+| `endScreen` | screen | videos (1 or 2), side (left, right: the speaker's side), kicker, title (added in G3, section 14) |
 
 `rule.demo` is one of: `image` {image, flag? {text, box {x, y, w, h} in image fractions,
 at}}, `account` {rows [text], button, toast, tapAt, clearAt}, `flow` {nodes [{text, at}],
@@ -230,7 +231,7 @@ from docs/plans/graphics-track.md".
 2. **Move and resize on the picture (G2b).** Done 2026-10-15; section 11.
 3. **Publish panel with a YouTube preview (G3).** Done 2026-10-15; section 12.
 4. **Thumbnail maker (G3).** Done 2026-10-15; section 13.
-5. **End screen layout (G3).** Section 6.
+5. **End screen layout (G3).** Done 2026-10-15; section 14.
 6. **Auto edit options.** The choices Claude asked before the first edit become app
    settings stored in the project and readable by agents: transcript model (whisper.cpp
    large-v3-turbo q5 or base.en, downloaded only with consent) and language; cut style
@@ -503,3 +504,78 @@ from docs/plans/graphics-track.md".
   `Tools/Snapshot` cannot capture a web view in a sheet of its own.
 - **Open.** Real footage of a person (the tests use a drawn subject). Several looks or
   layouts to choose from, and saving a design as a look for the next video.
+
+## 14. End screen status (2026-10-15)
+
+- **YouTube's rules** (checked 2026-10-15 against YouTube's help page): end screen elements
+  show in the last 5 to 20 seconds of a video of at least 25 seconds, up to four of them:
+  a video (best for viewer, most recent upload or a chosen one), a playlist, Subscribe, a
+  channel, or a link (Partner Program only). YouTube's upload API cannot set them; they are
+  placed in YouTube Studio (Content → the video → Editor → End screen). YouTube does not
+  publish the elements' sizes; creators measure a video card at about 615×346 and the
+  circle at about 296 px on a 1920×1080 frame, which the layout uses, with a 10 px margin
+  round each drawn box.
+- **Data** (project version 10). A new kind, `endScreen`, in a new `screen` zone, with
+  `videos` (1 or 2), `side` (where the speaker sits) and the kicker and title beside the
+  circle. It must end where the video ends (within 0.05 s), last 5 to 20 s, and be the only
+  graphic on screen: column graphics end by its start, and panels must have slid away
+  (0.8 s after they end). It cannot be moved on the picture. Cuts keep it on the last
+  seconds, as long as it was, shortened when something now runs into it, or dropped and
+  reported when under 5 s. The publish details keep which element goes in each box
+  (`endScreen`: circle subscribe or channel, and per video box best for viewer, most
+  recent upload, a chosen video or a playlist, with its link and title).
+- **Layout** (`EndScreenLayout`, and `endLayout` in the engine with the same numbers): the
+  speaker's frame at half size (960×540 at 96, 102), the circle below it, the kicker and
+  title beside the circle, and the video cards in the other column (two stacked, or one),
+  mirrored when the speaker sits on the right.
+- **The move is native**, like the move aside: over 0.8 s (smoothstep) the picture shrinks
+  about its top-left corner into the frame, over the move aside's blurred, darker fill, and
+  stays there to the end. Core Image scales with Lanczos; the export cuts the end screen's
+  frames out of the video, gives each frame of the move its own `scale` (Lanczos) and
+  `overlay` place, and one place to the rest, with the same whole-pixel numbers
+  (`GraphicsMotion.screenPlacement`). The engine draws the light frame round the speaker
+  (an outer shadow only, so the picture stays clear), the boxes, and the text. In the app's
+  Preview and in composed previews each box says what goes in it; exports draw the boxes
+  only, since YouTube's elements cover them.
+- **App.** Inspector Graphics → **End Screen** (and Publish → **Add End Screen**) adds it
+  for the last 20 s, or as much of them as is clear. On the timeline it spans both rows and
+  only its start drags. The inspector has Video boxes (one, two) and Speaker (left,
+  right). Publish has an End Screen section with the choice for each box and the Studio
+  note. Warnings (never blocking): a video under 25 s, a chosen video or playlist without a
+  YouTube link, another channel without a name, choices without a layout.
+- **Export for YouTube** adds an END SCREEN section to the upload text (the note that the
+  upload API cannot set the elements, when it starts, and each element with its box in
+  words and as percentages of the frame) and `endScreen` to the JSON (times, the speaker's
+  frame, and each box in pixels and fractions, with `uploadAPICanSet: false`).
+- **Agents.** `addGraphic` with just `{"kind": "endScreen"}` places it; `updateGraphic`
+  with `start` keeps its end at the end; refusals say the window (5 to 20 s), that nothing
+  may show over it, and that it cannot be moved. `setPublishInfo` with `endScreen` (only
+  its keys given change). `state.clips[].endScreen` lists its times and boxes with the
+  chosen elements. A composed preview draws it with its labels.
+- **Found on the way.** ffmpeg's `concat` times a segment by its frames' mean spacing, so
+  a one-frame segment adds no time: the first export lost the 24 frames of the move.
+  From the end screen's first frame on, frames are now timed by their number on the
+  stage's frame grid; a test checks every frame keeps its place.
+- **Tests** (1091 checks): the layout (inside the picture, nothing overlapping, YouTube's
+  sizes, mirrored) and the engine laying it out the same; every rule and its message; a
+  new end screen's span; cuts before, inside and through it; the move's curve and whole-
+  pixel places; preview and export agreeing at six frames during and after the move (worst
+  offset 0 px, mean difference 2.95 of 255 in the scaled picture and 1.73 over the frame), the fill beside the frame, frames before it untouched, an
+  exported MP4 keeping every frame and its time; the engine's frame and boxes in an
+  offscreen drawing; the upload text and JSON; the issues; the version gate; and agents
+  adding it with just its kind, choosing elements, being refused, moving its start, and a
+  composed preview.
+- **Real use (this Mac).** A 32 s 1080p recording in an isolated app instance, driven only
+  through `yamvideoctl`: an agent added a name plate and an end screen with just its kind
+  (placed at 0:12 to 0:32), chose a specific video and Most recent upload for the two
+  cards, and was refused, with the reason, when it tried to move the end screen on the
+  picture, leave it 3 s, or add a link over it. Composed previews at 12.4 s (mid-move) and
+  14 s show the frame following the picture and the labelled boxes. Export for YouTube took
+  36 s and wrote the MP4 (960 frames over 32 s, evenly spaced, like the source), the upload
+  text with its END SCREEN section, and the JSON; the MP4's frames match the composed
+  previews, without the labels. `Tools/Snapshot` shows the timeline block, the inspector and
+  the Publish section.
+- **Open.** Placing the elements in YouTube Studio on a real upload, which also checks the
+  boxes against Studio's own element sizes (YouTube does not publish them). Real footage of
+  a person. Layouts with a link element (Partner Program) or four elements. Mid-move a
+  composed preview lists no box for the end screen until its boxes pop in.
