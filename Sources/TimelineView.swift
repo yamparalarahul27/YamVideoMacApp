@@ -21,11 +21,13 @@ struct TimelineView: View {
     private static let graphicsRowHeight = 18.0
     private static let graphicsHeight = graphicsRowHeight * 2 + 4
     private static let shortsHeight = 22.0
+    private static let layoutHeight = 22.0
     private static let laneSpacing = 5.0
 
     private var laneHeights: [Double] {
         var lanes = [Self.rulerHeight, Self.sectionHeight]
         if overview != nil { lanes.append(Self.waveformHeight) }
+        if item.screen != nil { lanes += [Self.layoutHeight, Self.zoomHeight] }
         lanes.append(Self.zoomHeight)
         lanes.append(Self.effectHeight)
         lanes.append(Self.graphicsHeight)
@@ -64,6 +66,10 @@ struct TimelineView: View {
                                 .frame(width: width, height: Self.waveformHeight)
                                 .contentShape(Rectangle())
                                 .gesture(scrubGesture(width: width, pixels: pixels))
+                        }
+                        if let screen = item.screen {
+                            layoutLane(screen, width: width, pixels: pixels)
+                            screenZoomLane(screen, width: width, pixels: pixels)
                         }
                         zoomLane(width: width, pixels: pixels)
                         effectLane(width: width, pixels: pixels)
@@ -314,6 +320,63 @@ struct TimelineView: View {
         .clipped()
     }
 
+    /// The screen's layouts over its base layout.
+    private func layoutLane(_ screen: ScreenTrack, width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(screen.layout.tint.opacity(0.1))
+            HStack(spacing: 3) {
+                Image(systemName: screen.layout.symbol)
+                Text(screen.spans.isEmpty ? "Layout · \(screen.layout.label) throughout · add a layout at the playhead in the inspector"
+                     : "\(screen.layout.label) elsewhere")
+            }
+            .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 4)
+            .allowsHitTesting(false)
+            ForEach(screen.spans.filter { viewport.intersects($0.start, $0.end) }) { span in
+                LayoutBlock(span: span, selected: model.selectedLayoutID == span.id,
+                            highlighted: model.agentHighlight?.elements.contains(span.id) == true, pixels: pixels,
+                            snapStart: { snapSpan(span.id, start: $0, duration: span.duration, pixels: pixels) },
+                            snapEdge: { snap($0, pixels: pixels, excluding: span.id) },
+                            endSnap: endSnap,
+                            onSelect: { model.selectLayout(span) },
+                            onMove: { start in model.updateLayout(span.id) { $0.end = start + $0.duration; $0.start = start } },
+                            onTrim: { start, end in model.updateLayout(span.id) { if let start { $0.start = start }; if let end { $0.end = end } } })
+                    .frame(height: Self.layoutHeight)
+                    .offset(x: viewport.x(of: span.start, across: width))
+            }
+        }
+        .frame(width: width, height: Self.layoutHeight, alignment: .leading)
+        .clipped()
+    }
+
+    /// Zooms on the screen recording, as the zoom lane shows the recording's own.
+    private func screenZoomLane(_ screen: ScreenTrack, width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(Color.indigo.opacity(0.08))
+            if screen.zooms.isEmpty {
+                Text("Screen zooms · add one in the inspector's Screen section")
+                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
+                    .allowsHitTesting(false)
+            }
+            ForEach(screen.zooms.filter { viewport.intersects($0.start, $0.end) }) { shot in
+                ZoomBlock(shot: shot, selected: model.selectedScreenZoomID == shot.id,
+                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
+                          snapStart: { snapSpan(shot.id, start: $0, duration: shot.duration, pixels: pixels) },
+                          snapEnd: { snap($0, pixels: pixels, excluding: shot.id) },
+                          endSnap: endSnap,
+                          onSelect: { model.selectScreenZoom(shot) },
+                          onMove: { model.setScreenZoomStart(shot.id, $0) },
+                          onResize: { model.setScreenZoomHold(shot.id, $0) },
+                          tint: .indigo, symbol: "macwindow")
+                    .frame(width: max(3, shot.duration * pixels), height: Self.zoomHeight)
+                    .offset(x: viewport.x(of: shot.start, across: width))
+            }
+        }
+        .frame(width: width, height: Self.zoomHeight, alignment: .leading)
+        .clipped()
+    }
+
     private func zoomLane(width: Double, pixels: Double) -> some View {
         let viewport = model.viewport
         return ZStack(alignment: .topLeading) {
@@ -543,21 +606,23 @@ private struct ZoomBlock: View {
     let onSelect: () -> Void
     let onMove: (Double) -> Void
     let onResize: (Double) -> Void
+    var tint = Color.cyan
+    var symbol = "plus.magnifyingglass"
     @State private var delta = 0.0
     @State private var resize = 0.0
 
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: 3) {
-                Image(systemName: "plus.magnifyingglass")
+                Image(systemName: symbol)
                 Text(shot.levelLabel).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .font(.system(size: 10, weight: .medium))
             .padding(.horizontal, 7)
             .frame(width: max(8, geo.size.width + resize), height: 28)
-            .background(Color.cyan.opacity(selected ? 0.45 : 0.23), in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.cyan.opacity(selected ? 1 : 0.5)))
+            .background(tint.opacity(selected ? 0.45 : 0.23), in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(tint.opacity(selected ? 1 : 0.5)))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.orange, lineWidth: 2.5)
                 .shadow(color: .orange.opacity(0.6), radius: 4)
                 .opacity(highlighted ? 1 : 0)
@@ -571,7 +636,7 @@ private struct ZoomBlock: View {
                     onSelect(); onMove(movedStart(value.translation.width)); delta = 0; endSnap()
                 })
             .overlay(alignment: .trailing) {
-                RoundedRectangle(cornerRadius: 2).fill(Color.cyan).frame(width: 5, height: 16).padding(.trailing, 3)
+                RoundedRectangle(cornerRadius: 2).fill(tint).frame(width: 5, height: 16).padding(.trailing, 3)
                     .contentShape(Rectangle())
                     .highPriorityGesture(DragGesture(minimumDistance: 1)
                         .onChanged { resize = (resizedEnd($0.translation.width) - shot.end) * pixels }

@@ -68,6 +68,16 @@ struct InspectorPane: View {
                 ShortInspector(item: item, info: info, short: short, index: index).id(short.id)
                 Divider()
             }
+        case .layout:
+            if let span = model.selectedLayout {
+                LayoutInspector(span: span).id(span.id)
+                Divider()
+            }
+        case .screenZoom:
+            if let shot = model.selectedScreenZoom {
+                ScreenZoomInspector(item: item, shot: shot).id(shot.id)
+                Divider()
+            }
         case .recording:
             EmptyView()
         }
@@ -334,6 +344,7 @@ private struct RecordingInspector: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            ScreenSection(item: item, info: info)
             frame
             blurAreas
             zooms

@@ -51,7 +51,7 @@ extension AgentCatalog {
         /// made-up ids, so a copied example is at least a valid command.
         func example(_ json: String) -> JSONValue {
             let ids = ["OTHER-CLIP-ID": "0", "SECOND-CLIP-ID": "2", "FIRST-CLIP-ID": "1", "CLIP-ID": "1", "SECTION-ID": "5",
-                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c", "SHORT-ID": "d"]
+                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c", "SHORT-ID": "d", "LAYOUT-ID": "9"]
             var text = json
             for (placeholder, digit) in ids.sorted(by: { $0.key.count > $1.key.count }) {
                 text = text.replacingOccurrences(of: placeholder, with: "00000000-0000-4000-8000-00000000000\(digit)")
@@ -272,6 +272,52 @@ extension AgentCatalog {
         add("removeShort", "shorts", "Remove a Short.", [clip, shortID],
             #"{"type": "removeShort", "clipID": "CLIP-ID", "shortID": "SHORT-ID"}"#)
 
+        // Screen + speaker
+        let layoutID = field("layoutID", "uuid", "A layout's id from state.clips[].screen.layouts[].id.")
+        let layoutKinds = "speaker (the speaker fills the frame), screen (the screen fills the frame, the speaker in a round bubble in a corner) or split (the speaker in a tall panel on the left, the screen on the right)"
+        let layoutKeys = "{start, end, layout}: start and end in edited-recording seconds, half-open; layouts on one recording may touch but not overlap. layout is \(layoutKinds). A change of layout eases over 0.4 s from its start."
+        add("setScreen", "screen", "Show a screen recording with this recording (the speaker). The speaker stays the master: its audio, sections and edits drive both pictures, and every cut cuts the screen at the same moment. A first screen starts in the screen layout with the bubble on the face Apple Vision finds. Replacing the file keeps the layouts. state.clips[].screen shows it, with covered: the edited times where the screen file has footage (outside them its first or last frame holds).",
+            [clip, field("path", "string", "A local video file: the screen recording. It is probed first; it may not be rotated or HDR."),
+             field("offset", "number", "The screen recording's time at this recording's source time 0: screen time = source time + offset. Find it from a moment you can see in both, such as a click the speaker names. Default 0, or the current offset when replacing.", required: false, unit: "seconds")],
+            #"{"type": "setScreen", "clipID": "CLIP-ID", "path": "~/Movies/Screen Recording.mov", "offset": 142.5}"#)
+        add("updateScreen", "screen", "Change the screen: give only the keys to change.",
+            [clip, field("screen", "object", "Keys: offset (seconds), crop ({x, y, width, height} in the screen recording's pixels, \"border\" to cut away a dark border round a recorded window, or null for all of it), layout (the base layout, used wherever no layout span says otherwise: \(layoutKinds)), bubble ({corner: topLeft, topRight, bottomLeft or bottomRight; size: 0.15 to 0.5, the bubble's diameter as a share of the frame's height; face: {x, y} in this recording's source pixels, \"speaker\" to find it with Apple Vision, or null for the middle}).")],
+            #"{"type": "updateScreen", "clipID": "CLIP-ID", "screen": {"offset": 142.6, "crop": {"x": 0, "y": 88, "width": 3248, "height": 1920}, "bubble": {"corner": "bottomRight", "size": 0.3, "face": "speaker"}}}"#)
+        add("removeScreen", "screen", "Remove the screen recording and its layouts.", [clip],
+            #"{"type": "removeScreen", "clipID": "CLIP-ID"}"#)
+        add("addLayout", "screen", "Give part of the recording a layout of its own. Its id is in createdIDs. Layouts follow the footage they start on through cuts.",
+            [clip, field("layout", "object", layoutKeys + " Also id, to choose the new layout's id."),
+             field("layoutID", "uuid", "The new layout's id, when you choose it.", required: false)],
+            #"{"type": "addLayout", "clipID": "CLIP-ID", "layout": {"start": 0, "end": 28.5, "layout": "speaker"}}"#)
+        add("updateLayout", "screen", "Change a layout. Give only the keys to change; moving start alone keeps the length.",
+            [clip, layoutID, field("layout", "object", layoutKeys)],
+            #"{"type": "updateLayout", "clipID": "CLIP-ID", "layoutID": "LAYOUT-ID", "layout": {"layout": "split"}}"#)
+        add("removeLayout", "screen", "Remove a layout; the base layout shows there again.", [clip, layoutID],
+            #"{"type": "removeLayout", "clipID": "CLIP-ID", "layoutID": "LAYOUT-ID"}"#)
+        let zoomFields = "start (edited-recording seconds, when the ease in begins), hold (seconds at full zoom, default 2, at least 0.2), level (1 to 10, default 2) and target ({x, y} in the screen recording's pixels, as state.clips[].screen.media sizes it)"
+        add("addScreenZoom", "screen", "A push-in on the screen, to make small text readable: it eases in over 0.5 s, holds, and eases out. The screen's stream keeps up to the recording's own detail for it. Its id is in createdIDs. Screen zooms follow their footage through cuts; analyze with kind screenZooms suggests some.",
+            [clip, field("start", "number", "When the ease in begins.", unit: editedSeconds),
+             field("target", "point", "Where to zoom, in the screen recording's pixels."),
+             field("hold", "number", "Seconds at full zoom.", required: false, unit: "seconds", range: 0.2...30, default: .number(2)),
+             field("level", "number", "Magnification.", required: false, range: 1...10, default: .number(2)),
+             field("zoomID", "uuid", "The new zoom's id, when you choose it.", required: false)],
+            #"{"type": "addScreenZoom", "clipID": "CLIP-ID", "start": 48.0, "hold": 3, "level": 2, "target": {"x": 1700, "y": 160}}"#)
+        add("updateScreenZoom", "screen", "Change a screen zoom; only the fields given change.",
+            [clip, field("zoomID", "uuid", "A screen zoom's id from state.clips[].screen.zooms[].id."),
+             field("start", "number", "When the ease in begins.", required: false, unit: editedSeconds),
+             field("hold", "number", "Seconds at full zoom.", required: false, unit: "seconds"),
+             field("level", "number", "Magnification.", required: false, range: 1...10),
+             field("target", "point", "Where to zoom, in the screen recording's pixels.", required: false)],
+            #"{"type": "updateScreenZoom", "clipID": "CLIP-ID", "zoomID": "ZOOM-ID", "level": 3}"#)
+        add("removeScreenZoom", "screen", "Remove a screen zoom.", [clip, field("zoomID", "uuid", "A screen zoom's id.")],
+            #"{"type": "removeScreenZoom", "clipID": "CLIP-ID", "zoomID": "ZOOM-ID"}"#)
+        add("replaceScreenZooms", "screen", "Every screen zoom at once.",
+            [clip, field("zooms", "array", "The zooms, each with " + zoomFields + "; they may not overlap.")],
+            #"{"type": "replaceScreenZooms", "clipID": "CLIP-ID", "zooms": [{"start": 48.0, "hold": 3, "level": 2, "target": {"x": 1700, "y": 160}}]}"#)
+        add("replaceLayouts", "screen", "Every layout at once, as a plan from the transcript gives them: for example speaker for the intro and the outro, split where the speaker explains, and the base screen layout elsewhere.",
+            [clip, field("layouts", "array", "The layouts, each " + layoutKeys)],
+            #"{"type": "replaceLayouts", "clipID": "CLIP-ID", "layouts": [{"start": 0, "end": 30.2, "layout": "speaker"}, {"start": 512, "end": 531, "layout": "speaker"}]}"#)
+
         add("addMedia", "project", "Add recordings; each is probed first. New ids are in createdIDs.",
             [field("paths", "string[]", "Local video files.")], #"{"type": "addMedia", "paths": ["~/Movies/take2.mov"]}"#)
         add("removeMedia", "project", "Remove a recording from the project (the file is untouched).", [clip],
@@ -307,7 +353,7 @@ extension AgentCatalog {
             Method(method: "redo", summary: "Redo it.", fields: session + [
                 field("transactionID", "uuid", "From undo's result."), field("expectedRevision", "integer", "The revision you read.")]),
             Method(method: "analyze", summary: "Propose cuts or zooms as a job; applies nothing. silence: pauses (threshold, minimum, padding as in the silence review). autoEdit: the cuts the project's cut style makes, pauses and stumbles from the transcript, each with its reasons, plus the captions and audio settings an auto edit would set.", fields: session + [
-                field("clip", "uuid", "The recording."), field("kind", "string", "What to look for.", values: ["silence", "zooms", "autoEdit"]),
+                field("clip", "uuid", "The recording."), field("kind", "string", "What to look for. screenZooms: zooms on the recording's screen recording, from local activity in the part the edit shows, timed on the edited recording, with targets in the screen recording's pixels.", values: ["silence", "zooms", "screenZooms", "autoEdit"]),
                 field("style", "string", "For autoEdit: a cut style other than the project's.", required: false, values: CutStyle.allCases.map(\.rawValue))]),
             Method(method: "transcribe", summary: "Transcribe a recording on this Mac with whisper.cpp, as a job with progress; the words land as one undo step (Transcribe). state.autoEdit says whether whisper is installed and which models are downloaded; only the owner can download a model.", fields: session + [
                 field("clip", "uuid", "The recording."),
@@ -337,6 +383,7 @@ extension AgentCatalog {
                 field("zoom", "uuid", "A zoom.", required: false), field("effect", "uuid", "A blur effect.", required: false),
                 field("marker", "uuid", "A marker.", required: false), field("graphic", "uuid", "A graphic.", required: false),
                 field("short", "uuid", "A Short: selects it and shows it in the Short viewer; time is then seconds into it.", required: false),
+                field("layout", "uuid", "A screen layout: selects it and moves the playhead to it.", required: false),
                 field("time", "number", "A time.", required: false, unit: editedSeconds), timeSpace]),
         ]
 
@@ -347,7 +394,7 @@ extension AgentCatalog {
                 "Rectangles are {x, y, width, height} and points {x, y} in source pixels with the origin at the top left of the displayed (rotation-applied) frame.",
                 "Examples use made-up ids (00000000-…); use real ids from state.",
                 "Commands in one apply all see the state you read, not each other's results. To refer to something you add in the same request, choose its id yourself (areaID, zoomID, effectID, markerID).",
-                "Effects, zooms and markers follow the footage they are on: cutting that footage removes them (apply's result lists removedZooms, removedEffects and removedMarkers; undo restores them).",
+                "Effects, zooms, markers and screen layouts follow the footage they are on: cutting that footage removes them (apply's result lists removedZooms, removedEffects, removedMarkers and removedLayouts; undo restores them).",
                 "The owner edits too. Every apply names the revision you read; revision_conflict means read state again and re-plan, not retry blindly. agents_paused means the owner has paused agents.",
             ],
             workflow: [
@@ -357,6 +404,7 @@ extension AgentCatalog {
                 "Apply for real with a label the owner will understand in the Undo menu.",
                 "Look at the result with preview (composed: true to see effects and zooms; short to see a Short).",
                 "For a YouTube Short from a long recording: addShort on its best minute or two (window: \"speaker\"), give it its own title, check it with preview and short at a few times, then export with short and youtube.",
+                "For a walkthrough with a separate screen recording: setScreen on the speaker's recording with the offset that syncs them (check with preview composed at a moment both show, such as a click), cut the speaker as usual, then replaceLayouts from the transcript (speaker for the intro and the outro, split while the speaker explains, the screen layout while the screen shows the point).",
                 "Undo your own step by transactionID if it is not right; reveal to show the owner what you did.",
             ],
             commands: commands, methods: methods)

@@ -33,7 +33,7 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
                                                  transcribe if needed, cut, set captions and loudness
   yamvideoctl cancel JOB
-  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--short ID] [--time SECONDS] [--movie]
+  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--short ID] [--layout ID] [--time SECONDS] [--movie]
   yamvideoctl request --file REQUEST.json        send a raw protocol request
 
 EDITS.json is a list of commands, or an object with "commands" and optionally
@@ -313,6 +313,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let marker = arguments.values["marker"] { request["marker"] = marker }
         if let graphic = arguments.values["graphic"] { request["graphic"] = graphic }
         if let short = arguments.values["short"] { request["short"] = short }
+        if let layout = arguments.values["layout"] { request["layout"] = layout }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }
     case "request":

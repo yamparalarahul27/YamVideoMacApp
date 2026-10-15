@@ -166,7 +166,7 @@ extension FFmpeg {
     /// The fill behind a moved picture, on 10-bit 4:4:4 frames: the frame grown by
     /// `fillScale` and cut back to the frame, at quarter size, blurred, darkened and
     /// desaturated by `gain`, then brought back up.
-    private static func fillChain(width w: Int, height h: Int, gain: Double, tags: FrameTags) -> String {
+    static func fillChain(width w: Int, height h: Int, gain: Double, tags: FrameTags) -> String {
         let unit = GraphicsMotion.unit(CGSize(width: w, height: h))
         let black = tags.fullRange ? 0 : 64
         let quarter = (w: Int((Double(w) / 4).rounded()), h: Int((Double(h) / 4).rounded()))

@@ -394,6 +394,7 @@ enum FFmpeg {
         strength: Double,
         tail: [String],
         effects: EffectStage? = nil,
+        layout: EffectStage? = nil,
         delivery: [String] = [],
         move: EffectStage? = nil,
         overlays: EffectStage? = nil,
@@ -402,11 +403,12 @@ enum FFmpeg {
         enum Step { case filters([String]), stage(EffectStage, input: String, output: String) }
         var steps: [Step] = []
         if let effects { steps.append(.stage(effects, input: "fxin", output: "fxout")) }
+        if let layout { steps.append(.stage(layout, input: "lyin", output: "lyout")) }
         if let move { steps.append(.stage(move, input: "mvin", output: "mvout")) }
         steps.append(.filters(delivery))
         if let overlays { steps.append(.stage(overlays, input: "gfin", output: "gfout")) }
         steps.append(.filters(captions))
-        guard effects != nil || move != nil || overlays != nil else {
+        guard effects != nil || layout != nil || move != nil || overlays != nil else {
             return baseGraph(head: head, regions: regions, style: style, strength: strength, tail: tail + delivery + captions)
         }
         var parts: [String] = []
@@ -518,7 +520,8 @@ enum FFmpeg {
         shots: [ZoomShot],
         frame: CGSize,
         cropOrigin: CGPoint,
-        fpsExpression: String
+        fpsExpression: String,
+        output: CGSize? = nil
     ) -> String? {
         let active = shots.filter { $0.level > 1 && $0.hold >= 0 }
         guard !active.isEmpty, frame.width > 0, frame.height > 0 else { return nil }
@@ -542,8 +545,9 @@ enum FFmpeg {
         let x = "max(0,min((\(centreX.joined(separator: "+")))-iw/(2*zoom),iw-iw/zoom))"
         let y = "max(0,min((\(centreY.joined(separator: "+")))-ih/(2*zoom),ih-ih/zoom))"
 
+        let size = output ?? frame
         return "zoompan=z='\(z)':x='\(x)':y='\(y)':d=1"
-            + ":s=\(Int(frame.width))x\(Int(frame.height)):fps=\(fpsExpression)"
+            + ":s=\(Int(size.width))x\(Int(size.height)):fps=\(fpsExpression)"
     }
 
     // MARK: - Subtitles
@@ -806,21 +810,39 @@ enum FFmpeg {
 
     /// Assemble source ranges first so zoom times describe the edited timeline. Audio
     /// is cut with the exact same ranges, with silence padding for a short source track.
+    ///
+    /// With a `screen` (its stream on the speaker's frame grid, `ScreenLayer`), the screen
+    /// rides under the speaker through the cuts, stacked in one frame, so both lose exactly
+    /// the same frames; after the concat they part again and the screen goes on as `[scrv]`.
     static func editedFilterGraph(
         head: [String] = [],
         segments: [TimelineSegment]?, audio: Bool,
         regions: [CGRect], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30",
-        effects effectStage: EffectStage? = nil, delivery: [String] = [],
+        effects effectStage: EffectStage? = nil, screen: ScreenLayer? = nil, delivery: [String] = [],
         move: EffectStage? = nil, overlays: EffectStage? = nil, captions: [String] = []
     ) -> FilterGraph? {
         // With segments the head runs after the concat rather than before the split: tone
         // mapping is per-frame, so the result is identical and fewer frames pass through it.
         let effects = filterGraph(head: head, regions: regions, style: style, strength: strength, tail: tail,
-                                  effects: effectStage, delivery: delivery, move: move, overlays: overlays, captions: captions)
-        guard let segments, !segments.isEmpty else { return effects }
+                                  effects: effectStage, layout: screen?.stage, delivery: delivery, move: move, overlays: overlays, captions: captions)
+        guard let segments, !segments.isEmpty else {
+            guard let screen, let effects else { return effects }
+            return FilterGraph(spec: (screen.head + ["[scrh]null[scrv]", effects.spec]).joined(separator: ";"), isComplex: true, outputLabel: effects.outputLabel)
+        }
         var parts: [String] = []
         let count = segments.count
-        parts.append("[0:v]split=\(count)" + segments.indices.map { "[sv\($0)]" }.joined())
+        if let screen {
+            // One frame as wide as the wider of the two: a zoomed screen's stream can be wider
+            // than the speaker.
+            let width = max(Int(screen.sourceSize.width), Int(screen.size.width))
+            let widen = width > Int(screen.sourceSize.width) ? ",pad=\(width):\(Int(screen.sourceSize.height)):0:0" : ""
+            parts += screen.head
+            parts.append("[0:v]format=yuv420p10le,setsar=1\(widen)[stks]")
+            parts.append("[scrh]format=yuv420p10le,setsar=1,pad=\(width):\(Int(screen.size.height)):0:0[stkc]")
+            parts.append("[stks][stkc]vstack=inputs=2:shortest=1,split=\(count)" + segments.indices.map { "[sv\($0)]" }.joined())
+        } else {
+            parts.append("[0:v]split=\(count)" + segments.indices.map { "[sv\($0)]" }.joined())
+        }
         if audio {
             parts.append("[0:a:0]aresample=async=1:first_pts=0,apad,asplit=\(count)" + segments.indices.map { "[sa\($0)]" }.joined())
         }
@@ -845,7 +867,13 @@ enum FFmpeg {
             }
         }
         let inputs = segments.indices.map { audio ? "[tv\($0)][ta\($0)]" : "[tv\($0)]" }.joined()
-        parts.append(inputs + "concat=n=\(count):v=1:a=\(audio ? 1 : 0)[timelinev]" + (audio ? "[timelinea]" : ""))
+        parts.append(inputs + "concat=n=\(count):v=1:a=\(audio ? 1 : 0)[\(screen == nil ? "timelinev" : "timelinestk")]" + (audio ? "[timelinea]" : ""))
+        if let screen {
+            let height = Int(screen.sourceSize.height)
+            parts.append("[timelinestk]split=2[stka][stkb]")
+            parts.append("[stka]crop=\(Int(screen.sourceSize.width)):\(height):0:0[timelinev]")
+            parts.append("[stkb]crop=\(Int(screen.size.width)):\(Int(screen.size.height)):0:\(height)[scrv]")
+        }
         let label: String
         if let effects {
             if effects.isComplex {
@@ -888,19 +916,28 @@ enum FFmpeg {
         effects: [VideoBlurEffect] = [],
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
-        captionsASS: URL? = nil
+        captionsASS: URL? = nil,
+        screen: ScreenTrack? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
         let stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
                                  settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS)
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
+        // The screen recording comes after the palette, so the palette stays input 1.
+        let screenInput = palette == nil ? 1 : 2
+        let layer = canvas != nil ? nil : screen.map {
+            screenLayer($0, info: info, crop: cropRect, segments: segments, rate: stages.rate, rateExpression: stages.rateExpression,
+                        input: screenInput, tags: FrameTags(info: info, converted: !head.isEmpty || effectStage != nil),
+                        endScreen: graphics?.endScreen?.start)
+        }
         let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
-                                 converted: !head.isEmpty || effectStage != nil, canvas: canvas)
+                                 converted: !head.isEmpty || effectStage != nil || layer != nil, canvas: canvas)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
-        // The graphics come after the palette, so it stays input 1.
+        if let screen, let layer { args += layer.input(screen.url) }
+        // The graphics come after the palette and the screen.
         args += graphicsInputs(drawn.jobs)
 
         var graph = editedFilterGraph(
@@ -910,8 +947,8 @@ enum FFmpeg {
             style: settings.blurStyle,
             strength: settings.blurStrength,
             tail: stages.geometry, fpsExpression: info.fpsExpression,
-            effects: effectStage, delivery: stages.delivery,
-            move: drawn.move, overlays: drawn.overlays(firstInput: palette == nil ? 1 : 2), captions: stages.captions
+            effects: effectStage, screen: layer, delivery: stages.delivery,
+            move: drawn.move, overlays: drawn.overlays(firstInput: screenInput + (layer == nil ? 0 : 1)), captions: stages.captions
         )
 
         var loudnessFilter: String?
@@ -961,7 +998,7 @@ enum FFmpeg {
             // The frames are Rec.709 now. Saying so matters: without these the muxer
             // copies the source's HDR tags onto SDR pixels and players stretch them back,
             // and a D-Log M file's own tags no longer describe the corrected picture.
-            if !head.isEmpty || tagRec709 || effectStage != nil {
+            if !head.isEmpty || tagRec709 || effectStage != nil || layer != nil {
                 args += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             }
 
@@ -1032,7 +1069,8 @@ enum FFmpeg {
         effects: [VideoBlurEffect] = [],
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
-        captionsASS: URL? = nil
+        captionsASS: URL? = nil,
+        screen: ScreenTrack? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
@@ -1044,10 +1082,17 @@ enum FFmpeg {
         // actually looks at. A still background can afford to band a little.
         stages.captions.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
+        let layer = canvas != nil ? nil : screen.map {
+            screenLayer($0, info: info, crop: cropRect, segments: segments, rate: stages.rate, rateExpression: stages.rateExpression,
+                        input: 1, tags: FrameTags(info: info, converted: !head.isEmpty || effectStage != nil),
+                        endScreen: graphics?.endScreen?.start)
+        }
         let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
-                                 converted: !head.isEmpty || effectStage != nil, canvas: canvas)
+                                 converted: !head.isEmpty || effectStage != nil || layer != nil, canvas: canvas)
 
-        var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path] + graphicsInputs(drawn.jobs)
+        var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
+        if let screen, let layer { args += layer.input(screen.url) }
+        args += graphicsInputs(drawn.jobs)
         args += mapped(
             editedFilterGraph(
                 head: head,
@@ -1056,8 +1101,8 @@ enum FFmpeg {
                 style: settings.blurStyle,
                 strength: settings.blurStrength,
                 tail: stages.geometry, fpsExpression: info.fpsExpression,
-                effects: effectStage, delivery: stages.delivery,
-                move: drawn.move, overlays: drawn.overlays(firstInput: 1), captions: stages.captions
+                effects: effectStage, screen: layer, delivery: stages.delivery,
+                move: drawn.move, overlays: drawn.overlays(firstInput: layer == nil ? 1 : 2), captions: stages.captions
             ),
             audio: false
         )
@@ -1146,7 +1191,8 @@ enum FFmpeg {
         effects: [VideoBlurEffect] = [],
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
-        captionsASS: URL? = nil
+        captionsASS: URL? = nil,
+        screen: ScreenTrack? = nil
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
@@ -1158,14 +1204,37 @@ enum FFmpeg {
                                              crop: crop, regions: regions,
                                              zoomShots: zoomShots, segments: segments,
                                              settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                             graphics: graphics, canvas: canvas, captionsASS: captionsASS))
+                                             graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
                                         segments: segments, settings: settings,
                                         subtitles: subtitles, palette: palette, color: color, effects: effects,
-                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS))
+                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen))
         return commands
+    }
+
+    /// A filter graph longer than this goes to a file. A screen layout's graph grows with
+    /// each change of layout, and macOS limits a command's arguments to 1 MB in all.
+    static let inlineGraphLimit = 120_000
+
+    /// `args` with a long `-filter_complex` graph written to a file and read with
+    /// `-/filter_complex` (ffmpeg 7 and later). The file is named by its contents, so the
+    /// command is the same each time for the same graph.
+    static func spilledGraph(_ args: [String]) throws -> [String] {
+        guard let index = args.firstIndex(of: "-filter_complex"), index + 1 < args.count,
+              args[index + 1].utf8.count > inlineGraphLimit else { return args }
+        let data = Data(args[index + 1].utf8)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("YamVideo-graphs", isDirectory: true)
+        let file = folder.appendingPathComponent("\(ColorCube.sha256(data)).txt")
+        if (try? Data(contentsOf: file)) != data {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: file, options: .atomic)
+        }
+        var spilled = args
+        spilled[index] = "-/filter_complex"
+        spilled[index + 1] = file.path
+        return spilled
     }
 
     /// Output size after applying the long-side limit. Nil when no rescale is needed.
@@ -1194,6 +1263,7 @@ enum FFmpeg {
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
+        screen: ScreenTrack? = nil,
         drawGraphics: ((GraphicsRender.Job, _ page: URL, _ frames: URL) async throws -> Void)? = nil,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -1204,6 +1274,7 @@ enum FFmpeg {
         if let problem = color.problem { throw FFmpegError(message: problem) }
         if let problem = effectProblem(effects, info: info, settings: settings) { throw FFmpegError(message: problem) }
         if let problem = graphicsProblem(graphics, info: info, settings: settings) { throw FFmpegError(message: problem) }
+        if canvas == nil, let problem = screenProblem(screen, info: info, settings: settings) { throw FFmpegError(message: problem) }
         let color = try ColorPipeline.ffmpegFilters(color, info: info, toneMapped: info.isHDR && settings.toneMapHDR)
         // Fail with something actionable instead of ffmpeg's "Unknown encoder 'libwebp'"
         // four passes into the error log.
@@ -1283,7 +1354,7 @@ enum FFmpeg {
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, segments: segments,
                                       settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS)
+                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen)
         let measuring = needsLoudnessPass(info: info, settings: settings)
         // Progress is reported against what the export actually writes, which is the
         // edited timeline rather than the whole source.
@@ -1315,10 +1386,11 @@ enum FFmpeg {
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
                     loudness: measurement, color: color, effects: effects, graphics: graphics,
-                    canvas: canvas, captionsASS: captionsASS
+                    canvas: canvas, captionsASS: captionsASS, screen: screen
                 )
             }
 
+            args = try spilledGraph(args)
             // Each command writes its last argument — except the measurement pass, whose
             // "-" is the null muxer and must not be treated as a file to clean up.
             let last = args[args.count - 1]

@@ -105,6 +105,24 @@ enum EditCommand: Equatable {
     case addShort(clip: UUID, short: Short)
     case updateShort(clip: UUID, short: Short)
     case removeShort(clip: UUID, short: UUID)
+    /// A screen recording synced to the recording, with its offset, crop, base layout,
+    /// bubble and layouts; nil removes it. Probing the file happens before the command.
+    case setScreen(clip: UUID, screen: ScreenTrack?)
+    /// A part of the recording with a layout of its own. Start and end snap to the frame
+    /// cadence; it may not overlap another layout.
+    case addLayout(clip: UUID, span: LayoutSpan)
+    /// Replaces the layout with the same ID.
+    case updateLayout(clip: UUID, span: LayoutSpan)
+    case removeLayout(clip: UUID, span: UUID)
+    /// Every layout at once, as a plan from the transcript produces them.
+    case replaceLayouts(clip: UUID, spans: [LayoutSpan])
+    /// A push-in on the screen; its target is in the screen recording's pixels. It may not
+    /// overlap another screen zoom.
+    case addScreenZoom(clip: UUID, zoom: ZoomShot)
+    /// Replaces the screen zoom with the same ID.
+    case updateScreenZoom(clip: UUID, zoom: ZoomShot)
+    case removeScreenZoom(clip: UUID, zoom: UUID)
+    case replaceScreenZooms(clip: UUID, zooms: [ZoomShot])
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -156,6 +174,15 @@ enum EditCommand: Equatable {
         case .addShort: return "Add Short"
         case .updateShort: return "Edit Short"
         case .removeShort: return "Delete Short"
+        case .setScreen(_, let screen): return screen == nil ? "Remove Screen" : "Screen Recording"
+        case .addLayout: return "Add Layout"
+        case .updateLayout: return "Change Layout"
+        case .removeLayout: return "Delete Layout"
+        case .replaceLayouts: return "Edit Layouts"
+        case .addScreenZoom: return "Add Screen Zoom"
+        case .updateScreenZoom: return "Adjust Screen Zoom"
+        case .removeScreenZoom: return "Delete Screen Zoom"
+        case .replaceScreenZooms: return "Edit Screen Zooms"
         }
     }
 }
@@ -226,6 +253,8 @@ struct EditOutcome: Equatable {
     var removedGraphics: [UUID] = []
     /// Shorts whose footage was all cut away.
     var removedShorts: [UUID] = []
+    /// Layouts whose footage was cut away.
+    var removedLayouts: [UUID] = []
 }
 
 /// Applies a batch of commands to a project value. Pure: no UI state, no selection, no
@@ -609,6 +638,64 @@ enum ProjectReducer {
                 shorts.removeAll { $0.id == id }
             } placing: { nil }
 
+        case .setScreen(let clip, let screen):
+            try editClip(clip, in: &outcome) { record, info in
+                guard var screen else { record.screen = nil; return }
+                screen.crop = screen.crop.map { $0.evenClamped(in: screen.info.fullFrame) }
+                screen.spans = screen.spans.map { $0.snapped(fps: info.fps) }.sorted { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
+                screen.zooms.sort { $0.start < $1.start }
+                if let problem = screen.problem(duration: record.timeline.duration, speaker: info) { throw EditError.invalid(problem) }
+                record.screen = screen
+            }
+
+        case .addLayout(let clip, let span):
+            try editLayouts(clip, in: &outcome) { spans in
+                guard !spans.contains(where: { $0.id == span.id }) else { throw EditError.invalid("A layout with that ID already exists.") }
+                spans.append(span)
+            } placing: { span }
+            outcome.createdIDs.append(span.id)
+
+        case .updateLayout(let clip, let span):
+            try editLayouts(clip, in: &outcome) { spans in
+                guard let index = spans.firstIndex(where: { $0.id == span.id }) else {
+                    throw EditError.notFound("No layout with that ID on this recording.")
+                }
+                spans[index] = span
+            } placing: { span }
+
+        case .removeLayout(let clip, let id):
+            try editLayouts(clip, in: &outcome) { spans in
+                guard spans.contains(where: { $0.id == id }) else { throw EditError.notFound("No layout with that ID on this recording.") }
+                spans.removeAll { $0.id == id }
+            } placing: { nil }
+
+        case .replaceLayouts(let clip, let replacement):
+            try editLayouts(clip, in: &outcome) { spans in spans = replacement } placing: { nil }
+
+        case .addScreenZoom(let clip, let zoom):
+            try editScreenZooms(clip, in: &outcome) { zooms in
+                guard !zooms.contains(where: { $0.id == zoom.id }) else { throw EditError.invalid("A screen zoom with that ID already exists.") }
+                zooms.append(zoom)
+            }
+            outcome.createdIDs.append(zoom.id)
+
+        case .updateScreenZoom(let clip, let zoom):
+            try editScreenZooms(clip, in: &outcome) { zooms in
+                guard let index = zooms.firstIndex(where: { $0.id == zoom.id }) else {
+                    throw EditError.notFound("No screen zoom with that ID on this recording.")
+                }
+                zooms[index] = zoom
+            }
+
+        case .removeScreenZoom(let clip, let id):
+            try editScreenZooms(clip, in: &outcome) { zooms in
+                guard zooms.contains(where: { $0.id == id }) else { throw EditError.notFound("No screen zoom with that ID on this recording.") }
+                zooms.removeAll { $0.id == id }
+            }
+
+        case .replaceScreenZooms(let clip, let replacement):
+            try editScreenZooms(clip, in: &outcome) { zooms in zooms = replacement }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -701,7 +788,7 @@ enum ProjectReducer {
     /// footage is gone.
     private static func editTimeline(_ id: UUID, in outcome: inout EditOutcome,
                                      _ body: (inout ClipTimeline, MediaInfo) throws -> Void) throws {
-        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID], graphics: [UUID], shorts: [UUID]) = ([], [], [], [], [])
+        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID], graphics: [UUID], shorts: [UUID], layouts: [UUID]) = ([], [], [], [], [], [])
         try editClip(id, in: &outcome) { record, info in
             let old = record.timeline
             var timeline = old
@@ -728,6 +815,15 @@ enum ProjectReducer {
                 record.shorts = remapped.shorts.isEmpty ? nil : Self.pruned(remapped.shorts, graphics: record.graphics)
                 removed.shorts = remapped.removed
             }
+            if var screen = record.screen {
+                let kept = timeline.remap(screen.spans, from: old, fps: info.fps)
+                removed.layouts = screen.spans.map(\.id).filter { id in !kept.contains { $0.id == id } }
+                screen.spans = kept
+                let keptZooms = timeline.remap(screen.zooms, from: old)
+                removed.zooms += screen.zooms.map(\.id).filter { id in !keptZooms.contains { $0.id == id } }
+                screen.zooms = keptZooms
+                record.screen = screen
+            }
             if var publish = record.publish {
                 publish.chapters = timeline.remap(publish.chapters, from: old)
                 // The thumbnail's frame follows its footage, or stays inside the recording.
@@ -743,6 +839,7 @@ enum ProjectReducer {
         outcome.removedMarkers += removed.markers
         outcome.removedGraphics += removed.graphics
         outcome.removedShorts += removed.shorts
+        outcome.removedLayouts += removed.layouts
     }
 
     /// Edits one probed recording's graphics and checks the whole track against its
@@ -823,6 +920,41 @@ enum ProjectReducer {
             }
             effects.sort { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
             record.blurEffects = effects.isEmpty ? nil : effects
+        }
+    }
+
+    /// Edits the layouts of a recording's screen. `placing` names the span being placed,
+    /// whose times are snapped to frames; then all of them are checked together.
+    private static func editLayouts(_ id: UUID, in outcome: inout EditOutcome,
+                                    _ body: (inout [LayoutSpan]) throws -> Void, placing: () -> LayoutSpan?) throws {
+        try editClip(id, in: &outcome) { record, info in
+            guard var screen = record.screen else {
+                throw EditError.invalid("This recording has no screen recording. Add one with setScreen first.")
+            }
+            var spans = screen.spans
+            try body(&spans)
+            if let placed = placing(), let index = spans.firstIndex(where: { $0.id == placed.id }) {
+                spans[index] = placed.snapped(fps: info.fps)
+            } else if placing() == nil {
+                spans = spans.map { $0.snapped(fps: info.fps) }
+            }
+            spans.sort { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
+            screen.spans = spans
+            if let problem = screen.problem(duration: record.timeline.duration, speaker: info) { throw EditError.invalid(problem) }
+            record.screen = screen
+        }
+    }
+
+    /// Edits the zooms of a recording's screen, then checks them all together.
+    private static func editScreenZooms(_ id: UUID, in outcome: inout EditOutcome, _ body: (inout [ZoomShot]) throws -> Void) throws {
+        try editClip(id, in: &outcome) { record, info in
+            guard var screen = record.screen else {
+                throw EditError.invalid("This recording has no screen recording. Add one with setScreen first.")
+            }
+            try body(&screen.zooms)
+            screen.zooms.sort { $0.start < $1.start }
+            if let problem = screen.problem(duration: record.timeline.duration, speaker: info) { throw EditError.invalid(problem) }
+            record.screen = screen
         }
     }
 

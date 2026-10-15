@@ -62,6 +62,8 @@ struct AgentRequest: Codable {
     var style: String?
     /// preview, export and reveal: one of the recording's Shorts (then `time` is seconds into it).
     var short: UUID?
+    /// reveal: one of the recording's screen layouts.
+    var layout: UUID?
 }
 
 struct WireRect: Codable, Equatable {
@@ -108,6 +110,16 @@ struct WireGraphic: Codable, Equatable {
     var look: String?
     /// Moved and scaled on the picture; in `updateGraphic` only the keys given change.
     var transform: WireTransform?
+}
+
+/// A screen layout span as JSON. In `updateLayout` every field is optional and replaces
+/// only itself; moving start alone keeps the length.
+struct WireLayout: Codable, Equatable {
+    var id: UUID?
+    var start: Double?
+    var end: Double?
+    /// speaker, screen or split.
+    var layout: String?
 }
 
 /// A graphic's move (design pixels of a 1920×1080 frame) and scale on the picture.
@@ -176,6 +188,13 @@ struct WireCommand: Codable, Equatable {
     /// A Short's keys to set: start, end, window, title, description, tags, hidden,
     /// placements, cover, panels, captions (and id for a new one).
     var short: [String: JSONValue]?
+    /// setScreen: the screen recording's time at the recording's source time 0.
+    var offset: Double?
+    /// updateScreen: only the keys to change: offset, crop, layout, bubble.
+    var screen: [String: JSONValue]?
+    var layoutID: UUID?
+    var layout: WireLayout?
+    var layouts: [WireLayout]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -188,13 +207,15 @@ struct WireCommand: Codable, Equatable {
         "addGraphic", "updateGraphic", "removeGraphic", "replaceGraphics", "setGraphicsStyle", "importGraphics",
         "setPublishInfo", "setAutoEditOptions", "importTranscript", "clearTranscript",
         "addShort", "updateShort", "removeShort",
+        "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
+        "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
     ]
 
     /// Files that must be probed before this command can be resolved.
     var mediaPaths: [String] {
         switch type {
         case "addMedia": return paths ?? []
-        case "relinkMedia": return path.map { [$0] } ?? []
+        case "relinkMedia", "setScreen": return path.map { [$0] } ?? []
         default: return []
         }
     }
@@ -214,6 +235,7 @@ struct AgentReceipt: Encodable {
     var removedZooms: [UUID]
     var removedGraphics: [UUID] = []
     var removedShorts: [UUID] = []
+    var removedLayouts: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -234,7 +256,7 @@ struct AgentSessionInfo: Encodable {
     var interactionInProgress: Bool
     var methods: [String]
     var commands: [String]
-    var analyzeKinds = ["silence", "zooms"]
+    var analyzeKinds = ["silence", "zooms", "screenZooms"]
     var exportScopes = ["recording", "movie"]
     var timeSpaces = ["recording", "movie"]
 }
@@ -291,6 +313,8 @@ struct AgentState: Encodable {
         var captions: CaptionsState
         /// Its Shorts: vertical 1080×1920 versions of parts of it.
         var shorts: [ShortState]
+        /// The screen recording shown with it, and the layouts; nil when it has none.
+        var screen: ScreenState?
     }
     /// A Short as an agent needs it. Times are edited-recording seconds; `graphics` are the
     /// ones that show in it, in its own time from 0, and `window` is the 9:16 part of the
@@ -750,7 +774,8 @@ extension AppModel {
                 },
                 captions: .init(use: document.settings.captionUse(hasFile: clip.subtitles != nil).rawValue,
                                 source: clip.item().captionsSource(document.settings)),
-                shorts: Self.shortStates(clip, settings: document.settings))
+                shorts: Self.shortStates(clip, settings: document.settings),
+                screen: Self.screenState(clip))
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -884,8 +909,17 @@ extension AppModel {
             for (index, command) in wire.enumerated() where command.short?["window"] == .string("speaker") {
                 speakers[index] = try await speakerWindow(for: command, in: document)
             }
+            // A screen's bubble asked to sit on the speaker, or a first screen, is looked at
+            // with Vision first too.
+            var faces: [Int: CGPoint] = [:]
+            var borders: [Int: CGRect] = [:]
+            for (index, command) in wire.enumerated() {
+                if let face = try await speakerFace(for: command, in: document) { faces[index] = face }
+                if let border = try await screenBorder(for: command, in: document) { borders[index] = border }
+            }
             let commands = try wire.enumerated().map { index, command in
-                try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index])
+                try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index], face: faces[index],
+                            border: borders[index])
             }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
@@ -893,7 +927,8 @@ extension AppModel {
             return result.map {
                 AgentReceipt(revision: $0.revision, transactionID: $0.transactionID, changed: $0.changed,
                              dryRun: request.dryRun ?? false, createdIDs: $0.createdIDs, removedZooms: $0.removedZooms,
-                             removedGraphics: $0.removedGraphics, removedShorts: $0.removedShorts, affectedClips: $0.affectedClips)
+                             removedGraphics: $0.removedGraphics, removedShorts: $0.removedShorts, removedLayouts: $0.removedLayouts,
+                             affectedClips: $0.affectedClips)
             }
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid(error.localizedDescription)) }
@@ -901,7 +936,8 @@ extension AppModel {
 
     /// One wire command as an `EditCommand`, against the committed document.
     private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
-                         tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil) throws -> EditCommand {
+                         tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil, face: CGPoint? = nil,
+                         border: CGRect? = nil) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -1269,6 +1305,9 @@ extension AppModel {
             } catch {
                 throw EditError.invalid("\((path as NSString).lastPathComponent) cannot be used as graphics: \(error.localizedDescription)")
             }
+        case "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
+             "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms":
+            return try Self.resolveScreen(wire, in: document, probed: probed, face: face, border: border)
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
@@ -1443,6 +1482,12 @@ extension AppModel {
                 }
                 selectedGraphicID = graphic
                 if let item = selectedItem, item.editedDuration > 0 { setPreviewFraction(found.start / item.editedDuration) }
+            }
+            if let id = request.layout {
+                guard let span = selectedItem?.screen?.spans.first(where: { $0.id == id }) else {
+                    return .failure(.notFound("No layout \(id) on the selected recording."))
+                }
+                selectLayout(span)
             }
             if let id = request.short {
                 guard let short = selectedItem?.short(id) else {
@@ -1635,12 +1680,16 @@ extension AppModel {
                     proposedSections: proposed.map { Section(id: $0.id, start: $0.start, end: $0.end, speed: $0.speed) },
                     savedSeconds: cuts.reduce(0) { $0 + $1.duration }))
             })
-        case "zooms":
+        case "zooms", "screenZooms":
+            let screen = request.kind == "screenZooms"
+            if screen, item.screen == nil {
+                return .failure(.invalid("Recording \(clipID) has no screen recording. Add one with setScreen first."))
+            }
             return .success(startJob(kind: "analyze", clip: clipID, origin: agentOrigin(request)) {
-                let suggestions = try await ZoomAnalyzer.analyze(item)
+                let suggestions = screen ? try await ZoomAnalyzer.analyzeScreen(item) : try await ZoomAnalyzer.analyze(item)
                 struct Suggestion: Encodable { var start: Double; var hold: Double; var level: Double; var target: WirePoint; var score: Double }
-                struct Zooms: Encodable { var kind = "zooms"; var suggestions: [Suggestion] }
-                return try JSONValue.from(Zooms(suggestions: suggestions.map {
+                struct Zooms: Encodable { var kind: String; var suggestions: [Suggestion] }
+                return try JSONValue.from(Zooms(kind: screen ? "screenZooms" : "zooms", suggestions: suggestions.map {
                     Suggestion(start: $0.shot.start, hold: $0.shot.hold, level: $0.shot.level, target: WirePoint($0.shot.target), score: $0.score)
                 }))
             })
@@ -1873,7 +1922,7 @@ extension AppModel {
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.burnedCaptions(exportSettings),
                                             color: item.colorStage(exportSettings), effects: item.blurEffects,
-                                            graphics: item.exportGraphics(exportSettings), onProgress: progress)
+                                            graphics: item.exportGraphics(exportSettings), screen: item.screen, onProgress: progress)
                 case .movie(let plan):
                     try await FFmpeg.exportMovie(plan: plan, settings: exportSettings, output: temporary, onProgress: progress)
                 }

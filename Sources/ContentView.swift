@@ -388,6 +388,11 @@ struct CropEditorPane: View {
             } else if model.showPlayback {
                 PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay, editsGraphics: !model.isConverting,
                                onGraphicBounds: { model.graphicBounds = $0 })
+                    .overlay {
+                        if item.screen != nil, model.selectedScreenZoom != nil, !model.isConverting {
+                            ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
+                        }
+                    }
                     .frame(maxHeight: .infinity)
             } else {
             CropCanvas(
@@ -423,6 +428,8 @@ struct CropEditorPane: View {
             guard !model.isConverting else { return }
             if model.inspectorFocus == .graphic { model.removeSelectedGraphic(); return }
             if model.inspectorFocus == .short { model.removeSelectedShort(); return }
+            if model.inspectorFocus == .layout { model.removeSelectedLayout(); return }
+            if model.inspectorFocus == .screenZoom { model.removeSelectedScreenZoom(); return }
             switch model.editorMode {
             case .blur: model.removeSelectedRegion()
             case .zoom: model.removeSelectedZoom()

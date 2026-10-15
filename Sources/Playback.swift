@@ -119,6 +119,11 @@ final class PlaybackController: ObservableObject {
         recolored?.color = record.color
         recolored?.blurEffects = record.blurEffects
         recolored?.markers = record.markers
+        // A screen's layouts, bubble and crop are drawn, not loaded: only another file or
+        // offset needs new tracks.
+        if let loaded = recolored?.screen, let screen = record.screen, loaded.url == screen.url, loaded.offset == screen.offset {
+            recolored?.screen = screen
+        }
         if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
            recolored?.withoutOverlays == record.withoutOverlays, loadedSettings == settings, let info = clip.info {
             item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
@@ -237,6 +242,9 @@ final class PlaybackController: ObservableObject {
                 }
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
         }
+        if let screen = clip.screen, short == nil {
+            try await insertScreen(screen, segments: clip.timeline.segments, into: composition)
+        }
         let item = AVPlayerItem(asset: composition)
         item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original, short: short)
         item.audioTimePitchAlgorithm = .spectral
@@ -255,6 +263,10 @@ final class PlaybackController: ObservableObject {
     /// picture is its 9:16 window, with its graphics' motion.
     static func videoComposition(for asset: AVAsset, clip: VideoItem, info: MediaInfo,
                                  settings: ExportSettings, original: Bool, short: Short? = nil) -> AVVideoComposition {
+        if let screen = clip.screen, short == nil, let composition = asset as? AVComposition,
+           let layout = screenComposition(for: composition, clip: clip, screen: screen, info: info, settings: settings, original: original) {
+            return layout
+        }
         let picture = picture(clip, info: info, short: short)
         let crop = picture.crop
         let shots = clip.zoomShots
@@ -449,7 +461,7 @@ func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Dou
 /// The fill behind a moved picture, from its encoded values: the frame grown by
 /// `fillScale`, blurred, then darkened and desaturated by one matrix, faded in with the
 /// move. Over black, so `amount` scales the colour, as ffmpeg's table does.
-private func movedPictureFill(_ base: CIImage, frame: CGRect, amount: Double) -> CIImage {
+func movedPictureFill(_ base: CIImage, frame: CGRect, amount: Double) -> CIImage {
     let w = frame.width, h = frame.height, unit = GraphicsMotion.unit(frame.size)
     let scale = GraphicsMotion.fillScale
     let grow = CGAffineTransform(translationX: -w / 2, y: -h / 2)

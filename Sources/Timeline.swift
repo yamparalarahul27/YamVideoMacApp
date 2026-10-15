@@ -122,6 +122,8 @@ struct ProjectClip: Codable, Equatable {
     var transcript: Transcript?
     /// Version 12 onwards. Nil while the recording has no Shorts.
     var shorts: [Short]?
+    /// Version 14 onwards. Nil while the recording has no screen recording.
+    var screen: ScreenTrack?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -135,6 +137,7 @@ struct ProjectClip: Codable, Equatable {
         publish = item.publish?.isEmpty == false ? item.publish : nil
         transcript = item.transcript
         shorts = item.shorts.isEmpty ? nil : item.shorts
+        screen = item.screen
     }
 
     func item() -> VideoItem {
@@ -150,6 +153,7 @@ struct ProjectClip: Codable, Equatable {
         item.publish = publish
         item.transcript = transcript
         item.shorts = shorts ?? []
+        item.screen = screen
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -164,10 +168,11 @@ struct VideoProject: Codable, Equatable {
     /// 9: adds the thumbnail maker's design. 10: adds the end screen graphic and the choice of
     /// YouTube element for each of its boxes. 11: adds the auto edit options, each recording's
     /// transcript and the captions choice. 12: adds each recording's Shorts. 13: adds a
-    /// Short's zoom (zoomed out, at the top over a blurred copy). Every edited
+    /// Short's zoom (zoomed out, at the top over a blurred copy). 14: adds a recording's
+    /// screen recording and its layouts. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 13
+    static let currentVersion = 14
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -246,6 +251,9 @@ struct VideoProject: Codable, Equatable {
         if version < 13, clips.contains(where: { $0.shorts?.contains { $0.zoom != nil } == true }) {
             try reject("The project claims an older format but contains a zoomed-out Short."); return
         }
+        if version < 14, clips.contains(where: { $0.screen != nil }) {
+            try reject("The project claims an older format but contains a screen recording."); return
+        }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
@@ -266,7 +274,8 @@ struct VideoProject: Codable, Equatable {
             }
             guard let info = clip.info else {
                 guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
-                      clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil, clip.transcript == nil, clip.shorts == nil else {
+                      clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil, clip.transcript == nil, clip.shorts == nil,
+                      clip.screen == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -331,6 +340,9 @@ struct VideoProject: Codable, Equatable {
             }
             if let shorts = clip.shorts, let problem = shortsProblem(shorts, duration: duration, info: info) {
                 try reject("The project contains an invalid Short: \(problem)"); return
+            }
+            if let problem = clip.screen?.problem(duration: duration, speaker: info) {
+                try reject("The project contains an invalid screen recording: \(problem)"); return
             }
             for rect in [clip.crop].compactMap({ $0 }) + clip.blurRegions.map(\.rect) {
                 guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
