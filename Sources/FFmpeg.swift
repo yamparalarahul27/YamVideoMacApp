@@ -635,7 +635,8 @@ enum FFmpeg {
         crop cropRect: CGRect,
         zoomShots: [ZoomShot],
         settings: ExportSettings,
-        subtitles: URL? = nil
+        subtitles: URL? = nil,
+        segments: [TimelineSegment]? = nil
     ) -> (geometry: [String], delivery: [String], captions: [String], rate: Double, rateExpression: String) {
         var tail: [String] = []
 
@@ -662,10 +663,10 @@ enum FFmpeg {
         // Subtitles are burned last, on purpose. Ahead of the scale the text would be
         // resampled along with the picture; ahead of the zoom it would be magnified with
         // it; ahead of the blur areas it could be obscured by one; ahead of the graphics
-        // a card could cover them.
+        // a card could cover them. They are timed on the edited recording.
         var captions: [String] = []
         if let subtitles {
-            captions.append(subtitlesFilter(staged: stagedSubtitlesURL(for: subtitles),
+            captions.append(subtitlesFilter(staged: burnedCaptions(subtitles, segments: segments),
                                             forceStyle: settings.subtitleForceStyle))
         }
         return (tail, delivery, captions, outputRate, outputExpression)
@@ -866,7 +867,7 @@ enum FFmpeg {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
         let stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
-                                 settings: settings, subtitles: subtitles)
+                                 settings: settings, subtitles: subtitles, segments: segments)
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
         let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
                                  converted: !head.isEmpty || effectStage != nil)
@@ -1010,7 +1011,7 @@ enum FFmpeg {
         // Both GIF passes must see exactly the same frames, captions, effects and graphics
         // included, or the palette is built for a picture the encode never renders.
         var stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
-                                 settings: settings, subtitles: subtitles)
+                                 settings: settings, subtitles: subtitles, segments: segments)
         // stats_mode=diff weights the palette towards whatever moves — the part anyone
         // actually looks at. A still background can afford to band a little.
         stages.captions.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")

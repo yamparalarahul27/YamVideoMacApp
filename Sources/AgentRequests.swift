@@ -35,6 +35,8 @@ struct AgentRequest: Codable {
     var timeSpace: String?
     var path: String?
     var overwrite: Bool?
+    /// export: write the YouTube files (video, captions, thumbnail, upload text) into the folder `path`.
+    var youtube: Bool?
     var scope: String?
     var kind: String?
     var job: UUID?
@@ -155,6 +157,8 @@ struct WireCommand: Codable, Equatable {
     var graphics: [WireGraphic]?
     /// Only the keys to change: accent, panel, moveVideo, edge, look.
     var graphicsStyle: [String: JSONValue]?
+    /// Only the keys to change: title, description, tags, category, chapters, thumbnail, language, channel.
+    var publish: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -165,6 +169,7 @@ struct WireCommand: Codable, Equatable {
         "setColorAdjustments", "resetColorAdjustments", "copyColorAdjustments",
         "addBlurEffect", "updateBlurEffect", "removeBlurEffect", "addMarker", "updateMarker", "removeMarker",
         "addGraphic", "updateGraphic", "removeGraphic", "replaceGraphics", "setGraphicsStyle", "importGraphics",
+        "setPublishInfo",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -254,6 +259,10 @@ struct AgentState: Encodable {
         var blurEffects: [Effect]
         var markers: [Marker]
         var graphics: GraphicsTrack?
+        /// What YouTube gets, what it would refuse or ignore, and chapters the edit suggests.
+        var publish: PublishInfo?
+        var publishIssues: [PublishInfo.Issue]
+        var suggestedChapters: [Chapter]
     }
     /// Edited-recording seconds; `weight` follows `VideoBlurEffect.weight`.
     struct Effect: Encodable {
@@ -574,7 +583,11 @@ extension AppModel {
                           fadeIn: $0.fadeIn, fadeOut: $0.fadeOut, enabled: $0.isEnabled)
                 },
                 markers: (clip.markers ?? []).map { .init(id: $0.id, time: $0.time, label: $0.label, color: $0.color.rawValue) },
-                graphics: clip.graphics)
+                graphics: clip.graphics,
+                publish: clip.publish,
+                publishIssues: clip.info == nil ? [] : (clip.publish ?? PublishInfo()).issues(duration: clip.timeline.duration),
+                suggestedChapters: clip.info == nil ? [] : PublishInfo.suggestedChapters(markers: clip.markers ?? [], graphics: clip.graphics,
+                                                                                         duration: clip.timeline.duration))
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -797,6 +810,29 @@ extension AppModel {
                     + "moveVideo is true or false, edge is a number and accent is a colour like #F5C42C.")
             }
         }
+        func mergedPublish(_ changes: [String: JSONValue], onto info: PublishInfo) throws -> PublishInfo {
+            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel"]
+            if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
+                throw EditError.invalid("Unknown publish key \"\(unknown)\". Keys: \(known.sorted().joined(separator: ", ")).")
+            }
+            if case .string(let path)? = changes["thumbnail"] {
+                let expanded = (path as NSString).expandingTildeInPath
+                guard FileManager.default.fileExists(atPath: path.hasPrefix("file:") ? (URL(string: path)?.path ?? path) : expanded) else {
+                    throw EditError(code: .missingMedia, message: "No image at \(path).")
+                }
+            }
+            guard case .object(var merged) = try JSONValue.from(info) else { return info }
+            for (key, value) in changes {
+                if value == .null { merged.removeValue(forKey: key) } else { merged[key] = value }
+            }
+            do {
+                return try AgentProtocol.decoder.decode(PublishInfo.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+            } catch {
+                throw EditError.invalid("publish: title, description, language and channel are text; tags is a list of text; "
+                    + "category is one of \(YouTubeCategory.allCases.map(\.rawValue).joined(separator: ", ")); chapters is a list of "
+                    + "{time, title}; thumbnail is a path to an image.")
+            }
+        }
         func zoom(_ value: WireZoom) -> ZoomShot {
             ZoomShot(id: value.id ?? UUID(), start: value.start, hold: value.hold ?? 2, level: value.level ?? 2,
                      target: value.target.point)
@@ -984,6 +1020,10 @@ extension AppModel {
             let clipID = try field(wire.clipID, "clipID")
             let changes = try field(wire.graphicsStyle, "graphicsStyle")
             return .setGraphicsStyle(clip: clipID, style: try mergedStyle(changes, onto: try record(clipID).graphics?.style ?? GraphicsStyle()))
+        case "setPublishInfo":
+            let clipID = try field(wire.clipID, "clipID")
+            return .setPublishInfo(clip: clipID, info: try mergedPublish(try field(wire.publish, "publish"),
+                                                                        onto: try record(clipID).publish ?? PublishInfo()))
         case "importGraphics":
             let path = (try field(wire.path, "path") as NSString).expandingTildeInPath
             guard FileManager.default.fileExists(atPath: path) else {
@@ -1178,30 +1218,10 @@ extension AppModel {
             let settings = document.settings
             let composed = request.composed ?? false
             if composed {
-                // The native renderer the owner's Preview uses, so an agent sees what the
-                // owner sees: zooms and effects at this exact time, which a still from the
-                // source frame cannot show.
-                let player = try await PlaybackController.makeItem(clip.item(), settings: settings, original: request.original ?? false)
-                let generator = AVAssetImageGenerator(asset: player.asset)
-                generator.videoComposition = player.videoComposition
-                generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
-                var image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
-                                                                 preferredTimescale: 600_000)).image
-                // Graphics are drawn by the same engine page the Preview lays over the
-                // picture, at this time, with where each one landed.
-                var drawn: [PreviewGraphic]?
-                if let track = clip.graphics, !track.items.isEmpty,
-                   abs(Double(image.width) / Double(max(1, image.height)) - 16.0 / 9.0) < 0.02 {
-                    let snapshot = try await GraphicsSnapshot.draw(track, duration: timeline.duration, fps: info.fpsExpression,
-                                                                   time: local, over: image)
-                    image = snapshot.image
-                    drawn = track.items.compactMap { graphic in
-                        snapshot.boxes[graphic.id].map { PreviewGraphic(id: graphic.id, kind: graphic.kind.rawValue, rect: WireRect($0)) }
-                    }
-                }
-                var preview = try writePreview(image, clipID: clipID, local: local, source: source, revision: requestedRevision,
+                let frame = try await composedFrame(clip, at: local, settings: settings, original: request.original ?? false)
+                var preview = try writePreview(frame.image, clipID: clipID, local: local, source: source, revision: requestedRevision,
                                                cropped: true, original: request.original ?? false, composed: true)
-                preview.graphics = drawn
+                preview.graphics = frame.graphics
                 return .success(preview)
             }
             let data = try await FFmpeg.thumbnail(
@@ -1223,6 +1243,32 @@ extension AppModel {
                                              cropped: cropped, original: request.original ?? false, composed: false))
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid("The frame could not be rendered: \(error.localizedDescription)")) }
+    }
+
+    /// The picture at an edited time as the owner's Preview shows it: the native renderer
+    /// (zooms, colour, effects, the move aside), then the graphics, drawn by the same engine
+    /// page the Preview lays over the picture, with where each one landed.
+    func composedFrame(_ clip: ProjectClip, at local: Double, settings: ExportSettings,
+                       original: Bool = false) async throws -> (image: CGImage, graphics: [PreviewGraphic]?) {
+        guard let info = clip.info else { throw EditError(code: .missingMedia, message: "That recording is still loading.") }
+        let timeline = clip.timeline
+        let player = try await PlaybackController.makeItem(clip.item(), settings: settings, original: original)
+        let generator = AVAssetImageGenerator(asset: player.asset)
+        generator.videoComposition = player.videoComposition
+        generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+        var image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
+                                                         preferredTimescale: 600_000)).image
+        var drawn: [PreviewGraphic]?
+        if let track = clip.graphics, !track.items.isEmpty,
+           abs(Double(image.width) / Double(max(1, image.height)) - 16.0 / 9.0) < 0.02 {
+            let snapshot = try await GraphicsSnapshot.draw(track, duration: timeline.duration, fps: info.fpsExpression,
+                                                           time: local, over: image)
+            image = snapshot.image
+            drawn = track.items.compactMap { graphic in
+                snapshot.boxes[graphic.id].map { PreviewGraphic(id: graphic.id, kind: graphic.kind.rawValue, rect: WireRect($0)) }
+            }
+        }
+        return (image, drawn)
     }
 
     private func writePreview(_ image: CGImage, clipID: UUID, local: Double, source: Double, revision: Int,
@@ -1329,6 +1375,7 @@ extension AppModel {
         let origin = agentOrigin(request)
         if let refusal = admit(origin, expectedRevision: expected) { return .failure(refusal) }
         guard let path = request.path else { return .failure(EditError(code: .invalidRequest, message: "export needs path.")) }
+        if request.youtube == true { return agentYouTubeExport(request, folder: path, origin: origin) }
         let output = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
         let format = settings.format
         guard output.pathExtension.lowercased() == format.fileExtension else {
@@ -1428,6 +1475,62 @@ extension AppModel {
                 self.statusMessage = "\(origin.label) exported \(output.lastPathComponent)."
             }
             return .object(["path": .string(output.path), "format": .string(format.rawValue)])
+        }
+        return .success(job)
+    }
+
+    /// Export for YouTube as a job: the MP4, captions on the edited timeline, thumbnail,
+    /// upload text and JSON, written into an existing folder.
+    private func agentYouTubeExport(_ request: AgentRequest, folder path: String, origin: EditOrigin) -> Result<AgentJob, EditError> {
+        let folder = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return .failure(.invalid("For a YouTube export, path is an existing folder; \(folder.path) is not one."))
+        }
+        guard let clipID = request.clip, let item = items.first(where: { $0.id == clipID }), let info = item.info,
+              FileManager.default.fileExists(atPath: item.url.path) else {
+            return .failure(EditError(code: .missingMedia, message: "A YouTube export needs a loaded recording in clip whose source is present."))
+        }
+        let publish = item.publish ?? PublishInfo()
+        if let blocking = publish.issues(duration: item.editedDuration).first(where: { $0.severity == .blocking }) {
+            return .failure(.invalid(blocking.message + " (state.clips[].publishIssues lists everything; setPublishInfo changes it.)"))
+        }
+        let files = YouTubeExport.files(in: folder, publish: publish, fallback: item.url.deletingPathExtension().lastPathComponent,
+                                        captions: item.subtitles.map { Captions.retimable.contains($0.pathExtension.lowercased()) } ?? false,
+                                        unique: false)
+        if request.overwrite != true, let existing = files.all.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            return .failure(.invalid("\(existing.lastPathComponent) already exists. Pass overwrite: true to replace it."))
+        }
+        let exportSettings = settings
+        playback.pause()
+        isConverting = true
+        if let index = items.firstIndex(where: { $0.id == clipID }) { items[index].status = .converting(0) }
+        statusMessage = "\(origin.label) is exporting \(files.video.lastPathComponent) for YouTube…"
+        let jobID = UUID()
+        let job = startJob(id: jobID, kind: "export", clip: clipID, origin: origin) { [weak self] in
+            defer { self?.isConverting = false }
+            do {
+                try await YouTubeExport.run(item, info: info, publish: publish, settings: exportSettings, files: files) { value in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.agentJobs[jobID]?.progress = value
+                        if let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .converting(value) }
+                    }
+                }
+            } catch {
+                if let self, let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .ready }
+                self?.statusMessage = error is CancellationError ? "Export cancelled." : "\(origin.label)'s YouTube export failed."
+                throw error
+            }
+            if let self {
+                if let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .done(files.video) }
+                self.statusMessage = "\(origin.label) exported \(files.video.lastPathComponent) for YouTube."
+            }
+            var result: [String: JSONValue] = ["path": .string(files.video.path), "format": .string("mp4"),
+                                               "text": .string(files.text.path), "json": .string(files.json.path)]
+            if let captions = files.captions, FileManager.default.fileExists(atPath: captions.path) { result["captions"] = .string(captions.path) }
+            if let thumbnail = files.thumbnail { result["thumbnail"] = .string(thumbnail.path) }
+            return .object(result)
         }
         return .success(job)
     }

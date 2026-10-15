@@ -96,6 +96,7 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `removeGraphic` | `clipID`, `graphicID` |
 | `replaceGraphics` | `clipID`, `graphics`, `graphicsStyle`? |
 | `setGraphicsStyle` | `clipID`, `graphicsStyle`: any of `accent`, `panel` (shade, solid), `moveVideo`, `edge` (0–400), `look` (glass, ink, mix) |
+| `setPublishInfo` | `clipID`, `publish`: only the keys to change, from `title`, `description`, `tags`, `category`, `chapters` (`[{time, title}]`), `thumbnail` (a path), `language`, `channel`. YouTube's limits show in `state.clips[].publishIssues`; `suggestedChapters` has chapters from markers and graphics |
 | `importGraphics` | `clipID`, `path` of a graphics.json (the format `Tools/Graphics` uses) |
 
 `yamvideoctl catalog` prints all of this from the app itself, with each field's type,
@@ -113,6 +114,7 @@ section's ID and reports the new right one in `createdIDs`.
 | `preview --clip ID --time T [--composed] [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--composed` renders it as the owner's Preview plays it — crop, zoom, colour, blur areas, whole-frame effects and graphics — at the export's frame size, and lists each graphic showing with its box in `graphics`. `--original` leaves the colour correction out. |
 | `catalog` | Every command and request, described for an agent: fields, units, ranges, defaults, examples and conventions. |
 | `analyze --kind silence\|zooms --clip ID` | Starts a job that proposes cuts or zooms for the revision it read. It applies nothing. |
+| `export --youtube --path FOLDER --clip ID` | Export for YouTube into an existing folder: the MP4, the captions as an SRT on the edited timeline, a 1280×720 thumbnail under 2 MB, the upload text and a JSON of it. Refused while `publishIssues` has a blocking issue. |
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. A recording's graphics are drawn in; `state.graphicsRenderer.status` says whether this Mac can (`ready`, `needsNode`, `needsDownload`). Only the owner can download HyperFrames, so on `unsupported_capability` ask them, or export without graphics. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |
 | `save [--path FILE]` | Saves without a dialog: in place, to a first location, or — to a different path — as a copy with its own identity. |

@@ -239,6 +239,10 @@ extension AgentCatalog {
         add("setExportSettings", "project", "Change export settings; only the keys given change. graphics: false exports without each recording's graphics and the move aside under its panels.",
             [field("settings", "object", "Keys to change.", values: AgentCatalog.exportSettingKeys.sorted())],
             #"{"type": "setExportSettings", "settings": {"format": "gif", "frameRate": 12}}"#)
+        add("setPublishInfo", "publish", "Set what YouTube gets for a recording; only the keys given change. YouTube's limits (title 100 characters, description 5000 with its chapters, tags 500 as YouTube counts them, chapters from 0:00, at least 3, each 10 s or more) show in state.clips[].publishIssues rather than being refused, so a draft can be written in steps; state.clips[].suggestedChapters has chapters made from named markers and panel, rule, checklist and title graphics. Chapters follow their footage through cuts.",
+            [clip, field("publish", "object", "Keys to change: title, description, tags (list of text), category (one of the values), chapters ([{time, title}], edited-recording seconds; replaces the list), thumbnail (path to an image, or null), language (like en), channel (for the owner's preview).",
+                         values: YouTubeCategory.allCases.map(\.rawValue))],
+            #"{"type": "setPublishInfo", "clipID": "CLIP-ID", "publish": {"title": "How I edit with YamVideo", "tags": ["video editing", "macOS"], "chapters": [{"time": 0, "title": "Intro"}, {"time": 42, "title": "Cutting"}, {"time": 95, "title": "Graphics"}]}}"#)
         add("setSubtitles", "project", "Burn a caption file into a recording.",
             [clip, field("path", "string", "A local .srt, .vtt or .ass file.")],
             #"{"type": "setSubtitles", "clipID": "CLIP-ID", "path": "~/Movies/talk.srt"}"#)
@@ -281,7 +285,8 @@ extension AgentCatalog {
                 field("clip", "uuid", "The recording."), field("kind", "string", "What to look for.", values: ["silence", "zooms"])]),
             Method(method: "export", summary: "Export one recording or the movie as a job. A recording's graphics are drawn in (HyperFrames renders each one once and keeps its frames, so the first export takes longer); state.graphicsRenderer says whether this Mac can, and only the owner can download HyperFrames. Movies leave graphics out.", fields: session + [
                 field("path", "string", "Where to write."), field("scope", "string", "What.", values: ["recording", "movie"]),
-                field("clip", "uuid", "For scope recording.", required: false), field("overwrite", "boolean", "Replace an existing file.", required: false, default: .bool(false))]),
+                field("clip", "uuid", "For scope recording.", required: false), field("overwrite", "boolean", "Replace an existing file.", required: false, default: .bool(false)),
+                field("youtube", "boolean", "Export for YouTube: path is an existing folder, and it gets the MP4, the captions as an SRT on the edited timeline, a 1280×720 thumbnail under 2 MB, the upload text and a JSON of the same. Refused while state.clips[].publishIssues has a blocking issue.", required: false, default: .bool(false))]),
             Method(method: "job", summary: "A job's status and result.", fields: [field("job", "uuid", "From analyze or export.")]),
             Method(method: "cancel", summary: "Cancel a job.", fields: [field("job", "uuid", "From analyze or export.")]),
             Method(method: "save", summary: "Save without a dialog: in place, first save, or a copy to another path.", fields: session + [

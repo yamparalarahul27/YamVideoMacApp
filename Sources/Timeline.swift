@@ -116,6 +116,8 @@ struct ProjectClip: Codable, Equatable {
     var markers: [TimelineMarker]?
     /// Version 6 onwards. Nil when the recording has no graphics.
     var graphics: GraphicsTrack?
+    /// Version 8 onwards. Nil until something is written for YouTube.
+    var publish: PublishInfo?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -126,6 +128,7 @@ struct ProjectClip: Codable, Equatable {
         blurEffects = item.blurEffects.isEmpty ? nil : item.blurEffects
         markers = item.markers.isEmpty ? nil : item.markers
         graphics = item.graphics?.isEmpty == false ? item.graphics : nil
+        publish = item.publish?.isEmpty == false ? item.publish : nil
     }
 
     func item() -> VideoItem {
@@ -138,6 +141,7 @@ struct ProjectClip: Codable, Equatable {
         item.blurEffects = blurEffects ?? []
         item.markers = markers ?? []
         item.graphics = graphics
+        item.publish = publish
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -148,9 +152,10 @@ struct VideoProject: Codable, Equatable {
     /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
     /// and the per-recording subtitle file. 4: adds per-recording colour. 5: adds
     /// whole-frame blur effects and timeline markers. 6: adds per-recording graphics. 7: adds
-    /// a graphic's move and scale on the picture. Every edited project is written as the
-    /// current version; older builds reject it rather than silently dropping edits.
-    static let currentVersion = 7
+    /// a graphic's move and scale on the picture. 8: adds what YouTube needs per recording.
+    /// Every edited project is written as the current version; older builds reject it
+    /// rather than silently dropping edits.
+    static let currentVersion = 8
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -208,6 +213,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 7, clips.contains(where: { $0.graphics?.items.contains { $0.transform != nil } == true }) {
             try reject("The project claims an older format but contains graphics moved on the picture."); return
+        }
+        if version < 8, clips.contains(where: { $0.publish != nil }) {
+            try reject("The project claims an older format but contains publishing details."); return
         }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return

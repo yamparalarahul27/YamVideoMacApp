@@ -192,6 +192,8 @@ struct VideoItem: Identifiable {
     var color = ClipColorSettings()
     /// Timed motion graphics over the recording. Nil until one is added.
     var graphics: GraphicsTrack?
+    /// What YouTube needs for this recording. Nil until something is written.
+    var publish: PublishInfo?
     /// Whole-frame blurs, sorted and non-overlapping, in edited-recording seconds.
     var blurEffects: [VideoBlurEffect] = []
     /// Named points on the edited timeline, sorted by time.

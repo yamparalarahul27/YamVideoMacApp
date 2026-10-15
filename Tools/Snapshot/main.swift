@@ -177,6 +177,26 @@ func run() async throws {
            to: output.appendingPathComponent("5c-export-graphics-download.png"))
     unsetenv("YAMVIDEO_HYPERFRAMES_DIR")
     model.undo()
+    // Publish: details with one chapter too short, a frame as the thumbnail, both previews.
+    var details = PublishInfo()
+    details.title = "How I edit talking-head videos on a Mac"
+    details.description = "My whole edit, start to finish: cuts, colour, graphics and the export.\n\nGear and links below."
+    details.tags = ["video editing", "macOS", "YamVideo"]
+    details.channel = "Yamparala Media"
+    let length = model.items[0].editedDuration
+    details.chapters = [Chapter(time: 0, title: "Intro"), Chapter(time: min(2, length / 2), title: "Cutting")]
+    let frameFile = output.appendingPathComponent("publish-thumbnail.png")
+    if let preview = model.previewImage, let tiff = preview.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+       let png = bitmap.representation(using: .png, properties: [:]) {
+        try? png.write(to: frameFile)
+        details.thumbnail = frameFile
+    }
+    _ = model.perform([.setPublishInfo(clip: model.items[0].id, info: details)])
+    await render(PublishSheet().environmentObject(model), size: CGSize(width: 1080, height: 760),
+           to: output.appendingPathComponent("5f-publish-watch-page.png"))
+    await render(PublishSheet(initialPreview: 1).environmentObject(model), size: CGSize(width: 1080, height: 760),
+           to: output.appendingPathComponent("5g-publish-search-result.png"))
+    model.undo()
     await render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
            to: output.appendingPathComponent("6-local-agents.png"))
 

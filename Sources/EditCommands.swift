@@ -94,6 +94,8 @@ enum EditCommand: Equatable {
     case replaceGraphics(clip: UUID, graphics: [Graphic], style: GraphicsStyle?)
     /// The look of every graphic on the recording: accent, panel, move aside, edge, look.
     case setGraphicsStyle(clip: UUID, style: GraphicsStyle)
+    /// What YouTube needs for the recording; an empty one clears it.
+    case setPublishInfo(clip: UUID, info: PublishInfo)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -139,6 +141,7 @@ enum EditCommand: Equatable {
         case .removeGraphic: return "Delete Graphic"
         case .replaceGraphics: return "Edit Graphics"
         case .setGraphicsStyle: return "Graphics Style"
+        case .setPublishInfo: return "Publish Details"
         }
     }
 }
@@ -545,6 +548,17 @@ enum ProjectReducer {
         case .setGraphicsStyle(let clip, let style):
             try editGraphics(clip, in: &outcome) { track in track.style = style }
 
+        case .setPublishInfo(let clip, var info):
+            try editClip(clip, in: &outcome) { record, _ in
+                if let problem = info.problem { throw EditError.invalid(problem) }
+                let duration = record.timeline.duration
+                if let late = info.chapters.first(where: { $0.time > duration + 0.0005 }) {
+                    throw EditError.invalid("A chapter at \(PublishInfo.timestamp(late.time)) is after the end of the edited recording (\(PublishInfo.timestamp(duration))).")
+                }
+                info.chapters.sort { $0.time < $1.time }
+                record.publish = info.isEmpty ? nil : info
+            }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -658,6 +672,10 @@ enum ProjectReducer {
                 let remapped = timeline.remap(graphics, from: old)
                 record.graphics = remapped.track
                 removed.graphics = remapped.removed
+            }
+            if var publish = record.publish, !publish.chapters.isEmpty {
+                publish.chapters = timeline.remap(publish.chapters, from: old)
+                record.publish = publish
             }
             record.segments = timeline.segments
         }
