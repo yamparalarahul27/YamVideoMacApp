@@ -63,6 +63,11 @@ struct InspectorPane: View {
                 MarkerInspector(marker: marker).id(marker.id)
                 Divider()
             }
+        case .short:
+            if let short = model.selectedShort, let index = item.shorts.firstIndex(where: { $0.id == short.id }) {
+                ShortInspector(item: item, info: info, short: short, index: index).id(short.id)
+                Divider()
+            }
         case .recording:
             EmptyView()
         }
@@ -333,6 +338,7 @@ private struct RecordingInspector: View {
             blurAreas
             zooms
             GraphicsSection(item: item)
+            ShortsSection(item: item)
             subtitles
             ColorInspector(item: item, info: info)
             EffectsAndMarkersSection(item: item)

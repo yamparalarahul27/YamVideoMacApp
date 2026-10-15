@@ -112,8 +112,11 @@ if (mode === "full") {
 }
 
 const rate = String(data.fps || "30").split("/").reduce((a, b) => Number(a) / Number(b));
+const short = pageData.layout && pageData.layout.canvas === "short";
 const page = fs.readFileSync(path.join(engineDir, "page.html"), "utf8")
   .replaceAll("{{MODE}}", mode)
+  .replaceAll("{{WIDTH}}", short ? "1080" : "1920")
+  .replaceAll("{{HEIGHT}}", short ? "1920" : "1080")
   .replaceAll("{{DURATION}}", String(Math.round(duration * 1000) / 1000))
   .replaceAll("{{FPS}}", String(Math.round(rate)))
   .replace("{{MEDIA}}", media)

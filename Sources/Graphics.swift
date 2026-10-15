@@ -182,10 +182,26 @@ struct Graphic: Identifiable, Codable, Equatable {
     var length: Double { end - start }
 }
 
+/// What the graphics are drawn on: the 1920×1080 video, or a Short's 1080×1920 canvas with
+/// its choice of panel layout.
+enum GraphicsCanvas: Equatable {
+    case landscape
+    case short(ShortPanels)
+
+    /// The design canvas, in design pixels.
+    var size: CGSize { self == .landscape ? CGSize(width: 1920, height: 1080) : ShortFormat.size }
+    var panels: ShortPanels? { if case .short(let panels) = self { return panels }; return nil }
+}
+
 /// The graphics of one recording.
 struct GraphicsTrack: Codable, Equatable {
     var style = GraphicsStyle()
     var items: [Graphic] = []
+    /// What they are drawn on. Never stored: a Short's graphics are made from the
+    /// recording's when needed (`forShort`).
+    var canvas = GraphicsCanvas.landscape
+
+    private enum CodingKeys: String, CodingKey { case style, items }
 
     static let minimumLength = 0.5
     /// Panel graphics closer than this share one panel, so the shade does not flash.
@@ -196,8 +212,8 @@ struct GraphicsTrack: Codable, Equatable {
     static let shiftFraction = 0.25
     static let maximumPropsBytes = 64 * 1024
 
-    init(style: GraphicsStyle = GraphicsStyle(), items: [Graphic] = []) {
-        self.style = style; self.items = items
+    init(style: GraphicsStyle = GraphicsStyle(), items: [Graphic] = [], canvas: GraphicsCanvas = .landscape) {
+        self.style = style; self.items = items; self.canvas = canvas
     }
 
     init(from decoder: Decoder) throws {
@@ -334,17 +350,18 @@ struct GraphicsTrack: Codable, Equatable {
             }
             items.append(.object(item))
         }
-        let root: JSONValue = .object([
+        var root: [String: JSONValue] = [
             "version": .number(1), "duration": .number(duration), "fps": .string(fps),
             "style": .object([
                 "accent": .string(style.accent), "panel": .string(style.panel.rawValue),
                 "moveVideo": .bool(style.moveVideo), "edge": .number(style.edge), "look": .string(style.look.rawValue),
             ]),
             "items": .array(items),
-        ])
+        ]
+        if let panels = canvas.panels { root["layout"] = .object(["canvas": .string("short"), "panels": .string(panels.rawValue)]) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return try encoder.encode(root)
+        return try encoder.encode(JSONValue.object(root))
     }
 }
 
@@ -396,6 +413,9 @@ extension ClipTimeline {
 extension ProjectClip {
     /// The same recording without its graphics, to tell a graphics-only change apart.
     var withoutGraphics: ProjectClip { var copy = self; copy.graphics = nil; return copy }
+    /// The same recording without what draws over the picture or is made from it (its
+    /// graphics and Shorts), to tell a change the movie does not need apart.
+    var withoutOverlays: ProjectClip { var copy = self; copy.graphics = nil; copy.shorts = nil; return copy }
 }
 
 // MARK: - The move aside, shared by the preview and the export
@@ -409,6 +429,10 @@ struct GraphicsMotion: Equatable {
     /// The end screen: from `start` the picture moves into `frame` (design pixels of a
     /// 1920-wide frame) and stays there to the end of the video.
     var screen: ScreenMove?
+    /// In a Short, the panel layout: a lift under a bottom sheet, a frost over the whole
+    /// picture under a full shade, or the picture shrinking into the split frame. Nil on
+    /// the 16:9 video.
+    var short: ShortPanels?
 
     struct ScreenMove: Equatable {
         var start: Double
@@ -417,11 +441,21 @@ struct GraphicsMotion: Equatable {
 
     init?(_ track: GraphicsTrack?) {
         guard let track else { return nil }
-        let spans = track.style.moveVideo ? track.panelSpans() : []
-        let screen = track.endScreen.map { ScreenMove(start: $0.start, frame: EndScreenLayout(props: $0.props).frame) }
+        let spans: [PanelSpan]
+        switch track.canvas.panels {
+        case nil, .sheet?: spans = track.style.moveVideo ? track.panelSpans() : []
+        // The full shade and the split are what those layouts are, whatever the style.
+        case .shade?, .split?: spans = track.panelSpans()
+        }
+        let screen = track.canvas == .landscape
+            ? track.endScreen.map { ScreenMove(start: $0.start, frame: EndScreenLayout(props: $0.props).frame) } : nil
         guard !spans.isEmpty || screen != nil else { return nil }
-        self.spans = spans; self.style = track.style; self.screen = screen
+        self.spans = spans; self.style = track.style; self.screen = screen; self.short = track.canvas.panels
     }
+
+    /// Design pixels on this frame: 1920 of them across the long side, on the 16:9 video
+    /// and on a Short alike.
+    static func unit(_ size: CGSize) -> Double { Double(max(size.width, size.height)) / 1920 }
 
     /// The fill behind a moved picture: the same frame, this much larger, blurred by this
     /// sigma (design pixels), then darkened and desaturated by one matrix on the encoded
@@ -464,11 +498,37 @@ struct GraphicsMotion: Equatable {
                 max(2, Int((size.width * scale).rounded())), max(2, Int((size.height * scale).rounded())))
     }
 
-    /// Where the frost under the panel fades in, as fractions of the frame width.
+    /// Where the frost under the panel fades in, as fractions of the frame width (of its
+    /// height in a Short, top to bottom). A full shade frosts everything.
     func frostRamp(for span: PanelSpan) -> (from: Double, to: Double, blur: Double)? {
-        if span.ink { return (780 / 1920, 1160 / 1920, 14) }
-        guard style.panel == .shade else { return nil }
-        return (0.5, (960 + style.edge) / 1920, 28)
+        switch short {
+        case nil:
+            if span.ink { return (780 / 1920, 1160 / 1920, 14) }
+            guard style.panel == .shade else { return nil }
+            return (0.5, (960 + style.edge) / 1920, 28)
+        case .sheet?:
+            if span.ink { return ((ShortLayout.sheetTop - 40) / 1920, (ShortLayout.sheetTop + 260) / 1920, 14) }
+            guard style.panel == .shade else { return nil }
+            return (ShortLayout.sheetTop / 1920, (ShortLayout.sheetTop + style.edge) / 1920, 28)
+        case .shade?:
+            return (-1, -1 + 0.5 / 1920, span.ink ? 14 : 28)
+        case .split?:
+            return nil
+        }
+    }
+
+    /// How far the picture lifts under a bottom sheet, in pixels of a frame `size` tall.
+    func lift(amount: Double, size: CGSize) -> Int {
+        short == .sheet ? Int((ShortLayout.lift * Self.unit(size) * amount).rounded()) : 0
+    }
+
+    /// Where the picture sits in the split layout at `amount` of its move, like
+    /// `screenPlacement`: the full frame at 0, the split frame at 1, in whole pixels.
+    func splitPlacement(amount: Double, size: CGSize) -> (x: Int, y: Int, width: Int, height: Int) {
+        let frame = ShortLayout.splitFrame, unit = Double(size.width) / ShortFormat.size.width
+        let scale = 1 + (frame.width / ShortFormat.size.width - 1) * amount
+        return (Int((frame.minX * unit * amount).rounded()), Int((frame.minY * unit * amount).rounded()),
+                max(2, Int((size.width * scale).rounded())), max(2, Int((size.height * scale).rounded())))
     }
 }
 
@@ -512,7 +572,10 @@ enum GraphicsEngine {
         let rate = fps.split(separator: "/").compactMap { Double($0) }
         let fpsValue = rate.count == 2 && rate[1] > 0 ? rate[0] / rate[1] : (rate.first ?? 30)
         var page = try String(contentsOf: resources.appendingPathComponent("page.html"), encoding: .utf8)
+        let canvas = track.canvas.size
         page = page.replacingOccurrences(of: "{{MODE}}", with: mode)
+            .replacingOccurrences(of: "{{WIDTH}}", with: String(Int(canvas.width)))
+            .replacingOccurrences(of: "{{HEIGHT}}", with: String(Int(canvas.height)))
             .replacingOccurrences(of: "{{DURATION}}", with: String(format: "%.3f", pageDuration ?? duration))
             .replacingOccurrences(of: "{{FPS}}", with: String(Int(fpsValue.rounded())))
             .replacingOccurrences(of: "{{MEDIA}}", with: media)

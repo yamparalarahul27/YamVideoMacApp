@@ -14,6 +14,8 @@ struct EditReceipt: Equatable {
     var removedEffects: [UUID] = []
     var removedMarkers: [UUID] = []
     var removedGraphics: [UUID] = []
+    /// Shorts dropped because all their footage was cut away.
+    var removedShorts: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -110,7 +112,7 @@ extension AppModel {
         var receipt = EditReceipt(revision: revision, transactionID: nil, changed: outcome.project != base,
                                   createdIDs: outcome.createdIDs, removedZooms: outcome.removedZooms,
                                   removedEffects: outcome.removedEffects, removedMarkers: outcome.removedMarkers,
-                                  removedGraphics: outcome.removedGraphics,
+                                  removedGraphics: outcome.removedGraphics, removedShorts: outcome.removedShorts,
                                   affectedClips: Self.changedClips(from: base, to: outcome.project))
         guard !dryRun, receipt.changed else { return .success(receipt) }
 
@@ -161,8 +163,18 @@ extension AppModel {
     private func finishCommit(_ kind: EditEvent.Kind, origin: EditOrigin, label: String,
                               transaction: UUID?, clips: [UUID]) -> Int {
         hasUnsavedChanges = project != savedProject
+        let wasPlaying = playback.isPlaying
         playback.pause()
-        if showPlayback { showPlayback = false; refreshPreview() }
+        if showPlayback {
+            // The Short viewer stays up and keeps playing through edits, so its options can
+            // be tried while it plays; the 16:9 Preview goes back to the edit frame.
+            if showsShort, let item = selectedItem, item.short(playback.shortID) != nil {
+                playback.prepare(item, settings: settings, at: previewTime, play: wasPlaying)
+            } else {
+                showPlayback = false; showsShort = false; playback.shortID = nil
+                refreshPreview()
+            }
+        }
         if isMovieMode { prepareMovie(play: false) }
         scheduleAutosave()
         let revision = advance(kind, origin: origin, label: label, transaction: transaction, clips: clips)
@@ -212,6 +224,8 @@ extension AppModel {
             elements.formUnion((clip.markers ?? []).filter { oldMarkers[$0.id] != $0 }.map(\.id))
             let oldGraphics = Dictionary(uniqueKeysWithValues: (previous?.graphics?.items ?? []).map { ($0.id, $0) })
             elements.formUnion((clip.graphics?.items ?? []).filter { oldGraphics[$0.id] != $0 }.map(\.id))
+            let oldShorts = Dictionary(uniqueKeysWithValues: (previous?.shorts ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.shorts ?? []).filter { oldShorts[$0.id] != $0 }.map(\.id))
         }
         let highlight = AgentHighlight(origin: origin.label, label: label, clips: clips, elements: elements)
         agentHighlight = highlight
@@ -251,7 +265,7 @@ extension AppModel {
         if editSession.gesture == nil {
             editSession.gesture = OpenGesture(key: key, base: project, history: historyEntry(label), lastUpdate: Date())
             playback.pause()
-            if showPlayback, !keepPreview { showPlayback = false }
+            if showPlayback, !keepPreview, !showsShort { showPlayback = false }
         }
         guard let base = editSession.gesture?.base else { return nil }
         do {
@@ -428,6 +442,11 @@ extension AppModel {
         if sections != sectionSelection { sectionSelection = sections }
         if let id = selectedShotID, selectedItem?.zoomShots.contains(where: { $0.id == id }) != true { selectedShotID = nil }
         if let id = selectedGraphicID, selectedItem?.graphics?.items.contains(where: { $0.id == id }) != true { selectedGraphicID = nil }
+        if let id = selectedShortID, selectedItem?.shorts.contains(where: { $0.id == id }) != true { selectedShortID = nil }
+        if showsShort, selectedItem?.short(playback.shortID) == nil {
+            showsShort = false; playback.shortID = nil
+            if showPlayback { showPlayback = false; playback.pause() }
+        }
         if let id = selectedRegionID, selectedItem?.blurRegions.contains(where: { $0.id == id }) != true { selectedRegionID = nil }
         if let id = selectedEffectID, selectedItem?.blurEffects.contains(where: { $0.id == id }) != true { selectedEffectID = nil }
         if let id = selectedMarkerID, selectedItem?.markers.contains(where: { $0.id == id }) != true { selectedMarkerID = nil }

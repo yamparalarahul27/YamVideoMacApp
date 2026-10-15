@@ -196,6 +196,8 @@ struct VideoItem: Identifiable {
     var publish: PublishInfo?
     /// What was said, word by word, in source seconds. Nil until transcribed.
     var transcript: Transcript?
+    /// Vertical 9:16 versions of parts of the recording, for YouTube Shorts.
+    var shorts: [Short] = []
     /// Whole-frame blurs, sorted and non-overlapping, in edited-recording seconds.
     var blurEffects: [VideoBlurEffect] = []
     /// Named points on the edited timeline, sorted by time.

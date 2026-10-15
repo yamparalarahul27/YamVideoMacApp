@@ -18,6 +18,12 @@ final class PlaybackController: ObservableObject {
     private var loadedClip: ProjectClip?
     private var loadedSettings: ExportSettings?
     private var loadedOriginal = false
+    private var loadedPicture: PictureKey?
+    /// The Short the Preview shows, by id; nil shows the 16:9 video. Set by the app when
+    /// the owner switches the viewer, so every `prepare` follows it.
+    var shortID: UUID?
+    /// While a Short shows, playback stops at its end.
+    var stopAt: Double?
     private var requestedTime = 0.0
     private var playWhenReady = false
     private var seekGeneration = 0
@@ -28,6 +34,11 @@ final class PlaybackController: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self, !self.seeking, !self.isLoading else { return }
                 self.isPlaying = self.player.rate != 0
+                if self.isPlaying, let stop = self.stopAt, time.seconds >= stop - 0.0005 {
+                    self.pause()
+                    self.onTime?(stop)
+                    return
+                }
                 if self.isPlaying { self.onTime?(time.seconds) }
             }
         }
@@ -41,7 +52,7 @@ final class PlaybackController: ObservableObject {
 
     func clear() {
         pause(); task?.cancel(); task = nil
-        loadedClip = nil; loadedSettings = nil; loadedMovie = nil; loadedOriginal = false
+        loadedClip = nil; loadedSettings = nil; loadedMovie = nil; loadedOriginal = false; loadedPicture = nil
         statusObservation = nil
         player.replaceCurrentItem(with: nil)
         isLoading = false; error = nil
@@ -61,21 +72,40 @@ final class PlaybackController: ObservableObject {
         }
     }
 
+    /// What the picture is made of beyond the recording itself: the part shown (the crop,
+    /// or a Short's window) and the graphics' native motion. A change here is a new video
+    /// composition, not a new movie.
+    struct PictureKey: Equatable {
+        var crop: CGRect
+        var motion: GraphicsMotion?
+    }
+
+    static func picture(_ clip: VideoItem, info: MediaInfo, short: Short?) -> PictureKey {
+        if let short {
+            return PictureKey(crop: short.frame(info: info, crop: clip.crop),
+                              motion: GraphicsMotion(clip.graphics?.forShort(short, recordingTime: true)))
+        }
+        return PictureKey(crop: (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame), motion: GraphicsMotion(clip.graphics))
+    }
+
     /// `original` shows the recording without its colour stage, for comparison.
     func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool, original: Bool = false) {
         requestedTime = time
         playWhenReady = play
         let record = ProjectClip(clip)
-        if let loaded = loadedClip, loaded.withoutGraphics == record.withoutGraphics,
+        let short = clip.short(shortID)
+        stopAt = short?.end
+        let picture = clip.info.map { Self.picture(clip, info: $0, short: short) }
+        if let loaded = loadedClip, loaded.withoutOverlays == record.withoutOverlays,
            loadedSettings == settings, loadedOriginal == original, error == nil {
-            // Graphics draw in their own layer; only a change to the move aside needs a
-            // new picture, and that is a composition swap, not a new movie.
-            if GraphicsMotion(loaded.graphics) != GraphicsMotion(record.graphics),
-               let item = player.currentItem, !isLoading, let info = clip.info {
+            // Graphics draw in their own layer; only a change to the picture's motion or to
+            // the part shown needs a new picture, and that is a composition swap, not a
+            // new movie.
+            if loadedPicture != picture, let item = player.currentItem, !isLoading, let info = clip.info {
                 item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
-                                                              settings: settings, original: original)
+                                                              settings: settings, original: original, short: short)
             }
-            loadedClip = record
+            loadedClip = record; loadedPicture = picture
             seek(to: time)
             if !isLoading, play { player.play(); isPlaying = true }
             return
@@ -87,10 +117,10 @@ final class PlaybackController: ObservableObject {
         recolored?.blurEffects = record.blurEffects
         recolored?.markers = record.markers
         if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
-           recolored?.withoutGraphics == record.withoutGraphics, loadedSettings == settings, let info = clip.info {
+           recolored?.withoutOverlays == record.withoutOverlays, loadedSettings == settings, let info = clip.info {
             item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
-                                                          settings: settings, original: original)
-            loadedClip = record; loadedOriginal = original
+                                                          settings: settings, original: original, short: short)
+            loadedClip = record; loadedOriginal = original; loadedPicture = picture
             seek(to: time)
             if play { player.play(); isPlaying = true }
             return
@@ -98,11 +128,11 @@ final class PlaybackController: ObservableObject {
         task?.cancel()
         player.pause(); isPlaying = false
         loadedMovie = nil
-        loadedClip = record; loadedSettings = settings; loadedOriginal = original
+        loadedClip = record; loadedSettings = settings; loadedOriginal = original; loadedPicture = picture
         error = nil; isLoading = true
         task = Task {
             do {
-                let item = try await Self.makeItem(clip, settings: settings, original: original)
+                let item = try await Self.makeItem(clip, settings: settings, original: original, short: short)
                 try Task.checkCancellation()
                 player.replaceCurrentItem(with: item)
                 statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -136,8 +166,8 @@ final class PlaybackController: ObservableObject {
             if !isLoading, play { player.play(); isPlaying = true }
             return
         }
-        task?.cancel(); player.pause(); isPlaying = false
-        loadedClip = nil; loadedMovie = records; loadedCanvas = plan.size; loadedSettings = settings; loadedOriginal = false
+        task?.cancel(); player.pause(); isPlaying = false; stopAt = nil
+        loadedClip = nil; loadedMovie = records; loadedCanvas = plan.size; loadedSettings = settings; loadedOriginal = false; loadedPicture = nil
         isLoading = true; error = nil
         task = Task {
             do {
@@ -163,7 +193,7 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    static func makeItem(_ clip: VideoItem, settings: ExportSettings, original: Bool = false) async throws -> AVPlayerItem {
+    static func makeItem(_ clip: VideoItem, settings: ExportSettings, original: Bool = false, short: Short? = nil) async throws -> AVPlayerItem {
         guard let info = clip.info else { throw FFmpegError(message: "The video is still loading.") }
         let asset = AVURLAsset(url: clip.url)
         guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else {
@@ -205,7 +235,7 @@ final class PlaybackController: ObservableObject {
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
         }
         let item = AVPlayerItem(asset: composition)
-        item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original)
+        item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original, short: short)
         item.audioTimePitchAlgorithm = .spectral
         let mix = AVMutableAudioMix()
         mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
@@ -218,16 +248,18 @@ final class PlaybackController: ObservableObject {
     }
 
     /// Everything drawn on top of the assembled sections. A colour stage that cannot be
-    /// applied shows the picture as recorded; the inspector says why.
+    /// applied shows the picture as recorded; the inspector says why. With a Short, the
+    /// picture is its 9:16 window, with its graphics' motion.
     static func videoComposition(for asset: AVAsset, clip: VideoItem, info: MediaInfo,
-                                 settings: ExportSettings, original: Bool) -> AVVideoComposition {
-        let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+                                 settings: ExportSettings, original: Bool, short: Short? = nil) -> AVVideoComposition {
+        let picture = picture(clip, info: info, short: short)
+        let crop = picture.crop
         let shots = clip.zoomShots
         let regions = clip.blurRegions
         let effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
                                         toneMapHDR: settings.toneMapHDR, original: original).render
-        let motion = GraphicsMotion(clip.graphics)
+        let motion = picture.motion
         let videoComposition = AVMutableVideoComposition(asset: asset) { request in
             let result = renderFrame(request.sourceImage, info: info, crop: crop,
                                      regions: regions, shots: shots, settings: settings,
@@ -328,31 +360,54 @@ enum BlurCalibration {
 /// over the same fill, and stays there.
 func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Double) -> CIImage {
     if let screen = motion.screen, time >= screen.start {
-        return moveIntoFrame(image, size: size, motion: motion, amount: motion.screenProgress(at: time))
+        let amount = motion.screenProgress(at: time)
+        return moveIntoFrame(image, size: size, place: motion.screenPlacement(amount: amount, size: size), amount: amount)
     }
     let (amount, span) = motion.progress(at: time)
     guard amount > 0.0001, let span else { return image }
+    // A Short's split: the picture shrinks into its frame in the top half, over the fill.
+    if motion.short == .split {
+        return moveIntoFrame(image, size: size, place: motion.splitPlacement(amount: amount, size: size), amount: amount)
+    }
     let frame = CGRect(origin: .zero, size: size)
-    let w = size.width, unit = w / 1920
+    let w = size.width, h = size.height, unit = GraphicsMotion.unit(size)
     let space = ColorPipeline.videoSpace
     guard let base = image.cropped(to: frame).matchedFromWorkingSpace(to: space) else { return image }
-    let behind = movedPictureFill(base, frame: frame, amount: amount)
-
-    let shift = w * GraphicsTrack.shiftFraction * amount
-    let moved = base.transformed(by: CGAffineTransform(translationX: -shift, y: 0))
-    let fade = GraphicsMotion.edgeFade * unit * amount
-    var result = moved.applyingFilter("CIBlendWithMask", parameters: [
-        kCIInputBackgroundImageKey: behind,
-        kCIInputMaskImageKey: horizontalRamp(from: w - shift - fade, to: w - shift, rising: false, strength: 1, frame: frame),
-    ])
+    var result: CIImage
+    switch motion.short {
+    case nil:
+        let behind = movedPictureFill(base, frame: frame, amount: amount)
+        let shift = w * GraphicsTrack.shiftFraction * amount
+        let moved = base.transformed(by: CGAffineTransform(translationX: -shift, y: 0))
+        let fade = GraphicsMotion.edgeFade * unit * amount
+        result = moved.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: behind,
+            kCIInputMaskImageKey: linearRamp(from: CGPoint(x: w - shift - fade + max(fade, 0.5), y: 0), to: CGPoint(x: w - shift - fade, y: 0),
+                                             strength: 1, frame: frame),
+        ])
+    case .sheet?:
+        // The picture lifts; its bottom edge fades into the fill. Core Image's y runs up.
+        let behind = movedPictureFill(base, frame: frame, amount: amount)
+        let shift = CGFloat(motion.lift(amount: amount, size: size))
+        let moved = base.transformed(by: CGAffineTransform(translationX: 0, y: shift))
+        let fade = GraphicsMotion.edgeFade * unit * amount
+        result = moved.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: behind,
+            kCIInputMaskImageKey: linearRamp(from: CGPoint(x: 0, y: shift + fade - max(fade, 0.5)), to: CGPoint(x: 0, y: shift + fade),
+                                             strength: 1, frame: frame),
+        ])
+    case .shade?, .split?:
+        result = base
+    }
 
     if let ramp = motion.frostRamp(for: span) {
         let frosted = result.clampedToExtent()
             .applyingGaussianBlur(sigma: ramp.blur * unit * BlurCalibration.coreImageRadiusPerSigma).cropped(to: frame)
-        result = frosted.applyingFilter("CIBlendWithMask", parameters: [
-            kCIInputBackgroundImageKey: result,
-            kCIInputMaskImageKey: horizontalRamp(from: ramp.from * w, to: ramp.to * w, rising: true, strength: amount, frame: frame),
-        ])
+        // Across the 16:9 frame from left to right; down a Short from top to bottom.
+        let mask = motion.short == nil
+            ? linearRamp(from: CGPoint(x: ramp.from * w, y: 0), to: CGPoint(x: max(ramp.to * w, ramp.from * w + 0.5), y: 0), strength: amount, frame: frame)
+            : linearRamp(from: CGPoint(x: 0, y: h - ramp.from * h), to: CGPoint(x: 0, y: min(h - ramp.to * h, h - ramp.from * h - 0.5)), strength: amount, frame: frame)
+        result = frosted.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: result, kCIInputMaskImageKey: mask])
     }
     return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: frame)
 }
@@ -361,7 +416,7 @@ func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Dou
 /// `fillScale`, blurred, then darkened and desaturated by one matrix, faded in with the
 /// move. Over black, so `amount` scales the colour, as ffmpeg's table does.
 private func movedPictureFill(_ base: CIImage, frame: CGRect, amount: Double) -> CIImage {
-    let w = frame.width, h = frame.height, unit = w / 1920
+    let w = frame.width, h = frame.height, unit = GraphicsMotion.unit(frame.size)
     let scale = GraphicsMotion.fillScale
     let grow = CGAffineTransform(translationX: -w / 2, y: -h / 2)
         .concatenating(CGAffineTransform(scaleX: scale, y: scale))
@@ -381,14 +436,13 @@ private func movedPictureFill(_ base: CIImage, frame: CGRect, amount: Double) ->
         .cropped(to: frame)
 }
 
-/// The end screen's move: the picture, scaled with Lanczos as ffmpeg's `scale` does, at
-/// the whole-pixel place `GraphicsMotion.screenPlacement` gives, over the moved-picture fill.
-private func moveIntoFrame(_ image: CIImage, size: CGSize, motion: GraphicsMotion, amount: Double) -> CIImage {
+/// The picture scaled with Lanczos, as ffmpeg's `scale` does, at a whole-pixel place
+/// (top-left origin) over the moved-picture fill: the end screen's move and a Short's split.
+private func moveIntoFrame(_ image: CIImage, size: CGSize, place: (x: Int, y: Int, width: Int, height: Int), amount: Double) -> CIImage {
     guard amount > 0.0001 else { return image }
     let frame = CGRect(origin: .zero, size: size)
     let space = ColorPipeline.videoSpace
     guard let base = image.cropped(to: frame).matchedFromWorkingSpace(to: space) else { return image }
-    let place = motion.screenPlacement(amount: amount, size: size)
     let across = Double(place.width) / size.width, down = Double(place.height) / size.height
     let piece = CGRect(x: 0, y: 0, width: place.width, height: place.height)
     // Edges repeat their outermost pixels, so the scaled picture has no soft border.
@@ -400,16 +454,16 @@ private func moveIntoFrame(_ image: CIImage, size: CGSize, motion: GraphicsMotio
     return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: frame)
 }
 
-/// A left-to-right grey ramp for CIBlendWithMask: 0 before `from` and `strength` after
-/// `to` when rising, the reverse otherwise. The colours are linear, so the mask values are
-/// the numbers given rather than sRGB greys converted to light.
-private func horizontalRamp(from: CGFloat, to: CGFloat, rising: Bool, strength: Double, frame: CGRect) -> CIImage {
+/// A grey ramp for CIBlendWithMask: 0 at `from` and `strength` at `to`, along the line
+/// between them (Core Image coordinates), held beyond both. The colours are linear, so
+/// the mask values are the numbers given rather than sRGB greys converted to light.
+private func linearRamp(from: CGPoint, to: CGPoint, strength: Double, frame: CGRect) -> CIImage {
     let linear = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
     let low = CIColor(red: 0, green: 0, blue: 0, alpha: 1, colorSpace: linear)!
     let high = CIColor(red: strength, green: strength, blue: strength, alpha: 1, colorSpace: linear)!
     return CIFilter(name: "CILinearGradient", parameters: [
-        "inputPoint0": CIVector(x: from, y: 0), "inputPoint1": CIVector(x: max(to, from + 0.5), y: 0),
-        "inputColor0": rising ? low : high, "inputColor1": rising ? high : low,
+        "inputPoint0": CIVector(x: from.x, y: from.y), "inputPoint1": CIVector(x: to.x, y: to.y),
+        "inputColor0": low, "inputColor1": high,
     ])!.outputImage!.cropped(to: frame)
 }
 
@@ -419,6 +473,10 @@ struct PlaybackCanvas: View {
     var graphics: GraphicsOverlayInput? = nil
     /// Lets the owner select, move and resize the graphics on the picture.
     var editsGraphics = false
+    /// The Short shown, whose own placements drags change.
+    var short: UUID? = nil
+    /// Where YouTube draws over a Short, faintly.
+    var furniture = false
     var onGraphicBounds: ([UUID: GraphicBounds]) -> Void = { _ in }
     var body: some View {
         ZStack {
@@ -433,8 +491,13 @@ struct PlaybackCanvas: View {
                         .frame(width: size.width, height: size.height)
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
                         .allowsHitTesting(false)
+                    if furniture {
+                        ShortFurniture()
+                            .frame(width: size.width, height: size.height)
+                            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    }
                     if editsGraphics {
-                        GraphicsPlacementLayer(input: graphics)
+                        GraphicsPlacementLayer(input: graphics, short: short)
                             .frame(width: size.width, height: size.height)
                             .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     }

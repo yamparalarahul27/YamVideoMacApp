@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="--yg-w:{{WIDTH}}px;--yg-h:{{HEIGHT}}px">
 <head>
 <meta charset="utf-8" />
 <link rel="stylesheet" href="graphics.css" />
 </head>
 <body class="yg-{{MODE}}">
-<div id="stage" data-composition-id="yam-graphics" data-start="0" data-duration="{{DURATION}}" data-fps="{{FPS}}" data-width="1920" data-height="1080">
+<div id="stage" data-composition-id="yam-graphics" data-start="0" data-duration="{{DURATION}}" data-fps="{{FPS}}" data-width="{{WIDTH}}" data-height="{{HEIGHT}}">
 {{MEDIA}}
 <script type="application/json" id="graphics-data">{{JSON}}</script>
 <script src="gsap.min.js"></script>

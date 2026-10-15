@@ -227,6 +227,44 @@ func run() async throws {
                to: output.appendingPathComponent("5k-publish-end-screen.png"))
         model.undo(); model.undo()
     }
+    // A Short: the viewer at 9:16 with a bottom-sheet panel, YouTube's buttons and captions
+    // stepping up above it; the inspector's Short section; and Publish for the Short.
+    let shortWords = (0..<24).map { index in
+        TranscriptWord(text: ["Here", "is", "the", "first", "rule,", "and", "why", "it", "matters", "for", "every", "video."][index % 12],
+                       start: Double(index) / 24 * length * 0.95, end: Double(index + 1) / 24 * length * 0.95)
+    }
+    _ = model.perform([.setTranscript(clip: model.items[0].id, transcript: Transcript(model: "base.en", language: "en", words: shortWords)),
+                       .replaceGraphics(clip: model.items[0].id, graphics: [
+                           Graphic(kind: .namePlate, start: 0, end: length * 0.3,
+                                   props: ["kicker": .string("Yamparala Media"), "title": .string("Yamparala Rahul"), "detail": .string("UX Design Engineer")]),
+                           Graphic(kind: .rule, start: length * 0.35, end: length * 0.9,
+                                   props: ["kicker": .string("Rule"), "number": .string("01"), "title": .string("Cut every pause"),
+                                           "points": .array([.object(["text": .string("Viewers leave in the gaps"), "at": .number(0.8)]),
+                                                             .object(["text": .string("Tight, not rushed"), "at": .number(1.4)])])])], style: nil)])
+    var shortSettings = model.settings; shortSettings.captions = .burnIn
+    model.updateSettings(shortSettings)
+    model.setPreviewFraction(0.5)
+    model.addShortAtPlayhead()
+    if let short = model.selectedShort {
+        model.updateShort(short.id, label: "Short Title") { $0.title = "Cut every pause"; $0.tags = ["editing", "shorts"]; $0.cover = length * 0.6 }
+        model.setPreviewFraction(0.62)
+        model.setViewer(.short)
+        await render(window(), size: size, to: output.appendingPathComponent("5o-short-viewer.png"))
+        await pump(2.5)
+        await render(window(), size: size, to: output.appendingPathComponent("5o-short-viewer.png"))
+        await render(InspectorPane().environmentObject(model).frame(width: 340, height: 1300), size: CGSize(width: 340, height: 1300),
+               to: output.appendingPathComponent("5p-short-inspector.png"))
+        await render(PublishSheet().environmentObject(model), size: CGSize(width: 1080, height: 760),
+               to: output.appendingPathComponent("5q-publish-short.png"))
+        await pump(2)
+        await render(PublishSheet().environmentObject(model), size: CGSize(width: 1080, height: 760),
+               to: output.appendingPathComponent("5q-publish-short.png"))
+        model.updateShort(short.id, label: "Short Panels") { $0.panels = .split }
+        await pump(2.5)
+        await render(window(), size: size, to: output.appendingPathComponent("5r-short-split.png"))
+        model.setViewer(.frame)
+    }
+    model.undo(); model.undo(); model.undo(); model.undo(); model.undo()
     model.undo()
     // Auto Edit: the answers with the recording transcribed, the review list with stumbles,
     // and the inspector's captions from the transcript.

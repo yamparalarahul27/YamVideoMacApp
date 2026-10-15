@@ -51,7 +51,7 @@ extension AgentCatalog {
         /// made-up ids, so a copied example is at least a valid command.
         func example(_ json: String) -> JSONValue {
             let ids = ["OTHER-CLIP-ID": "0", "SECOND-CLIP-ID": "2", "FIRST-CLIP-ID": "1", "CLIP-ID": "1", "SECTION-ID": "5",
-                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c"]
+                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c", "SHORT-ID": "d"]
             var text = json
             for (placeholder, digit) in ids.sorted(by: { $0.key.count > $1.key.count }) {
                 text = text.replacingOccurrences(of: placeholder, with: "00000000-0000-4000-8000-00000000000\(digit)")
@@ -260,6 +260,18 @@ extension AgentCatalog {
             #"{"type": "importTranscript", "clipID": "CLIP-ID", "path": "~/Movies/talk.json"}"#)
         add("clearTranscript", "auto edit", "Forget a recording's transcript (and the captions made from it).", [clip],
             #"{"type": "clearTranscript", "clipID": "CLIP-ID"}"#)
+        // Shorts
+        let shortID = field("shortID", "uuid", "A Short's id from state.clips[].shorts[].id.")
+        let shortKeys = "Keys to set (only those given change): start and end (edited-recording seconds; a Short lasts 1 s to 3:00 and Shorts of one recording do not overlap; moving start alone keeps the length), window ({x, y, width, height} in source pixels, 9:16 and inside the picture; \"speaker\" centres it on the face Apple Vision finds; \"centre\" or null is the full height, centred), title, description, tags (list of text; the Short's own upload details), hidden (graphic ids left out of this Short), placements ({graphicID: {x, y, scale}} on the Short's 1080×1920 canvas, null puts one back), cover (seconds into the Short of the cover frame, or null), panels (sheet: a frosted shade rises over the lower half and the picture lifts by an eighth with moveVideo on; shade: the whole picture frosts and dims with the panel large in the middle; split: the picture shrinks into a frame in the top half with the panel below), captions (what burned-in captions do while a card or panel covers the lower half: stepUp moves them above it, over keeps them over it, hide pauses them)."
+        add("addShort", "shorts", "Add a Short: a vertical 1080×1920 version of part of the recording for YouTube Shorts, with the same edit, graphics (laid out for 9:16; the end screen is left out, as Shorts have none) and captions (in the safe area, sized for a phone). With no times it covers the whole recording when that is under 3:00, else the minute from the start (or from start). Its id is in createdIDs. state.clips[].shorts shows it with its issues; preview with short draws it.",
+            [clip, field("short", "object", shortKeys + " Also id, to choose the new Short's id.", required: false), field("shortID", "uuid", "The new Short's id, when you choose it.", required: false)],
+            #"{"type": "addShort", "clipID": "CLIP-ID", "short": {"start": 42.0, "end": 98.5, "window": "speaker", "title": "Why I edit on a Mac", "panels": "sheet", "captions": "stepUp"}}"#)
+        add("updateShort", "shorts", "Change a Short. Give only the keys to change.",
+            [clip, shortID, field("short", "object", shortKeys)],
+            #"{"type": "updateShort", "clipID": "CLIP-ID", "shortID": "SHORT-ID", "short": {"panels": "shade", "captions": "hide", "placements": {"GRAPHIC-ID": {"y": -120, "scale": 1.1}}}}"#)
+        add("removeShort", "shorts", "Remove a Short.", [clip, shortID],
+            #"{"type": "removeShort", "clipID": "CLIP-ID", "shortID": "SHORT-ID"}"#)
+
         add("addMedia", "project", "Add recordings; each is probed first. New ids are in createdIDs.",
             [field("paths", "string[]", "Local video files.")], #"{"type": "addMedia", "paths": ["~/Movies/take2.mov"]}"#)
         add("removeMedia", "project", "Remove a recording from the project (the file is untouched).", [clip],
@@ -284,6 +296,7 @@ extension AgentCatalog {
                 field("clip", "uuid", "The recording (or use timeSpace movie).", required: false),
                 field("time", "number", "When.", unit: editedSeconds), timeSpace,
                 field("composed", "boolean", "As the owner's Preview plays it: crop, zoom, colour, blur areas, effects and graphics (captions are export-only), with each graphic's box in graphics[]. Use this to see an effect, a zoom or where a graphic sits.", required: false, default: .bool(false)),
+                field("short", "uuid", "One of the recording's Shorts: draws it as the Short viewer shows it, 1080×1920, with its graphics laid out for 9:16 and its burned-in captions, and each graphic's box in graphics[]. time is then seconds into the Short.", required: false),
                 field("cropped", "boolean", "Apply the crop to a source-frame preview.", required: false, default: .bool(false)),
                 field("original", "boolean", "Leave the colour correction out, to compare.", required: false, default: .bool(false)),
                 field("expectedRevision", "integer", "Refuse if the project has moved on.", required: false)]),
@@ -309,7 +322,8 @@ extension AgentCatalog {
             Method(method: "export", summary: "Export one recording or the movie as a job. A recording's graphics are drawn in (HyperFrames renders each one once and keeps its frames, so the first export takes longer); state.graphicsRenderer says whether this Mac can, and only the owner can download HyperFrames. Movies leave graphics out.", fields: session + [
                 field("path", "string", "Where to write."), field("scope", "string", "What.", values: ["recording", "movie"]),
                 field("clip", "uuid", "For scope recording.", required: false), field("overwrite", "boolean", "Replace an existing file.", required: false, default: .bool(false)),
-                field("youtube", "boolean", "Export for YouTube: path is an existing folder, and it gets the MP4, the captions as an SRT on the edited timeline, a 1280×720 thumbnail under 2 MB, the upload text and a JSON of the same (with an end screen: when it starts and which element goes in which box, to place in YouTube Studio, as its upload API cannot). Refused while state.clips[].publishIssues has a blocking issue.", required: false, default: .bool(false))]),
+                field("youtube", "boolean", "Export for YouTube: path is an existing folder, and it gets the MP4, the captions as an SRT on the edited timeline, a 1280×720 thumbnail under 2 MB, the upload text and a JSON of the same (with an end screen: when it starts and which element goes in which box, to place in YouTube Studio, as its upload API cannot). Refused while state.clips[].publishIssues has a blocking issue.", required: false, default: .bool(false)),
+                field("short", "uuid", "Export one of the recording's Shorts (with clip): a 1080×1920 MP4 to path, or with youtube into the folder path its MP4, its captions as an SRT on its own timeline, a 1080×1920 cover JPEG, the upload text and a JSON (short: true; the related-video link to set in YouTube Studio, which the upload API cannot). Refused while state.clips[].shorts[].issues has a blocking issue.", required: false)]),
             Method(method: "thumbnail", summary: "Make the recording's thumbnail from its design (state.clips[].publish.design): the frame, the speaker cut out with Apple Vision, the title, tag and picture, at 1280×720. Returns the PNG's path to look at, whether a speaker was found and where; changes nothing unless saved. To use it: save, then setPublishInfo with {thumbnail: savedPath, design: …}.", fields: [
                 field("clip", "uuid", "The recording."),
                 field("design", "object", "Design keys to try over the stored design, without storing them.", required: false),
@@ -321,7 +335,9 @@ extension AgentCatalog {
             Method(method: "reveal", summary: "Show the owner something: select it and move the playhead there. Changes no edits.", fields: [
                 field("clip", "uuid", "A recording.", required: false), field("section", "uuid", "A section.", required: false),
                 field("zoom", "uuid", "A zoom.", required: false), field("effect", "uuid", "A blur effect.", required: false),
-                field("marker", "uuid", "A marker.", required: false), field("time", "number", "A time.", required: false, unit: editedSeconds), timeSpace]),
+                field("marker", "uuid", "A marker.", required: false), field("graphic", "uuid", "A graphic.", required: false),
+                field("short", "uuid", "A Short: selects it and shows it in the Short viewer; time is then seconds into it.", required: false),
+                field("time", "number", "A time.", required: false, unit: editedSeconds), timeSpace]),
         ]
 
         return AgentCatalog(
@@ -339,7 +355,8 @@ extension AgentCatalog {
                 "For a first edit of a talking-head recording, follow the owner's answers in state.autoEdit.options: run autoEdit (it transcribes, cuts and sets captions and loudness), then read transcript to place graphics and chapters on what is said.",
                 "Plan, then apply with dryRun to check the batch.",
                 "Apply for real with a label the owner will understand in the Undo menu.",
-                "Look at the result with preview (composed: true to see effects and zooms).",
+                "Look at the result with preview (composed: true to see effects and zooms; short to see a Short).",
+                "For a YouTube Short from a long recording: addShort on its best minute or two (window: \"speaker\"), give it its own title, check it with preview and short at a few times, then export with short and youtube.",
                 "Undo your own step by transactionID if it is not right; reveal to show the owner what you did.",
             ],
             commands: commands, methods: methods)
