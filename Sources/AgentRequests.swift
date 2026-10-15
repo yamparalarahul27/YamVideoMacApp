@@ -37,6 +37,10 @@ struct AgentRequest: Codable {
     var overwrite: Bool?
     /// export: write the YouTube files (video, captions, thumbnail, upload text) into the folder `path`.
     var youtube: Bool?
+    /// thumbnail: changes to try over the stored design, without storing them.
+    var design: [String: JSONValue]?
+    /// thumbnail: also save the PNG next to the recording.
+    var save: Bool?
     var scope: String?
     var kind: String?
     var job: UUID?
@@ -389,7 +393,7 @@ struct AgentSaveResult: Encodable {
 
 @MainActor
 extension AppModel {
-    static let agentMethods = ["catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview",
+    static let agentMethods = ["catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
                                "analyze", "export", "job", "cancel", "reveal"]
 
     /// Answers one request line with one response line. Never throws: every failure is
@@ -415,6 +419,7 @@ extension AppModel {
             return agentResponse(.success(agentState()), instanceID)
         case "events": return agentResponse(agentEvents(request), instanceID)
         case "preview": return agentResponse(await agentPreview(request), instanceID)
+        case "thumbnail": return agentResponse(await agentThumbnail(request), instanceID)
         case "job": return agentResponse(agentJob(request), instanceID)
         case "reveal": return agentResponse(agentReveal(request), instanceID)
         case "apply", "undo", "redo", "save", "export", "analyze", "cancel":
@@ -811,7 +816,7 @@ extension AppModel {
             }
         }
         func mergedPublish(_ changes: [String: JSONValue], onto info: PublishInfo) throws -> PublishInfo {
-            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel"]
+            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design"]
             if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
                 throw EditError.invalid("Unknown publish key \"\(unknown)\". Keys: \(known.sorted().joined(separator: ", ")).")
             }
@@ -821,16 +826,28 @@ extension AppModel {
                     throw EditError(code: .missingMedia, message: "No image at \(path).")
                 }
             }
+            if case .string(let path)? = changes["design"]?.object?["image"],
+               !FileManager.default.fileExists(atPath: (path as NSString).expandingTildeInPath) {
+                throw EditError(code: .missingMedia, message: "No image at \(path).")
+            }
             guard case .object(var merged) = try JSONValue.from(info) else { return info }
             for (key, value) in changes {
-                if value == .null { merged.removeValue(forKey: key) } else { merged[key] = value }
+                if value == .null { merged.removeValue(forKey: key) }
+                else if key == "design", case .object(let patch) = value {
+                    // The design's keys merge too: only those given change.
+                    var design = merged["design"]?.object ?? [:]
+                    for (name, part) in patch { if part == .null { design.removeValue(forKey: name) } else { design[name] = part } }
+                    merged["design"] = .object(design)
+                } else { merged[key] = value }
             }
             do {
                 return try AgentProtocol.decoder.decode(PublishInfo.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
             } catch {
                 throw EditError.invalid("publish: title, description, language and channel are text; tags is a list of text; "
                     + "category is one of \(YouTubeCategory.allCases.map(\.rawValue).joined(separator: ", ")); chapters is a list of "
-                    + "{time, title}; thumbnail is a path to an image.")
+                    + "{time, title}; thumbnail is a path to an image; design has time, title, tag, accent, image, cutout, outline, "
+                    + "side (\(ThumbnailDesign.Side.allCases.map(\.rawValue).joined(separator: ", "))), background "
+                    + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))) and zoom.")
             }
         }
         func zoom(_ value: WireZoom) -> ZoomShot {
@@ -1249,7 +1266,7 @@ extension AppModel {
     /// (zooms, colour, effects, the move aside), then the graphics, drawn by the same engine
     /// page the Preview lays over the picture, with where each one landed.
     func composedFrame(_ clip: ProjectClip, at local: Double, settings: ExportSettings,
-                       original: Bool = false) async throws -> (image: CGImage, graphics: [PreviewGraphic]?) {
+                       original: Bool = false, graphics: Bool = true) async throws -> (image: CGImage, graphics: [PreviewGraphic]?) {
         guard let info = clip.info else { throw EditError(code: .missingMedia, message: "That recording is still loading.") }
         let timeline = clip.timeline
         let player = try await PlaybackController.makeItem(clip.item(), settings: settings, original: original)
@@ -1259,7 +1276,7 @@ extension AppModel {
         var image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
                                                          preferredTimescale: 600_000)).image
         var drawn: [PreviewGraphic]?
-        if let track = clip.graphics, !track.items.isEmpty,
+        if graphics, let track = clip.graphics, !track.items.isEmpty,
            abs(Double(image.width) / Double(max(1, image.height)) - 16.0 / 9.0) < 0.02 {
             let snapshot = try await GraphicsSnapshot.draw(track, duration: timeline.duration, fps: info.fpsExpression,
                                                            time: local, over: image)
@@ -1534,4 +1551,58 @@ extension AppModel {
         }
         return .success(job)
     }
+
+    /// Renders a recording's thumbnail design, with `design` tried over the stored one, to a
+    /// PNG an agent can look at; with `save`, also next to the recording, for setPublishInfo.
+    private func agentThumbnail(_ request: AgentRequest) async -> Result<AgentThumbnail, EditError> {
+        if let refusal = checkSession(request, required: false) { return .failure(refusal) }
+        guard let clipID = request.clip, let clip = committedProject.clips.first(where: { $0.id == clipID }) else {
+            return .failure(.invalid("thumbnail needs clip, a recording's id from state."))
+        }
+        guard clip.info != nil else { return .failure(EditError(code: .missingMedia, message: "That recording is still loading.")) }
+        var publish = clip.publish ?? PublishInfo()
+        if publish.design == nil { publish.design = ThumbnailDesign(time: 0, title: publish.title) }
+        if let changes = request.design {
+            guard case .object(var merged)? = try? JSONValue.from(publish.design!) else { return .failure(.invalid("Could not read the design.")) }
+            for (name, value) in changes { if value == .null { merged.removeValue(forKey: name) } else { merged[name] = value } }
+            do { publish.design = try AgentProtocol.decoder.decode(ThumbnailDesign.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged))) }
+            catch { return .failure(.invalid("design: \(Self.describe(error)).")) }
+        }
+        guard let design = publish.design else { return .failure(.invalid("No design.")) }
+        if let problem = design.problem { return .failure(.invalid(problem)) }
+        guard design.time <= clip.timeline.duration + 0.0005 else {
+            return .failure(.invalid("The thumbnail's frame must be within the edited recording (0–\(clip.timeline.duration) s)."))
+        }
+        do {
+            let sources = try await thumbnailSources(clip, at: design.time, cutout: design.cutout)
+            let image = try await ThumbnailMaker.render(design, sources: sources, accent: clip.graphics?.style.accent ?? GraphicsStyle().accent)
+            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+                return .failure(.invalid("The thumbnail could not be encoded."))
+            }
+            let directory = agentArtifactsDirectory
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let file = directory.appendingPathComponent("thumbnail-\(clipID.uuidString.prefix(8))-\(UUID().uuidString.prefix(6)).png")
+            try png.write(to: file, options: .atomic)
+            var saved: String?
+            if request.save == true { saved = try await saveThumbnail(clip, design: design).path }
+            let k = 1920 / Double(sources.frame.width)
+            return .success(AgentThumbnail(path: file.path, savedPath: saved, width: image.width, height: image.height, design: design,
+                                           speakerFound: sources.cutout != nil,
+                                           speaker: sources.cutout.map { WireRect(CGRect(x: $0.box.minX * k, y: $0.box.minY * k,
+                                                                                         width: $0.box.width * k, height: $0.box.height * k)) }))
+        } catch let error as EditError { return .failure(error) }
+        catch { return .failure(.invalid("The thumbnail could not be made: \(error.localizedDescription)")) }
+    }
+}
+
+/// A rendered thumbnail: where to look at it, where it was saved, and what it was made from.
+struct AgentThumbnail: Encodable {
+    var path: String
+    var savedPath: String?
+    var width: Int
+    var height: Int
+    var design: ThumbnailDesign
+    var speakerFound: Bool
+    /// The speaker's box in design pixels of a 1920×1080 frame.
+    var speaker: WireRect?
 }

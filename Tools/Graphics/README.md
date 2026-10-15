@@ -54,6 +54,8 @@ page folder under a content-hash name, so the page has no paths outside its fold
 - `style.look` is `glass` (cards), `ink` (handwriting over a soft haze) or `mix` (panel
   graphics in ink, the rest as cards). One graphic can override it with its own `look`.
 - `style.edge` is the soft edge of the shade next to the speaker, in pixels (default 170).
+- `YamGraphics.thumbnail(data)` draws a still YouTube thumbnail on the stage (page mode
+  `thumbnail`); the app's thumbnail maker fills in the frame, the cut-out and the text.
 - An item's optional `transform` `{x, y, scale}` moves it on the picture, in pixels, and
   scales it from the top-left corner of its zone. The app sets it when a graphic is dragged
   in Preview.

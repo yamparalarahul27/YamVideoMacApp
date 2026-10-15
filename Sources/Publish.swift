@@ -81,11 +81,13 @@ struct PublishInfo: Codable, Equatable {
     var language = "en"
     /// The channel name, shown in the preview only.
     var channel = ""
+    /// How the thumbnail maker made the thumbnail, so it can be made again or changed.
+    var design: ThumbnailDesign?
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case title, description, tags, category, chapters, thumbnail, language, channel
+        case title, description, tags, category, chapters, thumbnail, language, channel, design
     }
 
     init(from decoder: Decoder) throws {
@@ -103,6 +105,7 @@ struct PublishInfo: Codable, Equatable {
         }
         language = try c.decodeIfPresent(String.self, forKey: .language) ?? defaults.language
         channel = try c.decodeIfPresent(String.self, forKey: .channel) ?? defaults.channel
+        design = try c.decodeIfPresent(ThumbnailDesign.self, forKey: .design)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -115,6 +118,7 @@ struct PublishInfo: Codable, Equatable {
         try c.encodeIfPresent(thumbnail?.path, forKey: .thumbnail)
         try c.encode(language, forKey: .language)
         try c.encode(channel, forKey: .channel)
+        try c.encodeIfPresent(design, forKey: .design)
     }
 
     var isEmpty: Bool { self == PublishInfo() }
@@ -157,6 +161,7 @@ struct PublishInfo: Codable, Equatable {
             return "The language is a code like en or en-GB."
         }
         if let thumbnail, !thumbnail.isFileURL { return "The thumbnail must be a local image." }
+        if let problem = design?.problem { return problem }
         return nil
     }
 

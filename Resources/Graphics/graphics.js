@@ -1043,8 +1043,100 @@
     return out;
   }
 
-  /** Reads the inline JSON and loads it. Used by page.html. */
+  // ───────────────────────── Thumbnail ─────────────────────────
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  /** A white outline round whatever it filters: the alpha, grown, filled white, under it. */
+  function outlineFilter() {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("width", "0"); svg.setAttribute("height", "0");
+    svg.style.position = "absolute";
+    const filter = document.createElementNS(SVG_NS, "filter");
+    const attrs = { id: "yg-outline", x: "-5%", y: "-5%", width: "110%", height: "110%" };
+    for (const key in attrs) filter.setAttribute(key, attrs[key]);
+    const steps = [
+      ["feMorphology", { in: "SourceAlpha", operator: "dilate", radius: "9", result: "dilated" }],
+      ["feGaussianBlur", { in: "dilated", stdDeviation: "1.4", result: "grown" }],
+      ["feFlood", { "flood-color": "#ffffff", result: "white" }],
+      ["feComposite", { in: "white", in2: "grown", operator: "in", result: "ring" }],
+    ];
+    for (const [tag, values] of steps) {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const key in values) node.setAttribute(key, values[key]);
+      filter.appendChild(node);
+    }
+    const merge = document.createElementNS(SVG_NS, "feMerge");
+    for (const name of ["ring", "SourceGraphic"]) {
+      const node = document.createElementNS(SVG_NS, "feMergeNode");
+      node.setAttribute("in", name);
+      merge.appendChild(node);
+    }
+    filter.appendChild(merge);
+    svg.appendChild(filter);
+    return svg;
+  }
+
+  /** Lines of the title; words between asterisks take the accent colour. Text only. */
+  function accented(node, text) {
+    String(text).split("\n").slice(0, 3).forEach((line, index) => {
+      if (index > 0) node.appendChild(document.createElement("br"));
+      line.split("*").forEach((part, i) => {
+        if (!part) return;
+        node.appendChild(i % 2 ? h("em", { text: part }) : document.createTextNode(part));
+      });
+    });
+  }
+
+  /** The largest title size, from 170 px down, at which the text column holds everything. */
+  function fitTitle(title, column) {
+    for (let size = 170; size >= 56; size -= 4) {
+      title.style.fontSize = size + "px";
+      if (column.scrollHeight <= column.clientHeight + 1 && title.scrollWidth <= title.clientWidth + 1) return size;
+    }
+    return 56;
+  }
+
+  /**
+   * A YouTube thumbnail on the stage (drawn at 1280×720): the frame, the speaker cut out
+   * and outlined, a big title with *accent* words, a tag, and a photo. Resolves with the
+   * title's size once the pictures have loaded and the title fits.
+   */
+  function thumbnail(data) {
+    if (current) { current.tl.kill(); current.node.remove(); current = null; }
+    const old = document.getElementById("yg-thumb");
+    if (old) old.remove();
+    const d = data || {};
+    document.documentElement.style.setProperty("--yg-accent", d.accent || DEFAULT_STYLE.accent);
+    const root = h("div", { id: "yg-thumb", class: "yg-thumb bg-" + (d.background || "dim") + " side-" + (d.side === "left" ? "left" : "right") });
+    const pictures = [];
+    const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
+    append(root, outlineFilter());
+    if (d.frame) append(root, picture(d.frame, "yg-thumb-bg"));
+    append(root, h("div", { class: "yg-thumb-scrim" }));
+    if (d.cutout) {
+      const cut = picture(d.cutout, "yg-thumb-cut" + (d.outline ? " outlined" : ""));
+      const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
+      const speaker = d.speaker || { x: 0, y: 0, w: 1920, h: 1080 };
+      cut.style.transformOrigin = (num(speaker.x, 0) + num(speaker.w, 1920) / 2) + "px " + (num(speaker.y, 0) + num(speaker.h, 1080)) + "px";
+      if (zoom !== 1) cut.style.transform = "scale(" + zoom + ")";
+      append(root, cut);
+    }
+    const column = h("div", { class: "yg-thumb-text" });
+    if (d.tag) append(column, h("div", { class: "yg-thumb-tag", text: d.tag }));
+    const title = h("div", { class: "yg-thumb-title" });
+    accented(title, d.title || "");
+    append(column, title);
+    if (d.image) append(column, picture(d.image, "yg-thumb-image"));
+    append(root, column);
+    append(document.getElementById("stage") || document.body, root);
+    const loaded = pictures.map((img) => (img.decode ? img.decode().catch(() => null) : Promise.resolve()));
+    return Promise.all(loaded).then(() => document.fonts.ready).then(() => fitTitle(title, column));
+  }
+
+  /** Reads the inline JSON and loads it. Used by page.html. A thumbnail page starts empty
+   * and is drawn by `thumbnail(data)`. */
   function boot(options) {
+    if (options && options.mode === "thumbnail") return null;
     const data = JSON.parse(document.getElementById("graphics-data").textContent);
     return load(data, options);
   }
@@ -1052,7 +1144,7 @@
   /** Moves the playhead. Events stay on, so count-ups and the route dot update. */
   function seek(seconds) { if (current) current.tl.time(Math.max(0, seconds), false); }
 
-  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
+  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -153,9 +153,9 @@ struct VideoProject: Codable, Equatable {
     /// and the per-recording subtitle file. 4: adds per-recording colour. 5: adds
     /// whole-frame blur effects and timeline markers. 6: adds per-recording graphics. 7: adds
     /// a graphic's move and scale on the picture. 8: adds what YouTube needs per recording.
-    /// Every edited project is written as the current version; older builds reject it
-    /// rather than silently dropping edits.
-    static let currentVersion = 8
+    /// 9: adds the thumbnail maker's design. Every edited project is written as the current
+    /// version; older builds reject it rather than silently dropping edits.
+    static let currentVersion = 9
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -216,6 +216,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 8, clips.contains(where: { $0.publish != nil }) {
             try reject("The project claims an older format but contains publishing details."); return
+        }
+        if version < 9, clips.contains(where: { $0.publish?.design != nil }) {
+            try reject("The project claims an older format but contains a thumbnail design."); return
         }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
