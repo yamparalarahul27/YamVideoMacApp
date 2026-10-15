@@ -236,18 +236,30 @@ extension AgentCatalog {
         add("setMovieCanvas", "movie", "The movie's frame shape.",
             [field("canvas", "string", "firstClip matches the first recording's crop.", values: MovieCanvas.allCases.map(\.rawValue))],
             #"{"type": "setMovieCanvas", "canvas": "portrait"}"#)
-        add("setExportSettings", "project", "Change export settings; only the keys given change. graphics: false exports without each recording's graphics and the move aside under its panels.",
+        add("setExportSettings", "project", "Change export settings; only the keys given change. graphics: false exports without each recording's graphics and the move aside under its panels. captions: burnIn, upload or off (what exports and Export for YouTube do with captions; null goes back to burning in a caption file only). audio: normalised exports at -14 LUFS.",
             [field("settings", "object", "Keys to change.", values: AgentCatalog.exportSettingKeys.sorted())],
             #"{"type": "setExportSettings", "settings": {"format": "gif", "frameRate": 12}}"#)
         add("setPublishInfo", "publish", "Set what YouTube gets for a recording; only the keys given change. YouTube's limits (title 100 characters, description 5000 with its chapters, tags 500 as YouTube counts them, chapters from 0:00, at least 3, each 10 s or more) show in state.clips[].publishIssues rather than being refused, so a draft can be written in steps; state.clips[].suggestedChapters has chapters made from named markers and panel, rule, checklist and title graphics. Chapters follow their footage through cuts.",
             [clip, field("publish", "object", "Keys to change: title, description, tags (list of text), category (one of the values), chapters ([{time, title}], edited-recording seconds; replaces the list), thumbnail (path to an image, or null), language (like en), channel (for the owner's preview), design (the thumbnail maker's design; only its keys given change: time (edited seconds of the frame), title (up to 3 lines, *words* in the accent), tag, accent (#RRGGBB), image (path), cutout, outline, side (auto, left, right), background (frame, dim, blur, solid), zoom (1–1.6)), endScreen (which YouTube element goes in each box of the endScreen graphic; only its keys given change: circle (subscribe or channel; channel and message name the other channel), videos (one per video box, top first: [{kind: bestForViewer|recentUpload|video|playlist, link, title}], link a YouTube link for video and playlist)). YouTube's upload API cannot set end screen elements, so Export for YouTube writes where each goes for YouTube Studio.",
                          values: YouTubeCategory.allCases.map(\.rawValue))],
             #"{"type": "setPublishInfo", "clipID": "CLIP-ID", "publish": {"title": "How I edit with YamVideo", "tags": ["video editing", "macOS"], "chapters": [{"time": 0, "title": "Intro"}, {"time": 42, "title": "Cutting"}, {"time": 95, "title": "Graphics"}]}}"#)
-        add("setSubtitles", "project", "Burn a caption file into a recording.",
+        add("setSubtitles", "project", "Give a recording a caption file. It is used before the transcript's captions; settings.captions decides whether exports burn it in (burnIn), only upload it with Export for YouTube (upload) or leave it out (off). Without settings.captions a file is burned in.",
             [clip, field("path", "string", "A local .srt, .vtt or .ass file.")],
             #"{"type": "setSubtitles", "clipID": "CLIP-ID", "path": "~/Movies/talk.srt"}"#)
-        add("clearSubtitles", "project", "Stop burning captions into a recording.", [clip],
+        add("clearSubtitles", "project", "Remove a recording's caption file; captions then come from its transcript, if settings.captions is on.", [clip],
             #"{"type": "clearSubtitles", "clipID": "CLIP-ID"}"#)
+
+        // Auto edit
+        add("setAutoEditOptions", "auto edit", "Change the project's auto edit answers; only the keys given change. state.autoEdit shows them. autoEdit (the method) and the owner's Auto Edit button follow them.",
+            [field("autoEdit", "object", "Keys to change: model (whisper model: " + TranscriptModel.allCases.map(\.rawValue).joined(separator: " or ")
+                   + "; base.en is English only), language (a whisper language code such as en, hi, te, or auto), cutStyle (tight: pauses of 0.42 s or more become about 0.22 s and stumbles from the transcript go; natural: pauses of 0.8 s or more become 0.3 s; review: the tight cuts, chosen by the owner), captions (upload: an SRT goes up with Export for YouTube; burnIn: also drawn into the picture; off), normaliseAudio (true: exports at -14 LUFS).",
+                   values: ["model", "language", "cutStyle", "captions", "normaliseAudio"])],
+            #"{"type": "setAutoEditOptions", "autoEdit": {"cutStyle": "natural", "captions": "burnIn"}}"#)
+        add("importTranscript", "auto edit", "Set a recording's transcript from a file: whisper-cli's full JSON (-ojf, with -dtw for word times) or {model, language, words: [{text, start, end}]} in source seconds. Replaces any transcript; one undo step.",
+            [clip, field("path", "string", "A local JSON file.")],
+            #"{"type": "importTranscript", "clipID": "CLIP-ID", "path": "~/Movies/talk.json"}"#)
+        add("clearTranscript", "auto edit", "Forget a recording's transcript (and the captions made from it).", [clip],
+            #"{"type": "clearTranscript", "clipID": "CLIP-ID"}"#)
         add("addMedia", "project", "Add recordings; each is probed first. New ids are in createdIDs.",
             [field("paths", "string[]", "Local video files.")], #"{"type": "addMedia", "paths": ["~/Movies/take2.mov"]}"#)
         add("removeMedia", "project", "Remove a recording from the project (the file is untouched).", [clip],
@@ -281,8 +293,19 @@ extension AgentCatalog {
                 field("transactionID", "uuid", "From apply's result."), field("expectedRevision", "integer", "The revision you read.")]),
             Method(method: "redo", summary: "Redo it.", fields: session + [
                 field("transactionID", "uuid", "From undo's result."), field("expectedRevision", "integer", "The revision you read.")]),
-            Method(method: "analyze", summary: "Propose silence cuts or zooms as a job; applies nothing.", fields: session + [
-                field("clip", "uuid", "The recording."), field("kind", "string", "What to look for.", values: ["silence", "zooms"])]),
+            Method(method: "analyze", summary: "Propose cuts or zooms as a job; applies nothing. silence: pauses (threshold, minimum, padding as in the silence review). autoEdit: the cuts the project's cut style makes, pauses and stumbles from the transcript, each with its reasons, plus the captions and audio settings an auto edit would set.", fields: session + [
+                field("clip", "uuid", "The recording."), field("kind", "string", "What to look for.", values: ["silence", "zooms", "autoEdit"]),
+                field("style", "string", "For autoEdit: a cut style other than the project's.", required: false, values: CutStyle.allCases.map(\.rawValue))]),
+            Method(method: "transcribe", summary: "Transcribe a recording on this Mac with whisper.cpp, as a job with progress; the words land as one undo step (Transcribe). state.autoEdit says whether whisper is installed and which models are downloaded; only the owner can download a model.", fields: session + [
+                field("clip", "uuid", "The recording."),
+                field("model", "string", "Default: the project's autoEdit.model.", required: false, values: TranscriptModel.allCases.map(\.rawValue)),
+                field("language", "string", "A whisper language code or auto. Default: the project's autoEdit.language.", required: false)]),
+            Method(method: "transcript", summary: "A recording's words in source seconds with editedStart (where each plays now; null when cut), its captions on the edited timeline, and the stumbles found in it (filler, repeat, restart, fragment). Use it to place graphics and chapters on what is said.", fields: [
+                field("clip", "uuid", "The recording.")]),
+            Method(method: "autoEdit", summary: "The whole auto edit by the project's answers (state.autoEdit.options), as a job: transcribe if the cut style or captions need words and there are none, find the cuts, then apply them with the captions and loudness settings as one undo step, labelled Auto Edit. With cutStyle review nothing is applied and the cuts come back for the owner to choose. The result lists every cut with its reasons, the sections and settings, and the transactionID to undo it.", fields: session + [
+                field("clip", "uuid", "The recording."),
+                field("style", "string", "A cut style other than the project's, for this run only.", required: false, values: CutStyle.allCases.map(\.rawValue)),
+                field("label", "string", "What the Undo menu calls the step.", required: false, default: .string("Auto Edit"))]),
             Method(method: "export", summary: "Export one recording or the movie as a job. A recording's graphics are drawn in (HyperFrames renders each one once and keeps its frames, so the first export takes longer); state.graphicsRenderer says whether this Mac can, and only the owner can download HyperFrames. Movies leave graphics out.", fields: session + [
                 field("path", "string", "Where to write."), field("scope", "string", "What.", values: ["recording", "movie"]),
                 field("clip", "uuid", "For scope recording.", required: false), field("overwrite", "boolean", "Replace an existing file.", required: false, default: .bool(false)),
@@ -291,8 +314,8 @@ extension AgentCatalog {
                 field("clip", "uuid", "The recording."),
                 field("design", "object", "Design keys to try over the stored design, without storing them.", required: false),
                 field("save", "boolean", "Also save the PNG next to the recording and return savedPath.", required: false, default: .bool(false))]),
-            Method(method: "job", summary: "A job's status and result.", fields: [field("job", "uuid", "From analyze or export.")]),
-            Method(method: "cancel", summary: "Cancel a job.", fields: [field("job", "uuid", "From analyze or export.")]),
+            Method(method: "job", summary: "A job's status and result.", fields: [field("job", "uuid", "From analyze, transcribe, autoEdit or export.")]),
+            Method(method: "cancel", summary: "Cancel a job.", fields: [field("job", "uuid", "From analyze, transcribe, autoEdit or export.")]),
             Method(method: "save", summary: "Save without a dialog: in place, first save, or a copy to another path.", fields: session + [
                 field("path", "string", "Where, for a first save or a copy.", required: false)]),
             Method(method: "reveal", summary: "Show the owner something: select it and move the playhead there. Changes no edits.", fields: [
@@ -313,6 +336,7 @@ extension AgentCatalog {
             ],
             workflow: [
                 "Read state.",
+                "For a first edit of a talking-head recording, follow the owner's answers in state.autoEdit.options: run autoEdit (it transcribes, cuts and sets captions and loudness), then read transcript to place graphics and chapters on what is said.",
                 "Plan, then apply with dryRun to check the batch.",
                 "Apply for real with a label the owner will understand in the Undo menu.",
                 "Look at the result with preview (composed: true to see effects and zooms).",

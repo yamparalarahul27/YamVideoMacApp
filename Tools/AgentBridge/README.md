@@ -86,7 +86,10 @@ exits. `./test.sh` runs the same check against a test instance.
 | `yamvideo_apply_edits` | 1–100 typed commands as one undo step, against a revision; `dryRun` to check first. |
 | `yamvideo_get_events` | What changed since a cursor, and who changed it. |
 | `yamvideo_render_preview` | A frame as a PNG (path, and the image unless `attachImage` is false). `composed` renders it as the owner's Preview plays it, with zooms and whole-frame effects; `original` leaves the colour correction out, for a before/after pair at one revision. |
-| `yamvideo_analyze` | Silence or zoom suggestions as a job; applies nothing. |
+| `yamvideo_analyze` | Silence, auto edit or zoom suggestions as a job; applies nothing. |
+| `yamvideo_transcribe` | Transcribe a recording on this Mac with whisper.cpp, as a job; one undo step. |
+| `yamvideo_get_transcript` | The words with source and edited times, the captions and the stumbles. |
+| `yamvideo_auto_edit` | The owner's auto edit (`state.autoEdit.options`) as a job: transcribe, cut, captions and loudness in one undo step. |
 | `yamvideo_get_job`, `yamvideo_cancel_job` | Job status and result (optionally waiting), or cancel. |
 | `yamvideo_save_project` | Save in place, first save, or a copy — no dialog. |
 | `yamvideo_export` | Export one recording or the movie as a job. |

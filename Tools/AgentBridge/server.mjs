@@ -71,6 +71,7 @@ const server = new McpServer(
       "Times: split points and zoom starts are edited-recording seconds; trims and section ranges are source seconds; movie time only with timeSpace \"movie\".",
       "Look before and after with yamvideo_render_preview; pass composed: true to see zooms and whole-frame blur effects exactly as the owner's Preview shows them. Analysis proposes cuts or zooms but applies nothing. Ask the owner before exporting or saving over their file.",
       "Markers (state.clips[].markers) are the owner's notes on the timeline; read their labels to learn what they mean by \"the bit after the intro\", and add your own to point at moments.",
+      "The owner's answers for a first edit (transcript model and language, cut style, captions, loudness) are in state.autoEdit.options. yamvideo_auto_edit follows them in one undoable step; yamvideo_get_transcript gives the words with edited times, for placing graphics and chapters on what is said.",
     ].join("\n"),
   },
 );
@@ -106,7 +107,8 @@ server.registerTool("yamvideo_apply_edits", {
     "addBlurArea {clipID, rect, areaID?} · updateBlurArea {clipID, areaID, rect} · removeBlurArea {clipID, areaID} · replaceBlurAreas {clipID, areas:[{id?, rect}]}",
     "addZoom {clipID, start, target, hold? (2), level? (2), zoomID?} · updateZoom {clipID, zoomID, start?, hold?, level?, target?} · removeZoom {clipID, zoomID} · replaceZooms {clipID, zooms:[…]}",
     "setMovieOrder {order:[every clipID]} · setIncludedInMovie {clipID, included} · setMovieCanvas {canvas: firstClip|widescreen|portrait|square}",
-    "setExportSettings {settings: only the keys to change, e.g. {format: \"gif\", frameRate: 12}} · setSubtitles {clipID, path} · clearSubtitles {clipID} · addMedia {paths} · removeMedia {clipID} · relinkMedia {clipID, path}",
+    "setExportSettings {settings: only the keys to change, e.g. {format: \"gif\", frameRate: 12}; captions: burnIn|upload|off} · setSubtitles {clipID, path} · clearSubtitles {clipID} · addMedia {paths} · removeMedia {clipID} · relinkMedia {clipID, path}",
+    "Auto edit: setAutoEditOptions {autoEdit: only the keys to change: model large-v3-turbo-q5_0|base.en, language (en, hi, te… or auto), cutStyle tight|natural|review, captions upload|burnIn|off, normaliseAudio} · importTranscript {clipID, path to whisper-cli -ojf JSON or {model, language, words}} · clearTranscript {clipID}",
     "Colour (each recording's state.color shows the profile in effect and why, the conversion and any problem): setInputProfile {clipID, profile: auto|standard|pocket3DLogM|hlg|pq} · importTechnicalLUT {clipID, path to DJI's Pocket 3 D-Log M to Rec.709 .cube; needs profile pocket3DLogM} · clearTechnicalLUT {clipID} · setColorCorrection {clipID, enabled} (Natural colour) · setColorAdjustments {clipID, exposureEV? -2–2, warmth? -1–1, contrast? 0.5–1.5, saturation? 0–2} · resetColorAdjustments {clipID} · copyColorAdjustments {clipID (from), targets:[clipID], includeInterpretation? (also copy profile and conversion)}",
     "Whole-frame blur: addBlurEffect {clipID, start, end? or duration? (3), amount? 0–80 (24), mix? 0–1 (1), fadeIn? (0.25), fadeOut? (0.25), enabled?, effectID?} · updateBlurEffect {clipID, effectID, any of those} · removeBlurEffect {clipID, effectID}",
     "Markers: addMarker {clipID, time, label?, color? red|orange|yellow|green|blue|purple, markerID?} · updateMarker {clipID, markerID, time?, label?, color?} · removeMarker {clipID, markerID}",
@@ -159,9 +161,10 @@ server.registerTool("yamvideo_render_preview", {
 
 server.registerTool("yamvideo_analyze", {
   title: "Analyze a recording",
-  description: "Start a background job: \"silence\" proposes cuts (and the resulting sections) from audio levels; \"zooms\" proposes zooms from local visual activity. Nothing is applied — apply chosen results with yamvideo_apply_edits. Poll with yamvideo_get_job.",
+  description: "Start a background job: \"silence\" proposes cuts (and the resulting sections) from audio levels; \"autoEdit\" proposes the cuts the owner's cut style makes, pauses and stumbles from the transcript, each with its reasons; \"zooms\" proposes zooms from local visual activity. Nothing is applied — apply chosen results with yamvideo_apply_edits. Poll with yamvideo_get_job.",
   inputSchema: {
-    sessionID: address.sessionID, projectID: address.projectID, clip: id, kind: z.enum(["silence", "zooms"]),
+    sessionID: address.sessionID, projectID: address.projectID, clip: id, kind: z.enum(["silence", "zooms", "autoEdit"]),
+    style: z.enum(["tight", "natural", "review"]).optional().describe("For autoEdit: a cut style other than the owner's."),
     threshold: z.number().optional().describe("Silence threshold in dB (default -40)."),
     minimum: z.number().positive().optional().describe("Shortest pause to cut, seconds (default 0.8)."),
     padding: z.number().nonnegative().optional().describe("Audio kept either side of a cut, seconds (default 0.15)."),
@@ -169,6 +172,37 @@ server.registerTool("yamvideo_analyze", {
   },
   annotations: { readOnlyHint: true, openWorldHint: false },
 }, async (args) => result(await request("analyze", args)));
+
+server.registerTool("yamvideo_transcribe", {
+  title: "Transcribe a recording",
+  description: "Start a job that transcribes a recording on this Mac with whisper.cpp, word by word; the transcript lands as one undo step. state.autoEdit says whether whisper is installed and which models are downloaded (only the owner can download one). Poll with yamvideo_get_job.",
+  inputSchema: {
+    sessionID: address.sessionID, projectID: address.projectID, clip: id,
+    model: z.enum(["large-v3-turbo-q5_0", "base.en"]).optional().describe("Default: state.autoEdit.options.model."),
+    language: z.string().optional().describe("A whisper language code or auto. Default: state.autoEdit.options.language."),
+    requestID,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+}, async (args) => result(await request("transcribe", args)));
+
+server.registerTool("yamvideo_get_transcript", {
+  title: "Read a recording's transcript",
+  description: "Every word in source seconds with editedStart (where it plays now; null when cut), the captions on the edited timeline, and stumbles found (filler, repeat, restart, fragment).",
+  inputSchema: { clip: id },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async (args) => result(await request("transcript", args)));
+
+server.registerTool("yamvideo_auto_edit", {
+  title: "Auto edit a recording",
+  description: "Start a job that edits a recording the way the owner chose in state.autoEdit.options: transcribe if needed, cut pauses (and stumbles for the tight style), and set captions and loudness, as one undo step. With the review style nothing is cut and the proposed cuts come back to show the owner. The result lists each cut with its reasons and the transactionID to undo it. Poll with yamvideo_get_job.",
+  inputSchema: {
+    sessionID: address.sessionID, projectID: address.projectID, clip: id,
+    style: z.enum(["tight", "natural", "review"]).optional().describe("Override the owner's cut style for this run."),
+    label: z.string().max(80).optional(),
+    requestID,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+}, async (args) => result(await request("autoEdit", args)));
 
 server.registerTool("yamvideo_get_job", {
   title: "Check a job",
