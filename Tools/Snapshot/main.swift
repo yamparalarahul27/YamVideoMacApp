@@ -153,10 +153,25 @@ func run() async throws {
     // The Graphics section, taller so it is in view: HyperFrames ready, then not downloaded.
     let clipLength = model.items[0].editedDuration
     _ = model.perform([.replaceGraphics(clip: model.items[0].id, graphics: [
-        Graphic(kind: .namePlate, start: 0, end: min(1, clipLength / 2)),
+        Graphic(kind: .namePlate, start: 0, end: min(1, clipLength / 2),
+                props: ["kicker": .string("Yamparala Media"), "title": .string("Yamparala Rahul"), "detail": .string("UX Design Engineer")]),
         Graphic(kind: .rule, start: min(1, clipLength / 2), end: clipLength)], style: nil)])
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 900),
            to: output.appendingPathComponent("5b-export-graphics.png"))
+    // A graphic selected on the Preview picture, moved and scaled, and its inspector.
+    model.selectedGraphicID = model.items[0].graphics?.items.first?.id
+    if let id = model.selectedGraphicID { model.placeGraphic(id, GraphicTransform(x: -700, y: 400, scale: 1.3)) }
+    model.setPlaybackVisible(true)
+    model.setPreviewFraction(min(0.6, clipLength / 4) / clipLength)
+    // The first render builds the Preview, whose engine measures the graphics; the second
+    // shows the selection box from those measurements.
+    await render(window(), size: size, to: output.appendingPathComponent("5d-graphic-on-picture.png"))
+    await pump(2)
+    await render(window(), size: size, to: output.appendingPathComponent("5d-graphic-on-picture.png"))
+    await render(InspectorPane().environmentObject(model).frame(width: 340, height: 900), size: CGSize(width: 340, height: 900),
+           to: output.appendingPathComponent("5e-graphic-inspector.png"))
+    model.setPlaybackVisible(false)
+    model.undo()
     setenv("YAMVIDEO_HYPERFRAMES_DIR", NSTemporaryDirectory() + "yamvideo-no-hyperframes", 1)
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 900),
            to: output.appendingPathComponent("5c-export-graphics-download.png"))

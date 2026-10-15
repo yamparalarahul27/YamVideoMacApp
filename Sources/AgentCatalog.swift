@@ -177,7 +177,7 @@ extension AgentCatalog {
         let graphicID = field("graphicID", "uuid", "A graphic's id from state.clips[].graphics.items[].id.")
         let kinds = GraphicKind.allCases.map(\.rawValue)
         let graphicObject = field("graphic", "object",
-            "{kind, start, end, props, look?, id?}. kind is one of the values; namePlate, featureList, titleCard, phoneScreens, route, link and endCard sit in the right-hand column, panelTitle, rule and checklist in the side panel. start and end are edited-recording seconds; props is the template's data (see Tools/Graphics/README.md and docs/plans/graphics-track.md section 3): beat times in it (at, …At) are seconds after start, and image values are absolute paths to files that exist. look is glass or ink for this graphic alone.",
+            "{kind, start, end, props, look?, transform?, id?}. kind is one of the values; namePlate, featureList, titleCard, phoneScreens, route, link and endCard sit in the right-hand column, panelTitle, rule and checklist in the side panel. start and end are edited-recording seconds; props is the template's data (see Tools/Graphics/README.md and docs/plans/graphics-track.md section 3): beat times in it (at, …At) are seconds after start, and image values are absolute paths to files that exist. look is glass or ink for this graphic alone. transform {x, y, scale} moves it on the picture: x and y in pixels of a 1920×1080 frame (−1920–1920, −1080–1080) from its place in the template, scale 0.4–2.5 from the top-left corner of its zone; {x: 0, y: 0, scale: 1} puts it back. preview with composed: true draws the graphics and returns each one's box.",
             values: kinds)
         let styleKeys = "Only the keys to change: accent (\"#F5C42C\"), panel (shade|solid), moveVideo (slide the picture aside while a panel shows), edge (soft edge of the shade, 0–400 px, default 170), look (glass|ink|mix; mix writes panel graphics in ink)."
         let styleObject = field("graphicsStyle", "object", styleKeys)
@@ -185,8 +185,8 @@ extension AgentCatalog {
             [clip, graphicObject, timeSpace],
             #"{"type": "addGraphic", "clipID": "CLIP-ID", "graphic": {"kind": "namePlate", "start": 0.3, "end": 4.3, "props": {"kicker": "Yamparala Media", "title": "Yamparala Rahul", "detail": "UX Design Engineer"}}}"#)
         add("updateGraphic", "graphics", "Change a graphic. Give only the fields to change; moving start keeps the length; props, when given, replaces all props; look \"\" goes back to the style's choice.",
-            [clip, graphicID, field("graphic", "object", "{kind?, start?, end?, props?, look?}")],
-            #"{"type": "updateGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID", "graphic": {"start": 12.0}}"#)
+            [clip, graphicID, field("graphic", "object", "{kind?, start?, end?, props?, look?, transform?}; in transform only the keys given change.")],
+            #"{"type": "updateGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID", "graphic": {"start": 12.0, "transform": {"y": 120, "scale": 1.2}}}"#)
         add("removeGraphic", "graphics", "Remove a graphic.", [clip, graphicID],
             #"{"type": "removeGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID"}"#)
         add("replaceGraphics", "graphics", "Set every graphic on the recording at once, and the style too when given.",
@@ -267,7 +267,7 @@ extension AgentCatalog {
             Method(method: "preview", summary: "Render one frame to a PNG on this Mac.", fields: [
                 field("clip", "uuid", "The recording (or use timeSpace movie).", required: false),
                 field("time", "number", "When.", unit: editedSeconds), timeSpace,
-                field("composed", "boolean", "As the owner's Preview plays it: crop, zoom, colour, blur areas and effects (captions are export-only). Use this to see an effect or a zoom.", required: false, default: .bool(false)),
+                field("composed", "boolean", "As the owner's Preview plays it: crop, zoom, colour, blur areas, effects and graphics (captions are export-only), with each graphic's box in graphics[]. Use this to see an effect, a zoom or where a graphic sits.", required: false, default: .bool(false)),
                 field("cropped", "boolean", "Apply the crop to a source-frame preview.", required: false, default: .bool(false)),
                 field("original", "boolean", "Leave the colour correction out, to compare.", required: false, default: .bool(false)),
                 field("expectedRevision", "integer", "Refuse if the project has moved on.", required: false)]),

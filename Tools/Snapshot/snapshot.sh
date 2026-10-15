@@ -10,4 +10,5 @@ for file in "$ROOT"/Sources/*.swift; do [ "$(basename "$file")" = "App.swift" ] 
 xcrun swiftc -target "$(uname -m)-apple-macos14.0" -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
 	-o "$BIN" "${SOURCES[@]}" "$ROOT/Tools/Snapshot/main.swift" 2>&1 | grep -E "error" || true
 # Its own table store, so imported conversions never reach the owner's.
-YAMVIDEO_LUT_STORE="$(mktemp -d)" "$BIN" "$1" "$2"
+# The graphics engine from the source tree, as the app bundle carries it.
+YAMVIDEO_ROOT="$ROOT" YAMVIDEO_LUT_STORE="$(mktemp -d)" "$BIN" "$1" "$2"

@@ -93,6 +93,15 @@ struct WireGraphic: Codable, Equatable {
     var props: [String: JSONValue]?
     /// "glass" or "ink"; "" clears it back to the style's choice.
     var look: String?
+    /// Moved and scaled on the picture; in `updateGraphic` only the keys given change.
+    var transform: WireTransform?
+}
+
+/// A graphic's move (design pixels of a 1920×1080 frame) and scale on the picture.
+struct WireTransform: Codable, Equatable {
+    var x: Double?
+    var y: Double?
+    var scale: Double?
 }
 
 /// One command as JSON: a `type` plus the fields that type uses. Unused fields are
@@ -348,6 +357,15 @@ struct AgentPreview: Encodable {
     var original: Bool
     /// True when rendered as Preview plays it, effects and zooms included.
     var composed: Bool
+    /// In a composed preview, the graphics showing at that time and where each is drawn,
+    /// in this image's pixels.
+    var graphics: [PreviewGraphic]?
+}
+
+struct PreviewGraphic: Encodable {
+    var id: UUID
+    var kind: String
+    var rect: WireRect
 }
 
 struct AgentSaveResult: Encodable {
@@ -745,6 +763,13 @@ extension AppModel {
                 case "glass", "ink": result.look = GraphicsLook(rawValue: look)
                 default: throw EditError.invalid("A graphic's look is \"glass\" or \"ink\".")
                 }
+            }
+            if let place = value.transform {
+                var transform = result.transform ?? GraphicTransform()
+                if let x = place.x { transform.x = x }
+                if let y = place.y { transform.y = y }
+                if let scale = place.scale { transform.scale = scale }
+                result.transform = transform.isIdentity ? nil : transform
             }
             return result
         }
@@ -1160,10 +1185,24 @@ extension AppModel {
                 let generator = AVAssetImageGenerator(asset: player.asset)
                 generator.videoComposition = player.videoComposition
                 generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
-                let image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
+                var image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
                                                                  preferredTimescale: 600_000)).image
-                return .success(try writePreview(image, clipID: clipID, local: local, source: source, revision: requestedRevision,
-                                                 cropped: true, original: request.original ?? false, composed: true))
+                // Graphics are drawn by the same engine page the Preview lays over the
+                // picture, at this time, with where each one landed.
+                var drawn: [PreviewGraphic]?
+                if let track = clip.graphics, !track.items.isEmpty,
+                   abs(Double(image.width) / Double(max(1, image.height)) - 16.0 / 9.0) < 0.02 {
+                    let snapshot = try await GraphicsSnapshot.draw(track, duration: timeline.duration, fps: info.fpsExpression,
+                                                                   time: local, over: image)
+                    image = snapshot.image
+                    drawn = track.items.compactMap { graphic in
+                        snapshot.boxes[graphic.id].map { PreviewGraphic(id: graphic.id, kind: graphic.kind.rawValue, rect: WireRect($0)) }
+                    }
+                }
+                var preview = try writePreview(image, clipID: clipID, local: local, source: source, revision: requestedRevision,
+                                               cropped: true, original: request.original ?? false, composed: true)
+                preview.graphics = drawn
+                return .success(preview)
             }
             let data = try await FFmpeg.thumbnail(
                 url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.map(\.rect),
