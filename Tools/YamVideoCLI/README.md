@@ -91,12 +91,12 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `removeBlurEffect` | `clipID`, `effectID` |
 | `addMarker` | `clipID`, `time`, `label`?, `color`? (red, orange, yellow, green, blue, purple), `markerID`? |
 | `updateMarker` / `removeMarker` | `clipID`, `markerID`, and for update any of `time`, `label`, `color` |
-| `addGraphic` | `clipID`, `graphic`: `{kind, start, end, props, look?, id?}` |
+| `addGraphic` | `clipID`, `graphic`: `{kind, start, end, props, look?, id?}`. An `endScreen` needs only its kind: it takes the last 20 s (or as much as is clear of other graphics, at least 5 s) and ends where the video ends; `props` `videos` (1 or 2), `side` (left, right: where the speaker sits), `kicker`, `title`. `state.clips[].endScreen` lists its boxes |
 | `updateGraphic` | `clipID`, `graphicID`, `graphic`: only the fields to change (`start` keeps the length; `props` replaces all props; `transform` `{x, y, scale}` moves and scales it on the picture, only the keys given) |
 | `removeGraphic` | `clipID`, `graphicID` |
 | `replaceGraphics` | `clipID`, `graphics`, `graphicsStyle`? |
 | `setGraphicsStyle` | `clipID`, `graphicsStyle`: any of `accent`, `panel` (shade, solid), `moveVideo`, `edge` (0–400), `look` (glass, ink, mix) |
-| `setPublishInfo` | `clipID`, `publish`: only the keys to change, from `title`, `description`, `tags`, `category`, `chapters` (`[{time, title}]`), `thumbnail` (a path), `language`, `channel`, `design` (the thumbnail maker's design; only its keys given change). YouTube's limits show in `state.clips[].publishIssues`; `suggestedChapters` has chapters from markers and graphics |
+| `setPublishInfo` | `clipID`, `publish`: only the keys to change, from `title`, `description`, `tags`, `category`, `chapters` (`[{time, title}]`), `thumbnail` (a path), `language`, `channel`, `design` (the thumbnail maker's design; only its keys given change), `endScreen` (the YouTube element for each end screen box: `circle` subscribe or channel, `channel`, `message`, `videos` `[{kind: bestForViewer|recentUpload|video|playlist, link, title}]`; only its keys given change). YouTube's limits show in `state.clips[].publishIssues`; `suggestedChapters` has chapters from markers and graphics |
 | `importGraphics` | `clipID`, `path` of a graphics.json (the format `Tools/Graphics` uses) |
 
 `yamvideoctl catalog` prints all of this from the app itself, with each field's type,
@@ -115,7 +115,7 @@ section's ID and reports the new right one in `createdIDs`.
 | `catalog` | Every command and request, described for an agent: fields, units, ranges, defaults, examples and conventions. |
 | `analyze --kind silence\|zooms --clip ID` | Starts a job that proposes cuts or zooms for the revision it read. It applies nothing. |
 | `thumbnail --clip ID [--save]` | Draws the recording's thumbnail from its design (the frame, the speaker cut out with Apple Vision, the title, tag and picture) and returns the PNG's path, whether a speaker was found and where. With `--save` it is also saved next to the recording (`savedPath`); then `setPublishInfo` with `thumbnail` uses it. Changes tried over the design without storing them go in the request's `design` (raw `request`). |
-| `export --youtube --path FOLDER --clip ID` | Export for YouTube into an existing folder: the MP4, the captions as an SRT on the edited timeline, a 1280×720 thumbnail under 2 MB, the upload text and a JSON of it. Refused while `publishIssues` has a blocking issue. |
+| `export --youtube --path FOLDER --clip ID` | Export for YouTube into an existing folder: the MP4, the captions as an SRT on the edited timeline, a 1280×720 thumbnail under 2 MB, the upload text and a JSON of it. With an end screen, both say when it starts and which element goes in which box (in pixels and fractions of the frame): YouTube's upload API cannot set end screen elements, so they are placed in YouTube Studio, by the owner or an agent in the owner's browser. Refused while `publishIssues` has a blocking issue. |
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. A recording's graphics are drawn in; `state.graphicsRenderer.status` says whether this Mac can (`ready`, `needsNode`, `needsDownload`). Only the owner can download HyperFrames, so on `unsupported_capability` ask them, or export without graphics. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |
 | `save [--path FILE]` | Saves without a dialog: in place, to a first location, or — to a different path — as a copy with its own identity. |

@@ -20,7 +20,9 @@
     namePlate: "column", featureList: "column", titleCard: "column", phoneScreens: "column",
     route: "column", link: "column", endCard: "column",
     panelTitle: "panel", rule: "panel", checklist: "panel",
+    endScreen: "screen",
   };
+  const STAGE = { left: 0, top: 0, width: 1920, height: 1080 };
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
   const PANEL_PAD = 108;         // panel content starts this far past the soft edge's start
 
@@ -38,6 +40,27 @@
     const text = String(value || "30");
     const parts = text.split("/");
     return parts.length === 2 ? Number(parts[0]) / Number(parts[1]) : Number(text);
+  }
+
+  /**
+   * Pure: where the end screen puts everything on the 1920×1080 stage. The speaker's frame
+   * (half size), YouTube's Subscribe circle and one or two 16:9 video cards, and the text by
+   * the circle. The app has the same numbers (EndScreenLayout in Sources/EndScreen.swift).
+   */
+  function endLayout(props) {
+    const p = props || {};
+    const videos = p.videos === 1 ? 1 : 2;
+    const side = p.side === "right" ? "right" : "left";
+    const card = (y) => ({ x: 1209, y, w: 615, h: 346 });
+    let frame = { x: 96, y: 102, w: 960, h: 540 };
+    let circle = { x: 96, y: 682, w: 296, h: 296 };
+    let text = { x: 432, y: 682, w: 624, h: 296 };
+    let cards = videos === 2 ? [card(170), card(564)] : [card(199)];
+    if (side === "right") {
+      const flip = (r) => ({ x: 1920 - r.x - r.w, y: r.y, w: r.w, h: r.h });
+      frame = flip(frame); circle = flip(circle); text = flip(text); cards = cards.map(flip);
+    }
+    return { videos, side, frame, circle, text, cards };
   }
 
   /** Pure: zones, panel spans and render units. Shared with Tools/Graphics/assemble.mjs. */
@@ -338,6 +361,36 @@
       c.tl.to([ringLeft, ringRight], { opacity: 0, duration: 0.3, ease: "power2.in" }, c.at(ringAt + 0.9));
     }
     c.exitColumn();
+  };
+
+  /**
+   * The end screen: a frame round the speaker, who moves into it natively (in the app) or
+   * as #bg-video (full mode), and empty boxes exactly where YouTube's end screen elements
+   * sit, so nothing covers them. In the app's preview each box says what goes in it
+   * (`guides`, written by the app from the publish details); exports draw the boxes only,
+   * because YouTube's elements cover them.
+   */
+  const END_MARGIN = 10;
+  KINDS.endScreen = function (inner, p, c) {
+    const layout = endLayout(p);
+    const px = (r, pad) => "left:" + (r.x - pad) + "px;top:" + (r.y - pad) + "px;width:" + (r.w + 2 * pad) + "px;height:" + (r.h + 2 * pad) + "px;";
+    const frame = h("div", { class: "yg-es-frame", style: px({ x: STAGE.left, y: STAGE.top, w: STAGE.width, h: STAGE.height }, 0) });
+    const guides = c.mode === "preview" && p.guides ? p.guides : null;
+    const box = (r, round, label) => h("div", { class: "yg-es-box" + (round ? " yg-es-round" : ""), style: px(r, END_MARGIN) },
+      guides ? h("div", { class: "yg-es-guide" }, h("span", { text: label }), h("span", { class: "yg-es-note", text: "YouTube places it" })) : null);
+    const circle = box(layout.circle, true, guides && guides.circle ? guides.circle : "Subscribe");
+    const cards = layout.cards.map((r, i) => box(r, false, guides && guides.cards && guides.cards[i] ? guides.cards[i] : "Video " + (i + 1)));
+    const k = kicker(p.kicker);
+    const title = h("div", { class: "yg-es-title", text: p.title });
+    const text = h("div", { class: "yg-es-text " + layout.side, style: px(layout.text, 0) }, p.kicker ? k.node : null, p.title ? title : null);
+    append(inner, [frame, circle, cards, text]);
+    const tl = c.tl;
+    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, c.at(0));
+    // The frame follows the picture's move: the same curve and length as the native move.
+    tl.fromTo(frame, { left: 0, top: 0, width: 1920, height: 1080, opacity: 0 },
+      { left: layout.frame.x, top: layout.frame.y, width: layout.frame.w, height: layout.frame.h, opacity: 1, duration: PANEL_SLIDE, ease: smooth }, c.at(0));
+    c.pop([circle].concat(cards), PANEL_SLIDE + 0.1, 0.12);
+    c.up([k.node, title], PANEL_SLIDE + 0.35, 0.12);
   };
 
   KINDS.panelTitle = function (inner, p, c) {
@@ -797,12 +850,12 @@
 
   // ───────────────────────── Timeline ─────────────────────────
 
-  function context(tl, toTime, graphic, host, delayIn) {
+  function context(tl, toTime, graphic, host, delayIn, mode) {
     const length = graphic.end - graphic.start;
     const at = (rel) => toTime(graphic.start + rel);
     const end = (rel) => toTime(graphic.end + rel);
     return {
-      tl, host, length, at, ink: pen(seeded(String(graphic.id))),
+      tl, host, length, at, mode, ink: pen(seeded(String(graphic.id))),
       enterColumn() { tl.fromTo(host, { opacity: 0, x: 56 }, { opacity: 1, x: 0, duration: 0.6, ease: "power3.out" }, at(0)); },
       exitColumn() { tl.to(host, { opacity: 0, x: 36, duration: 0.4, ease: "power2.in" }, end(-0.4)); },
       enterPanel() { tl.fromTo(host, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power2.out" }, at(delayIn)); },
@@ -920,11 +973,24 @@
       });
     }
 
+    const screen = p.items.find((g) => g.kind === "endScreen");
+    if (mode === "full" && screen) {
+      // The end screen: the video moves into the speaker's frame over the blurred copy.
+      const video = document.getElementById("bg-video");
+      const fill = document.getElementById("bg-fill");
+      const f = endLayout(screen.props).frame;
+      if (video) {
+        tl.fromTo(video, { x: 0, y: 0, scale: 1, transformOrigin: "0 0" },
+          { x: f.x, y: f.y, scale: f.w / 1920, transformOrigin: "0 0", duration: PANEL_SLIDE, ease: smooth, immediateRender: false }, toTime(screen.start));
+      }
+      if (fill) tl.fromTo(fill, { opacity: 0 }, { opacity: 1, duration: PANEL_SLIDE, ease: "power2.out", immediateRender: false }, toTime(screen.start));
+    }
+
     const firstInSpan = new Set(p.spans.map((s) => s.items[0]));
     const places = {};
     for (const graphic of items) {
       const zone = zoneOf(graphic.kind);
-      const rect = zone === "column" ? COLUMN : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
+      const rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
       const host = h("div", { class: "yg-host yg-kind-" + graphic.kind, "data-graphic-id": graphic.id,
         style: "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" });
       const look = lookOf(graphic, style);
@@ -940,7 +1006,7 @@
       append(container, place);
       places[graphic.id] = { place, host, rect, graphic };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
-      (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn));
+      (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode));
     }
 
     current = { tl, node: container, plan: p, places, shift };
@@ -1144,7 +1210,7 @@
   /** Moves the playhead. Events stay on, so count-ups and the route dot update. */
   function seek(seconds) { if (current) current.tl.time(Math.max(0, seconds), false); }
 
-  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
+  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, endLayout, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -323,33 +323,20 @@ enum BlurCalibration {
 /// design pixels of a 1920-wide frame, scaled to the real width. The export draws the same
 /// (`FFmpeg.moveStage`): like the blur effects, everything here works on the frame's
 /// encoded values, as ffmpeg does, not in Core Image's linear working space.
+///
+/// From the end screen's start the picture instead moves into the end screen's frame,
+/// over the same fill, and stays there.
 func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Double) -> CIImage {
+    if let screen = motion.screen, time >= screen.start {
+        return moveIntoFrame(image, size: size, motion: motion, amount: motion.screenProgress(at: time))
+    }
     let (amount, span) = motion.progress(at: time)
     guard amount > 0.0001, let span else { return image }
     let frame = CGRect(origin: .zero, size: size)
-    let w = size.width, h = size.height, unit = w / 1920
+    let w = size.width, unit = w / 1920
     let space = ColorPipeline.videoSpace
     guard let base = image.cropped(to: frame).matchedFromWorkingSpace(to: space) else { return image }
-
-    let scale = GraphicsMotion.fillScale
-    let grow = CGAffineTransform(translationX: -w / 2, y: -h / 2)
-        .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-        .concatenating(CGAffineTransform(translationX: w / 2, y: h / 2))
-    // Darker and less saturated in one matrix, faded in with the move: over black, so
-    // `amount` scales the colour, as ffmpeg's table does.
-    let luma = GraphicsMotion.lumaWeights, s = GraphicsMotion.fillSaturation
-    let gain = GraphicsMotion.fillDim * amount
-    func row(_ index: Int) -> CIVector {
-        let weights = [luma.r, luma.g, luma.b].enumerated().map { gain * ((1 - s) * $0.element + ($0.offset == index ? s : 0)) }
-        return CIVector(x: weights[0], y: weights[1], z: weights[2], w: 0)
-    }
-    let behind = base.clampedToExtent().transformed(by: grow)
-        .applyingGaussianBlur(sigma: GraphicsMotion.fillBlur * unit * BlurCalibration.coreImageRadiusPerSigma)
-        .applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": row(0), "inputGVector": row(1), "inputBVector": row(2),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-        ])
-        .cropped(to: frame)
+    let behind = movedPictureFill(base, frame: frame, amount: amount)
 
     let shift = w * GraphicsTrack.shiftFraction * amount
     let moved = base.transformed(by: CGAffineTransform(translationX: -shift, y: 0))
@@ -367,6 +354,49 @@ func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Dou
             kCIInputMaskImageKey: horizontalRamp(from: ramp.from * w, to: ramp.to * w, rising: true, strength: amount, frame: frame),
         ])
     }
+    return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: frame)
+}
+
+/// The fill behind a moved picture, from its encoded values: the frame grown by
+/// `fillScale`, blurred, then darkened and desaturated by one matrix, faded in with the
+/// move. Over black, so `amount` scales the colour, as ffmpeg's table does.
+private func movedPictureFill(_ base: CIImage, frame: CGRect, amount: Double) -> CIImage {
+    let w = frame.width, h = frame.height, unit = w / 1920
+    let scale = GraphicsMotion.fillScale
+    let grow = CGAffineTransform(translationX: -w / 2, y: -h / 2)
+        .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+        .concatenating(CGAffineTransform(translationX: w / 2, y: h / 2))
+    let luma = GraphicsMotion.lumaWeights, s = GraphicsMotion.fillSaturation
+    let gain = GraphicsMotion.fillDim * amount
+    func row(_ index: Int) -> CIVector {
+        let weights = [luma.r, luma.g, luma.b].enumerated().map { gain * ((1 - s) * $0.element + ($0.offset == index ? s : 0)) }
+        return CIVector(x: weights[0], y: weights[1], z: weights[2], w: 0)
+    }
+    return base.clampedToExtent().transformed(by: grow)
+        .applyingGaussianBlur(sigma: GraphicsMotion.fillBlur * unit * BlurCalibration.coreImageRadiusPerSigma)
+        .applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": row(0), "inputGVector": row(1), "inputBVector": row(2),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ])
+        .cropped(to: frame)
+}
+
+/// The end screen's move: the picture, scaled with Lanczos as ffmpeg's `scale` does, at
+/// the whole-pixel place `GraphicsMotion.screenPlacement` gives, over the moved-picture fill.
+private func moveIntoFrame(_ image: CIImage, size: CGSize, motion: GraphicsMotion, amount: Double) -> CIImage {
+    guard amount > 0.0001 else { return image }
+    let frame = CGRect(origin: .zero, size: size)
+    let space = ColorPipeline.videoSpace
+    guard let base = image.cropped(to: frame).matchedFromWorkingSpace(to: space) else { return image }
+    let place = motion.screenPlacement(amount: amount, size: size)
+    let across = Double(place.width) / size.width, down = Double(place.height) / size.height
+    let piece = CGRect(x: 0, y: 0, width: place.width, height: place.height)
+    // Edges repeat their outermost pixels, so the scaled picture has no soft border.
+    let picture = base.clampedToExtent()
+        .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: down, kCIInputAspectRatioKey: across / down])
+        .cropped(to: piece)
+        .transformed(by: CGAffineTransform(translationX: CGFloat(place.x), y: size.height - CGFloat(place.y + place.height)))
+    let result = picture.composited(over: movedPictureFill(base, frame: frame, amount: amount))
     return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: frame)
 }
 

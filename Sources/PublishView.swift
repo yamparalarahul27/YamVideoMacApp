@@ -31,7 +31,7 @@ private struct PublishContent: View {
     let initialPreview: Int
     let close: () -> Void
 
-    private var issues: [PublishInfo.Issue] { publish.issues(duration: item.editedDuration) }
+    private var issues: [PublishInfo.Issue] { publish.issues(duration: item.editedDuration, graphics: item.graphics) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,7 +90,7 @@ private struct PublishForm: View {
     @State private var makingThumbnail = false
 
     private func issues(_ field: String) -> [PublishInfo.Issue] {
-        publish.issues(duration: item.editedDuration).filter { $0.field == field }
+        publish.issues(duration: item.editedDuration, graphics: item.graphics).filter { $0.field == field }
     }
 
     var body: some View {
@@ -127,6 +127,7 @@ private struct PublishForm: View {
             }
             chapters
             thumbnail
+            PublishEndScreenSection(item: item, publish: publish)
             captions
             InspectorSection("Channel") {
                 PublishTextField(placeholder: "Your channel's name, for the preview", value: publish.channel, axis: .horizontal) { text in
@@ -241,6 +242,90 @@ private struct PublishForm: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+/// Which YouTube element goes in each box of the end screen layout. YouTube's upload cannot
+/// place them, so the upload text and JSON say where each goes in Studio.
+struct PublishEndScreenSection: View {
+    @EnvironmentObject var model: AppModel
+    let item: VideoItem
+    let publish: PublishInfo
+
+    var body: some View {
+        let elements = publish.endScreen ?? EndScreenElements()
+        func change(_ label: String, _ edit: @escaping (inout EndScreenElements) -> Void) {
+            model.setPublish(label: label) { info in
+                var value = info.endScreen ?? EndScreenElements()
+                edit(&value)
+                info.endScreen = value
+            }
+        }
+        return InspectorSection("End Screen") {
+            if let screen = item.graphics?.endScreen {
+                let layout = EndScreenLayout(props: screen.props)
+                Text("From \(PublishInfo.timestamp(screen.start)) to the end (\(String(format: "%.0f", screen.length.rounded())) s). "
+                     + "Choose what goes in each box:")
+                    .font(.caption)
+                Picker("Circle, \(layout.place(of: layout.circle))", selection: Binding(get: { elements.circle },
+                                                                                       set: { value in change("End Screen Circle") { $0.circle = value } })) {
+                    ForEach(EndScreenElements.Circle.allCases) { Text($0.label).tag($0) }
+                }
+                if elements.circle == .channel {
+                    PublishTextField(placeholder: "The channel's link or @handle", value: elements.channel, axis: .horizontal) { text in
+                        change("End Screen Channel") { $0.channel = text }
+                    }
+                    PublishTextField(placeholder: "Its message, shown with it", value: elements.message, axis: .horizontal) { text in
+                        change("End Screen Channel") { $0.message = text }
+                    }
+                }
+                ForEach(Array(layout.cards.enumerated()), id: \.offset) { index, rect in
+                    let video = elements.video(index)
+                    let name = layout.cards.count == 1 ? "Video" : "Video \(index + 1)"
+                    Picker("\(name), \(layout.place(of: rect))", selection: Binding(get: { video.kind }, set: { kind in
+                        change("End Screen Video") { value in
+                            while value.videos.count <= index { value.videos.append(EndScreenElements.Video()) }
+                            value.videos[index].kind = kind
+                        }
+                    })) {
+                        ForEach(EndScreenElements.Kind.allCases) { Text($0.label).tag($0) }
+                    }
+                    if video.kind.needsLink {
+                        HStack(spacing: 6) {
+                            PublishTextField(placeholder: video.kind == .video ? "The video's YouTube link" : "The playlist's YouTube link",
+                                             value: video.link, axis: .horizontal) { text in
+                                change("End Screen Video") { value in
+                                    while value.videos.count <= index { value.videos.append(EndScreenElements.Video()) }
+                                    value.videos[index].link = text
+                                }
+                            }
+                            PublishTextField(placeholder: "Its title", value: video.title, axis: .horizontal) { text in
+                                change("End Screen Video") { value in
+                                    while value.videos.count <= index { value.videos.append(EndScreenElements.Video()) }
+                                    value.videos[index].title = text
+                                }
+                            }
+                            .frame(width: 140)
+                        }
+                    }
+                }
+                Text(EndScreen.apiNote + " The upload text lists each element and its box.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("No end screen. Add one to keep the last 5–20 seconds clear for YouTube's Subscribe circle and video cards; "
+                     + "the speaker moves into a smaller frame beside them.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Add End Screen") { model.addEndScreen() }
+                    .controlSize(.small)
+                    .disabled(item.editedDuration < EndScreen.lengths.lowerBound)
+            }
+            ForEach(publish.issues(duration: item.editedDuration, graphics: item.graphics).filter { $0.field == "endScreen" }, id: \.message) { issue in
+                Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
 }
 
 /// A field that commits on Return or when it loses focus, so typing is one undo step.

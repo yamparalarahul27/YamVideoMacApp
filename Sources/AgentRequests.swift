@@ -267,6 +267,9 @@ struct AgentState: Encodable {
         var publish: PublishInfo?
         var publishIssues: [PublishInfo.Issue]
         var suggestedChapters: [Chapter]
+        /// The end screen, when the recording has one: when it shows, the speaker's frame,
+        /// and each box with the YouTube element chosen for it, to place in YouTube Studio.
+        var endScreen: JSONValue?
     }
     /// Edited-recording seconds; `weight` follows `VideoBlurEffect.weight`.
     struct Effect: Encodable {
@@ -590,9 +593,11 @@ extension AppModel {
                 markers: (clip.markers ?? []).map { .init(id: $0.id, time: $0.time, label: $0.label, color: $0.color.rawValue) },
                 graphics: clip.graphics,
                 publish: clip.publish,
-                publishIssues: clip.info == nil ? [] : (clip.publish ?? PublishInfo()).issues(duration: clip.timeline.duration),
+                publishIssues: clip.info == nil ? [] : (clip.publish ?? PublishInfo()).issues(duration: clip.timeline.duration,
+                                                                                               graphics: clip.graphics),
                 suggestedChapters: clip.info == nil ? [] : PublishInfo.suggestedChapters(markers: clip.markers ?? [], graphics: clip.graphics,
-                                                                                         duration: clip.timeline.duration))
+                                                                                         duration: clip.timeline.duration),
+                endScreen: EndScreenPlan(graphics: clip.graphics, publish: clip.publish, duration: clip.timeline.duration)?.json)
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -768,11 +773,27 @@ extension AppModel {
                 }
                 result.kind = kind
             } else if old == nil { throw EditError.invalid("A new graphic needs a kind.") }
-            if let start = value.start {
+            if result.kind == .endScreen, value.end == nil, value.start != nil || old == nil {
+                // An end screen ends where the video does. Without a start it takes the
+                // last 20 s, or as much of them as is clear of the other graphics.
+                let clip = try record(try field(wire.clipID, "clipID"))
+                let duration = clip.timeline.duration
+                if let start = value.start {
+                    result.start = try placed(start).1
+                } else {
+                    let others = GraphicsTrack(items: (clip.graphics?.items ?? []).filter { $0.id != result.id })
+                    guard let span = others.newEndScreenSpan(duration: duration) else {
+                        throw EditError.invalid(String(format: "There is no room for an end screen: YouTube's end screen needs 5 to 20 s at the end of the video (%.2f s) with no other graphic showing. Give start to choose.", duration))
+                    }
+                    result.start = span.start
+                }
+                result.end = duration
+            } else if let start = value.start {
                 let length = (value.end ?? result.end) - (value.end == nil ? result.start : start)
                 result.start = try placed(start).1
                 result.end = result.start + length
             } else if old == nil { throw EditError.invalid("A new graphic needs start and end.") }
+            if old == nil, result.kind == .endScreen, value.props == nil { result.props = EndScreen.defaultProps }
             if let end = value.end, value.start == nil { result.end = end }
             if let props = value.props { result.props = props }
             if let look = value.look {
@@ -816,7 +837,7 @@ extension AppModel {
             }
         }
         func mergedPublish(_ changes: [String: JSONValue], onto info: PublishInfo) throws -> PublishInfo {
-            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design"]
+            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design", "endScreen"]
             if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
                 throw EditError.invalid("Unknown publish key \"\(unknown)\". Keys: \(known.sorted().joined(separator: ", ")).")
             }
@@ -833,11 +854,11 @@ extension AppModel {
             guard case .object(var merged) = try JSONValue.from(info) else { return info }
             for (key, value) in changes {
                 if value == .null { merged.removeValue(forKey: key) }
-                else if key == "design", case .object(let patch) = value {
-                    // The design's keys merge too: only those given change.
-                    var design = merged["design"]?.object ?? [:]
-                    for (name, part) in patch { if part == .null { design.removeValue(forKey: name) } else { design[name] = part } }
-                    merged["design"] = .object(design)
+                else if key == "design" || key == "endScreen", case .object(let patch) = value {
+                    // The design's and the end screen's keys merge too: only those given change.
+                    var object = merged[key]?.object ?? [:]
+                    for (name, part) in patch { if part == .null { object.removeValue(forKey: name) } else { object[name] = part } }
+                    merged[key] = .object(object)
                 } else { merged[key] = value }
             }
             do {
@@ -847,7 +868,9 @@ extension AppModel {
                     + "category is one of \(YouTubeCategory.allCases.map(\.rawValue).joined(separator: ", ")); chapters is a list of "
                     + "{time, title}; thumbnail is a path to an image; design has time, title, tag, accent, image, cutout, outline, "
                     + "side (\(ThumbnailDesign.Side.allCases.map(\.rawValue).joined(separator: ", "))), background "
-                    + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))) and zoom.")
+                    + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))) and zoom; endScreen has circle "
+                    + "(\(EndScreenElements.Circle.allCases.map(\.rawValue).joined(separator: ", "))), channel, message and videos, a list of "
+                    + "{kind (\(EndScreenElements.Kind.allCases.map(\.rawValue).joined(separator: ", "))), link, title}.")
             }
         }
         func zoom(_ value: WireZoom) -> ZoomShot {
@@ -1266,7 +1289,7 @@ extension AppModel {
     /// (zooms, colour, effects, the move aside), then the graphics, drawn by the same engine
     /// page the Preview lays over the picture, with where each one landed.
     func composedFrame(_ clip: ProjectClip, at local: Double, settings: ExportSettings,
-                       original: Bool = false, graphics: Bool = true) async throws -> (image: CGImage, graphics: [PreviewGraphic]?) {
+                       original: Bool = false, graphics: Bool = true, guides: Bool = true) async throws -> (image: CGImage, graphics: [PreviewGraphic]?) {
         guard let info = clip.info else { throw EditError(code: .missingMedia, message: "That recording is still loading.") }
         let timeline = clip.timeline
         let player = try await PlaybackController.makeItem(clip.item(), settings: settings, original: original)
@@ -1278,8 +1301,9 @@ extension AppModel {
         var drawn: [PreviewGraphic]?
         if graphics, let track = clip.graphics, !track.items.isEmpty,
            abs(Double(image.width) / Double(max(1, image.height)) - 16.0 / 9.0) < 0.02 {
-            let snapshot = try await GraphicsSnapshot.draw(track, duration: timeline.duration, fps: info.fpsExpression,
-                                                           time: local, over: image)
+            // As the Preview shows them: the end screen's boxes say what goes in each.
+            let snapshot = try await GraphicsSnapshot.draw(guides ? track.labellingEndScreen(clip.publish?.endScreen) : track, duration: timeline.duration,
+                                                           fps: info.fpsExpression, time: local, over: image)
             image = snapshot.image
             drawn = track.items.compactMap { graphic in
                 snapshot.boxes[graphic.id].map { PreviewGraphic(id: graphic.id, kind: graphic.kind.rawValue, rect: WireRect($0)) }
@@ -1509,7 +1533,7 @@ extension AppModel {
             return .failure(EditError(code: .missingMedia, message: "A YouTube export needs a loaded recording in clip whose source is present."))
         }
         let publish = item.publish ?? PublishInfo()
-        if let blocking = publish.issues(duration: item.editedDuration).first(where: { $0.severity == .blocking }) {
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
             return .failure(.invalid(blocking.message + " (state.clips[].publishIssues lists everything; setPublishInfo changes it.)"))
         }
         let files = YouTubeExport.files(in: folder, publish: publish, fallback: item.url.deletingPathExtension().lastPathComponent,

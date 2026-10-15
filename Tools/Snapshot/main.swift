@@ -207,6 +207,26 @@ func run() async throws {
     await pump(1)
     await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
            to: output.appendingPathComponent("5h-thumbnail-maker.png"))
+    // The end screen: the speaker in a frame beside YouTube's boxes, on the timeline and in
+    // the inspector, and the choice of element for each box (from Publish).
+    if length >= EndScreen.lengths.lowerBound {
+        model.addEndScreen()
+        var choices = EndScreenElements()
+        choices.videos[0] = EndScreenElements.Video(kind: .video, link: "https://youtu.be/abc123", title: "Part 2")
+        model.setPublish(label: "End Screen") { $0.endScreen = choices }
+        model.setPlaybackVisible(true)
+        model.setPreviewFraction(max(0, length - 0.5) / length)
+        await render(window(), size: size, to: output.appendingPathComponent("5i-end-screen.png"))
+        await pump(2)
+        await render(window(), size: size, to: output.appendingPathComponent("5i-end-screen.png"))
+        await render(InspectorPane().environmentObject(model).frame(width: 340, height: 900), size: CGSize(width: 340, height: 900),
+               to: output.appendingPathComponent("5j-end-screen-inspector.png"))
+        model.setPlaybackVisible(false)
+        await render(PublishEndScreenSection(item: model.items[0], publish: model.items[0].publish ?? PublishInfo())
+                        .environmentObject(model).padding(18).frame(width: 430), size: CGSize(width: 430, height: 520),
+               to: output.appendingPathComponent("5k-publish-end-screen.png"))
+        model.undo(); model.undo()
+    }
     model.undo()
     await render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
            to: output.appendingPathComponent("6-local-agents.png"))

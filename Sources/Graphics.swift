@@ -41,23 +41,29 @@ extension JSONValue {
 
 // MARK: - Graphics
 
-/// Where a kind sits: the right-hand column over the video, or the side panel.
-enum GraphicZone: String, Codable { case column, panel }
+/// Where a kind sits: the right-hand column over the video, the side panel, or the whole
+/// screen (the end screen, which moves the picture into a frame of its own).
+enum GraphicZone: String, Codable { case column, panel, screen }
 
 /// The template kinds of graphics engine version 1. See docs/plans/graphics-track.md.
 enum GraphicKind: String, Codable, CaseIterable, Identifiable {
     case namePlate, featureList, titleCard, phoneScreens, route, link, endCard
     case panelTitle, rule, checklist
+    case endScreen
 
     var id: String { rawValue }
     var zone: GraphicZone {
         switch self {
         case .panelTitle, .rule, .checklist: return .panel
+        case .endScreen: return .screen
         default: return .column
         }
     }
     /// Kinds the engine can write in ink. The others always use glass cards.
     var hasInk: Bool { zone == .panel }
+    /// Whether the owner may move and resize it on the picture. The end screen's boxes sit
+    /// where YouTube puts its elements, so it stays where it is.
+    var isPlaceable: Bool { self != .endScreen }
     var label: String {
         switch self {
         case .namePlate: return "Name plate"
@@ -70,6 +76,7 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
         case .panelTitle: return "Panel title"
         case .rule: return "Rule"
         case .checklist: return "Checklist"
+        case .endScreen: return "End screen"
         }
     }
 }
@@ -250,6 +257,12 @@ struct GraphicsTrack: Codable, Equatable {
             }
             guard graphic.look != .mix else { return "A single graphic's look is glass or ink." }
             if let problem = graphic.transform?.problem { return problem }
+            if graphic.kind == .endScreen {
+                guard graphic.transform == nil else {
+                    return "The end screen's boxes sit where YouTube puts its elements, so it cannot be moved or resized on the picture."
+                }
+                if let problem = EndScreenLayout.problem(props: graphic.props) { return problem }
+            }
             let props = JSONValue.object(graphic.props)
             if let data = try? JSONEncoder().encode(props), data.count > Self.maximumPropsBytes {
                 return "The \(name) has too much text or data."
@@ -275,6 +288,32 @@ struct GraphicsTrack: Codable, Equatable {
             let ordered = items.filter { $0.kind.zone == zone }.sorted { $0.start < $1.start }
             for (a, b) in zip(ordered, ordered.dropFirst()) where b.start < a.end - 0.001 {
                 return "The \(a.kind.label.lowercased()) and the \(b.kind.label.lowercased()) overlap in the same place."
+            }
+        }
+        return endScreenProblem(duration: duration)
+    }
+
+    /// YouTube's window for end screen elements: the last 5 to 20 seconds, with nothing
+    /// else of ours on screen, so the boxes stay clear.
+    private func endScreenProblem(duration: Double) -> String? {
+        let screens = items.filter { $0.kind == .endScreen }
+        guard let screen = screens.first else { return nil }
+        guard screens.count == 1 else { return "A video has one end screen." }
+        guard abs(screen.end - duration) <= EndScreen.endTolerance else {
+            return String(format: "The end screen must end where the video ends (%.2f s); YouTube shows its elements in the last 5 to 20 seconds.", duration)
+        }
+        let lengths = EndScreen.lengths
+        guard screen.length >= lengths.lowerBound - 0.001, screen.length <= lengths.upperBound + 0.001 else {
+            return String(format: "YouTube's end screen lasts %.0f to %.0f seconds; this one is %.1f s.", lengths.lowerBound, lengths.upperBound, screen.length)
+        }
+        for graphic in items where graphic.kind != .endScreen {
+            let clear = graphic.end + (graphic.kind.zone == .panel ? Self.slide : 0)
+            guard clear <= screen.start + 0.001 else {
+                return graphic.kind.zone == .panel
+                    ? String(format: "The %@'s panel must have slid away (%.1f s after it ends) before the end screen starts at %.2f s.",
+                             graphic.kind.label.lowercased(), Self.slide, screen.start)
+                    : String(format: "The %@ is still showing when the end screen starts at %.2f s; nothing else may show over YouTube's end screen.",
+                             graphic.kind.label.lowercased(), screen.start)
             }
         }
         return nil
@@ -323,7 +362,9 @@ extension ClipTimeline {
     func remap(_ track: GraphicsTrack, from old: ClipTimeline) -> (track: GraphicsTrack, removed: [UUID]) {
         var kept: [Graphic] = []
         var removed: [UUID] = []
+        var screen: Graphic?
         for var graphic in track.items.sorted(by: { $0.start < $1.start }) {
+            if graphic.kind == .endScreen, screen == nil { screen = graphic; continue }
             guard let source = old.location(at: graphic.start)?.source,
                   let start = time(forSource: source) else { removed.append(graphic.id); continue }
             let end = min(start + graphic.length, duration)
@@ -333,6 +374,18 @@ extension ClipTimeline {
             }
             graphic.start = start; graphic.end = end
             kept.append(graphic)
+        }
+        // The end screen stays on the last seconds of the video, as long as it was, or
+        // shorter when something now runs into it; dropped when under YouTube's 5 s.
+        if var screen {
+            var start = duration - min(screen.length, EndScreen.lengths.upperBound)
+            for graphic in kept { start = max(start, graphic.end + (graphic.kind.zone == .panel ? GraphicsTrack.slide : 0)) }
+            if start >= 0, duration - start >= EndScreen.lengths.lowerBound - 0.000001 {
+                screen.start = start; screen.end = duration
+                kept.append(screen)
+            } else {
+                removed.append(screen.id)
+            }
         }
         var result = track
         result.items = kept
@@ -350,14 +403,24 @@ extension ProjectClip {
 /// How far the picture has moved aside at an edited time: 0 in place, 1 fully moved.
 /// Smoothstep over `GraphicsTrack.slide`, the same curve as the engine's video move.
 struct GraphicsMotion: Equatable {
+    /// Panels the picture moves aside for; none when the style keeps the picture in place.
     var spans: [PanelSpan]
     var style: GraphicsStyle
+    /// The end screen: from `start` the picture moves into `frame` (design pixels of a
+    /// 1920-wide frame) and stays there to the end of the video.
+    var screen: ScreenMove?
+
+    struct ScreenMove: Equatable {
+        var start: Double
+        var frame: CGRect
+    }
 
     init?(_ track: GraphicsTrack?) {
-        guard let track, track.style.moveVideo else { return nil }
-        let spans = track.panelSpans()
-        guard !spans.isEmpty else { return nil }
-        self.spans = spans; self.style = track.style
+        guard let track else { return nil }
+        let spans = track.style.moveVideo ? track.panelSpans() : []
+        let screen = track.endScreen.map { ScreenMove(start: $0.start, frame: EndScreenLayout(props: $0.props).frame) }
+        guard !spans.isEmpty || screen != nil else { return nil }
+        self.spans = spans; self.style = track.style; self.screen = screen
     }
 
     /// The fill behind a moved picture: the same frame, this much larger, blurred by this
@@ -382,6 +445,23 @@ struct GraphicsMotion: Equatable {
             return (1 - Self.smooth((time - span.end) / slide), span)
         }
         return (0, nil)
+    }
+
+    /// How far the picture has moved into the end screen's frame: 0 whole, 1 in the frame.
+    func screenProgress(at time: Double) -> Double {
+        guard let screen, time >= screen.start else { return 0 }
+        return Self.smooth(min(1, (time - screen.start) / GraphicsTrack.slide))
+    }
+
+    /// Where the picture sits in a frame of `size` pixels at `amount` of the end screen's
+    /// move, top-left origin, in whole pixels: the full frame at 0, the end screen's frame
+    /// at 1, scaled about the top-left corner. Both renderers use exactly these numbers.
+    func screenPlacement(amount: Double, size: CGSize) -> (x: Int, y: Int, width: Int, height: Int) {
+        guard let screen else { return (0, 0, Int(size.width), Int(size.height)) }
+        let unit = size.width / 1920
+        let scale = 1 + (screen.frame.width / 1920 - 1) * amount
+        return (Int((screen.frame.minX * unit * amount).rounded()), Int((screen.frame.minY * unit * amount).rounded()),
+                max(2, Int((size.width * scale).rounded())), max(2, Int((size.height * scale).rounded())))
     }
 
     /// Where the frost under the panel fades in, as fractions of the frame width.

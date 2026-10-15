@@ -26,6 +26,7 @@ xcrun swiftc \
 	"$ROOT/Sources/MovieEditing.swift" \
 	"$ROOT/Sources/Playback.swift" \
 	"$ROOT/Sources/Graphics.swift" \
+	"$ROOT/Sources/EndScreen.swift" \
 	"$ROOT/Sources/GraphicsRender.swift" \
 	"$ROOT/Sources/Publish.swift" \
 	"$ROOT/Sources/Captions.swift" \

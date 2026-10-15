@@ -197,7 +197,7 @@ struct GraphicsPlacementLayer: View {
     private static let snapReach: CGFloat = 6
 
     private var selected: (graphic: Graphic, bounds: GraphicBounds)? {
-        guard let id = model.selectedGraphicID, let graphic = input.track.items.first(where: { $0.id == id }),
+        guard let id = model.selectedGraphicID, let graphic = input.track.items.first(where: { $0.id == id && $0.kind.isPlaceable }),
               let bounds = model.graphicBounds[id] else { return nil }
         return (graphic, bounds)
     }
@@ -282,7 +282,8 @@ struct GraphicsPlacementLayer: View {
             }
         }
         // The topmost graphic showing now under the pointer; later ones draw on top.
-        let showing = input.track.items.filter { input.time >= $0.start && input.time < $0.end }
+        // The end screen stays put, so clicks reach what sits under its boxes.
+        let showing = input.track.items.filter { $0.kind.isPlaceable && input.time >= $0.start && input.time < $0.end }
         if let hit = showing.reversed().first(where: { model.graphicBounds[$0.id]?.placed($0.transform).contains(point) == true }) {
             model.selectedGraphicID = hit.id
             return Drag(action: .move, id: hit.id, start: hit.transform ?? GraphicTransform(), bounds: model.graphicBounds[hit.id])

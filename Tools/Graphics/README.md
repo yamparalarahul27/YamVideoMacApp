@@ -59,5 +59,9 @@ page folder under a content-hash name, so the page has no paths outside its fold
 - An item's optional `transform` `{x, y, scale}` moves it on the picture, in pixels, and
   scales it from the top-left corner of its zone. The app sets it when a graphic is dragged
   in Preview.
+- `endScreen` takes the whole screen for YouTube's last 5–20 seconds: a frame round the
+  speaker and empty boxes where YouTube's Subscribe circle and video cards sit
+  (`YamGraphics.endLayout(props)` gives the places). In the app the speaker moves into the
+  frame natively; in `full` mode `#bg-video` does, over `#bg-fill`.
 
 The kinds and their props are in section 3 of the plan.

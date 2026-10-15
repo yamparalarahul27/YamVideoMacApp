@@ -425,7 +425,7 @@ struct CropEditorPane: View {
         guard let track = item.graphics, !track.items.isEmpty else { return nil }
         let frame = crop.size
         guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
-        return GraphicsOverlayInput(clip: item.id, track: track, duration: item.editedDuration,
+        return GraphicsOverlayInput(clip: item.id, track: track.labellingEndScreen(item.publish?.endScreen), duration: item.editedDuration,
                                     fps: info.fpsExpression, frame: frame, time: model.previewTime)
     }
 
