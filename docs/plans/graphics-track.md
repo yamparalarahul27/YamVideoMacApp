@@ -241,7 +241,8 @@ from docs/plans/graphics-track.md".
    transcript; Natural: the silence sheet's defaults; Review each cut); captions (SRT for
    upload, burn in and SRT, none); audio normalised to -14 LUFS. Word timing needs
    `whisper-cli -dtw large.v3.turbo -nfa`.
-   Then, by the owner's choice: **Shorts (9:16).** Done 2026-10-15; sections 16 and 17.
+   Then, by the owner's choice: **Shorts (9:16).** Done 2026-10-15 (merged as PR #24); sections 16
+   and 17.
 7. **YamDraw ink clips.** Section 2a, item 2.
 8. **Authoring (G2).** Section 6: Add Graphic menu, looks, video templates and the
    `youtube-edit` Claude skill.
@@ -775,7 +776,7 @@ and which graphics show; `preview` with `short` and `composed: true` draws the 1
 frame with its graphics and boxes; `export` with `youtube: true` and `short`. Refusals say
 the limits (3:00, the window inside the picture and 9:16, no overlap).
 
-## 17. Shorts status (2026-10-15)
+## 17. Shorts status (2026-10-15, merged as PR #24)
 
 - **Data** (project version 12): `ProjectClip.shorts`, each a `Short` (Sources/Shorts.swift)
   with its range, window, panel layout, captions option, hidden graphics, placements,
