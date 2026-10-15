@@ -20,6 +20,9 @@ xcrun swiftc \
 	"$ROOT/Sources/VisualEffectsEditing.swift" \
 	"$ROOT/Sources/AgentCatalog.swift" \
 	"$ROOT/Sources/AudioAnalysis.swift" \
+	"$ROOT/Sources/AutoEdit.swift" \
+	"$ROOT/Sources/AutoEditing.swift" \
+	"$ROOT/Sources/Whisper.swift" \
 	"$ROOT/Sources/Movie.swift" \
 	"$ROOT/Sources/ZoomSuggestions.swift" \
 	"$ROOT/Sources/MoviePlayback.swift" \
