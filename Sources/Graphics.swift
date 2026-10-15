@@ -309,6 +309,18 @@ struct GraphicsMotion: Equatable {
         self.spans = spans; self.style = track.style
     }
 
+    /// The fill behind a moved picture: the same frame, this much larger, blurred by this
+    /// sigma (design pixels), then darkened and desaturated by one matrix on the encoded
+    /// values, where both renderers can do exactly the same sum.
+    static let fillScale = 1.3
+    static let fillBlur = 36.0
+    static let fillDim = 0.86
+    static let fillSaturation = 0.9
+    /// The moved picture's right edge fades into the fill over this many design pixels.
+    static let edgeFade = 220.0
+    /// Rec.709 luma weights, for the saturation step.
+    static let lumaWeights = (r: 0.2126, g: 0.7152, b: 0.0722)
+
     static func smooth(_ p: Double) -> Double { p * p * (3 - 2 * p) }
 
     func progress(at time: Double) -> (amount: Double, span: PanelSpan?) {
@@ -347,7 +359,7 @@ enum GraphicsEngine {
     /// `index.html` from page.html. `media` adds root `<video>`/`<audio>` HTML for full mode.
     /// Returns the folder's index.html.
     static func writePage(_ track: GraphicsTrack, duration: Double, fps: String, mode: String,
-                          unit: String? = nil, pageDuration: Double? = nil, media: String = "",
+                          unit: String? = nil, origin: Double? = nil, pageDuration: Double? = nil, media: String = "",
                           to folder: URL) throws -> URL {
         guard let resources else { throw FFmpegError(message: "The graphics engine files are missing from the app.") }
         let manager = FileManager.default
@@ -360,9 +372,12 @@ enum GraphicsEngine {
             try copyIfChanged(resources.appendingPathComponent("fonts/\(font)"), to: folder.appendingPathComponent("fonts/\(font)"))
         }
         let json = try pageJSON(track, duration: duration, fps: fps, folder: folder)
-        var options: [String: String] = ["mode": mode]
-        if let unit { options["unit"] = unit }
-        let optionsJSON = String(decoding: try JSONEncoder().encode(options), as: UTF8.self)
+        var options: [String: JSONValue] = ["mode": .string(mode)]
+        if let unit { options["unit"] = .string(unit) }
+        if let origin { options["origin"] = .number(origin) }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let optionsJSON = String(decoding: try encoder.encode(JSONValue.object(options)), as: UTF8.self)
         let rate = fps.split(separator: "/").compactMap { Double($0) }
         let fpsValue = rate.count == 2 && rate[1] > 0 ? rate[0] / rate[1] : (rate.first ?? 30)
         var page = try String(contentsOf: resources.appendingPathComponent("page.html"), encoding: .utf8)
