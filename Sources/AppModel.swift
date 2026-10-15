@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea, effect, marker, graphic, short
+    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom
 }
 
 @MainActor
@@ -82,6 +82,8 @@ final class AppModel: ObservableObject {
     @Published var isAnalyzingZooms = false
     @Published var showingZoomSuggestions = false
     @Published var zoomSuggestions: [ZoomSuggestion] = []
+    /// The suggestions are for the screen recording's zooms, not the recording's own.
+    @Published var suggestingScreenZooms = false
     /// The sections `zoomSuggestions` were timed against.
     var zoomSuggestionTimeline: ClipTimeline?
     var zoomAnalysisTask: Task<Void, Never>?
@@ -516,6 +518,10 @@ final class AppModel: ObservableObject {
     @Published var graphicBounds: [UUID: GraphicBounds] = [:]
     /// The Short the inspector shows and the Short viewer plays.
     @Published var selectedShortID: UUID? { didSet { focusInspector(selectedShortID, .short) } }
+    /// The screen layout span the inspector shows, when one is selected.
+    @Published var selectedLayoutID: UUID? { didSet { focusInspector(selectedLayoutID, .layout) } }
+    /// The screen zoom the inspector shows; a click on the screen in the Preview aims it.
+    @Published var selectedScreenZoomID: UUID? { didSet { focusInspector(selectedScreenZoomID, .screenZoom) } }
     /// The viewer shows the selected Short, 9:16, with its graphics and captions.
     @Published var showsShort = false
     /// Faint marks where YouTube draws its buttons over a Short. A preference, never undone.
@@ -817,7 +823,8 @@ final class AppModel: ObservableObject {
                         subtitles: item.burnedCaptions(exportSettings),
                         color: item.colorStage(exportSettings),
                         effects: item.blurEffects,
-                        graphics: item.exportGraphics(exportSettings)
+                        graphics: item.exportGraphics(exportSettings),
+                        screen: item.screen
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -888,7 +895,8 @@ final class AppModel: ObservableObject {
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.burnedCaptions(settings),
-            color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings)
+            color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings),
+            screen: item.screen
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 

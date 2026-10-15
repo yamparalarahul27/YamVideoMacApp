@@ -28,6 +28,11 @@ xcrun swiftc \
 	"$ROOT/Sources/MoviePlayback.swift" \
 	"$ROOT/Sources/MovieEditing.swift" \
 	"$ROOT/Sources/Playback.swift" \
+	"$ROOT/Sources/Screen.swift" \
+	"$ROOT/Sources/ScreenPlayback.swift" \
+	"$ROOT/Sources/ScreenExport.swift" \
+	"$ROOT/Sources/ScreenEditing.swift" \
+	"$ROOT/Sources/ScreenAgents.swift" \
 	"$ROOT/Sources/Graphics.swift" \
 	"$ROOT/Sources/Shorts.swift" \
 	"$ROOT/Sources/ShortsEditing.swift" \

@@ -115,7 +115,7 @@ enum YouTubeExport {
                                 crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                 regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots, segments: item.segments,
                                 settings: videoSettings, subtitles: item.burnedCaptions(videoSettings), color: item.colorStage(videoSettings),
-                                effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), onProgress: onProgress)
+                                effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), screen: item.screen, onProgress: onProgress)
         try Task.checkCancellation()
         let manager = FileManager.default
         if manager.fileExists(atPath: files.video.path) { _ = try manager.replaceItemAt(files.video, withItemAt: temporary) }

@@ -17,6 +17,8 @@ struct EditReceipt: Equatable {
     /// Shorts dropped because all their footage was cut away.
     var removedShorts: [UUID] = []
     var affectedClips: [UUID]
+    /// Screen layouts dropped because their footage was cut away.
+    var removedLayouts: [UUID] = []
 }
 
 /// One entry in the change feed agents poll. Job progress shares the feed, which is why
@@ -113,7 +115,8 @@ extension AppModel {
                                   createdIDs: outcome.createdIDs, removedZooms: outcome.removedZooms,
                                   removedEffects: outcome.removedEffects, removedMarkers: outcome.removedMarkers,
                                   removedGraphics: outcome.removedGraphics, removedShorts: outcome.removedShorts,
-                                  affectedClips: Self.changedClips(from: base, to: outcome.project))
+                                  affectedClips: Self.changedClips(from: base, to: outcome.project),
+                                  removedLayouts: outcome.removedLayouts)
         guard !dryRun, receipt.changed else { return .success(receipt) }
 
         let transaction = UUID()
@@ -170,6 +173,9 @@ extension AppModel {
             // be tried while it plays; the 16:9 Preview goes back to the edit frame.
             if showsShort, let item = selectedItem, item.short(playback.shortID) != nil {
                 playback.prepare(item, settings: settings, at: previewTime, play: wasPlaying)
+            } else if !showsShort, let item = selectedItem, item.screen != nil {
+                // Only the Preview shows a screen's layouts and zooms, so it stays up.
+                playback.prepare(item, settings: settings, at: previewTime, play: false)
             } else {
                 showPlayback = false; showsShort = false; playback.shortID = nil
                 refreshPreview()
@@ -226,6 +232,10 @@ extension AppModel {
             elements.formUnion((clip.graphics?.items ?? []).filter { oldGraphics[$0.id] != $0 }.map(\.id))
             let oldShorts = Dictionary(uniqueKeysWithValues: (previous?.shorts ?? []).map { ($0.id, $0) })
             elements.formUnion((clip.shorts ?? []).filter { oldShorts[$0.id] != $0 }.map(\.id))
+            let oldLayouts = Dictionary(uniqueKeysWithValues: (previous?.screen?.spans ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.screen?.spans ?? []).filter { oldLayouts[$0.id] != $0 }.map(\.id))
+            let oldScreenZooms = Dictionary(uniqueKeysWithValues: (previous?.screen?.zooms ?? []).map { ($0.id, $0) })
+            elements.formUnion((clip.screen?.zooms ?? []).filter { oldScreenZooms[$0.id] != $0 }.map(\.id))
         }
         let highlight = AgentHighlight(origin: origin.label, label: label, clips: clips, elements: elements)
         agentHighlight = highlight
@@ -450,6 +460,8 @@ extension AppModel {
         if let id = selectedRegionID, selectedItem?.blurRegions.contains(where: { $0.id == id }) != true { selectedRegionID = nil }
         if let id = selectedEffectID, selectedItem?.blurEffects.contains(where: { $0.id == id }) != true { selectedEffectID = nil }
         if let id = selectedMarkerID, selectedItem?.markers.contains(where: { $0.id == id }) != true { selectedMarkerID = nil }
+        if let id = selectedLayoutID, selectedItem?.screen?.spans.contains(where: { $0.id == id }) != true { selectedLayoutID = nil }
+        if let id = selectedScreenZoomID, selectedItem?.screen?.zooms.contains(where: { $0.id == id }) != true { selectedScreenZoomID = nil }
 
         let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.init), movieSettings, settings)
         if movieBefore != movieAfter { movieOutput = nil }

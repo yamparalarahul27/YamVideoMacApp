@@ -51,29 +51,54 @@ enum ZoomAnalyzer {
     }
 
     static func proposals(frames: Data, rate: Double, clip: VideoItem) -> [ZoomSuggestion] {
-        guard let info = clip.info, clip.editedDuration >= 1.5, rate > 0 else { return [] }
+        guard let info = clip.info, rate > 0 else { return [] }
+        let crop = clip.crop ?? info.fullFrame
+        return proposals(frames: frames, duration: clip.editedDuration, level: 1.5, existing: clip.zoomShots) { index, spot in
+            guard let time = clip.timeline.time(forSource: Double(index) / rate) else { return nil }
+            let point = CGPoint(x: spot.x * Double(info.width), y: spot.y * Double(info.height))
+            return crop.contains(point) ? (time, point) : nil
+        }
+    }
+
+    /// Zooms on a recording's screen, from frames of the screen recording taken `rate` times
+    /// a second from `start` seconds into it: each at the edited time its footage plays,
+    /// aimed in the screen recording's pixels. 2×, as screen text needs more than a face.
+    static func screenProposals(frames: Data, rate: Double, start: Double, clip: VideoItem) -> [ZoomSuggestion] {
+        guard let screen = clip.screen, rate > 0 else { return [] }
+        let picture = screen.picture
+        return proposals(frames: frames, duration: clip.editedDuration, level: 2, existing: screen.zooms) { index, spot in
+            let moment = start + Double(index) / rate
+            guard let time = clip.timeline.time(forSource: moment - screen.offset) else { return nil }
+            let point = CGPoint(x: spot.x * Double(screen.info.width), y: spot.y * Double(screen.info.height))
+            return picture.contains(point) ? (time, point) : nil
+        }
+    }
+
+    /// The best moments of local activity in `frames`, at most one in six seconds and one
+    /// for each eight seconds of video, clear of `existing`. `place` gives a frame's edited
+    /// time and the point to aim at, or nil when that footage or point is not shown.
+    static func proposals(frames: Data, duration: Double, level: Double, existing: [ZoomShot],
+                          place: (_ index: Int, _ spot: CGPoint) -> (time: Double, target: CGPoint)?) -> [ZoomSuggestion] {
+        guard duration >= 1.5 else { return [] }
         let stride = width * height
         let count = frames.count / stride
         guard count >= 2 else { return [] }
-        let crop = clip.crop ?? info.fullFrame
         var candidates: [ZoomSuggestion] = []
         var previous = Array(frames[0..<stride])
         for index in 1..<count {
             let current = Array(frames[index * stride..<(index + 1) * stride])
             defer { previous = current }
             guard let activity = activity(previous: previous, current: current),
-                  let time = clip.timeline.time(forSource: Double(index) / rate) else { continue }
-            let point = CGPoint(x: activity.point.x * Double(info.width), y: activity.point.y * Double(info.height))
-            guard crop.contains(point) else { continue }
-            let start = max(0, time - 0.35)
-            let hold = min(2.0, clip.editedDuration - start - 2 * ZoomShot.ease)
+                  let placed = place(index, activity.point) else { continue }
+            let start = max(0, placed.time - 0.35)
+            let hold = min(2.0, duration - start - 2 * ZoomShot.ease)
             guard hold >= 0.5 else { continue }
-            let shot = ZoomShot(start: start, hold: hold, level: 1.5, target: point)
-            guard !clip.zoomShots.contains(where: { $0.overlaps(shot) }) else { continue }
+            let shot = ZoomShot(start: start, hold: hold, level: level, target: placed.target)
+            guard !existing.contains(where: { $0.overlaps(shot) }) else { continue }
             candidates.append(ZoomSuggestion(shot: shot, score: activity.score))
         }
         var selected: [ZoomSuggestion] = []
-        let maximum = min(20, max(1, Int(clip.editedDuration / 8)))
+        let maximum = min(20, max(1, Int(duration / 8)))
         for candidate in candidates.sorted(by: { $0.score > $1.score }) {
             if selected.allSatisfy({ abs($0.shot.start - candidate.shot.start) >= 6 && !$0.shot.overlaps(candidate.shot) }) {
                 selected.append(candidate)
@@ -93,26 +118,48 @@ enum ZoomAnalyzer {
         guard result.status == 0 else { throw FFmpegError(message: "Could not analyze the recording: \(result.stderrText.suffix(500))") }
         return proposals(frames: result.stdout, rate: rate, clip: clip)
     }
+
+    /// Suggest Zooms on the screen recording: only the part of it the edit shows is read.
+    static func analyzeScreen(_ clip: VideoItem) async throws -> [ZoomSuggestion] {
+        guard let screen = clip.screen, let executable = FFmpeg.ffmpegPath else { throw FFmpegError(message: "Add a screen recording and locate ffmpeg first.") }
+        let segments = clip.timeline.segments
+        let from = max(0, (segments.map(\.start).min() ?? 0) + screen.offset)
+        let to = min(screen.info.duration, (segments.map(\.end).max() ?? 0) + screen.offset)
+        guard to - from >= 1.5 else { return [] }
+        let rate = min(2, 1200 / (to - from))
+        let result = try await Shell.run(executable, ["-hide_banner", "-loglevel", "error", "-nostdin",
+            "-ss", String(format: "%.3f", from), "-t", String(format: "%.3f", to - from), "-i", screen.url.path,
+            "-vf", "fps=\(String(format: "%.8f", rate)),scale=\(width):\(height):flags=area,format=gray",
+            "-frames:v", "1200", "-an", "-f", "rawvideo", "-pix_fmt", "gray", "-"])
+        try Task.checkCancellation()
+        guard result.status == 0 else { throw FFmpegError(message: "Could not analyze the screen recording: \(result.stderrText.suffix(500))") }
+        return screenProposals(frames: result.stdout, rate: rate, start: from, clip: clip)
+    }
 }
 
 @MainActor
 extension AppModel {
-    func suggestZooms() {
-        guard !isAnalyzingZooms, let clip = selectedItem, clip.info != nil else { return }
+    /// `screen` looks at the recording's screen recording, for zooms on the screen.
+    func suggestZooms(screen: Bool = false) {
+        guard !isAnalyzingZooms, let clip = selectedItem, clip.info != nil, !screen || clip.screen != nil else { return }
         playback.pause()
         isAnalyzingZooms = true
+        suggestingScreenZooms = screen
         let snapshot = ProjectClip(clip)
         zoomAnalysisTask = Task {
             defer { isAnalyzingZooms = false; zoomAnalysisTask = nil }
             do {
-                let suggestions = try await ZoomAnalyzer.analyze(clip)
+                let suggestions = screen ? try await ZoomAnalyzer.analyzeScreen(clip) : try await ZoomAnalyzer.analyze(clip)
                 try Task.checkCancellation()
                 guard let current = selectedItem, ProjectClip(current) == snapshot else {
                     statusMessage = "The recording changed during analysis. Run Suggest Zooms again."; return
                 }
                 zoomSuggestions = suggestions
                 zoomSuggestionTimeline = current.timeline
-                if suggestions.isEmpty { statusMessage = "No clear local activity found. Add manual zooms at the moments you want to emphasize." }
+                if suggestions.isEmpty {
+                    statusMessage = screen ? "No clear local activity found on the screen. Add screen zooms at the moments you want to show."
+                        : "No clear local activity found. Add manual zooms at the moments you want to emphasize."
+                }
                 else { showingZoomSuggestions = true }
             } catch is CancellationError { statusMessage = "Zoom analysis cancelled." }
             catch { statusMessage = error.localizedDescription }
@@ -123,7 +170,7 @@ extension AppModel {
 
     func previewZoomSuggestion(_ suggestion: ZoomSuggestion) {
         guard var clip = selectedItem else { return }
-        clip.zoomShots.append(suggestion.shot)
+        if suggestingScreenZooms { clip.screen?.zooms.append(suggestion.shot) } else { clip.zoomShots.append(suggestion.shot) }
         playback.prepare(clip, settings: settings, at: max(0, suggestion.shot.start - 0.3), play: true)
     }
 
@@ -137,17 +184,21 @@ extension AppModel {
             showingZoomSuggestions = false
             statusMessage = "The recording changed since these suggestions were made. Run Suggest Zooms again."; return
         }
+        let screen = suggestingScreenZooms
+        let existing = screen ? items[index].screen?.zooms ?? [] : items[index].zoomShots
         var added: [ZoomShot] = []
         for shot in selected where shot.end <= items[index].editedDuration + 0.001 {
-            if !(items[index].zoomShots + added).contains(where: { $0.overlaps(shot) }) { added.append(shot) }
+            if !(existing + added).contains(where: { $0.overlaps(shot) }) { added.append(shot) }
         }
         showingZoomSuggestions = false
         playback.clear(); showPlayback = false
         guard !added.isEmpty else { statusMessage = "Every selected suggestion overlaps an existing zoom."; return }
-        switch perform(added.map { .addZoom(clip: items[index].id, zoom: $0) }, label: "Apply Zoom Suggestions") {
+        let clip = items[index].id
+        let commands: [EditCommand] = added.map { screen ? .addScreenZoom(clip: clip, zoom: $0) : .addZoom(clip: clip, zoom: $0) }
+        switch perform(commands, label: screen ? "Apply Screen Zoom Suggestions" : "Apply Zoom Suggestions") {
         case .success:
-            selectedShotID = added.first?.id
-            statusMessage = "Added \(added.count) editable zoom suggestions."
+            if screen { selectedScreenZoomID = added.first?.id } else { selectedShotID = added.first?.id }
+            statusMessage = "Added \(added.count) editable \(screen ? "screen " : "")zoom suggestions."
         case .failure(let error):
             statusMessage = error.message
         }
@@ -158,7 +209,7 @@ struct ZoomSuggestionsView: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Suggested zooms").font(.title2.weight(.semibold))
+            Text(model.suggestingScreenZooms ? "Suggested screen zooms" : "Suggested zooms").font(.title2.weight(.semibold))
             Text("Based on local visual activity. Preview the framing and choose what to keep. These suggestions do not recognize clicks or understand the content.")
                 .font(.callout).foregroundStyle(.secondary)
             PlaybackCanvas(playback: model.playback).frame(height: 240)

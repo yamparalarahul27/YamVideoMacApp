@@ -202,6 +202,9 @@ struct VideoItem: Identifiable {
     var blurEffects: [VideoBlurEffect] = []
     /// Named points on the edited timeline, sorted by time.
     var markers: [TimelineMarker] = []
+    /// A screen recording synced to this one, and the layouts that show the two. Nil
+    /// until one is added.
+    var screen: ScreenTrack?
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

@@ -76,6 +76,31 @@ rate without changing playback speed. The export size limit applies to the canva
 MP4 audio is normalized to AAC; silent clips receive silence. Cancellation keeps an
 existing destination intact. Inclusion, order and canvas save with the project.
 
+## Screen + speaker
+
+For a walkthrough, record yourself and your screen at the same time, then add the screen
+recording to your recording: **Screen → Add Screen Recording…** in the inspector. Your
+recording stays the master. Its sound, sections, captions and graphics drive both
+pictures, and each cut cuts the screen at the same moment.
+
+1. Set the **Offset**: the screen recording's time at your recording's time 0. Or type the
+   screen's time that belongs at the playhead in **Screen at playhead** (for example the
+   moment of a click you name). Use **−1 fr** and **+1 fr** to make it exact.
+2. Choose the base **Layout**: **Speaker** (you fill the frame), **Screen** (the screen
+   fills the frame, you in a round bubble) or **Side by side** (you in a tall panel on the
+   left, the screen on the right).
+3. Use **Add Layout** to give part of the video another layout. Layouts show on the
+   Layout lane; drag them, or drag an edge. A change of layout eases over 0.4 s.
+
+**Find Speaker** puts the bubble on the face Apple Vision finds at the playhead. **Crop
+Border** cuts away a dark border round a recorded window. Small text on the screen reads
+better with a zoom: **Add Zoom** puts a 2× screen zoom at the playhead, and a click on the
+screen in the Preview aims it; **Suggest** finds moments of activity on the screen
+recording for you to review. Screen zooms show on their own lane. The Preview and the
+export draw the same layouts and zooms. Shorts and Movie show the speaker only. The screen
+recording's own sound is not used, and a rotated or HDR screen recording is refused. Turn
+on the microphone in the screen recording if you want a later version to sync by sound.
+
 ## Assisted zooms
 
 In a recording's **Zoom** controls, choose **Suggest Zooms**. Analysis samples up to
@@ -369,7 +394,7 @@ Sources/
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v11)
+  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v14)
   ColorLUT.swift    .cube parser and trilinear sampling
   ColorAdjustments.swift colour settings, the four adjustments and Auto's inference
   ColorPipeline.swift table store and the colour stage shared by ffmpeg and Core Image
@@ -386,6 +411,10 @@ Sources/
   Whisper.swift     whisper.cpp: finding whisper-cli, downloading and checking models, transcribing, reading its JSON
   Thumbnail.swift / ThumbnailView.swift the thumbnail maker: design, Vision cut-out, rendering, the maker sheet
   EndScreen.swift   the end screen: YouTube's rules, the layout, the element in each box, the Studio step
+  Screen.swift      screen + speaker: the screen track, layouts over time and their geometry
+  ScreenPlayback.swift the two-track preview: the compositor and `composeLayout`
+  ScreenExport.swift the screen in exports: its stream on the speaker's frames and the layout stage
+  ScreenEditing.swift / ScreenAgents.swift / ScreenView.swift screen actions, agent commands, the Screen section and Layout lane
   GraphicsEditing.swift / GraphicsInspector.swift / GraphicsOverlay.swift graphics actions, inspector and preview layer
   AgentCatalog.swift every agent command described for agents, served by `catalog`
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
@@ -422,6 +451,10 @@ the earlier [timeline navigation](docs/plans/timeline-navigation.md) and
 shared-command phases (project identity, one edit path with revisions and gestures, the
 local socket and `yamvideoctl`) are implemented; the remaining phases describe planned
 work, not features available in this build.
+
+The [screen + speaker plan](docs/plans/screen-speaker.md) puts a screen recording with
+the speaker's recording, synced by one offset, in Speaker, Screen or Side by side layouts.
+Part 1 is implemented; section 10 lists part 2.
 
 The [graphics track plan](docs/plans/graphics-track.md) is the layer design that the
 co-editing plan asks for: timed motion graphics over a recording, in a glass-card look or

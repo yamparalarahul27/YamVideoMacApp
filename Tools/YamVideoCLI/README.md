@@ -104,6 +104,13 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `addShort` | `clipID`, `short`? with any of the keys below, and `id` to choose its id. A Short is a vertical 1080×1920 version of up to 3:00 of the recording for YouTube Shorts, with the same edit, graphics (laid out for 9:16; no end screen) and captions. With no times it covers a recording under 3:00 whole, else a minute from `start` (or 0) |
 | `updateShort` | `clipID`, `shortID`, `short`: only the keys to change: `start`, `end` (edited seconds; 1 s to 3:00; Shorts do not overlap), `window` (`{x, y, width, height}` 9:16 in source pixels, `"speaker"` to centre it on the face Apple Vision finds, `"centre"` or null for the full height centred), `title`, `description`, `tags`, `hidden` (graphic ids left out), `placements` (`{graphicID: {x, y, scale}}` on the 1080×1920 canvas, null puts one back), `cover` (seconds into the Short), `panels` (`sheet`, `shade`, `split`), `captions` (`stepUp`, `over`, `hide`: burned-in captions while a graphic covers the lower half). `state.clips[].shorts` shows each with its window, the graphics in it and its issues |
 | `removeShort` | `clipID`, `shortID` |
+| `setScreen` | `clipID`, `path` of a screen recording, `offset`? (the screen's time at the recording's source time 0, seconds). The recording stays the master: its sound and cuts drive both pictures. A first screen starts in the screen layout with the bubble on the face Apple Vision finds |
+| `updateScreen` | `clipID`, `screen`: only the keys to change: `offset`, `crop` (`{x, y, width, height}` in the screen recording's pixels, or null), `layout` (the base layout: `speaker`, `screen`, `split`), `bubble` (`corner` `topLeft`, `topRight`, `bottomLeft`, `bottomRight`; `size` 0.15–0.5 of the frame's height; `face` `{x, y}` in source pixels, `"speaker"` for Apple Vision, or null) |
+| `removeScreen` | `clipID` |
+| `addLayout` | `clipID`, `layout`: `{start, end, layout}` in edited seconds, and `id` to choose its id. Layouts may touch but not overlap; a change eases over 0.4 s |
+| `updateLayout` | `clipID`, `layoutID`, `layout`: only the keys to change (`start` alone keeps the length) |
+| `removeLayout` | `clipID`, `layoutID` |
+| `replaceLayouts` | `clipID`, `layouts`: every layout at once. `state.clips[].screen` shows the screen, its offset, the layouts and `covered` (where the screen file has footage) |
 
 `yamvideoctl catalog` prints all of this from the app itself, with each field's type,
 unit, range and default and an example per command. Effect starts and marker times
@@ -128,6 +135,7 @@ section's ID and reports the new right one in `createdIDs`.
 | `preview --clip ID --short ID --time T` | A Short as its viewer shows it: 1080×1920, its window, its graphics laid out for 9:16 and its burned-in captions, with each graphic's box. `T` is seconds into the Short. |
 | `export [--youtube] --path OUT.mp4\|FOLDER --clip ID --short ID` | Exports a Short: a 1080×1920 MP4, or with `--youtube` into a folder its MP4, its captions as an SRT on its own timeline, a 1080×1920 cover JPEG, the upload text and a JSON (`short: true`; the related-video link to set in YouTube Studio, which the upload API cannot). Refused while `state.clips[].shorts[].issues` has a blocking issue. |
 | `reveal --clip ID --short ID [--time T]` | Selects the Short and shows it in the owner's Short viewer. |
+| `reveal --clip ID --layout ID` | Selects a screen layout and moves the playhead into it. |
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. A recording's graphics are drawn in; `state.graphicsRenderer.status` says whether this Mac can (`ready`, `needsNode`, `needsDownload`). Only the owner can download HyperFrames, so on `unsupported_capability` ask them, or export without graphics. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |
 | `save [--path FILE]` | Saves without a dialog: in place, to a first location, or — to a different path — as a copy with its own identity. |
