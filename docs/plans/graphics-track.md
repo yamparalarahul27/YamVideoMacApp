@@ -2,8 +2,9 @@
 
 **Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
 the app: data, commands, preview, timeline, inspector), G1 part 2 (export with graphics
-from the app), G2b (move and resize on the picture) and the Publish panel (G3) are
-implemented; see sections 8 to 12. Feature 4 of section 6a (the thumbnail maker) is next. Phase 5 of
+from the app), G2b (move and resize on the picture), the Publish panel and the thumbnail
+maker (G3) are implemented; see sections 8 to 13. Feature 5 of section 6a (the end screen
+layout) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -228,7 +229,7 @@ from docs/plans/graphics-track.md".
 1. **Export with graphics from the app (G1 part 2).** Done 2026-10-15; section 10.
 2. **Move and resize on the picture (G2b).** Done 2026-10-15; section 11.
 3. **Publish panel with a YouTube preview (G3).** Done 2026-10-15; section 12.
-4. **Thumbnail maker (G3).** Section 6.
+4. **Thumbnail maker (G3).** Done 2026-10-15; section 13.
 5. **End screen layout (G3).** Section 6.
 6. **Auto edit options.** The choices Claude asked before the first edit become app
    settings stored in the project and readable by agents: transcript model (whisper.cpp
@@ -464,3 +465,41 @@ from docs/plans/graphics-track.md".
   warning, not a refusal. `Tools/Snapshot` shows the sheet with both previews.
 - **Open.** Upload itself (by the owner, or an agent in the owner's browser). End screen
   element boxes (feature 5) and the thumbnail maker (feature 4) build on this.
+
+## 13. Thumbnail maker status (2026-10-15)
+
+- **Design** (`ThumbnailDesign`, kept in the publish details; project version 9): the
+  frame (edited seconds, carried through cuts), a title of up to three lines where words
+  between asterisks take the accent colour, a tag, the accent (the graphics accent by
+  default), an optional picture beside the title, whether to cut the speaker out and
+  outline them, the speaker's size (100–160 %, growing up from the bottom), what is
+  behind them (as recorded, darker, blurred or plain), and the title's side (away from
+  the speaker by default).
+- **Cut-out.** Apple Vision (`VNGenerateForegroundInstanceMaskRequest`) cuts the
+  foreground out of the frame as Preview shows it (colour, zoom, effects; no graphics).
+  Cut-outs are kept by the frame's content, so the same frame is cut once. A frame with
+  nothing in front is used as it is, and the maker says so.
+- **Template.** `YamGraphics.thumbnail(data)` in the engine draws it on the 1920×1080
+  stage: the frame (dimmed, blurred or hidden), a scrim behind the title, the speaker cut
+  out with a white outline (an SVG dilate filter), a tag pill, and the title, sized down
+  from 170 px until it fits its column. The same page draws the live preview and, through
+  an offscreen WebKit snapshot, the final 1280×720 PNG.
+- **Maker** (Publish → **Make Thumbnail…**): the frame (slider and Use Playhead), title,
+  tag, accent, speaker, background, side and picture, with a live preview large and at
+  YouTube's 360 px search size. **Save Thumbnail** writes the PNG next to the recording
+  and makes it the video's thumbnail with its design, in one undo step.
+- **Agents.** `setPublishInfo` with `design` (only its keys given change), and a
+  `thumbnail` request (`yamvideoctl thumbnail --clip ID [--save]`) that draws the stored
+  design, or changes tried over it without storing them, and returns the PNG's path,
+  whether a speaker was found and where, and with `save` the saved file's path.
+- **Tests** (1041 checks): design rules and defaults, Vision cutting out a subject and
+  finding nothing in a plain frame, the title on the side away from the speaker (or the
+  side asked for), the cut-out staying bright on the darker background and the whole frame
+  darker without it, the accent tag, the version gate, a frame after the end refused, and
+  agents patching the design, trying one without storing it, saving, and being refused.
+- **Real use (this Mac).** An agent designed a thumbnail for a test recording through
+  `yamvideoctl`, drew it with a blurred background, saved it next to the recording and
+  made it the video's thumbnail. The live preview was checked with WebKit's own snapshot;
+  `Tools/Snapshot` cannot capture a web view in a sheet of its own.
+- **Open.** Real footage of a person (the tests use a drawn subject). Several looks or
+  layouts to choose from, and saving a design as a look for the next video.
