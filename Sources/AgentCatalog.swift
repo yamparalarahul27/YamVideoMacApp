@@ -236,7 +236,7 @@ extension AgentCatalog {
         add("setMovieCanvas", "movie", "The movie's frame shape.",
             [field("canvas", "string", "firstClip matches the first recording's crop.", values: MovieCanvas.allCases.map(\.rawValue))],
             #"{"type": "setMovieCanvas", "canvas": "portrait"}"#)
-        add("setExportSettings", "project", "Change export settings; only the keys given change.",
+        add("setExportSettings", "project", "Change export settings; only the keys given change. graphics: false exports without each recording's graphics and the move aside under its panels.",
             [field("settings", "object", "Keys to change.", values: AgentCatalog.exportSettingKeys.sorted())],
             #"{"type": "setExportSettings", "settings": {"format": "gif", "frameRate": 12}}"#)
         add("setSubtitles", "project", "Burn a caption file into a recording.",
@@ -279,7 +279,7 @@ extension AgentCatalog {
                 field("transactionID", "uuid", "From undo's result."), field("expectedRevision", "integer", "The revision you read.")]),
             Method(method: "analyze", summary: "Propose silence cuts or zooms as a job; applies nothing.", fields: session + [
                 field("clip", "uuid", "The recording."), field("kind", "string", "What to look for.", values: ["silence", "zooms"])]),
-            Method(method: "export", summary: "Export one recording or the movie as a job.", fields: session + [
+            Method(method: "export", summary: "Export one recording or the movie as a job. A recording's graphics are drawn in (HyperFrames renders each one once and keeps its frames, so the first export takes longer); state.graphicsRenderer says whether this Mac can, and only the owner can download HyperFrames. Movies leave graphics out.", fields: session + [
                 field("path", "string", "Where to write."), field("scope", "string", "What.", values: ["recording", "movie"]),
                 field("clip", "uuid", "For scope recording.", required: false), field("overwrite", "boolean", "Replace an existing file.", required: false, default: .bool(false))]),
             Method(method: "job", summary: "A job's status and result.", fields: [field("job", "uuid", "From analyze or export.")]),

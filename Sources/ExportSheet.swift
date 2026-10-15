@@ -20,6 +20,7 @@ struct ExportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var scope: ExportScope
     @State private var showCommand = false
+    @State private var confirmingDownload = false
 
     private var settingsBinding: Binding<ExportSettings> {
         Binding(get: { model.settings }, set: { model.updateSettings($0) })
@@ -56,6 +57,7 @@ struct ExportSheet: View {
                     }
                     if model.settings.format.isAnimation { animationSection } else { videoSection }
                     if model.settings.format == .mp4 { audioSection }
+                    if graphicsCount > 0 || (scope == .movie && movieHasGraphics) { graphicsSection }
                     destination
                     DisclosureGroup(isExpanded: $showCommand) {
                         if let command = model.previewCommand {
@@ -87,6 +89,15 @@ struct ExportSheet: View {
             .padding(14)
         }
         .frame(width: 520, height: 640)
+        .task { model.refreshGraphicsRenderer() }
+        .confirmationDialog("Download HyperFrames?", isPresented: $confirmingDownload) {
+            Button("Download") { model.downloadGraphicsRenderer() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("YamVideo draws graphics into exports with HyperFrames, a free, open-source renderer by HeyGen (Apache 2.0), "
+                 + "and the headless Chrome it uses: \(HyperFrames.downloadSize), downloaded once from npm and Google. "
+                 + "Its usage reporting stays off.")
+        }
     }
 
     private var canExport: Bool {
@@ -195,6 +206,59 @@ struct ExportSheet: View {
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// Graphics in the recordings this export covers.
+    private var graphicsCount: Int {
+        switch scope {
+        case .selected: return model.selectedItem?.graphics?.items.count ?? 0
+        case .all: return model.items.reduce(0) { $0 + ($1.graphics?.items.count ?? 0) }
+        case .movie: return 0
+        }
+    }
+
+    private var movieHasGraphics: Bool {
+        model.items.contains { $0.includedInMovie && !($0.graphics?.items.isEmpty ?? true) }
+    }
+
+    private var graphicsSection: some View {
+        InspectorSection("Graphics") {
+            if scope == .movie {
+                Text("Movies leave graphics out for now. Export each recording to keep its graphics.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Toggle("Draw graphics into the video", isOn: Binding(
+                    get: { model.settings.drawsGraphics },
+                    set: { var changed = model.settings; changed.graphics = $0 ? nil : false; model.updateSettings(changed) }))
+                    .controlSize(.small)
+                if model.settings.drawsGraphics { graphicsStatus }
+            }
+        }
+    }
+
+    @ViewBuilder private var graphicsStatus: some View {
+        let count = "\(graphicsCount) graphic\(graphicsCount == 1 ? "" : "s")"
+        if let progress = model.graphicsDownload {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(progress).font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            switch model.graphicsRenderer {
+            case .ready?:
+                Text("\(count). Each is drawn once and reused until it changes, so the first export takes longer.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            case .needsNode(let why)?:
+                warning(why)
+            case .needsDownload?:
+                Text("\(count). Drawing them needs HyperFrames, a free renderer (\(HyperFrames.downloadSize), downloaded once).")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Download HyperFrames…") { confirmingDownload = true }.controlSize(.small)
+            case nil:
+                Text("Checking whether this Mac can draw graphics…").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let error = model.graphicsDownloadError { warning(error) }
         }
     }
 

@@ -3960,6 +3960,340 @@ let unmoved = CIContext().createCGImage(moveAside(stripes, size: CGSize(width: 1
                                         from: CGRect(x: 0, y: 0, width: 1280, height: 720))!
 check(nativePixel(unmoved, x: 780, y: 360).0 > 200, "before the panel the picture is untouched")
 
+// MARK: - Export with graphics
+
+// Drawn frames go to scratch, never to the owner's cache.
+setenv("YAMVIDEO_GRAPHICS_CACHE", scratch.appendingPathComponent("graphics-cache").path, 1)
+print("\nGraphics render units")
+let unitPlate = gfx(.namePlate, 0.3456, 4.3, ["title": .string("Plate")])
+let unitRule = gfx(.rule, 5.0, 8.0, ["title": .string("Rule one")])
+let unitList = gfx(.checklist, 8.5, 10.0, ["title": .string("List")])
+let unitLink = gfx(.link, 9.0, 12.0, ["url": .string("example.com")])
+let unitTrack = GraphicsTrack(items: [unitPlate, unitRule, unitList, unitLink])
+let units = unitTrack.renderUnits(fps: 30)
+check(units.count == 5 && units.filter { $0.id == "panel-0" }.count == 1, "one unit per graphic, and one for the shared panel", "\(units.map(\.id))")
+let plateUnit = units.first { $0.id == unitPlate.id.uuidString }
+check(plateUnit.map { abs($0.origin - 10.0 / 30) < 0.000001 && abs($0.track.items[0].start - (0.3456 - 10.0 / 30)) < 0.000001 } == true,
+      "a unit starts on the frame grid, with its graphic timed from there")
+let panelUnit = units.first { $0.id == "panel-0" }
+check(panelUnit.map { $0.origin == 5 && abs($0.duration - 5.8) < 0.000001 && $0.track.items.allSatisfy(\.props.isEmpty) } == true,
+      "the panel unit runs to the panel's slide out, without the graphics' text")
+let ruleUnit = units.first { $0.id == unitRule.id.uuidString }
+check(ruleUnit.map { $0.track.items.count == 2 && $0.track.items.first { $0.id == unitList.id }?.props.isEmpty == true
+          && $0.track.items.first { $0.id == unitRule.id }?.props["title"]?.string == "Rule one" } == true,
+      "a panel graphic keeps its panel mates, without their text")
+check(unitTrack.panelGroups().map { ($0.first!.start, $0.map(\.end).max()!) }.elementsEqual(unitTrack.panelSpans().map { ($0.start, $0.end) }, by: ==),
+      "panel groups and panel spans agree")
+
+func unitKeys(_ track: GraphicsTrack, width: Double = 1920) -> [String: String] {
+    Dictionary(uniqueKeysWithValues: GraphicsRender.jobs(for: track, fps: "30", outputWidth: width).map { ($0.unit.id, $0.key) })
+}
+let baseKeys = unitKeys(unitTrack)
+var retexted = unitTrack; retexted.items[0].props["title"] = .string("Another plate")
+let retextedKeys = unitKeys(retexted)
+check(retextedKeys.filter { baseKeys[$0.key] != $0.value }.map(\.key) == [unitPlate.id.uuidString],
+      "new text draws that graphic again and nothing else")
+var shifted = unitTrack; shifted.items[0].start += 1; shifted.items[0].end += 1
+check(unitKeys(shifted)[unitPlate.id.uuidString] == baseKeys[unitPlate.id.uuidString],
+      "moving a graphic by whole frames reuses its frames")
+var mateEdit = unitTrack; mateEdit.items[2].props["title"] = .string("Other list")
+let mateKeys = unitKeys(mateEdit)
+check(mateKeys[unitRule.id.uuidString] == baseKeys[unitRule.id.uuidString] && mateKeys["panel-0"] == baseKeys["panel-0"],
+      "editing one panel graphic's text leaves its panel mates and the panel alone")
+var accented = unitTrack; accented.style.accent = "#FF0000"
+check(unitKeys(accented).allSatisfy { baseKeys[$0.key] != $0.value }, "a style change draws everything again")
+check(GraphicsRender.jobs(for: unitTrack, fps: "30", outputWidth: 3840).allSatisfy { $0.scale == 2 }
+          && GraphicsRender.jobs(for: unitTrack, fps: "30", outputWidth: 1920).allSatisfy { $0.scale == 1 },
+      "4K exports draw graphics at twice the design size")
+
+if let nodeBinary {
+    // The engine plans the same units: compare each unit's start and end.
+    let planFile = scratch.appendingPathComponent("units.json")
+    try unitTrack.engineData(duration: 12, fps: "30").write(to: planFile)
+    let script = "const g=require(process.argv[1]);const d=JSON.parse(require('fs').readFileSync(process.argv[2],'utf8'));"
+        + "console.log(JSON.stringify(g.plan(d).units.map(u=>[u.kind==='panel'?'panel':u.id,u.start,u.end])))"
+    let planned = try await Shell.run(nodeBinary, ["-e", script, "\(repository)/Resources/Graphics/graphics.js", planFile.path])
+    let jsUnits = (try? JSONSerialization.jsonObject(with: planned.stdout) as? [[Any]]) ?? []
+    let swiftUnits = units.map { unit -> (String, Double, Double) in
+        let id = unit.id == "panel-0" ? "panel" : unit.id
+        let start = unit.id == "panel-0" ? unit.track.items.map(\.start).min()! : unit.track.items.first { $0.id.uuidString == unit.id }!.start
+        return (id, unit.origin + start, unit.origin + unit.duration)
+    }
+    check(jsUnits.count == swiftUnits.count && zip(jsUnits, swiftUnits).allSatisfy { js, swift in
+        (js[0] as? String) == swift.0 && abs(((js[1] as? Double) ?? -1) - swift.1) < 0.0001 && abs(((js[2] as? Double) ?? -1) - swift.2) < 0.0001
+    }, "the engine lists the same units as the app", planned.stdoutText)
+}
+
+print("\nMove aside parity")
+// A textured 10-bit 4:4:4 Rec.709 clip, so neither renderer guesses chroma or matrix.
+let moveClip = scratch.appendingPathComponent("move.mov")
+let moveEncode = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30",
+    "-t", "4.5", "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv444p10le",
+    "-c:v", "prores_ks", "-profile:v", "4444", "-color_primaries", "bt709", "-color_trc", "bt709",
+    "-colorspace", "bt709", "-color_range", "tv", moveClip.path])
+check(moveEncode.status == 0, "made a textured Rec.709 clip", moveEncode.stderrText)
+let moveInfo = try await FFmpeg.probe(url: moveClip)
+var moveTrack = GraphicsTrack(items: [gfx(.rule, 1.0, 2.0), gfx(.rule, 3.2, 3.8, look: .ink)])
+moveTrack.style.panel = .shade
+let moveMotion = GraphicsMotion(moveTrack)!
+var moveItem = VideoItem(url: moveClip)
+moveItem.info = moveInfo; moveItem.crop = moveInfo.fullFrame; moveItem.graphics = moveTrack
+
+/// Encoded Rec.709 RGB, 0–255, of one frame.
+struct Picture { let width: Int, height: Int; let values: [Double]
+    func at(_ x: Int, _ y: Int, _ channel: Int) -> Double { values[(y * width + x) * 3 + channel] }
+}
+func nativePicture(_ item: VideoItem, frame: Int) async throws -> Picture {
+    let player = try await PlaybackController.makeItem(item, settings: ExportSettings())
+    let generator = AVAssetImageGenerator(asset: player.asset)
+    generator.videoComposition = player.videoComposition
+    generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+    let image = try await generator.image(at: CMTime(value: CMTimeValue(frame), timescale: 30)).image
+    var words = [UInt16](repeating: 0, count: image.width * image.height * 4)
+    let context = CGContext(data: &words, width: image.width, height: image.height, bitsPerComponent: 16,
+                            bytesPerRow: image.width * 8, space: ColorPipeline.videoSpace,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder16Little.rawValue)!
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    var values: [Double] = []; values.reserveCapacity(image.width * image.height * 3)
+    for pixel in stride(from: 0, to: words.count, by: 4) {
+        values += [Double(words[pixel]), Double(words[pixel + 1]), Double(words[pixel + 2])].map { $0 / 257 }
+    }
+    return Picture(width: image.width, height: image.height, values: values)
+}
+func ffmpegPicture(_ input: URL, graph: String?, frame: Int, width: Int, height: Int) async throws -> Picture {
+    let read = "select='eq(n,\(frame))',scale=in_color_matrix=bt709:in_range=tv:out_range=pc:flags=accurate_rnd+full_chroma_int,format=rgb48le"
+    var args = ["-hide_banner", "-loglevel", "error", "-i", input.path]
+    if let graph { args += ["-filter_complex", graph + ";[mvout]" + read + "[read]", "-map", "[read]"] } else { args += ["-vf", read] }
+    let result = try await Shell.run(ffmpeg, args + ["-frames:v", "1", "-f", "rawvideo", "-"])
+    let words = result.stdout.withUnsafeBytes { Array($0.bindMemory(to: UInt16.self)) }
+    guard words.count == width * height * 3 else { throw FFmpegError(message: "no frame \(frame): \(result.stderrText)") }
+    return Picture(width: width, height: height, values: words.map { Double(UInt16(littleEndian: $0)) / 257 })
+}
+/// The horizontal offset (−4…4 px) that best lines `b` up with `a` over columns `xs`, and
+/// the mean difference there.
+func alignment(_ a: Picture, _ b: Picture, xs: Range<Int>) -> (offset: Int, mean: Double) {
+    var best = (offset: 0, mean: Double.infinity)
+    for offset in -4...4 {
+        var total = 0.0, count = 0
+        for y in stride(from: 20, to: a.height - 20, by: 4) { for x in stride(from: xs.lowerBound, to: xs.upperBound, by: 2) {
+            for channel in 0..<3 { total += abs(a.at(x, y, channel) - b.at(x + offset, y, channel)) }
+            count += 3
+        } }
+        if total / Double(count) < best.mean { best = (offset, total / Double(count)) }
+    }
+    return best
+}
+func meanDifference(_ a: Picture, _ b: Picture, xs: Range<Int>) -> Double {
+    var total = 0.0, count = 0
+    for y in stride(from: 10, to: a.height - 10, by: 3) { for x in stride(from: xs.lowerBound, to: xs.upperBound, by: 2) {
+        for channel in 0..<3 { total += abs(a.at(x, y, channel) - b.at(x, y, channel)) }
+        count += 3
+    } }
+    return total / Double(max(1, count))
+}
+let moveStage = try FFmpeg.moveStage(moveMotion, frame: CGSize(width: 1280, height: 720), fps: 30, fpsExpression: "30",
+                                     duration: 4.5, tags: FrameTags(info: moveInfo, converted: false))
+let moveGraph = moveStage.parts.joined(separator: ";").replacingOccurrences(of: "[mvin]", with: "[0:v]")
+var worstOffset = 0, worstFill = 0.0, worstFrame = 0.0
+for frame in [33, 42, 57, 66, 78, 108] {
+    let native = try await nativePicture(moveItem, frame: frame)
+    let exported = try await ffmpegPicture(moveClip, graph: moveGraph, frame: frame, width: 1280, height: 720)
+    let amount = moveMotion.progress(at: Double(frame) / 30).amount
+    let shift = Int((1280 * GraphicsTrack.shiftFraction * amount).rounded())
+    let placed = alignment(native, exported, xs: 40..<(1280 - shift - 260))
+    worstOffset = max(worstOffset, abs(placed.offset))
+    worstFill = max(worstFill, meanDifference(native, exported, xs: (1280 - shift + 4)..<1276))
+    worstFrame = max(worstFrame, meanDifference(native, exported, xs: 4..<1276))
+}
+print(String(format: "       move parity: worst offset %d px, fill %.2f, whole frame %.2f of 255", worstOffset, worstFill, worstFrame))
+check(worstOffset <= 2, "the exported move lands within 2 px of the preview at six times in and out of two panels")
+check(worstFill < 3 && worstFrame < 3, "the fill, the fade and the frost match the preview",
+      String(format: "fill %.2f, frame %.2f", worstFill, worstFrame))
+let untouched = try await ffmpegPicture(moveClip, graph: moveGraph, frame: 15, width: 1280, height: 720)
+let source = try await ffmpegPicture(moveClip, graph: "[0:v]format=yuv420p10le[mvout]", frame: 15, width: 1280, height: 720)
+check(meanDifference(untouched, source, xs: 0..<1280) < 0.05, "outside the panels the stage leaves the picture alone",
+      String(format: "%.3f", meanDifference(untouched, source, xs: 0..<1280)))
+
+print("\nExport with graphics")
+// Stand-in frames: a magenta box at design (1300, 100, 200 × 100) on transparency, so the
+// overlay can be checked without HyperFrames.
+let standIn = scratch.appendingPathComponent("stand-in.png")
+let standInMade = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+    "-i", "color=c=black@0.0:s=1920x1080,format=rgba,drawbox=x=1300:y=100:w=200:h=100:color=magenta@1.0:t=fill",
+    "-frames:v", "1", standIn.path])
+check(standInMade.status == 0, "made a stand-in graphic frame", standInMade.stderrText)
+final class DrawCount: @unchecked Sendable { private let lock = NSLock(); private var value = 0
+    func add() { lock.lock(); value += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value } }
+let draws = DrawCount()
+let standInDraw: (GraphicsRender.Job, URL, URL) async throws -> Void = { job, page, frames in
+    draws.add()
+    check(FileManager.default.fileExists(atPath: page.appendingPathComponent("index.html").path), "each unit gets its own page")
+    try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+    let count = Int((job.unit.duration * FFmpeg.rate(job.fps)).rounded(.up))
+    for index in 1...count {
+        try FileManager.default.copyItem(at: standIn, to: frames.appendingPathComponent(String(format: "frame_%06d.png", index)))
+    }
+}
+try? FileManager.default.removeItem(at: GraphicsRender.cache)
+let overlayTrack = GraphicsTrack(items: [gfx(.namePlate, 0.5, 1.5)])
+let overlayOut = scratch.appendingPathComponent("graphics.mp4")
+try await FFmpeg.export(input: landscape, output: overlayOut, info: info, crop: info.fullFrame, settings: ExportSettings(),
+                        graphics: overlayTrack, drawGraphics: standInDraw) { _ in }
+check(draws.count == 1, "the export draws its one graphic", "\(draws.count)")
+// 1920 → 1280: the box lands at (867, 67) to (1000, 133). testsrc2 has magenta of its
+// own, so each pixel is compared with the same export made without graphics.
+let plainOut = scratch.appendingPathComponent("graphics-plain.mp4")
+try await FFmpeg.export(input: landscape, output: plainOut, info: info, crop: info.fullFrame, settings: ExportSettings()) { _ in }
+func isMagenta(_ p: (Int, Int, Int)) -> Bool { p.0 > 200 && p.1 < 60 && p.2 > 200 }
+func unchanged(_ a: URL, _ b: URL, x: Int, y: Int, at time: Double) async throws -> Bool {
+    let p = try await pixel(a, x: x, y: y, at: time), q = try await pixel(b, x: x, y: y, at: time)
+    return abs(p.0 - q.0) + abs(p.1 - q.1) + abs(p.2 - q.2) < 24
+}
+let boxPixel = try await pixel(overlayOut, x: 930, y: 100, at: 1.0)
+let beforeBox = try await unchanged(overlayOut, plainOut, x: 930, y: 100, at: 0.3)
+let afterBox = try await unchanged(overlayOut, plainOut, x: 930, y: 100, at: 1.8)
+check(isMagenta(boxPixel) && beforeBox && afterBox, "the graphic lands in its place, from its start to its end",
+      "\(boxPixel) before \(beforeBox) after \(afterBox)")
+let leftOfBox = try await unchanged(overlayOut, plainOut, x: 820, y: 100, at: 1.0)
+let belowBox = try await unchanged(overlayOut, plainOut, x: 930, y: 160, at: 1.0)
+check(leftOfBox && belowBox, "and nowhere else")
+let quietFrame = try await ffmpegPicture(overlayOut, graph: nil, frame: 9, width: 1280, height: 720)
+let quietPlain = try await ffmpegPicture(plainOut, graph: nil, frame: 9, width: 1280, height: 720)
+check(meanDifference(quietFrame, quietPlain, xs: 0..<1280) < 0.05,
+      "an untagged recording keeps its colours exactly: graphics never convert the picture",
+      String(format: "%.3f", meanDifference(quietFrame, quietPlain, xs: 0..<1280)))
+equal(try await frameCount(overlayOut), try await frameCount(out1), "graphics never change the frame count")
+try await FFmpeg.export(input: landscape, output: overlayOut, info: info, crop: info.fullFrame, settings: ExportSettings(),
+                        graphics: overlayTrack, drawGraphics: standInDraw) { _ in }
+check(draws.count == 1, "an unchanged graphic is not drawn again")
+
+// Cut and scaled: the graphic keeps its edited time and fits the smaller frame.
+var smaller = ExportSettings(); smaller.sizeLimit = .vga
+let cutSegments = [TimelineSegment(start: 1.0, end: 3.0)]
+let scaledOut = scratch.appendingPathComponent("graphics-scaled.mp4")
+try await FFmpeg.export(input: landscape, output: scaledOut, info: info, crop: info.fullFrame, segments: cutSegments, settings: smaller,
+                        graphics: overlayTrack, drawGraphics: standInDraw) { _ in }
+let scaledPlain = scratch.appendingPathComponent("graphics-scaled-plain.mp4")
+try await FFmpeg.export(input: landscape, output: scaledPlain, info: info, crop: info.fullFrame, segments: cutSegments, settings: smaller) { _ in }
+let scaledOn = try await pixel(scaledOut, x: 466, y: 50, at: 1.0)
+let scaledOff = try await unchanged(scaledOut, scaledPlain, x: 466, y: 50, at: 0.3)
+check(isMagenta(scaledOn) && scaledOff, "after a cut and a downscale the graphic shows at its edited time, fitted", "\(scaledOn)")
+
+// The move in an export lands where the preview puts it.
+let movedOut = scratch.appendingPathComponent("graphics-moved.mp4")
+var bestQuality = ExportSettings(); bestQuality.quality = 100
+try await FFmpeg.export(input: moveClip, output: movedOut, info: moveInfo, crop: moveInfo.fullFrame, settings: bestQuality,
+                        graphics: moveTrack, drawGraphics: { job, page, frames in
+                            try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+                            let clear = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                                "-i", "color=c=black@0.0:s=1920x1080,format=rgba", "-frames:v", "1", frames.appendingPathComponent("frame_000001.png").path])
+                            if clear.status != 0 { throw FFmpegError(message: clear.stderrText) }
+                        }) { _ in }
+let movedNative = try await nativePicture(moveItem, frame: 57)
+let movedExport = try await ffmpegPicture(movedOut, graph: nil, frame: 57, width: 1280, height: 720)
+let movedPlace = alignment(movedNative, movedExport, xs: 40..<700)
+check(abs(movedPlace.offset) <= 2 && movedPlace.mean < 6, "an exported MP4 moves the picture aside as the preview does",
+      String(format: "offset %d, mean %.2f", movedPlace.offset, movedPlace.mean))
+equal(try await frameCount(movedOut), try await frameCount(moveClip), "cutting the video into panel windows and joining it again keeps every frame")
+let windowed = moveStage.parts.joined(separator: ";")
+check(windowed.contains("concat=n=4") && windowed.contains("trim=start_frame=0:end_frame=29,setpts=PTS-STARTPTS,format=yuv420p10le"),
+      "frames away from the panels pass straight through", String(windowed.prefix(400)))
+
+// GIF: both passes see the graphics; the palette stays input 1.
+var gfxGIF = ExportSettings(); gfxGIF.format = .gif
+let gfxGIFCommands = FFmpeg.exportCommands(input: landscape, output: scratch.appendingPathComponent("g.gif"), info: info,
+                                           crop: info.fullFrame, settings: gfxGIF, graphics: overlayTrack)
+check(gfxGIFCommands.count == 2 && gfxGIFCommands.allSatisfy { $0.contains("-itsoffset") && $0.joined(separator: " ").contains("overlay=x=0:y=0") }
+          && gfxGIFCommands[1].joined(separator: " ").contains("[1:v]paletteuse") && gfxGIFCommands[1].joined(separator: " ").contains("[2:v]scale="),
+      "both GIF passes draw the graphics, and the palette stays the second input")
+var noGraphics = ExportSettings(); noGraphics.graphics = false
+var plainItem = VideoItem(url: landscape); plainItem.graphics = overlayTrack
+check(plainItem.exportGraphics(noGraphics) == nil && plainItem.exportGraphics(ExportSettings()) == overlayTrack,
+      "graphics can be left out of exports")
+
+// Cancel while drawing: nothing half-made is left in the cache, and no file is written.
+let cancelOut = scratch.appendingPathComponent("graphics-cancel.mp4")
+let slowTrack = GraphicsTrack(items: [gfx(.namePlate, 0.5, 2.5, ["title": .string("Slow")])])
+let cancelled = Task {
+    try await FFmpeg.export(input: landscape, output: cancelOut, info: info, crop: info.fullFrame, settings: ExportSettings(),
+                            graphics: slowTrack, drawGraphics: { _, _, frames in
+                                try FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+                                try FileManager.default.copyItem(at: standIn, to: frames.appendingPathComponent("frame_000001.png"))
+                                try await Task.sleep(nanoseconds: 5_000_000_000)
+                            }) { _ in }
+}
+try await Task.sleep(nanoseconds: 300_000_000)
+cancelled.cancel()
+let cancelResult = await cancelled.result
+let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: GraphicsRender.cache.path)) ?? []
+check((try? cancelResult.get()) == nil && !leftovers.contains { $0.hasPrefix(".work-") } && !FileManager.default.fileExists(atPath: cancelOut.path)
+          && !GraphicsRender.jobs(for: slowTrack, fps: info.fpsExpression, outputWidth: 1280)[0].isRendered,
+      "cancelling while graphics draw leaves no partial frames and no file", "\(leftovers)")
+
+var hdrGraphicsInfo = info; hdrGraphicsInfo.colorTransfer = "smpte2084"
+var keepHDRGraphics = ExportSettings(); keepHDRGraphics.toneMapHDR = false
+check(FFmpeg.graphicsProblem(overlayTrack, info: hdrGraphicsInfo, settings: keepHDRGraphics) != nil
+          && FFmpeg.graphicsProblem(overlayTrack, info: hdrGraphicsInfo, settings: ExportSettings()) == nil,
+      "graphics over HDR kept as HDR are refused; tone-mapped they are fine")
+
+// Without HyperFrames the export says what to do instead of leaving the graphics out.
+let emptyRenderer = scratch.appendingPathComponent("no-hyperframes", isDirectory: true)
+setenv("YAMVIDEO_HYPERFRAMES_DIR", emptyRenderer.path, 1)
+if case .ready = await HyperFrames.status() { check(false, "an empty folder is not a ready renderer") }
+do {
+    try await FFmpeg.export(input: landscape, output: scratch.appendingPathComponent("no-renderer.mp4"), info: info, crop: info.fullFrame,
+                            settings: ExportSettings(), graphics: GraphicsTrack(items: [gfx(.link, 0.2, 1.2)])) { _ in }
+    check(false, "an export with graphics and no renderer fails")
+} catch {
+    check(error.localizedDescription.contains("HyperFrames") && error.localizedDescription.contains("Draw graphics"),
+          "without HyperFrames the export says how to get it or leave the graphics out", error.localizedDescription)
+}
+unsetenv("YAMVIDEO_HYPERFRAMES_DIR")
+
+print("\nGraphics for agents in exports")
+let exportAgent = AppModel(recoveryURL: nil)
+exportAgent.restore(VideoProject(clips: [ProjectClip(gradeOther)], settings: ExportSettings(), selection: gradeOther.id))
+var graphicsOff = address(exportAgent)
+graphicsOff["method"] = "apply"; graphicsOff["requestID"] = "graphics-off"; graphicsOff["client"] = "Claude"
+graphicsOff["commands"] = [["type": "setExportSettings", "settings": ["graphics": false]]]
+let offReply = await agentCall(exportAgent, graphicsOff)
+check(offReply["ok"] as? Bool == true && exportAgent.settings.graphics == false, "an agent can leave graphics out of exports", "\(offReply)")
+let exportState = agentResult(await agentCall(exportAgent, ["method": "state"]))
+check((exportState["settings"] as? [String: Any])?["graphics"] as? Bool == false, "state shows the choice")
+check((exportState["graphicsRenderer"] as? [String: Any])?["status"] is String, "state says whether graphics can be drawn", "\(exportState["graphicsRenderer"] ?? "nil")")
+
+if case .ready = await HyperFrames.status() {
+    print("\nHyperFrames")
+    let realTrack = GraphicsTrack(items: [gfx(.namePlate, 0.3, 1.8, ["kicker": .string("Test"), "title": .string("Yamparala Rahul"),
+                                                                       "detail": .string("Graphics export")])])
+    let realJobs = GraphicsRender.jobs(for: realTrack, fps: info.fpsExpression, outputWidth: 1280)
+    for job in realJobs { try? FileManager.default.removeItem(at: job.folder) }
+    let realOut = scratch.appendingPathComponent("hyperframes.mp4")
+    let started = Date()
+    try await FFmpeg.export(input: landscape, output: realOut, info: info, crop: info.fullFrame, settings: ExportSettings(),
+                            graphics: realTrack) { _ in }
+    print(String(format: "       drew and exported in %.1f s", Date().timeIntervalSince(started)))
+    let frames = (try? FileManager.default.contentsOfDirectory(atPath: realJobs[0].folder.path)) ?? []
+    check(frames.count >= 44, "HyperFrames draws the graphic's frames", "\(frames.count)")
+    let probe = try await Shell.run(FFmpeg.ffprobePath!, ["-v", "error", "-show_entries", "stream=pix_fmt,width,height", "-of", "csv=p=0",
+                                                          realJobs[0].folder.appendingPathComponent("frame_000030.png").path])
+    check(probe.stdoutText.contains("1920,1080,rgba"), "with alpha, at the design size", probe.stdoutText)
+    // The name plate's card sits in the right-hand column, top: design x 1240–1880.
+    func cardDifference(_ time: Double) async throws -> Int {
+        var total = 0
+        for (x, y) in [(900, 60), (1000, 75), (1100, 60)] {
+            let a = try await pixel(realOut, x: x, y: y, at: time), b = try await pixel(landscape, x: x, y: y, at: time)
+            total += abs(a.0 - b.0) + abs(a.1 - b.1) + abs(a.2 - b.2)
+        }
+        return total
+    }
+    let during = try await cardDifference(1.2), before = try await cardDifference(0.1)
+    check(during > 60 && before < 30, "the exported video shows the card in its column while the graphic is on", "during \(during), before \(before)")
+} else {
+    print("  --   HyperFrames render skipped (not downloaded)")
+}
+
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)
 exit(failures == 0 ? 0 : 1)

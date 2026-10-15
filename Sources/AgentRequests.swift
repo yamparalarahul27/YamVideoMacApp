@@ -279,6 +279,9 @@ struct AgentState: Encodable {
         var exporting: Bool, interactionInProgress: Bool, agentsPaused: Bool, runningJobs: [UUID]
     }
     struct History: Encodable { var undo: AgentHistoryStep?; var redo: AgentHistoryStep? }
+    /// Whether exports can draw graphics here: ready, needsNode, needsDownload (the owner
+    /// downloads HyperFrames from the Export sheet), or unknown until the app has checked.
+    struct GraphicsRenderer: Encodable { var status: String; var detail: String?; var version: String }
 
     var sessionID: UUID
     var projectID: UUID
@@ -290,6 +293,7 @@ struct AgentState: Encodable {
     var history: History
     var selection: Selection
     var settings: JSONValue
+    var graphicsRenderer: GraphicsRenderer
     var movie: Movie
     var clips: [Clip]
 }
@@ -572,8 +576,18 @@ extension AppModel {
                              zoom: selectedShotID, blurArea: selectedRegionID, effect: selectedEffectID, marker: selectedMarkerID, graphic: selectedGraphicID,
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
+            graphicsRenderer: graphicsRendererState,
             movie: .init(canvas: (document.movieSettings ?? MovieSettings()).canvas.rawValue, duration: movieOffset, clips: movieClips),
             clips: clips)
+    }
+
+    private var graphicsRendererState: AgentState.GraphicsRenderer {
+        switch graphicsRenderer {
+        case .ready?: return .init(status: "ready", detail: nil, version: HyperFrames.version)
+        case .needsNode(let why)?: return .init(status: "needsNode", detail: why, version: HyperFrames.version)
+        case .needsDownload?: return .init(status: "needsDownload", detail: HyperFrames.missingMessage, version: HyperFrames.version)
+        case nil: return .init(status: "unknown", detail: nil, version: HyperFrames.version)
+        }
     }
 
     private func colorState(_ clip: ProjectClip, info: MediaInfo, settings: ExportSettings) -> AgentState.Color {
@@ -984,6 +998,7 @@ extension AppModel {
     nonisolated static let exportSettingKeys: Set<String> = {
         var every = ExportSettings()
         every.outputFolder = URL(fileURLWithPath: "/")
+        every.graphics = true
         guard case .object(let fields)? = try? JSONValue.from(every) else { return [] }
         return Set(fields.keys)
     }()
@@ -1308,6 +1323,17 @@ extension AppModel {
             return .failure(.invalid("scope must be \"recording\" (with clip) or \"movie\"."))
         }
 
+        // Graphics that still need drawing need HyperFrames, which only the owner can download.
+        if case .recording(let item, let info) = work, let graphics = item.exportGraphics(settings), !graphics.items.isEmpty,
+           let renderer = graphicsRenderer, renderer != .ready,
+           FFmpeg.graphicsPlan(graphics, info: info, crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
+                               segments: item.segments, settings: settings, converted: true).jobs.contains(where: { !$0.isRendered }) {
+            let why: String
+            if case .needsNode(let detail) = renderer { why = detail } else { why = HyperFrames.missingMessage }
+            return .failure(EditError(code: .unsupportedCapability, message: why
+                + " Ask the owner, or send setExportSettings with {\"graphics\": false} to export without graphics."))
+        }
+
         let exportSettings = settings
         let temporary = output.deletingLastPathComponent().appendingPathComponent(".yamvideo-\(UUID().uuidString).\(format.fileExtension)")
         let clipID: UUID? = { if case .recording(let item, _) = work { return item.id }; return nil }()
@@ -1341,7 +1367,7 @@ extension AppModel {
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.subtitles,
                                             color: item.colorStage(exportSettings), effects: item.blurEffects,
-                                            onProgress: progress)
+                                            graphics: item.exportGraphics(exportSettings), onProgress: progress)
                 case .movie(let plan):
                     try await FFmpeg.exportMovie(plan: plan, settings: exportSettings, output: temporary, onProgress: progress)
                 }
