@@ -517,3 +517,11 @@ state, reveal and highlights; `preview` gains `composed`; and a `catalog` reques
 `yamvideo_describe`, `yamvideoctl catalog`) describes every command with its fields,
 units, ranges, defaults and an example, kept in step with `apply` by the suite.
 
+### Phase 6 status (2026-10-15)
+
+Phase 6 became the [graphics track](graphics-track.md): HyperFrames rather than Remotion,
+for timed graphics over a recording rather than opaque clips. Implemented: the template
+engine (G0), graphics in the app's preview, timeline, inspector and agent commands
+(G1 part 1, schema v6), and graphics in exports with the move aside drawn by ffmpeg
+(G1 part 2). Its section 6a lists the next features in order.
+

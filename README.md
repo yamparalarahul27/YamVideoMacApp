@@ -173,6 +173,7 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
 | **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest |
+| **Export with graphics** | Export draws a recording's graphics into the video, with the picture sliding aside under each panel exactly as **Preview** shows it. The first time, the Export sheet's **Graphics** section offers **Download HyperFrames…** (a free renderer and the browser it draws with, about 220 MB, once). Each graphic is drawn once and reused until it changes, so later exports are quicker. Untick **Draw graphics into the video** to export without them. Movies leave graphics out for now |
 | **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector. Choose where it sits and how big it is |
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
 | **Correct Pocket 3 D-Log M colour** | In the inspector's **Colour** section set **Recorded colour** to **DJI Pocket 3 D-Log M**. The first time, **Get DJI Conversion** opens DJI's download page and **Import Conversion File…** takes the `.cube` you saved. After that, **Natural Colour** is one click, and one Undo. Auto never assumes D-Log M: a `DJI_` file name only makes it ask |
@@ -371,6 +372,7 @@ Sources/
   VisualEffects.swift whole-frame blur and markers: timing, validation, remapping
   VisualEffectsEditing.swift / VisualEffectsView.swift effect and marker actions, lane and inspectors
   Graphics.swift    graphics data, validation, remapping, the move aside and the engine page
+  GraphicsRender.swift graphics in exports: the move aside in ffmpeg, render units, HyperFrames, the cache
   GraphicsEditing.swift / GraphicsInspector.swift / GraphicsOverlay.swift graphics actions, inspector and preview layer
   AgentCatalog.swift every agent command described for agents, served by `catalog`
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
@@ -411,5 +413,6 @@ work, not features available in this build.
 The [graphics track plan](docs/plans/graphics-track.md) is the layer design that the
 co-editing plan asks for: timed motion graphics over a recording, in a glass-card look or
 an ink look (handwriting over a soft haze), plus ink clips drawn on an iPad. Its first
-phase, the template engine in `Resources/Graphics/` with `Tools/Graphics/assemble.mjs`,
-runs outside the app today; the app phases wait for co-editing phase 5.
+phase is the template engine in `Resources/Graphics/` with `Tools/Graphics/assemble.mjs`.
+Graphics now show and are edited in the app (G1 part 1) and are drawn into exports
+(G1 part 2); section 6a of the plan lists the next features in order.

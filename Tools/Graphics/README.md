@@ -5,6 +5,11 @@ graphics from JSON data, one stylesheet, a pinned GSAP and the Inter font. The p
 [docs/plans/graphics-track.md](../../docs/plans/graphics-track.md). In phase G0 the engine
 runs outside the app; phase G1 puts it in the app's preview and export.
 
+The app's export draws graphics itself (Sources/GraphicsRender.swift): each unit on its
+own page, rendered by a pinned HyperFrames to a cached PNG sequence and overlaid by ffmpeg.
+In `unit` mode the page options may give `origin`, the data time shown at page time 0; the
+app puts it on a frame so beats land on the frames the preview shows.
+
 `assemble.mjs` writes a HyperFrames page from a graphics JSON file. It needs Node 18 or
 later and nothing else.
 
