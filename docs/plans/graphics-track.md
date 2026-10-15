@@ -203,6 +203,14 @@ need Node.js to export" and offers to export without them.
   thumbnail at its real size. **Export for YouTube** writes the MP4, the `.srt`, the
   thumbnail and a text file. The upload itself stays with the owner or an agent in the
   owner's browser.
+- **G3 — end screen (owner's request).** An `endScreen` kind for the last 5–20 s
+  (YouTube's limit): the speaker moves into a smaller frame over a blurred backdrop, and
+  the frame keeps empty, marked boxes exactly where YouTube's end screen elements sit
+  (the Subscribe circle and one or two 16:9 video cards), so nothing covers them. The
+  Publish panel stores which element goes in which box. YouTube's upload API cannot set
+  end screen elements, so placing them stays a YouTube Studio step, by the owner or an
+  agent in the owner's browser. Today's end card (top-right column) conflicts with those
+  elements; the first video works around it by placing them in the left half.
 - **G3 — thumbnail maker.** Pick a frame on the timeline; Apple Vision
   (`VNGenerateForegroundInstanceMaskRequest`) cuts the speaker out; a thumbnail
   template (large title, accent tag, optional icon or product photo, outline on the
