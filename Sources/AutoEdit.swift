@@ -242,7 +242,7 @@ struct Transcript: Codable, Equatable, Sendable {
     /// wherever the edit jumps back, shown for at least 0.8 s where the next caption
     /// allows. A caption may run across a cut; moved onto the edited timeline its pieces
     /// join up again.
-    func captions(timeline: ClipTimeline) -> [Caption] {
+    func captions(timeline: ClipTimeline, characters: Int = 84) -> [Caption] {
         typealias Entry = (word: TranscriptWord, segment: Int)
         let kept = keptWords(timeline)
         let offsets = timeline.segments.indices.map { index in timeline.segments[..<index].reduce(0) { $0 + $1.duration } }
@@ -259,7 +259,7 @@ struct Transcript: Codable, Equatable, Sendable {
                     || (entry.segment == last.segment + 1 && timeline.segments[entry.segment].start >= timeline.segments[last.segment].end - 0.000001)
                 let sentenceEnded = last.word.text.last.map { ".?!".contains($0) } ?? false
                 let pause = edited(entry.word.start, in: entry.segment) - edited(last.word.end, in: last.segment) > 0.6
-                let tooLong = length(current) + 1 + entry.word.text.count > 84
+                let tooLong = length(current) + 1 + entry.word.text.count > characters
                     || edited(entry.word.start, in: entry.segment) - edited(first.word.start, in: first.segment) > 6
                 if !follows || tooLong || pause || (sentenceEnded && length(current) >= 18) {
                     groups.append(current); current = []

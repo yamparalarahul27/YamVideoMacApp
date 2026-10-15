@@ -26,6 +26,29 @@
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
   const PANEL_PAD = 108;         // panel content starts this far past the soft edge's start
 
+  /**
+   * Pure: where a Short (a 1080×1920 canvas) puts things. Each zone is where the template's
+   * own zone (the 640×900 column, the 960×1080 panel) has its top-left corner, and its size.
+   * The app has the same numbers (ShortLayout in Sources/Shorts.swift).
+   */
+  const SHORT_STAGE = { left: 0, top: 0, width: 1080, height: 1920 };
+  const SHORT_PANELS = {
+    sheet: { x: 29, y: 717, scale: 0.9 },
+    shade: { x: 0, y: 312, scale: 0.96 },
+    split: { x: 53, y: 802, scale: 0.85 },
+  };
+  function shortLayout(panels) {
+    const name = SHORT_PANELS[panels] ? panels : "sheet";
+    return {
+      panels: name, stage: SHORT_STAGE,
+      column: { x: 72, y: 760, scale: 1.2 },
+      panel: SHORT_PANELS[name],
+      sheetTop: 700, lift: 240,
+      splitFrame: { x: 333, y: 112, w: 414, h: 736 },
+      captionBottom: 1320,
+    };
+  }
+
   /** The video move curve. Core Image and FFmpeg use the same polynomial. */
   function smooth(p) { return p * p * (3 - 2 * p); }
 
@@ -77,9 +100,10 @@
         spans.push({ id: "panel-" + spans.length, start: g.start, end: g.end, items: [g.id] });
       }
     }
+    // A panel's shade comes before the graphics that start with it, so they draw over it.
     const units = items.map((g) => ({ id: g.id, kind: g.kind, start: g.start, end: g.end }))
       .concat(spans.map((s) => ({ id: s.id, kind: "panel", start: s.start, end: s.end + PANEL_SLIDE })))
-      .sort((a, b) => a.start - b.start);
+      .sort((a, b) => a.start - b.start || (b.kind === "panel") - (a.kind === "panel"));
     return { version: VERSION, items, spans, units };
   }
 
@@ -912,6 +936,9 @@
 
     const p = plan(data);
     const style = Object.assign({}, DEFAULT_STYLE, data.style || {});
+    const short = data.layout && data.layout.canvas === "short" ? shortLayout(data.layout.panels) : null;
+    const stage = short ? SHORT_STAGE : STAGE;
+    setStage(stage);
     document.documentElement.style.setProperty("--yg-accent", style.accent);
     const edge = Math.max(0, Math.min(400, num(style.edge, 170)));
     document.documentElement.style.setProperty("--yg-edge", edge + "px");
@@ -932,20 +959,27 @@
     (document.getElementById("stage") || document.body).appendChild(container);
     const tl = gsap.timeline({ paused: true });
 
-    const placement = style.moveVideo ? "move" : "stay";
+    const placement = short ? "short-" + short.panels : style.moveVideo ? "move" : "stay";
     const byID = new Map(p.items.map((g) => [g.id, g]));
     for (const span of spans) {
       const inkSpan = span.items.every((id) => lookOf(byID.get(id), style) === "ink");
       if (inkSpan) {
         const veil = h("div", { class: "yg-veil " + placement });
+        if (short && short.panels === "split") append(veil, splitFrame(short));
         append(container, veil);
         tl.fromTo(veil, { opacity: 0 }, { opacity: 1, duration: PANEL_SLIDE, ease: "power2.out" }, toTime(span.start));
         tl.to(veil, { opacity: 0, duration: PANEL_SLIDE, ease: "power2.in" }, toTime(span.end));
         continue;
       }
       const bg = h("div", { class: "yg-panel-bg " + (style.panel === "solid" ? "solid" : "shade") + " " + placement });
+      if (short && short.panels === "split") append(bg, splitFrame(short));
       append(container, bg);
-      if (style.panel === "solid" && style.moveVideo) {
+      if (short) {
+        // A Short's sheet rises from the bottom; the full shade and the split fade in.
+        const rise = short.panels === "sheet" ? 160 : 0;
+        tl.fromTo(bg, { opacity: 0, y: rise }, { opacity: 1, y: 0, duration: PANEL_SLIDE, ease: "power3.out" }, toTime(span.start));
+        tl.to(bg, { opacity: 0, y: rise, duration: PANEL_SLIDE, ease: "power3.in" }, toTime(span.end));
+      } else if (style.panel === "solid" && style.moveVideo) {
         tl.fromTo(bg, { opacity: 1, x: 960 }, { x: 0, duration: PANEL_SLIDE, ease: smooth }, toTime(span.start));
         tl.to(bg, { x: 960, duration: PANEL_SLIDE, ease: smooth }, toTime(span.end));
       } else {
@@ -954,7 +988,7 @@
       }
     }
 
-    if (mode === "full" && style.moveVideo) {
+    if (mode === "full" && style.moveVideo && !short) {
       // The video moves aside; a blurred copy fills the space it leaves, and its right
       // edge fades into that copy. In the app these three are native (see the plan).
       const video = document.getElementById("bg-video");
@@ -974,7 +1008,7 @@
     }
 
     const screen = p.items.find((g) => g.kind === "endScreen");
-    if (mode === "full" && screen) {
+    if (mode === "full" && screen && !short) {
       // The end screen: the video moves into the speaker's frame over the blurred copy.
       const video = document.getElementById("bg-video");
       const fill = document.getElementById("bg-fill");
@@ -990,12 +1024,24 @@
     const places = {};
     for (const graphic of items) {
       const zone = zoneOf(graphic.kind);
-      const rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
+      if (short && zone === "screen") continue;   // Shorts have no end screen
+      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
+      let scaled = null;
+      if (short) {
+        // The template's zone, scaled into the Short's own zone for it.
+        const z = zone === "column" ? short.column : short.panel;
+        const size = zone === "column" ? COLUMN : PANEL_MOVE;
+        rect = { left: z.x, top: z.y, width: size.width * z.scale, height: size.height * z.scale };
+        scaled = { width: size.width, height: size.height, scale: z.scale };
+      }
       const host = h("div", { class: "yg-host yg-kind-" + graphic.kind, "data-graphic-id": graphic.id,
         style: "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" });
       const look = lookOf(graphic, style);
-      const inner = h("div", { class: "yg-inner" + (zone === "panel" && !style.moveVideo ? " yg-scaled" : "") });
-      if (zone === "panel" && style.moveVideo && panelOffset && look === "glass") inner.style.transform = "translateX(" + panelOffset + "px)";
+      const inner = h("div", { class: "yg-inner" + (zone === "panel" && !style.moveVideo && !short ? " yg-scaled" : "") });
+      if (scaled) {
+        inner.style.width = scaled.width + "px"; inner.style.height = scaled.height + "px";
+        inner.style.transformOrigin = "0 0"; inner.style.transform = "scale(" + scaled.scale + ")";
+      } else if (zone === "panel" && style.moveVideo && panelOffset && look === "glass") inner.style.transform = "translateX(" + panelOffset + "px)";
       append(host, inner);
       // The place carries the owner's move and scale; the host keeps the template's own
       // motion, so the two never fight over one transform.
@@ -1009,10 +1055,58 @@
       (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode));
     }
 
-    current = { tl, node: container, plan: p, places, shift };
+    current = { tl, node: container, plan: p, places, shift, stage };
     root.__timelines = root.__timelines || {};
     root.__timelines[opts.compositionId || "yam-graphics"] = tl;
     return tl;
+  }
+
+  /** The light frame round the picture in a Short's split layout: an outer shadow only. */
+  function splitFrame(short) {
+    const f = short.splitFrame;
+    return h("div", { class: "yg-split-frame", style: "left:" + f.x + "px;top:" + f.y + "px;width:" + f.w + "px;height:" + f.h + "px;" });
+  }
+
+  /** Sizes the page and the stage for a canvas: 1920×1080, or a Short's 1080×1920. */
+  function setStage(size) {
+    const root = document.documentElement;
+    root.style.setProperty("--yg-w", size.width + "px");
+    root.style.setProperty("--yg-h", size.height + "px");
+  }
+
+  /** The design canvas the graphics are on now. */
+  function stageSize() { return current ? { width: current.stage.width, height: current.stage.height } : { width: STAGE.width, height: STAGE.height }; }
+
+  // ───────────────────────── Captions (a Short's Preview) ─────────────────────────
+  // The app lays a Short's captions out (lines, size, where each one's bottom sits) and
+  // the export burns the same with libass. Here they are drawn for the Preview only.
+
+  let captionList = null;
+  let captionNode = null;
+  /** {size, outline, items: [{start, end, lines, bottom}]}, or null for none. */
+  function captions(data) {
+    captionList = data && Array.isArray(data.items) ? data : null;
+    if (!captionNode) {
+      captionNode = h("div", { id: "yg-captions" });
+      (document.getElementById("stage") || document.body).appendChild(captionNode);
+    }
+    captionNode.textContent = "";
+    captionNode.dataset.shown = "";
+    if (current) showCaption(current.tl.time() + current.shift);
+  }
+  function showCaption(time) {
+    if (!captionNode) return;
+    const found = captionList ? captionList.items.find((c) => time >= c.start && time < c.end) : null;
+    const key = found ? found.start + ":" + found.bottom + ":" + found.lines.join("|") : "";
+    if (captionNode.dataset.shown === key) return;
+    captionNode.dataset.shown = key;
+    captionNode.textContent = "";
+    if (!found) return;
+    // libass's line ends 0.236 em under the baseline, a 1.18 em CSS line 0.32 em under it.
+    const box = h("div", { class: "yg-cap", style: "bottom:" + (stageSize().height - found.bottom - 0.084 * captionList.size) + "px;font-size:" + captionList.size +
+      "px;-webkit-text-stroke-width:" + (2 * captionList.outline) + "px;" });
+    found.lines.forEach((line, i) => { if (i) append(box, h("br")); append(box, line); });
+    append(captionNode, box);
   }
 
   /** A graphic's move and scale on the picture: `transform` {x, y, scale} in design
@@ -1064,7 +1158,7 @@
   function drawnBox(entry) {
     const stage = document.getElementById("stage") || document.body;
     const sr = stage.getBoundingClientRect();
-    const k = sr.width / 1920 || 1;
+    const k = sr.width / stageSize().width || 1;
     if (!shows(entry.host, entry.host)) return null;
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
     for (const el of entry.host.querySelectorAll("*")) {
@@ -1169,6 +1263,7 @@
    */
   function thumbnail(data) {
     if (current) { current.tl.kill(); current.node.remove(); current = null; }
+    setStage(STAGE);
     const old = document.getElementById("yg-thumb");
     if (old) old.remove();
     const d = data || {};
@@ -1208,9 +1303,13 @@
   }
 
   /** Moves the playhead. Events stay on, so count-ups and the route dot update. */
-  function seek(seconds) { if (current) current.tl.time(Math.max(0, seconds), false); }
+  function seek(seconds) {
+    if (current) current.tl.time(Math.max(0, seconds), false);
+    showCaption(seconds);
+  }
 
-  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, endLayout, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
+  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, endLayout, shortLayout, stageSize, captions,
+    smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

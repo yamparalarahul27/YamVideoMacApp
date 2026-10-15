@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea, effect, marker, graphic
+    case recording, section, zoom, blurArea, effect, marker, graphic, short
 }
 
 @MainActor
@@ -211,6 +211,7 @@ final class AppModel: ObservableObject {
                 self.cancelZoomAnalysis()
                 self.playback.clear()
                 self.showPlayback = false
+                self.showsShort = false; self.playback.shortID = nil; self.selectedShortID = nil
                 self.isMovieMode = false
                 self.selectedSegmentID = nil
                 self.selection = newValue
@@ -513,6 +514,19 @@ final class AppModel: ObservableObject {
     @Published var selectedGraphicID: UUID? { didSet { focusInspector(selectedGraphicID, .graphic) } }
     /// Each graphic's box on the picture, as the Preview's engine measured it.
     @Published var graphicBounds: [UUID: GraphicBounds] = [:]
+    /// The Short the inspector shows and the Short viewer plays.
+    @Published var selectedShortID: UUID? { didSet { focusInspector(selectedShortID, .short) } }
+    /// The viewer shows the selected Short, 9:16, with its graphics and captions.
+    @Published var showsShort = false
+    /// Faint marks where YouTube draws its buttons over a Short. A preference, never undone.
+    @Published var shortFurniture = UserDefaults.standard.object(forKey: AppModel.furnitureKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(shortFurniture, forKey: Self.furnitureKey) }
+    }
+    static let furnitureKey = "shortFurniture"
+    /// Each graphic's box on the Short's canvas, as the Short viewer's engine measured it.
+    @Published var shortGraphicBounds: [UUID: GraphicBounds] = [:]
+    /// The selected Short's captions as laid out, kept while nothing they depend on changes.
+    var shortCaptionCache: (key: ShortCaptionKey, value: CaptionOverlay?)?
 
     /// Selecting something shows it in the inspector; clearing the thing shown falls
     /// back to the recording.

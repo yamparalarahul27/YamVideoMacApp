@@ -170,6 +170,7 @@ extension AppModel {
 
     func restore(_ snapshot: VideoProject) {
         playback.clear(); showPlayback = false
+        showsShort = false; playback.shortID = nil; selectedShortID = nil
         projectID = snapshot.projectID ?? UUID()
         // A different document is a different session from the moment it appears, not
         // from its next edit — otherwise that edit would end the session it was sent in.
@@ -319,12 +320,19 @@ extension AppModel {
         if playback.isPlaying { playback.pause(); return }
         guard let item = selectedItem else { return }
         showPlayback = true
+        if showsShort, let short = item.short(playback.shortID) {
+            // A Short plays from its start when the playhead is outside it or at its end.
+            let time = previewTime < short.start || previewTime >= short.end - 0.02 ? short.start : previewTime
+            playback.prepare(item, settings: settings, at: time, play: true)
+            return
+        }
         let time = previewTime >= item.editedDuration - 0.02 ? 0 : previewTime
         playback.prepare(item, settings: settings, at: time, play: true)
     }
 
     func setPlaybackVisible(_ visible: Bool) {
         showPlayback = visible
+        if !visible { showsShort = false; playback.shortID = nil }
         if visible, let item = selectedItem {
             playback.prepare(item, settings: settings, at: previewTime, play: false)
         } else { playback.pause(); refreshPreview() }

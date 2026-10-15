@@ -380,7 +380,12 @@ struct CropEditorPane: View {
             header
             Divider()
 
-            if model.showPlayback {
+            if model.showPlayback, model.showsShort, let short = item.short(model.playback.shortID) {
+                PlaybackCanvas(playback: model.playback, graphics: model.shortOverlay(item, info: info, short: short),
+                               editsGraphics: !model.isConverting, short: short.id, furniture: model.shortFurniture,
+                               onGraphicBounds: { model.shortGraphicBounds = $0 })
+                    .frame(maxHeight: .infinity)
+            } else if model.showPlayback {
                 PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay, editsGraphics: !model.isConverting,
                                onGraphicBounds: { model.graphicBounds = $0 })
                     .frame(maxHeight: .infinity)
@@ -417,6 +422,7 @@ struct CropEditorPane: View {
         .onDeleteCommand {
             guard !model.isConverting else { return }
             if model.inspectorFocus == .graphic { model.removeSelectedGraphic(); return }
+            if model.inspectorFocus == .short { model.removeSelectedShort(); return }
             switch model.editorMode {
             case .blur: model.removeSelectedRegion()
             case .zoom: model.removeSelectedZoom()
@@ -469,10 +475,18 @@ struct CropEditorPane: View {
             .labelsHidden()
             .frame(width: 230)
 
-            Picker("Viewer", selection: Binding(get: { model.showPlayback }, set: { model.setPlaybackVisible($0) })) {
-                Text("Edit frame").tag(false)
-                Text("Preview").tag(true)
-            }.pickerStyle(.segmented).frame(width: 165).labelsHidden()
+            Picker("Viewer", selection: Binding(get: { model.viewer }, set: { model.setViewer($0) })) {
+                Text("Edit frame").tag(AppModel.Viewer.frame)
+                Text("Preview").tag(AppModel.Viewer.preview)
+                Text("Short").tag(AppModel.Viewer.short)
+            }.pickerStyle(.segmented).frame(width: 220).labelsHidden()
+                .help("Edit frame shows the frame to crop and mark; Preview plays the edit; Short plays the selected Short, 9:16")
+            if model.viewer == .short {
+                Toggle(isOn: $model.shortFurniture) { Label("YouTube's buttons", systemImage: "rectangle.portrait.inset.filled") }
+                    .toggleStyle(.button).labelStyle(.iconOnly).controlSize(.small)
+                    .accessibilityLabel("Show YouTube's buttons over the Short")
+                    .help("Show faintly where YouTube draws its icons, buttons, channel and title over a Short")
+            }
             Text(item.name).font(.headline).lineLimit(1).truncationMode(.middle)
                 .help("\(info.width)×\(info.height) · \(info.videoCodec.uppercased()) · \(formatDuration(info.duration))")
             Spacer(minLength: 0)

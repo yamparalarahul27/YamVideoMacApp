@@ -20,6 +20,7 @@ struct TimelineView: View {
     /// Two rows: column graphics above, panel graphics below.
     private static let graphicsRowHeight = 18.0
     private static let graphicsHeight = graphicsRowHeight * 2 + 4
+    private static let shortsHeight = 22.0
     private static let laneSpacing = 5.0
 
     private var laneHeights: [Double] {
@@ -28,6 +29,7 @@ struct TimelineView: View {
         lanes.append(Self.zoomHeight)
         lanes.append(Self.effectHeight)
         lanes.append(Self.graphicsHeight)
+        lanes.append(Self.shortsHeight)
         return lanes
     }
 
@@ -66,6 +68,7 @@ struct TimelineView: View {
                         zoomLane(width: width, pixels: pixels)
                         effectLane(width: width, pixels: pixels)
                         graphicsLane(width: width, pixels: pixels)
+                        shortsLane(width: width, pixels: pixels)
                     }
                     playhead(width: width)
                     guide(width: width)
@@ -395,6 +398,31 @@ struct TimelineView: View {
             }
         }
         .frame(width: width, height: Self.graphicsHeight, alignment: .leading)
+        .clipped()
+    }
+
+    private func shortsLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
+            if item.shorts.isEmpty {
+                Text("Shorts · add a 9:16 Short in the inspector")
+                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 4)
+            }
+            ForEach(Array(item.shorts.enumerated()).filter { viewport.intersects($0.element.start, $0.element.end) }, id: \.element.id) { index, short in
+                ShortBlock(short: short, name: short.name(index: index), selected: model.selectedShortID == short.id,
+                           highlighted: model.agentHighlight?.elements.contains(short.id) == true, pixels: pixels,
+                           snapStart: { snapSpan(short.id, start: $0, duration: short.length, pixels: pixels) },
+                           snapEdge: { snap($0, pixels: pixels) },
+                           endSnap: endSnap,
+                           onSelect: { model.selectShort(short.id) },
+                           onMove: { model.moveShort(short.id, to: $0) },
+                           onTrim: { start, end in model.setShortEdge(short.id, start: start, end: end) })
+                    .frame(height: Self.shortsHeight)
+                    .offset(x: viewport.x(of: short.start, across: width))
+            }
+        }
+        .frame(width: width, height: Self.shortsHeight, alignment: .leading)
         .clipped()
     }
 

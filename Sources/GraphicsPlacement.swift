@@ -58,6 +58,16 @@ enum GraphicPlacement {
         return Guides(vertical: Array(Set(vertical)).sorted(), horizontal: Array(Set(horizontal)).sorted())
     }
 
+    /// The lines a graphic snaps to on a Short's canvas: YouTube's clear area, the centre
+    /// line, its own place, and the card or panel zone it belongs to.
+    static func shortGuides(for graphic: Graphic, bounds: GraphicBounds, panels: ShortPanels) -> Guides {
+        let clear = ShortFormat.clearArea
+        let zone = ShortLayout(panels: panels).zone(of: graphic.kind)
+        let vertical: [Double] = [clear.minX, ShortFormat.size.width / 2, clear.maxX, bounds.content.minX, bounds.content.maxX, zone.origin.x]
+        let horizontal: [Double] = [clear.minY, clear.maxY, bounds.content.minY, bounds.content.maxY, zone.origin.y, ShortLayout.captionBottom]
+        return Guides(vertical: Array(Set(vertical)).sorted(), horizontal: Array(Set(horizontal)).sorted())
+    }
+
     /// A placement, and the guide lines it snapped to, in design pixels.
     struct Result: Equatable {
         var transform: GraphicTransform
@@ -180,6 +190,22 @@ extension AppModel {
 struct GraphicsPlacementLayer: View {
     @EnvironmentObject var model: AppModel
     let input: GraphicsOverlayInput
+    /// A Short whose own placements the drags change, on its 1080×1920 canvas; nil moves
+    /// graphics on the 16:9 video.
+    var short: UUID? = nil
+
+    private var bounds: [UUID: GraphicBounds] { short == nil ? model.graphicBounds : model.shortGraphicBounds }
+    private var stageWidth: CGFloat { input.track.canvas.size.width }
+
+    private func place(_ id: UUID, _ transform: GraphicTransform, label: String) {
+        if let short { model.placeGraphicInShort(short, graphic: id, transform, live: true, label: label == "Move Graphic on Picture" ? "Move Graphic in Short" : "Resize Graphic in Short") }
+        else { model.placeGraphic(id, transform, live: true, label: label) }
+    }
+
+    private func guides(for graphic: Graphic, bounds: GraphicBounds) -> GraphicPlacement.Guides {
+        if case .short(let panels) = input.track.canvas { return GraphicPlacement.shortGuides(for: graphic, bounds: bounds, panels: panels) }
+        return GraphicPlacement.guides(for: graphic, bounds: bounds, style: input.track.style)
+    }
 
     private enum Action { case move, resize(GraphicPlacement.Corner), deselect }
     private struct Drag {
@@ -198,13 +224,13 @@ struct GraphicsPlacementLayer: View {
 
     private var selected: (graphic: Graphic, bounds: GraphicBounds)? {
         guard let id = model.selectedGraphicID, let graphic = input.track.items.first(where: { $0.id == id && $0.kind.isPlaceable }),
-              let bounds = model.graphicBounds[id] else { return nil }
+              let bounds = bounds[id] else { return nil }
         return (graphic, bounds)
     }
 
     var body: some View {
         GeometryReader { geo in
-            let k = geo.size.width / 1920
+            let k = geo.size.width / stageWidth
             ZStack(alignment: .topLeading) {
                 Color.clear.contentShape(Rectangle())
                 if let selected {
@@ -284,9 +310,9 @@ struct GraphicsPlacementLayer: View {
         // The topmost graphic showing now under the pointer; later ones draw on top.
         // The end screen stays put, so clicks reach what sits under its boxes.
         let showing = input.track.items.filter { $0.kind.isPlaceable && input.time >= $0.start && input.time < $0.end }
-        if let hit = showing.reversed().first(where: { model.graphicBounds[$0.id]?.placed($0.transform).contains(point) == true }) {
+        if let hit = showing.reversed().first(where: { bounds[$0.id]?.placed($0.transform).contains(point) == true }) {
             model.selectedGraphicID = hit.id
-            return Drag(action: .move, id: hit.id, start: hit.transform ?? GraphicTransform(), bounds: model.graphicBounds[hit.id])
+            return Drag(action: .move, id: hit.id, start: hit.transform ?? GraphicTransform(), bounds: bounds[hit.id])
         }
         return Drag(action: .deselect)
     }
@@ -299,17 +325,17 @@ struct GraphicsPlacementLayer: View {
         guard current.changed || moved else { return }
         current.changed = true
         drag = current
-        let guides = model.pictureSnaps() ? GraphicPlacement.guides(for: graphic, bounds: bounds, style: input.track.style) : nil
+        let guides = model.pictureSnaps() ? self.guides(for: graphic, bounds: bounds) : nil
         let tolerance = Double(Self.snapReach / k)
         switch current.action {
         case .move:
             snapped = GraphicPlacement.moved(current.start, by: CGSize(width: value.translation.width / k, height: value.translation.height / k),
                                              bounds: bounds, guides: guides, tolerance: tolerance)
-            model.placeGraphic(id, snapped.transform, live: true)
+            place(id, snapped.transform, label: "Move Graphic on Picture")
         case .resize(let corner):
             snapped = GraphicPlacement.resized(current.start, corner: corner, to: CGPoint(x: value.location.x / k, y: value.location.y / k),
                                                bounds: bounds, guides: guides, tolerance: tolerance)
-            model.placeGraphic(id, snapped.transform, live: true, label: "Resize Graphic")
+            place(id, snapped.transform, label: "Resize Graphic")
         case .deselect:
             break
         }

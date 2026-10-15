@@ -45,12 +45,36 @@ extension FFmpeg {
         // A window reaching the end runs to the last frame, whatever the exact count.
         if screenFirst == nil, let last = windows.last, let end = last.end, end >= total - 2 { windows[windows.count - 1].end = nil }
 
-        enum Piece { case pass, panel(Int), screen(Double) }
+        enum Piece { case pass, panel(Int), screen(Double), split(Double) }
         var segments: [(first: Int, end: Int?, piece: Piece)] = []
         var cursor = 0
+        /// The first frame that has a segment of its own, from which frames are retimed.
+        var firstSingle: Int?
         for (index, window) in windows.enumerated() {
             if window.first > cursor { segments.append((cursor, window.first, .pass)) }
-            segments.append((window.first, window.end, .panel(index)))
+            if motion.short == .split {
+                // The picture shrinks into the split frame: each frame of the move has its
+                // own size and place; while it holds, the frames share one.
+                let last = window.end ?? total
+                var frame = window.first
+                while frame < last {
+                    let amount = motion.progress(at: Double(frame) / rate).amount
+                    if amount < 0.0001 {
+                        if case .pass? = segments.last?.piece, segments.last?.end == frame { segments[segments.count - 1].end = frame + 1 }
+                        else { segments.append((frame, frame + 1, .pass)) }
+                    } else if amount > 0.9999 {
+                        if case .split(let held)? = segments.last?.piece, held > 0.9999, segments.last?.end == frame { segments[segments.count - 1].end = frame + 1 }
+                        else { segments.append((frame, frame + 1, .split(1))) }
+                    } else {
+                        segments.append((frame, frame + 1, .split(amount)))
+                        firstSingle = firstSingle ?? frame
+                    }
+                    frame += 1
+                }
+                if window.end == nil { segments[segments.count - 1].end = nil }
+            } else {
+                segments.append((window.first, window.end, .panel(index)))
+            }
             cursor = window.end ?? Int.max
         }
         if let screenFirst {
@@ -64,11 +88,15 @@ extension FFmpeg {
                 index += 1
             }
             segments.append((index, nil, .screen(1)))
+            firstSingle = min(firstSingle ?? screenFirst, screenFirst)
         } else if cursor < Int.max {
             segments.append((cursor, nil, .pass))
         }
 
-        var parts = ["[mvin]split=\(segments.count)" + segments.indices.map { "[\(name)s\($0)]" }.joined()]
+        // Square pixels throughout: a fill or frost scaled back from a quarter or half of a
+        // width that does not divide (a Short's 406-wide window) would otherwise come back
+        // with a sample aspect a hair off, which mergeplanes and concat refuse.
+        var parts = ["[mvin]setsar=1,split=\(segments.count)" + segments.indices.map { "[\(name)s\($0)]" }.joined()]
         for (index, segment) in segments.enumerated() {
             let trim = "trim=start_frame=\(segment.first)" + (segment.end.map { ":end_frame=\($0)" } ?? "") + ",setpts=PTS-STARTPTS"
             let output = "[\(name)c\(index)]"
@@ -81,28 +109,32 @@ extension FFmpeg {
                                         frame: frame, rate: rate, fpsExpression: fpsExpression, tags: tags,
                                         input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)w\(window)_")
             case .screen(let amount):
-                parts += screenWindow(motion, amount: amount, frame: frame, tags: tags,
-                                      input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)e\(index)_")
+                parts += placedWindow(motion.screenPlacement(amount: amount, size: frame), gain: GraphicsMotion.fillDim * amount,
+                                      frame: frame, tags: tags, input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)e\(index)_")
+            case .split(let amount):
+                parts += placedWindow(motion.splitPlacement(amount: amount, size: frame), gain: GraphicsMotion.fillDim * amount,
+                                      frame: frame, tags: tags, input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)p\(index)_")
             }
         }
         // concat times a segment by its frames' mean spacing, so a one-frame segment adds no
-        // time at all. From the end screen's first frame on, each frame is timed by its
-        // number on the frame grid this stage works on (the joined video starts at 0).
-        let retime = screenFirst.map { ",setpts='if(lt(N,\($0)),PTS,N/(\(fpsExpression))/TB)'" } ?? ""
+        // time at all. From the first frame with a segment of its own on, each frame is
+        // timed by its number on the frame grid this stage works on (the joined video
+        // starts at 0).
+        let retime = firstSingle.map { ",setpts='if(lt(N,\($0)),PTS,N/(\(fpsExpression))/TB)'" } ?? ""
         parts.append(segments.indices.map { "[\(name)c\($0)]" }.joined() + "concat=n=\(segments.count):v=1:a=0\(retime)[mvout]")
         return EffectStage(parts: parts)
     }
 
-    /// Frames of the end screen with the picture at one place: the fill, as in the move
-    /// aside, with the picture scaled (Lanczos, as the preview) and laid over it.
-    private static func screenWindow(_ motion: GraphicsMotion, amount: Double, frame: CGSize, tags: FrameTags,
-                                     input: String, output: String, name: String) -> [String] {
+    /// Frames with the picture at one place: the fill, as in the move aside, with the
+    /// picture scaled (Lanczos, as the preview) and laid over it. The end screen's frame
+    /// and a Short's split frame both move this way.
+    private static func placedWindow(_ place: (x: Int, y: Int, width: Int, height: Int), gain: Double, frame: CGSize,
+                                     tags: FrameTags, input: String, output: String, name: String) -> [String] {
         let w = Int(frame.width), h = Int(frame.height)
-        let place = motion.screenPlacement(amount: amount, size: frame)
         return [
             "\(input),format=yuv444p10le,split=2[\(name)a][\(name)b]",
-            "[\(name)b]" + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim * amount, tags: tags) + "[\(name)f]",
-            "[\(name)a]scale=\(place.width):\(place.height):flags=lanczos+accurate_rnd+full_chroma_int[\(name)p]",
+            "[\(name)b]" + fillChain(width: w, height: h, gain: gain, tags: tags) + "[\(name)f]",
+            "[\(name)a]scale=\(place.width):\(place.height):flags=lanczos+accurate_rnd+full_chroma_int,setsar=1[\(name)p]",
             "[\(name)f][\(name)p]overlay=x=\(place.x):y=\(place.y):format=yuv444p10:eof_action=pass,format=yuv420p10le\(output)",
         ]
     }
@@ -111,21 +143,26 @@ extension FFmpeg {
     /// `fillScale` and cut back to the frame, at quarter size, blurred, darkened and
     /// desaturated by `gain`, then brought back up.
     private static func fillChain(width w: Int, height h: Int, gain: Double, tags: FrameTags) -> String {
-        let unit = Double(w) / 1920
+        let unit = GraphicsMotion.unit(CGSize(width: w, height: h))
         let black = tags.fullRange ? 0 : 64
         let quarter = (w: Int((Double(w) / 4).rounded()), h: Int((Double(h) / 4).rounded()))
         let grown = (w: Int((Double(w) * GraphicsMotion.fillScale / 4).rounded()), h: Int((Double(h) * GraphicsMotion.fillScale / 4).rounded()))
         let chroma = String(format: "(val-512)*%.6f+512", gain * GraphicsMotion.fillSaturation)
         return "scale=\(grown.w):\(grown.h):flags=bilinear,"
             + "gblur=sigma=\(num(GraphicsMotion.fillBlur * unit / 4)):steps=3,crop=\(quarter.w):\(quarter.h),"
-            + String(format: "lutyuv=y='(val-%d)*%.6f+%d'", black, gain, black) + ":u='\(chroma)':v='\(chroma)',scale=\(w):\(h):flags=bilinear"
+            + String(format: "lutyuv=y='(val-%d)*%.6f+%d'", black, gain, black) + ":u='\(chroma)':v='\(chroma)',scale=\(w):\(h):flags=bilinear,setsar=1"
     }
 
-    /// One panel window of the move, its frames timed from 0.
+    /// One panel window of the move, its frames timed from 0. On the 16:9 video the picture
+    /// slides left; under a Short's bottom sheet it lifts; under a full shade it stays put
+    /// and only the frost comes in.
     private static func moveWindow(_ motion: GraphicsMotion, spans: [PanelSpan], first: Int, frames: Int,
                                    frame: CGSize, rate: Double, fpsExpression: String, tags: FrameTags,
                                    input: String, output: String, name: String) throws -> [String] {
-        let w = Int(frame.width), h = Int(frame.height), unit = Double(frame.width) / 1920
+        let w = Int(frame.width), h = Int(frame.height), unit = GraphicsMotion.unit(frame)
+        let vertical = motion.short != nil
+        let moves = motion.short != .shade
+        let along = vertical ? Double(h) : Double(w)
         let black = tags.fullRange ? 0 : 64
         let offset = Double(first) / rate
         func gate(_ spans: [PanelSpan]) -> String {
@@ -140,6 +177,7 @@ extension FFmpeg {
                 + "geq=lum='\(expression)':cb=512:cr=512,\(tags.filter),loop=loop=\(frames + 2):size=1,lutyuv@\(target)=y='val*\(initial)'"
         }
         let alpha = "mergeplanes=map0s=0:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2:map3s=1:map3p=0:format=yuva444p10le"
+        let axis = vertical ? "y" : "x"
 
         // Panels of one look share a frost: the same ramp, the same blur.
         var frosts: [(ramp: (from: Double, to: Double, blur: Double), spans: [PanelSpan])] = []
@@ -161,20 +199,23 @@ extension FFmpeg {
         shown["lutyuv@\(name)f y"] = darkFill.y
         shown["lutyuv@\(name)f u"] = darkFill.c
         shown["lutyuv@\(name)f v"] = darkFill.c
-        shown["overlay@\(name)x x"] = "0"
+        shown["overlay@\(name)x \(axis)"] = "0"
         shown["lutyuv@\(name)a y"] = "val*1000000"
         for index in frosts.indices { shown["lutyuv@\(name)r\(index) y"] = "val*0" }
         let saturation = GraphicsMotion.fillSaturation
         for index in 0..<frames {
             let (amount, span) = motion.progress(at: Double(first + index) / rate)
             let now = (Double(index) - 0.5) / rate, early = (Double(index) - 1.5) / rate
-            send(now, "overlay@\(name)x", "x", String(-Int((Double(w) * GraphicsTrack.shiftFraction * amount).rounded())))
-            let gain = GraphicsMotion.fillDim * amount
-            send(now, "lutyuv@\(name)f", "y", String(format: "(val-%d)*%.6f+%d", black, gain, black))
-            send(now, "lutyuv@\(name)f", "u", String(format: "(val-512)*%.6f+512", gain * saturation))
-            send(now, "lutyuv@\(name)f", "v", String(format: "(val-512)*%.6f+512", gain * saturation))
-            // The edge fade is `edgeFade × amount` wide: the full-width ramp over amount.
-            send(early, "lutyuv@\(name)a", "y", amount > 0.000001 ? String(format: "val*%.6f", 1 / amount) : "val*1000000")
+            if moves {
+                let shift = vertical ? motion.lift(amount: amount, size: frame) : Int((Double(w) * GraphicsTrack.shiftFraction * amount).rounded())
+                send(now, "overlay@\(name)x", axis, String(-shift))
+                let gain = GraphicsMotion.fillDim * amount
+                send(now, "lutyuv@\(name)f", "y", String(format: "(val-%d)*%.6f+%d", black, gain, black))
+                send(now, "lutyuv@\(name)f", "u", String(format: "(val-512)*%.6f+512", gain * saturation))
+                send(now, "lutyuv@\(name)f", "v", String(format: "(val-512)*%.6f+512", gain * saturation))
+                // The edge fade is `edgeFade × amount` wide: the full-width ramp over amount.
+                send(early, "lutyuv@\(name)a", "y", amount > 0.000001 ? String(format: "val*%.6f", 1 / amount) : "val*1000000")
+            }
             for (frost, entry) in frosts.enumerated() {
                 let strength = span.flatMap(motion.frostRamp(for:)).map { $0 == entry.ramp } == true ? amount : 0
                 send(early, "lutyuv@\(name)r\(frost)", "y", String(format: "val*%.6f", strength))
@@ -188,27 +229,35 @@ extension FFmpeg {
             try script.write(to: file, options: .atomic)
         }
 
-        // The fill: the frame grown by `fillScale` and cut back to the frame, at quarter
-        // size, blurred, darkened, then brought back up.
-        let quarter = (w: Int((Double(w) / 4).rounded()), h: Int((Double(h) / 4).rounded()))
-        let grown = (w: Int((Double(w) * GraphicsMotion.fillScale / 4).rounded()), h: Int((Double(h) * GraphicsMotion.fillScale / 4).rounded()))
         let half = (w: Int((Double(w) / 2).rounded()), h: Int((Double(h) / 2).rounded()))
-        var parts = [
-            "\(input),format=yuv444p10le,sendcmd=f='\(file.path)',split=2[\(name)a][\(name)b]",
-            "[\(name)b]scale=\(grown.w):\(grown.h):flags=bilinear,"
-                + "gblur=sigma=\(num(GraphicsMotion.fillBlur * unit / 4)):steps=3,crop=\(quarter.w):\(quarter.h),"
-                + "lutyuv@\(name)f=y='\(darkFill.y)':u='\(darkFill.c)':v='\(darkFill.c)',scale=\(w):\(h):flags=bilinear[\(name)f]",
-            ramp("1023*clip((W-X-0.5)/\(num(GraphicsMotion.edgeFade * unit)),0,1)", gain: "\(name)a", initial: "1000000") + "[\(name)g]",
-            "[\(name)a][\(name)g]\(alpha)[\(name)m]",
-            "[\(name)f][\(name)m]overlay@\(name)x=x=0:y=0:format=yuv444p10:eof_action=pass[\(name)0]",
-        ]
+        var parts: [String]
+        if moves {
+            // The fill: the frame grown by `fillScale` and cut back to the frame, at quarter
+            // size, blurred, darkened, then brought back up. The moved picture's far edge
+            // (right, or bottom in a Short) fades into it.
+            let quarter = (w: Int((Double(w) / 4).rounded()), h: Int((Double(h) / 4).rounded()))
+            let grown = (w: Int((Double(w) * GraphicsMotion.fillScale / 4).rounded()), h: Int((Double(h) * GraphicsMotion.fillScale / 4).rounded()))
+            let edge = vertical ? "(H-Y-0.5)" : "(W-X-0.5)"
+            parts = [
+                "\(input),format=yuv444p10le,sendcmd=f='\(file.path)',split=2[\(name)a][\(name)b]",
+                "[\(name)b]scale=\(grown.w):\(grown.h):flags=bilinear,"
+                    + "gblur=sigma=\(num(GraphicsMotion.fillBlur * unit / 4)):steps=3,crop=\(quarter.w):\(quarter.h),"
+                    + "lutyuv@\(name)f=y='\(darkFill.y)':u='\(darkFill.c)':v='\(darkFill.c)',scale=\(w):\(h):flags=bilinear,setsar=1[\(name)f]",
+                ramp("1023*clip(\(edge)/\(num(GraphicsMotion.edgeFade * unit)),0,1)", gain: "\(name)a", initial: "1000000") + "[\(name)g]",
+                "[\(name)a][\(name)g]\(alpha)[\(name)m]",
+                "[\(name)f][\(name)m]overlay@\(name)x=x=0:y=0:format=yuv444p10:eof_action=pass[\(name)0]",
+            ]
+        } else {
+            parts = ["\(input),format=yuv444p10le,sendcmd=f='\(file.path)'[\(name)0]"]
+        }
+        let position = vertical ? "Y" : "X"
         for (index, frost) in frosts.enumerated() {
-            let from = frost.ramp.from * Double(w), width = max(0.5, (frost.ramp.to - frost.ramp.from) * Double(w))
+            let from = frost.ramp.from * along, width = max(0.5, (frost.ramp.to - frost.ramp.from) * along)
             parts += [
                 "[\(name)\(index)]split=2[\(name)\(index)p][\(name)\(index)q]",
                 "[\(name)\(index)q]scale=\(half.w):\(half.h):flags=bilinear,"
-                    + "gblur=sigma=\(num(frost.ramp.blur * unit / 2)):steps=3:\(gate(frost.spans)),scale=\(w):\(h):flags=bilinear[\(name)z\(index)]",
-                ramp("1023*clip((X+0.5-\(num(from)))/\(num(width)),0,1)", gain: "\(name)r\(index)", initial: "0") + "[\(name)h\(index)]",
+                    + "gblur=sigma=\(num(frost.ramp.blur * unit / 2)):steps=3:\(gate(frost.spans)),scale=\(w):\(h):flags=bilinear,setsar=1[\(name)z\(index)]",
+                ramp("1023*clip((\(position)+0.5-\(num(from)))/\(num(width)),0,1)", gain: "\(name)r\(index)", initial: "0") + "[\(name)h\(index)]",
                 "[\(name)z\(index)][\(name)h\(index)]\(alpha)[\(name)k\(index)]",
                 "[\(name)\(index)p][\(name)k\(index)]overlay=x=0:y=0:format=yuv444p10:eof_action=pass:\(gate(frost.spans))[\(name)\(index + 1)]",
             ]
@@ -290,7 +339,7 @@ extension GraphicsTrack {
                 copy.end = ((graphic.end - origin) * 1_000_000).rounded() / 1_000_000
                 if copy.id != id { copy.props = [:] }
                 return copy
-            })
+            }, canvas: canvas)
         }
         let groups = panelGroups()
         var units: [GraphicsUnit] = []
@@ -307,7 +356,9 @@ extension GraphicsTrack {
             units.append(GraphicsUnit(id: "panel-0", name: "Panel", track: track,
                                       origin: origin, duration: (track.items.map(\.end).max() ?? 0) + Self.slide))
         }
-        return units.sorted { ($0.origin, $0.id) < ($1.origin, $1.id) }
+        // Overlaid in this order: a panel's shade goes under the graphics that start with it,
+        // as the preview draws it.
+        return units.sorted { ($0.origin, $0.id.hasPrefix("panel-") ? 0 : 1, $0.id) < ($1.origin, $1.id.hasPrefix("panel-") ? 0 : 1, $1.id) }
     }
 }
 
@@ -577,8 +628,9 @@ extension FFmpeg {
     /// and converted to the frame's own matrix and range.
     static func graphicsStage(_ jobs: [GraphicsRender.Job], frame: CGSize, firstInput: Int,
                               matrix: String, tags: FrameTags) -> EffectStage? {
-        guard !jobs.isEmpty else { return nil }
-        let w = Int(frame.width), h = Int((frame.width * 1080 / 1920 / 2).rounded()) * 2
+        guard let first = jobs.first else { return nil }
+        let stage = first.unit.track.canvas.size
+        let w = Int(frame.width), h = Int((frame.width * stage.height / stage.width / 2).rounded()) * 2
         var parts: [String] = []
         var current = "gfin"
         for index in jobs.indices {

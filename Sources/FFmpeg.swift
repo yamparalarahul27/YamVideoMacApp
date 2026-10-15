@@ -636,7 +636,9 @@ enum FFmpeg {
         zoomShots: [ZoomShot],
         settings: ExportSettings,
         subtitles: URL? = nil,
-        segments: [TimelineSegment]? = nil
+        segments: [TimelineSegment]? = nil,
+        canvas: CGSize? = nil,
+        captionsASS: URL? = nil
     ) -> (geometry: [String], delivery: [String], captions: [String], rate: Double, rateExpression: String) {
         var tail: [String] = []
 
@@ -656,7 +658,11 @@ enum FFmpeg {
         }
 
         var delivery: [String] = []
-        if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
+        if let canvas {
+            // A Short is always delivered at its canvas size, whatever the size limit says.
+            // Square pixels: a window a pixel off 9:16 would otherwise carry its own aspect.
+            if cropRect.size != canvas { delivery.append("scale=\(Int(canvas.width)):\(Int(canvas.height)):flags=lanczos,setsar=1") }
+        } else if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
             delivery.append("scale=\(Int(scaled.width)):\(Int(scaled.height)):flags=lanczos")
         }
 
@@ -665,7 +671,11 @@ enum FFmpeg {
         // it; ahead of the blur areas it could be obscured by one; ahead of the graphics
         // a card could cover them. They are timed on the edited recording.
         var captions: [String] = []
-        if let subtitles {
+        if let captionsASS {
+            // Laid out by the app on the frame's own pixel grid (a Short's captions): sizes,
+            // places and line breaks are all in the file.
+            captions.append("subtitles=\(captionsASS.path)")
+        } else if let subtitles {
             captions.append(subtitlesFilter(staged: burnedCaptions(subtitles, segments: segments),
                                             forceStyle: settings.subtitleForceStyle))
         }
@@ -687,12 +697,12 @@ enum FFmpeg {
     }
 
     static func graphicsPlan(_ graphics: GraphicsTrack?, info: MediaInfo, crop cropRect: CGRect, segments: [TimelineSegment]?,
-                             settings: ExportSettings, converted: Bool) -> GraphicsPlan {
+                             settings: ExportSettings, converted: Bool, canvas: CGSize? = nil) -> GraphicsPlan {
         guard let graphics, !graphics.items.isEmpty else { return GraphicsPlan() }
         let stages = videoStages(info: info, crop: cropRect, zoomShots: [], settings: settings)
         let duration = segments.map { ClipTimeline(segments: $0).duration } ?? info.duration
         let tags = FrameTags(info: info, converted: converted)
-        let output = scaledSize(for: cropRect.size, limit: settings.sizeLimit) ?? cropRect.size
+        let output = canvas ?? scaledSize(for: cropRect.size, limit: settings.sizeLimit) ?? cropRect.size
         return GraphicsPlan(
             move: GraphicsMotion(graphics).flatMap {
                 try? moveStage($0, frame: cropRect.size, fps: stages.rate, fpsExpression: stages.rateExpression,
@@ -862,15 +872,17 @@ enum FFmpeg {
         color: [String] = [],
         tagRec709: Bool = false,
         effects: [VideoBlurEffect] = [],
-        graphics: GraphicsTrack? = nil
+        graphics: GraphicsTrack? = nil,
+        canvas: CGSize? = nil,
+        captionsASS: URL? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
         let stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
-                                 settings: settings, subtitles: subtitles, segments: segments)
+                                 settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS)
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
         let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
-                                 converted: !head.isEmpty || effectStage != nil)
+                                 converted: !head.isEmpty || effectStage != nil, canvas: canvas)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
@@ -1004,20 +1016,22 @@ enum FFmpeg {
         subtitles: URL? = nil,
         color: [String] = [],
         effects: [VideoBlurEffect] = [],
-        graphics: GraphicsTrack? = nil
+        graphics: GraphicsTrack? = nil,
+        canvas: CGSize? = nil,
+        captionsASS: URL? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
         // Both GIF passes must see exactly the same frames, captions, effects and graphics
         // included, or the palette is built for a picture the encode never renders.
         var stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
-                                 settings: settings, subtitles: subtitles, segments: segments)
+                                 settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS)
         // stats_mode=diff weights the palette towards whatever moves — the part anyone
         // actually looks at. A still background can afford to band a little.
         stages.captions.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
         let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
-                                 converted: !head.isEmpty || effectStage != nil)
+                                 converted: !head.isEmpty || effectStage != nil, canvas: canvas)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path] + graphicsInputs(drawn.jobs)
         args += mapped(
@@ -1116,7 +1130,9 @@ enum FFmpeg {
         subtitles: URL? = nil,
         color: [String] = [],
         effects: [VideoBlurEffect] = [],
-        graphics: GraphicsTrack? = nil
+        graphics: GraphicsTrack? = nil,
+        canvas: CGSize? = nil,
+        captionsASS: URL? = nil
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
@@ -1128,13 +1144,13 @@ enum FFmpeg {
                                              crop: crop, regions: regions,
                                              zoomShots: zoomShots, segments: segments,
                                              settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                             graphics: graphics))
+                                             graphics: graphics, canvas: canvas, captionsASS: captionsASS))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
                                         segments: segments, settings: settings,
                                         subtitles: subtitles, palette: palette, color: color, effects: effects,
-                                        graphics: graphics))
+                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS))
         return commands
     }
 
@@ -1162,6 +1178,8 @@ enum FFmpeg {
         color: ColorStage = .none,
         effects: [VideoBlurEffect] = [],
         graphics: GraphicsTrack? = nil,
+        canvas: CGSize? = nil,
+        captionsASS: URL? = nil,
         drawGraphics: ((GraphicsRender.Job, _ page: URL, _ frames: URL) async throws -> Void)? = nil,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -1190,7 +1208,14 @@ enum FFmpeg {
         }
         // Fail here, before the first pass, rather than letting ffmpeg complain about a
         // filename halfway through an encode.
-        if let subtitles {
+        if captionsASS != nil, await !supportsSubtitles() {
+            throw FFmpegError(message: "This copy of ffmpeg was built without libass, so it cannot burn captions in. "
+                + "Install ffmpeg-full (brew install ffmpeg-full) and relaunch, or set captions to upload only.")
+        }
+        if let captionsASS, !FileManager.default.fileExists(atPath: captionsASS.path) {
+            throw FFmpegError(message: "The Short's captions could not be written.")
+        }
+        if let subtitles, captionsASS == nil {
             if await !supportsSubtitles() {
                 throw FFmpegError(message: "This copy of ffmpeg was built without libass, so it "
                     + "cannot burn subtitles in. Install ffmpeg-full (brew install ffmpeg-full) "
@@ -1216,7 +1241,7 @@ enum FFmpeg {
         var drawingShare = 0.0
         if let graphics, !graphics.items.isEmpty {
             let jobs = graphicsPlan(graphics, info: info, crop: crop.evenClamped(in: info.fullFrame), segments: segments,
-                                    settings: settings, converted: true).jobs
+                                    settings: settings, converted: true, canvas: canvas).jobs
             if jobs.contains(where: { !$0.isRendered }) {
                 drawingShare = 0.4
                 let draw: (GraphicsRender.Job, URL, URL) async throws -> Void
@@ -1236,7 +1261,7 @@ enum FFmpeg {
             // an export that quietly leaves the picture in place under its panels.
             if GraphicsMotion(graphics) != nil,
                graphicsPlan(graphics, info: info, crop: crop.evenClamped(in: info.fullFrame), segments: segments,
-                            settings: settings, converted: true).move == nil {
+                            settings: settings, converted: true, canvas: canvas).move == nil {
                 throw FFmpegError(message: "Could not prepare the picture's move aside for the export.")
             }
         }
@@ -1244,7 +1269,7 @@ enum FFmpeg {
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, segments: segments,
                                       settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                      graphics: graphics)
+                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS)
         let measuring = needsLoudnessPass(info: info, settings: settings)
         // Progress is reported against what the export actually writes, which is the
         // edited timeline rather than the whole source.
@@ -1275,7 +1300,8 @@ enum FFmpeg {
                     settings: settings,
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
-                    loudness: measurement, color: color, effects: effects, graphics: graphics
+                    loudness: measurement, color: color, effects: effects, graphics: graphics,
+                    canvas: canvas, captionsASS: captionsASS
                 )
             }
 

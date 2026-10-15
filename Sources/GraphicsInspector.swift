@@ -272,7 +272,7 @@ private struct GraphicPropsEditor: View {
 }
 
 /// A text field that commits on Return or when it loses focus, so typing is one undo step.
-private struct CommitTextField: View {
+struct CommitTextField: View {
     let label: String
     let value: String
     let onCommit: (String) -> Void
@@ -298,7 +298,7 @@ private struct CommitTextField: View {
     private func commit() { if text != value { onCommit(text) } }
 }
 
-private struct CommitNumberField: View {
+struct CommitNumberField: View {
     let label: String
     let value: Double
     let onCommit: (Double) -> Void

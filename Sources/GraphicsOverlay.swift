@@ -10,6 +10,8 @@ struct GraphicsOverlayInput: Equatable {
     /// The size of the picture the player shows, to fit the overlay to it.
     var frame: CGSize
     var time: Double
+    /// A Short's burned-in captions, drawn over its graphics.
+    var captions: CaptionOverlay? = nil
 }
 
 /// The recording's graphics over the player, drawn by the same engine as the export.
@@ -46,18 +48,22 @@ struct GraphicsOverlay: NSViewRepresentable {
         private var sentTime = -1.0
         private var pending: GraphicsOverlayInput?
 
-        static func folder(for clip: UUID) -> URL {
+        static func folder(for clip: UUID, canvas: GraphicsCanvas = .landscape) -> URL {
             FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("YamVideo/GraphicsPreview/\(clip.uuidString)", isDirectory: true)
+                .appendingPathComponent("YamVideo/GraphicsPreview/\(clip.uuidString)\(canvas == .landscape ? "" : "-short")", isDirectory: true)
         }
+
+        private var sentCaptions: CaptionOverlay??
 
         func update(_ input: GraphicsOverlayInput) {
             guard let view else { return }
             pending = input
-            if loaded?.clip != input.clip {
-                ready = false; sentTime = -1
+            // A different recording, or a change between the 16:9 video and a Short (a
+            // different stage size), loads the page again.
+            if loaded?.clip != input.clip || (loaded?.track.canvas == .landscape) != (input.track.canvas == .landscape) {
+                ready = false; sentTime = -1; sentCaptions = nil
                 do {
-                    let folder = Self.folder(for: input.clip)
+                    let folder = Self.folder(for: input.clip, canvas: input.track.canvas)
                     let index = try GraphicsEngine.writePage(input.track, duration: input.duration, fps: input.fps,
                                                              mode: "preview", to: folder)
                     view.loadFileURL(index, allowingReadAccessTo: folder)
@@ -68,13 +74,17 @@ struct GraphicsOverlay: NSViewRepresentable {
                 return
             }
             guard ready else { return }
+            if sentCaptions != .some(input.captions) {
+                sentCaptions = .some(input.captions)
+                view.evaluateJavaScript("YamGraphics.captions(\(input.captions?.json ?? "null"));")
+            }
             if let before = loaded, before.duration == input.duration, before.track != input.track,
                before.track.withoutPlacement == input.track.withoutPlacement {
                 // Only moves and sizes on the picture changed, as in a drag: move those
                 // graphics without rebuilding anything.
                 place(changed: input.track.items.filter { item in before.track.items.first { $0.id == item.id }?.transform != item.transform })
             } else if loaded?.track != input.track || loaded?.duration != input.duration {
-                let folder = Self.folder(for: input.clip)
+                let folder = Self.folder(for: input.clip, canvas: input.track.canvas)
                 if let json = try? GraphicsEngine.pageJSON(input.track, duration: input.duration, fps: input.fps, folder: folder) {
                     view.evaluateJavaScript("YamGraphics.load(\(json), {mode: 'preview'});")
                     sentTime = -1
@@ -117,7 +127,8 @@ struct GraphicsOverlay: NSViewRepresentable {
         nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             MainActor.assumeIsolated {
                 ready = true
-                // Fit the 1920×1080 design stage to whatever size the overlay has.
+                // Fit the design stage (1920×1080, or a Short's 1080×1920) to whatever size
+                // the overlay has.
                 webView.evaluateJavaScript("""
                     (function () {
                       document.documentElement.style.background = 'transparent';
@@ -125,14 +136,14 @@ struct GraphicsOverlay: NSViewRepresentable {
                       var fit = function () {
                         var stage = document.getElementById('stage');
                         stage.style.transformOrigin = '0 0';
-                        stage.style.transform = 'scale(' + (window.innerWidth / 1920) + ')';
+                        stage.style.transform = 'scale(' + (window.innerWidth / YamGraphics.stageSize().width) + ')';
                       };
                       window.addEventListener('resize', fit);
                       fit();
                     })();
                     """)
                 // An edit made while the page loaded is applied now, with the playhead.
-                if let pending { sentTime = -1; update(pending) }
+                if let pending { sentTime = -1; sentCaptions = nil; update(pending) }
                 measure()
             }
         }
@@ -153,12 +164,12 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
     private var loading: CheckedContinuation<Void, Error>?
 
     static func draw(_ track: GraphicsTrack, duration: Double, fps: String, time: Double,
-                     over picture: CGImage) async throws -> (image: CGImage, boxes: [UUID: CGRect]) {
-        try await GraphicsSnapshot().render(track, duration: duration, fps: fps, time: time, over: picture)
+                     over picture: CGImage, captions: CaptionOverlay? = nil) async throws -> (image: CGImage, boxes: [UUID: CGRect]) {
+        try await GraphicsSnapshot().render(track, duration: duration, fps: fps, time: time, over: picture, captions: captions)
     }
 
     private func render(_ track: GraphicsTrack, duration: Double, fps: String, time: Double,
-                        over picture: CGImage) async throws -> (image: CGImage, boxes: [UUID: CGRect]) {
+                        over picture: CGImage, captions: CaptionOverlay?) async throws -> (image: CGImage, boxes: [UUID: CGRect]) {
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("YamVideo/GraphicsSnapshot/\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -180,7 +191,8 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
             document.body.style.background = 'transparent';
             const stage = document.getElementById('stage');
             stage.style.transformOrigin = '0 0';
-            stage.style.transform = 'scale(' + (window.innerWidth / 1920) + ')';
+            stage.style.transform = 'scale(' + (window.innerWidth / YamGraphics.stageSize().width) + ')';
+            YamGraphics.captions(\(captions?.json ?? "null"));
             await document.fonts.ready;
             YamGraphics.seek(time);
             return JSON.stringify(YamGraphics.boxes());
@@ -202,7 +214,7 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
         context.draw(picture, in: frame)
         context.draw(graphics, in: frame)
         guard let image = context.makeImage() else { throw FFmpegError(message: "The graphics could not be drawn.") }
-        let k = width / 1920
+        let k = width / track.canvas.size.width
         let boxes = GraphicBounds.parse(measured).mapValues { box in
             CGRect(x: box.content.minX * k, y: box.content.minY * k, width: box.content.width * k, height: box.content.height * k)
         }
@@ -259,7 +271,8 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
             .appendingPathComponent("YamVideo/GraphicsSnapshot/\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let index = try GraphicsEngine.writePage(track, duration: duration, fps: fps, mode: "preview", to: folder)
-        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 960, height: 540), configuration: WKWebViewConfiguration())
+        let size = track.canvas.size
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: size.width / 2, height: size.height / 2), configuration: WKWebViewConfiguration())
         view.navigationDelegate = self
         self.view = view
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

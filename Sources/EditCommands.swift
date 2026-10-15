@@ -101,6 +101,10 @@ enum EditCommand: Equatable {
     case setAutoEditOptions(AutoEditOptions)
     /// What was said in the recording, word by word in source seconds, or nil to forget it.
     case setTranscript(clip: UUID, transcript: Transcript?)
+    /// Vertical versions of parts of the recording, for YouTube Shorts.
+    case addShort(clip: UUID, short: Short)
+    case updateShort(clip: UUID, short: Short)
+    case removeShort(clip: UUID, short: UUID)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -149,6 +153,9 @@ enum EditCommand: Equatable {
         case .setPublishInfo: return "Publish Details"
         case .setAutoEditOptions: return "Auto Edit Options"
         case .setTranscript(_, let transcript): return transcript == nil ? "Remove Transcript" : "Transcribe"
+        case .addShort: return "Add Short"
+        case .updateShort: return "Edit Short"
+        case .removeShort: return "Delete Short"
         }
     }
 }
@@ -217,6 +224,8 @@ struct EditOutcome: Equatable {
     var removedMarkers: [UUID] = []
     /// Graphics dropped for the same reason.
     var removedGraphics: [UUID] = []
+    /// Shorts whose footage was all cut away.
+    var removedShorts: [UUID] = []
 }
 
 /// Applies a batch of commands to a project value. Pure: no UI state, no selection, no
@@ -579,6 +588,27 @@ enum ProjectReducer {
                 record.transcript = transcript
             }
 
+        case .addShort(let clip, let short):
+            try editShorts(clip, in: &outcome) { shorts in
+                guard !shorts.contains(where: { $0.id == short.id }) else { throw EditError.invalid("A Short with that ID already exists.") }
+                shorts.append(short)
+            } placing: { short }
+            outcome.createdIDs.append(short.id)
+
+        case .updateShort(let clip, let short):
+            try editShorts(clip, in: &outcome) { shorts in
+                guard let index = shorts.firstIndex(where: { $0.id == short.id }) else {
+                    throw EditError.notFound("No Short with that ID on this recording.")
+                }
+                shorts[index] = short
+            } placing: { short }
+
+        case .removeShort(let clip, let id):
+            try editShorts(clip, in: &outcome) { shorts in
+                guard shorts.contains(where: { $0.id == id }) else { throw EditError.notFound("No Short with that ID on this recording.") }
+                shorts.removeAll { $0.id == id }
+            } placing: { nil }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -671,7 +701,7 @@ enum ProjectReducer {
     /// footage is gone.
     private static func editTimeline(_ id: UUID, in outcome: inout EditOutcome,
                                      _ body: (inout ClipTimeline, MediaInfo) throws -> Void) throws {
-        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID], graphics: [UUID]) = ([], [], [], [])
+        var removed: (zooms: [UUID], effects: [UUID], markers: [UUID], graphics: [UUID], shorts: [UUID]) = ([], [], [], [], [])
         try editClip(id, in: &outcome) { record, info in
             let old = record.timeline
             var timeline = old
@@ -693,6 +723,11 @@ enum ProjectReducer {
                 record.graphics = remapped.track
                 removed.graphics = remapped.removed
             }
+            if let shorts = record.shorts {
+                let remapped = timeline.remap(shorts, from: old, fps: info.fps)
+                record.shorts = remapped.shorts.isEmpty ? nil : Self.pruned(remapped.shorts, graphics: record.graphics)
+                removed.shorts = remapped.removed
+            }
             if var publish = record.publish {
                 publish.chapters = timeline.remap(publish.chapters, from: old)
                 // The thumbnail's frame follows its footage, or stays inside the recording.
@@ -707,6 +742,7 @@ enum ProjectReducer {
         outcome.removedEffects += removed.effects
         outcome.removedMarkers += removed.markers
         outcome.removedGraphics += removed.graphics
+        outcome.removedShorts += removed.shorts
     }
 
     /// Edits one probed recording's graphics and checks the whole track against its
@@ -719,6 +755,50 @@ enum ProjectReducer {
             track.items.sort { $0.start < $1.start }
             if let problem = track.problem(duration: record.timeline.duration) { throw EditError.invalid(problem) }
             record.graphics = track.isEmpty ? nil : track
+            if let shorts = record.shorts { record.shorts = Self.pruned(shorts, graphics: record.graphics) }
+        }
+    }
+
+    /// Shorts forget graphics that are gone: none is hidden or placed that does not exist.
+    private static func pruned(_ shorts: [Short], graphics: GraphicsTrack?) -> [Short] {
+        let present = Set(graphics?.items.map(\.id) ?? [])
+        return shorts.map { short in
+            var kept = short
+            kept.hidden = short.hidden.filter(present.contains)
+            kept.placements = short.placements.filter { present.contains($0.key) }
+            return kept
+        }
+    }
+
+    /// Edits a recording's Shorts. `placing` names the Short being placed, whose times are
+    /// snapped to frames and whose window to even pixels; then all of them are checked.
+    private static func editShorts(_ id: UUID, in outcome: inout EditOutcome,
+                                   _ body: (inout [Short]) throws -> Void, placing: () -> Short?) throws {
+        try editClip(id, in: &outcome) { record, info in
+            var shorts = record.shorts ?? []
+            try body(&shorts)
+            if let placed = placing(), let index = shorts.firstIndex(where: { $0.id == placed.id }) {
+                var short = placed
+                guard short.start.isFinite, short.end.isFinite else { throw EditError.invalid("A Short's start and end must be finite numbers.") }
+                short.start = snapToFrame(short.start, fps: info.fps)
+                short.end = snapToFrame(short.end, fps: info.fps)
+                if let window = short.window {
+                    guard window.minX.isFinite, window.minY.isFinite, window.width.isFinite, window.height.isFinite else {
+                        throw EditError.invalid("The Short's window must be finite numbers.")
+                    }
+                    short.window = window.evenClamped(in: info.fullFrame)
+                    if window.width > 0, window.height > 0, !info.fullFrame.insetBy(dx: -1, dy: -1).contains(window) {
+                        throw EditError.invalid("The Short's window must lie inside the \(info.width)×\(info.height) picture.")
+                    }
+                }
+                short.tags = short.tags.map { $0.trimmingCharacters(in: .whitespaces) }
+                short.hidden = Array(Set(short.hidden)).sorted { $0.uuidString < $1.uuidString }
+                shorts[index] = short
+            }
+            let duration = record.timeline.duration
+            if let problem = shortsProblem(shorts, duration: duration, info: info) { throw EditError.invalid(problem) }
+            shorts.sort { $0.start < $1.start }
+            record.shorts = shorts.isEmpty ? nil : Self.pruned(shorts, graphics: record.graphics)
         }
     }
 

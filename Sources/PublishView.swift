@@ -12,7 +12,8 @@ struct PublishSheet: View {
     var body: some View {
         Group {
             if let item = model.selectedItem, item.info != nil {
-                PublishContent(item: item, publish: item.publish ?? PublishInfo(), initialPreview: initialPreview, close: { dismiss() })
+                PublishContent(item: item, publish: item.publish ?? PublishInfo(), initialPreview: initialPreview,
+                               target: model.showsShort || model.inspectorFocus == .short ? model.selectedShortID : nil, close: { dismiss() })
             } else {
                 VStack(spacing: 12) {
                     Text("Select a recording to publish.").foregroundStyle(.secondary)
@@ -29,9 +30,14 @@ private struct PublishContent: View {
     let item: VideoItem
     let publish: PublishInfo
     let initialPreview: Int
+    /// The Short being published, or nil for the video itself.
+    @State var target: UUID?
     let close: () -> Void
 
-    private var issues: [PublishInfo.Issue] { publish.issues(duration: item.editedDuration, graphics: item.graphics) }
+    private var short: Short? { item.short(target) }
+    private var issues: [PublishInfo.Issue] {
+        short.map { $0.issues(graphics: item.graphics, publish: item.publish) } ?? publish.issues(duration: item.editedDuration, graphics: item.graphics)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,29 +45,58 @@ private struct PublishContent: View {
                 Text("Publish").font(.title2.weight(.semibold))
                 Text(item.name).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 Spacer()
+                if !item.shorts.isEmpty {
+                    Picker("What", selection: $target) {
+                        Text("The video").tag(UUID?.none)
+                        ForEach(Array(item.shorts.enumerated()), id: \.element.id) { index, short in
+                            Text(short.name(index: index)).tag(UUID?.some(short.id))
+                        }
+                    }
+                    .frame(width: 260)
+                    .help("The video itself, or one of its Shorts: each has its own title, description and tags")
+                }
             }
             .padding(.horizontal, 18).padding(.vertical, 14)
             Divider()
             HStack(alignment: .top, spacing: 0) {
-                ScrollView { PublishForm(item: item, publish: publish).padding(18) }
-                    .frame(width: 430)
-                Divider()
-                ScrollView { YouTubePreview(item: item, publish: publish, page: initialPreview).padding(18) }
-                    .frame(maxWidth: .infinity)
+                if let short {
+                    ScrollView { ShortPublishForm(item: item, short: short).padding(18) }
+                        .frame(width: 430)
+                    Divider()
+                    ScrollView { ShortsPlayerPreview(item: item, short: short).padding(18) }
+                        .frame(maxWidth: .infinity)
+                } else {
+                    ScrollView { PublishForm(item: item, publish: publish).padding(18) }
+                        .frame(width: 430)
+                    Divider()
+                    ScrollView { YouTubePreview(item: item, publish: publish, page: initialPreview).padding(18) }
+                        .frame(maxWidth: .infinity)
+                }
             }
             Divider()
             HStack(spacing: 10) {
                 summary
                 Spacer()
                 Button("Close") { close() }.keyboardShortcut(.cancelAction)
-                Button("Export for YouTube…") {
-                    close()
-                    DispatchQueue.main.async { model.promptForYouTubeExport() }
+                if let short {
+                    Button("Export Short for YouTube…") {
+                        close()
+                        DispatchQueue.main.async { model.promptForShortExport(short.id) }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isConverting || !model.toolsAvailable || issues.contains { $0.severity == .blocking })
+                    .help("Writes the 1080×1920 MP4, its captions, a cover and the upload text into a folder")
+                } else {
+                    Button("Export for YouTube…") {
+                        close()
+                        DispatchQueue.main.async { model.promptForYouTubeExport() }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isConverting || !model.toolsAvailable || issues.contains { $0.severity == .blocking })
+                    .help("Writes the MP4, the captions on the edited timeline, the thumbnail and the upload text into a folder")
                 }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isConverting || !model.toolsAvailable || issues.contains { $0.severity == .blocking })
-                .help("Writes the MP4, the captions on the edited timeline, the thumbnail and the upload text into a folder")
             }
             .padding(14)
         }
@@ -70,8 +105,9 @@ private struct PublishContent: View {
 
     @ViewBuilder private var summary: some View {
         let blocking = issues.filter { $0.severity == .blocking }.count
-        let warnings = issues.count - blocking
-        if issues.isEmpty {
+        // A Short always carries the related-video note; it is a step, not a problem.
+        let warnings = issues.filter { $0.field != "relatedVideo" }.count - blocking
+        if blocking == 0, warnings == 0 {
             Label("Ready for YouTube", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
         } else {
             Label(blocking > 0 ? "\(blocking) to fix before exporting" + (warnings > 0 ? ", \(warnings) to check" : "")
@@ -334,7 +370,7 @@ struct PublishEndScreenSection: View {
 }
 
 /// A field that commits on Return or when it loses focus, so typing is one undo step.
-private struct PublishTextField: View {
+struct PublishTextField: View {
     let placeholder: String
     let value: String
     let axis: Axis
@@ -358,7 +394,7 @@ private struct PublishTextField: View {
 }
 
 /// An image file, or a stand-in.
-private struct PublishImage: View {
+struct PublishImage: View {
     let url: URL?
     let fallback: NSImage?
 

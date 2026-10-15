@@ -16,17 +16,17 @@
 }
 * { box-sizing: border-box; }
 html, body {
-  margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+  margin: 0; padding: 0; width: var(--yg-w, 1920px); height: var(--yg-h, 1080px); overflow: hidden; background: transparent;
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif; color: var(--yg-text);
   -webkit-font-smoothing: antialiased;
 }
 body.yg-full { background: #000; }
-#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+#stage { position: relative; width: var(--yg-w, 1920px); height: var(--yg-h, 1080px); overflow: hidden; }
 #bg-video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
-#yg-root { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
+#yg-root { position: absolute; left: 0; top: 0; width: var(--yg-w, 1920px); height: var(--yg-h, 1080px); pointer-events: none; }
 
 /* Places: one per graphic, the whole stage, carrying its move and scale on the picture. */
-.yg-place { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
+.yg-place { position: absolute; left: 0; top: 0; width: var(--yg-w, 1920px); height: var(--yg-h, 1080px); pointer-events: none; }
 /* Hosts: one per graphic, sized to its zone. */
 .yg-host { position: absolute; opacity: 0; }
 .yg-inner { position: relative; width: 100%; height: 100%; }
@@ -47,6 +47,32 @@ body.yg-full { background: #000; }
   background: linear-gradient(90deg, rgba(8, 10, 13, 0) 0%, rgba(8, 10, 13, 0.55) 28%, rgba(8, 10, 13, 0.86) 48%, rgba(8, 10, 13, 0.92) 100%); }
 .yg-panel-bg.solid.stay { left: 1060px; width: 860px;
   background: linear-gradient(180deg, #111419 0%, #0b0d10 100%); border-left: 1px solid rgba(255, 255, 255, 0.08); }
+
+/* A Short (1080×1920): the sheet rises from the bottom with its soft edge on top; the
+   full shade covers everything; the split darkens below the picture's frame. */
+.yg-panel-bg.short-sheet { left: 0; top: 700px; width: 1080px; height: 1220px;
+  background: linear-gradient(180deg, rgba(8, 10, 13, 0.72) 0%, rgba(8, 10, 13, 0.82) 30%, rgba(8, 10, 13, 0.88) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 var(--yg-edge)); mask-image: linear-gradient(180deg, transparent 0, #000 var(--yg-edge)); }
+.yg-panel-bg.solid.short-sheet { -webkit-mask-image: none; mask-image: none; background: linear-gradient(180deg, #111419 0%, #0b0d10 100%);
+  border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.yg-panel-bg.short-shade { left: 0; top: 0; width: 1080px; height: 1920px; background: rgba(8, 10, 13, 0.62); }
+.yg-panel-bg.solid.short-shade { background: linear-gradient(180deg, #111419 0%, #0b0d10 100%); }
+.yg-panel-bg.short-split { left: 0; top: 0; width: 1080px; height: 1920px;
+  background: linear-gradient(180deg, rgba(8, 10, 13, 0) 0, rgba(8, 10, 13, 0) 860px, rgba(8, 10, 13, 0.62) 1000px, rgba(8, 10, 13, 0.74) 1920px); }
+.yg-panel-bg.solid.short-split { background: linear-gradient(180deg, rgba(17, 20, 25, 0) 0, rgba(17, 20, 25, 0) 860px, #111419 980px, #0b0d10 1920px); }
+.yg-split-frame { position: absolute; border-radius: 4px; box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.92), 0 28px 80px rgba(0, 0, 0, 0.55); }
+.yg-veil.short-sheet { width: 1080px; height: 1920px;
+  background: linear-gradient(180deg, rgba(8, 10, 13, 0) 0, rgba(8, 10, 13, 0) 660px, rgba(8, 10, 13, 0.50) 960px, rgba(8, 10, 13, 0.58) 1920px);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, transparent 660px, #000 960px); mask-image: linear-gradient(180deg, transparent 0, transparent 660px, #000 960px); }
+.yg-veil.short-shade { width: 1080px; height: 1920px; background: rgba(8, 10, 13, 0.5); }
+.yg-veil.short-split { width: 1080px; height: 1920px;
+  background: linear-gradient(180deg, rgba(8, 10, 13, 0) 0, rgba(8, 10, 13, 0) 860px, rgba(8, 10, 13, 0.5) 1000px, rgba(8, 10, 13, 0.6) 1920px); }
+
+/* A Short's captions in the Preview, as libass burns them in the export: Helvetica Bold,
+   white, a black outline, centred, each caption's bottom where the app put it. */
+#yg-captions { position: absolute; left: 0; top: 0; width: var(--yg-w, 1920px); height: var(--yg-h, 1080px); pointer-events: none; z-index: 5; }
+.yg-cap { position: absolute; left: 40px; right: 40px; text-align: center; color: #fff; font-family: "Helvetica", sans-serif;
+  font-weight: 700; line-height: 1.18; white-space: nowrap; -webkit-text-stroke-color: #000; paint-order: stroke fill; }
 
 /* Shared parts */
 .yg-abs { position: absolute; }
