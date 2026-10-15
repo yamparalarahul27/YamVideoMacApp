@@ -150,6 +150,18 @@ func run() async throws {
 
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),
            to: output.appendingPathComponent("5-export-sheet.png"))
+    // The Graphics section, taller so it is in view: HyperFrames ready, then not downloaded.
+    let clipLength = model.items[0].editedDuration
+    _ = model.perform([.replaceGraphics(clip: model.items[0].id, graphics: [
+        Graphic(kind: .namePlate, start: 0, end: min(1, clipLength / 2)),
+        Graphic(kind: .rule, start: min(1, clipLength / 2), end: clipLength)], style: nil)])
+    await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 900),
+           to: output.appendingPathComponent("5b-export-graphics.png"))
+    setenv("YAMVIDEO_HYPERFRAMES_DIR", NSTemporaryDirectory() + "yamvideo-no-hyperframes", 1)
+    await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 900),
+           to: output.appendingPathComponent("5c-export-graphics-download.png"))
+    unsetenv("YAMVIDEO_HYPERFRAMES_DIR")
+    model.undo()
     await render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
            to: output.appendingPathComponent("6-local-agents.png"))
 

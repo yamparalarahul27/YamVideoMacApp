@@ -491,6 +491,11 @@ struct ExportSettings: Equatable, Codable {
     /// Nil means "next to the source file".
     var outputFolder: URL?
     var suffix: String = "-converted"
+    /// False leaves each recording's graphics, and the move aside under its panels, out of
+    /// exports. Nil (the default) draws them.
+    var graphics: Bool?
+
+    var drawsGraphics: Bool { graphics ?? true }
 
     static let presets = ["ultrafast", "veryfast", "faster", "fast", "medium", "slow", "slower"]
 

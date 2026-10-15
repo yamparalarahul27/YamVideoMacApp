@@ -846,7 +846,9 @@
   /**
    * Builds the graphics and the timeline. Modes:
    * - "preview": every graphic and panel; the app seeks it. No video.
-   * - "unit": one graphic or one panel span, with its own time starting at 0.
+   * - "unit": one graphic or one panel span, with its own time starting at 0. `origin`
+   *   (seconds, default the unit's start) is the data time shown at page time 0; the app
+   *   puts it on a frame, so beats land on the same frames as in the preview.
    * - "full": every graphic, plus the video move on #bg-video when the style asks for it.
    */
   function load(data, options) {
@@ -867,7 +869,7 @@
     if (mode === "unit") {
       const unit = p.units.find((u) => u.id === opts.unit);
       if (!unit) throw new Error("Unknown unit: " + opts.unit);
-      shift = unit.start;
+      shift = typeof opts.origin === "number" ? opts.origin : unit.start;
       items = unit.kind === "panel" ? [] : p.items.filter((g) => g.id === unit.id);
       spans = unit.kind === "panel" ? p.spans.filter((s) => s.id === unit.id) : [];
     }

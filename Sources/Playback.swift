@@ -320,29 +320,40 @@ enum BlurCalibration {
 /// While a side panel shows, the picture slides left by a quarter of its width. A larger,
 /// blurred, darker copy of the same frame fills the space it leaves, the moved picture's
 /// right edge fades into that copy, and a frost fades in under the panel. Sizes are in
-/// design pixels of a 1920-wide frame, scaled to the real width. The export draws the same.
+/// design pixels of a 1920-wide frame, scaled to the real width. The export draws the same
+/// (`FFmpeg.moveStage`): like the blur effects, everything here works on the frame's
+/// encoded values, as ffmpeg does, not in Core Image's linear working space.
 func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Double) -> CIImage {
     let (amount, span) = motion.progress(at: time)
     guard amount > 0.0001, let span else { return image }
     let frame = CGRect(origin: .zero, size: size)
     let w = size.width, h = size.height, unit = w / 1920
-    let base = image.cropped(to: frame)
+    let space = ColorPipeline.videoSpace
+    guard let base = image.cropped(to: frame).matchedFromWorkingSpace(to: space) else { return image }
 
+    let scale = GraphicsMotion.fillScale
     let grow = CGAffineTransform(translationX: -w / 2, y: -h / 2)
-        .concatenating(CGAffineTransform(scaleX: 1.3, y: 1.3))
+        .concatenating(CGAffineTransform(scaleX: scale, y: scale))
         .concatenating(CGAffineTransform(translationX: w / 2, y: h / 2))
-    let fill = base.clampedToExtent().transformed(by: grow)
-        .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 36 * unit])
-        .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.9])
-        .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: log2(0.72)])
+    // Darker and less saturated in one matrix, faded in with the move: over black, so
+    // `amount` scales the colour, as ffmpeg's table does.
+    let luma = GraphicsMotion.lumaWeights, s = GraphicsMotion.fillSaturation
+    let gain = GraphicsMotion.fillDim * amount
+    func row(_ index: Int) -> CIVector {
+        let weights = [luma.r, luma.g, luma.b].enumerated().map { gain * ((1 - s) * $0.element + ($0.offset == index ? s : 0)) }
+        return CIVector(x: weights[0], y: weights[1], z: weights[2], w: 0)
+    }
+    let behind = base.clampedToExtent().transformed(by: grow)
+        .applyingGaussianBlur(sigma: GraphicsMotion.fillBlur * unit * BlurCalibration.coreImageRadiusPerSigma)
+        .applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": row(0), "inputGVector": row(1), "inputBVector": row(2),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ])
         .cropped(to: frame)
-    let black = CIImage(color: .black).cropped(to: frame)
-    let behind = fill.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: amount)])
-        .composited(over: black)
 
     let shift = w * GraphicsTrack.shiftFraction * amount
     let moved = base.transformed(by: CGAffineTransform(translationX: -shift, y: 0))
-    let fade = 220 * unit * amount
+    let fade = GraphicsMotion.edgeFade * unit * amount
     var result = moved.applyingFilter("CIBlendWithMask", parameters: [
         kCIInputBackgroundImageKey: behind,
         kCIInputMaskImageKey: horizontalRamp(from: w - shift - fade, to: w - shift, rising: false, strength: 1, frame: frame),
@@ -350,19 +361,22 @@ func moveAside(_ image: CIImage, size: CGSize, motion: GraphicsMotion, time: Dou
 
     if let ramp = motion.frostRamp(for: span) {
         let frosted = result.clampedToExtent()
-            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: ramp.blur * unit]).cropped(to: frame)
+            .applyingGaussianBlur(sigma: ramp.blur * unit * BlurCalibration.coreImageRadiusPerSigma).cropped(to: frame)
         result = frosted.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: result,
             kCIInputMaskImageKey: horizontalRamp(from: ramp.from * w, to: ramp.to * w, rising: true, strength: amount, frame: frame),
         ])
     }
-    return result.cropped(to: frame)
+    return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: frame)
 }
 
 /// A left-to-right grey ramp for CIBlendWithMask: 0 before `from` and `strength` after
-/// `to` when rising, the reverse otherwise.
+/// `to` when rising, the reverse otherwise. The colours are linear, so the mask values are
+/// the numbers given rather than sRGB greys converted to light.
 private func horizontalRamp(from: CGFloat, to: CGFloat, rising: Bool, strength: Double, frame: CGRect) -> CIImage {
-    let low = CIColor(red: 0, green: 0, blue: 0), high = CIColor(red: strength, green: strength, blue: strength)
+    let linear = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
+    let low = CIColor(red: 0, green: 0, blue: 0, alpha: 1, colorSpace: linear)!
+    let high = CIColor(red: strength, green: strength, blue: strength, alpha: 1, colorSpace: linear)!
     return CIFilter(name: "CILinearGradient", parameters: [
         "inputPoint0": CIVector(x: from, y: 0), "inputPoint1": CIVector(x: max(to, from + 0.5), y: 0),
         "inputColor0": rising ? low : high, "inputColor1": rising ? high : low,

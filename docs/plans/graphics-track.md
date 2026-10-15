@@ -1,8 +1,9 @@
 # Graphics track — implementation plan
 
-**Updated:** 2026-10-14. **Status:** G0 (the template engine) and G1 part 1 (graphics in
-the app: data, commands, preview, timeline, inspector) are implemented; see sections 8
-and 9. G1 part 2 (export with graphics from the app) is next. Phase 5 of
+**Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
+the app: data, commands, preview, timeline, inspector) and G1 part 2 (export with
+graphics from the app) are implemented; see sections 8 to 10. Feature 2 of section 6a
+(move and resize on the picture) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -165,11 +166,12 @@ custom ease, Core Image, FFmpeg expression) so that they agree to the frame.
 | Preview | `Playback.swift`, new `GraphicsOverlay.swift` | `WKWebView` (transparent, no input) over `PlayerSurface`, fitted to `AVPlayerView.videoBounds`. The app calls `seek(previewTime)` on every playhead change and at 30 Hz while playing. Edits call `load` with new JSON. The move-aside transform goes into `renderFrame`. |
 | Timeline | `TimelineView.swift` | A Graphics lane: one block per graphic, with column and panel blocks in two tones. Click selects; drag moves; edge drag changes the length. Snaps like zoom blocks. |
 | Inspector | `InspectorView.swift` | Graphic section: kind, start, length, text fields, items with "appear after" times, image pickers, Delete, Show It. Recording section: Style (Panel: Shade / Solid; Move video aside; Accent). |
-| Export | `FFmpeg.swift`, `Movie.swift`, new `GraphicsRender.swift` | Find `node` and `npx` like `ffmpeg`, with an explicit `PATH`. Render each changed unit to a cached PNG sequence with `hyperframes render --format png-sequence`, pinned version. Add each unit as an input with `-itsoffset`, `overlay=eof_action=pass` after zoom and scale, and before subtitles. Input indexes shift after the GIF palette. The move-aside effect is a time-based `overlay` x on a black canvas. Progress: graphics 0–40 %, encode 40–100 %. |
+| Export | `FFmpeg.swift`, new `GraphicsRender.swift` | Find `node` like `ffmpeg`, with an explicit `PATH`. Render each changed unit to a cached PNG sequence with `hyperframes render --format png-sequence`, pinned version. Add each unit as an input with `-itsoffset`, `overlay=eof_action=pass` after zoom and scale, and before subtitles. Input indexes shift after the GIF palette. The move aside is its own ffmpeg stage (section 10). Progress: graphics 0–40 %, encode 40–100 %. As built: HyperFrames is downloaded into the app's folder on the owner's click rather than run through `npx`, and Movie exports leave graphics out (G3). |
 | Build and tests | `build.sh`, `test.sh`, `Tests/main.swift` | Copy `Resources/Graphics`. Add the new logic files to `test.sh`. |
 
-When `node` is missing, preview still works (it needs only WebKit). Export then says "Graphics
-need Node.js to export" and offers to export without them.
+When `node` is missing, preview still works (it needs only WebKit). Export then says that
+graphics need Node.js, and the Export sheet's **Draw graphics into the video** switch
+exports without them.
 
 ## 6. Phases
 
@@ -223,11 +225,7 @@ need Node.js to export" and offers to export without them.
 The owner's priority after the first video. Start a new session with "start feature 1
 from docs/plans/graphics-track.md".
 
-1. **Export with graphics from the app (G1 part 2).** Render each unit (graphic or panel
-   span) with HyperFrames to a cached PNG sequence; overlay them in the app's ffmpeg graph
-   after zoom and scale, before subtitles; port `moveAside` (move, blurred fill, edge
-   fade, frost) to ffmpeg with a Core Image parity test. Until this lands, the final video
-   comes from `Tools/Graphics/assemble.mjs` and `hyperframes render`.
+1. **Export with graphics from the app (G1 part 2).** Done 2026-10-15; section 10.
 2. **Move and resize on the picture (G2b).** Section 6.
 3. **Publish panel with a YouTube preview (G3).** Section 6; also the category (Science &
    Technology for this channel), tags (500 characters), chapters of at least 10 s each
@@ -318,3 +316,64 @@ from docs/plans/graphics-track.md".
   signed app can make macOS ask again for Desktop access; the first image read waits on it.
 - **Next (part 2):** export. Render each unit to a cached PNG sequence with HyperFrames,
   overlay in ffmpeg, and port `moveAside` to an ffmpeg graph with a parity test.
+
+## 10. G1 part 2 status (2026-10-15)
+
+- **Export draws graphics.** Each graphic, and each panel span, is a render unit
+  (`GraphicsTrack.renderUnits`, the same list as `plan()` in graphics.js). A unit's page
+  carries only what it draws, timed from its first frame. That frame sits on the export's
+  frame grid (`origin`, a new `unit` option in the engine), so beats land on the frames
+  the preview shows. HyperFrames renders the page to PNG frames with alpha, at 1920×1080,
+  or 3840×2160 for exports wider than 2400 px. ffmpeg adds each unit as an input at its
+  start and lays it over the picture after the downscale and before the captions, fitted
+  to the width and pinned to the top, as the preview fits the stage.
+- **Cache.** `~/Library/Caches/YamVideo/GraphicsRender/<key>`. The key covers the engine
+  files, the HyperFrames version, the unit's data, its images (path, size and date), its
+  length, the frame rate and the size. New text in one graphic draws that graphic again
+  and nothing else; a graphic moved by whole frames draws nothing; a panel graphic keeps
+  its panel mates without their text, so editing one leaves the others alone. Frames no
+  export has used for 30 days are removed. A cancelled render leaves nothing behind.
+- **HyperFrames.** Pinned 0.8.159. It is downloaded with npm into
+  `~/Library/Application Support/YamVideo/HyperFrames/0.8.159`, with its headless Chrome
+  (about 220 MB together), only when the owner clicks **Download HyperFrames…** in the
+  Export sheet. It runs on Node.js 22 or later from the usual places (nodejs.org,
+  Homebrew, MacPorts, Volta, nvm), with telemetry, update checks and self-install off.
+  Without it, an export with graphics stops and says how to get it, or to switch graphics
+  off: the sheet's **Draw graphics into the video**, or `graphics: false` in the export
+  settings.
+- **The move aside in ffmpeg** (`FFmpeg.moveStage`). The video is cut into frame windows
+  around each panel. Only those go through the move; the rest pass straight through, and
+  concat joins them in order. In a window the frames are 10-bit 4:4:4: the fill at
+  quarter size (grown, blurred, then one darkening and desaturating table), the edge fade
+  as a still ramp merged into the alpha, and the frost at half size under a still ramp.
+  Per-frame values come from `GraphicsMotion` through `sendcmd`. The ramps' gains go out a
+  frame early, because mergeplanes reads them one frame ahead (measured at 30, 29.97 and
+  15 fps).
+- **Preview change for parity.** `moveAside` now works on the encoded values, like the blur
+  effects: the fill is darkened (×0.86) and desaturated (0.9) by one matrix instead of an
+  exposure step in linear light, and the masks are plain numbers. The look is close to
+  before.
+- **Colour tags.** ffmpeg 9 makes a blend's inputs agree on colour space and range, and
+  converts one to match. That converted untagged recordings to BT.709 under the graphics.
+  Graphics and the ramps now carry the picture's own tags, so the picture is never
+  converted for them (checked: identical pixels).
+- **Agents.** `state.graphicsRenderer` (`ready`, `needsNode`, `needsDownload` or
+  `unknown`), the `graphics` export setting, and an early `unsupported_capability` refusal
+  when something must be drawn but HyperFrames is missing. The catalog describes both.
+- **Tests** (940 checks): units and keys; the engine and the app listing the same units;
+  move parity at six times across a glass and an ink panel (worst offset 0 px, mean
+  difference 0.76 of 255 in the fill and 1.2 over the frame); frames away from panels
+  untouched and every frame kept; overlay place and timing with stand-in frames, also
+  after a cut and a downscale; an untagged recording's colours kept exactly; an unchanged
+  graphic not drawn again; cancel; the HDR refusal; the missing-renderer message; agent
+  state; and a real HyperFrames render when it is downloaded.
+- **Real use (a demo on this Mac).** A 24 s 1080p recording with seven graphics in the
+  mix look (name plate, feature list, a panel of three ink graphics, link, end card),
+  imported and exported by an agent through `yamvideoctl`. First export 69 s (8 units
+  drawn); after one text change 26 s (1 unit drawn); unchanged 18 s; without graphics
+  11 s.
+- **Open.** The first video's own project, on the other Mac, is the real-use gate: export
+  it from the app and compare with the G0 render. Graphics in Movie exports (G3). The
+  move costs about 1 s of processing per second of panel, mostly resizing; a faster path
+  can come later if long panels feel slow. In the demo, a long ink checklist line ran past
+  the frame's edge: a template limit, not the export.

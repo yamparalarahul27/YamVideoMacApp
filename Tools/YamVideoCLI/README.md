@@ -74,7 +74,7 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `setMovieOrder` | `order`: every recording ID |
 | `setIncludedInMovie` | `clipID`, `included` |
 | `setMovieCanvas` | `canvas`: firstClip, widescreen, portrait, square |
-| `setExportSettings` | `settings`: only the keys to change, e.g. `{"format": "gif"}` |
+| `setExportSettings` | `settings`: only the keys to change, e.g. `{"format": "gif"}`; `{"graphics": false}` exports without graphics |
 | `setSubtitles` / `clearSubtitles` | `clipID`, `path` |
 | `addMedia` | `paths` (probed first) |
 | `removeMedia` | `clipID` |
@@ -113,7 +113,7 @@ section's ID and reports the new right one in `createdIDs`.
 | `preview --clip ID --time T [--composed] [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--composed` renders it as the owner's Preview plays it — crop, zoom, colour, blur areas and whole-frame effects — at the export's frame size. `--original` leaves the colour correction out. |
 | `catalog` | Every command and request, described for an agent: fields, units, ranges, defaults, examples and conventions. |
 | `analyze --kind silence\|zooms --clip ID` | Starts a job that proposes cuts or zooms for the revision it read. It applies nothing. |
-| `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. |
+| `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. A recording's graphics are drawn in; `state.graphicsRenderer.status` says whether this Mac can (`ready`, `needsNode`, `needsDownload`). Only the owner can download HyperFrames, so on `unsupported_capability` ask them, or export without graphics. |
 | `job ID [--wait]` / `cancel ID` | Job status and result, or cancel it. |
 | `save [--path FILE]` | Saves without a dialog: in place, to a first location, or — to a different path — as a copy with its own identity. |
 | `reveal --clip/--section/--zoom/--effect/--marker/--graphic/--time` | Moves your view, only when asked; edits never do. |

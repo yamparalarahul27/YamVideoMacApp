@@ -77,11 +77,13 @@ enum Shell {
     static func run(
         _ executable: String,
         _ arguments: [String],
+        environment: [String: String]? = nil,
         onStdoutLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if let environment { process.environment = environment }
         process.standardInput = FileHandle.nullDevice
 
         let outPipe = Pipe()

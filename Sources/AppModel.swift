@@ -38,6 +38,11 @@ final class AppModel: ObservableObject {
     @Published var toneMappingAvailable = true
     /// Whether it has libass, without which subtitles cannot be burned in.
     @Published var subtitlesAvailable = true
+    /// Whether exports can draw graphics on this Mac (Node.js and HyperFrames); nil until checked.
+    @Published var graphicsRenderer: HyperFrames.Status?
+    /// What the owner's HyperFrames download is doing, while it runs.
+    @Published var graphicsDownload: String?
+    @Published var graphicsDownloadError: String?
     @Published var statusMessage: String?
     @Published var editorMode: EditorMode = .crop
     @Published var selectedRegionID: BlurRegion.ID? { didSet { focusInspector(selectedRegionID, .blurArea) } }
@@ -146,6 +151,28 @@ final class AppModel: ObservableObject {
         Task { webpAvailable = await FFmpeg.supportsWebP() }
         Task { toneMappingAvailable = await FFmpeg.supportsToneMapping() }
         Task { subtitlesAvailable = await FFmpeg.supportsSubtitles() }
+        refreshGraphicsRenderer()
+    }
+
+    func refreshGraphicsRenderer() {
+        Task { graphicsRenderer = await HyperFrames.status() }
+    }
+
+    /// The one-time HyperFrames download, started only by the owner's click.
+    func downloadGraphicsRenderer() {
+        guard graphicsDownload == nil else { return }
+        graphicsDownloadError = nil
+        graphicsDownload = "Starting the download…"
+        Task {
+            do {
+                try await HyperFrames.install { message in Task { @MainActor [weak self] in self?.graphicsDownload = message } }
+                statusMessage = "HyperFrames is ready: exports now draw graphics."
+            } catch {
+                graphicsDownloadError = error.localizedDescription
+            }
+            graphicsDownload = nil
+            graphicsRenderer = await HyperFrames.status()
+        }
     }
 
     var selectedItem: VideoItem? {
@@ -755,7 +782,8 @@ final class AppModel: ObservableObject {
                         settings: exportSettings,
                         subtitles: item.subtitles,
                         color: item.colorStage(exportSettings),
-                        effects: item.blurEffects
+                        effects: item.blurEffects,
+                        graphics: item.exportGraphics(exportSettings)
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -826,7 +854,7 @@ final class AppModel: ObservableObject {
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.subtitles,
-            color: item.colorFilters(settings), effects: item.blurEffects
+            color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings)
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 
