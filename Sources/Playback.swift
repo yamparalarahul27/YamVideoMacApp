@@ -78,12 +78,15 @@ final class PlaybackController: ObservableObject {
     struct PictureKey: Equatable {
         var crop: CGRect
         var motion: GraphicsMotion?
+        /// A zoomed-out Short's taller 9:16 stage, with the picture at its top.
+        var stage: CGSize?
     }
 
     static func picture(_ clip: VideoItem, info: MediaInfo, short: Short?) -> PictureKey {
         if let short {
-            return PictureKey(crop: short.frame(info: info, crop: clip.crop),
-                              motion: GraphicsMotion(clip.graphics?.forShort(short, recordingTime: true)))
+            let picture = short.picture(info: info, crop: clip.crop)
+            return PictureKey(crop: picture, motion: GraphicsMotion(clip.graphics?.forShort(short, recordingTime: true)),
+                              stage: ShortFormat.stage(for: picture.size))
         }
         return PictureKey(crop: (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame), motion: GraphicsMotion(clip.graphics))
     }
@@ -259,14 +262,14 @@ final class PlaybackController: ObservableObject {
         let effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
                                         toneMapHDR: settings.toneMapHDR, original: original).render
-        let motion = picture.motion
+        let motion = picture.motion, stage = picture.stage
         let videoComposition = AVMutableVideoComposition(asset: asset) { request in
             let result = renderFrame(request.sourceImage, info: info, crop: crop,
                                      regions: regions, shots: shots, settings: settings,
-                                     time: request.compositionTime.seconds, color: color, effects: effects, motion: motion)
+                                     time: request.compositionTime.seconds, color: color, effects: effects, motion: motion, stage: stage)
             request.finish(with: result, context: nil)
         }
-        videoComposition.renderSize = crop.size
+        videoComposition.renderSize = stage ?? crop.size
         let rate = info.fpsExpression.split(separator: "/")
         if rate.count == 2, let numerator = Int32(rate[0]), let denominator = Int64(rate[1]), numerator > 0, denominator > 0 {
             videoComposition.frameDuration = CMTime(value: denominator, timescale: numerator)
@@ -283,7 +286,7 @@ final class PlaybackController: ObservableObject {
 /// area obscuring, crop and zoom. A black area therefore stays black whatever the grade.
 func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurRegion],
                  shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil,
-                 effects: [VideoBlurEffect] = [], motion: GraphicsMotion? = nil) -> CIImage {
+                 effects: [VideoBlurEffect] = [], motion: GraphicsMotion? = nil, stage: CGSize? = nil) -> CIImage {
     var image = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
     if let color { image = ColorPipeline.apply(color, to: image, space: source.colorSpace) }
     for region in regions {
@@ -323,8 +326,39 @@ func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [Blu
     if let effect = effects.first(where: { $0.isVisible && $0.weight(at: time) > 0 }) {
         image = applyBlurEffect(effect, to: image, bounds: bounds, weight: effect.weight(at: time))
     }
-    if let motion { image = moveAside(image, size: crop.size, motion: motion, time: time) }
+    var size = crop.size
+    if let stage {
+        image = zoomOut(image, picture: crop.size, stage: stage)
+        size = stage
+    }
+    if let motion { image = moveAside(image, size: size, motion: motion, time: time) }
     return image
+}
+
+/// A zoomed-out Short: the picture at the top of its taller 9:16 stage, its bottom edge
+/// fading over `ShortFormat.zoomFade` design pixels into the fill below, made as the moved
+/// picture's is (the picture grown to cover the stage, blurred, darkened). The export
+/// draws the same (`FFmpeg.zoomStage`), on the encoded values.
+func zoomOut(_ image: CIImage, picture: CGSize, stage: CGSize) -> CIImage {
+    let frame = CGRect(origin: .zero, size: stage)
+    let space = ColorPipeline.videoSpace
+    guard let base = image.cropped(to: CGRect(origin: .zero, size: picture)).matchedFromWorkingSpace(to: space) else { return image }
+    // The picture scaled to cover the stage, centred, then the moved picture's fill of it.
+    let cover = stage.height / picture.height
+    let covered = base.clampedToExtent()
+        .transformed(by: CGAffineTransform(scaleX: cover, y: cover))
+        .transformed(by: CGAffineTransform(translationX: -(picture.width * cover - stage.width) / 2, y: 0))
+        .cropped(to: frame)
+    let fill = movedPictureFill(covered, frame: frame, amount: 1)
+    // Core Image's y runs up: the picture's top at the stage's top.
+    let bottom = stage.height - picture.height
+    let placed = base.transformed(by: CGAffineTransform(translationX: 0, y: bottom))
+    let fade = ShortFormat.zoomFade * GraphicsMotion.unit(stage)
+    let result = placed.applyingFilter("CIBlendWithMask", parameters: [
+        kCIInputBackgroundImageKey: fill,
+        kCIInputMaskImageKey: linearRamp(from: CGPoint(x: 0, y: bottom), to: CGPoint(x: 0, y: bottom + fade), strength: 1, frame: frame),
+    ])
+    return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: frame)
 }
 
 /// A whole-frame blur mixed in at `weight`, matching the export: blurred and mixed on the

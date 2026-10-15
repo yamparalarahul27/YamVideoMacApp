@@ -696,18 +696,32 @@ enum FFmpeg {
         }
     }
 
+    /// A Short's picture wider than 9:16 is zoomed out: it is drawn at the top of its
+    /// taller stage (`zoomStage`) before the move aside, which then works on the stage.
     static func graphicsPlan(_ graphics: GraphicsTrack?, info: MediaInfo, crop cropRect: CGRect, segments: [TimelineSegment]?,
                              settings: ExportSettings, converted: Bool, canvas: CGSize? = nil) -> GraphicsPlan {
-        guard let graphics, !graphics.items.isEmpty else { return GraphicsPlan() }
+        let stage = canvas == nil ? nil : ShortFormat.stage(for: cropRect.size)
+        let drawn = graphics.map { !$0.items.isEmpty } == true
+        guard drawn || stage != nil else { return GraphicsPlan() }
         let stages = videoStages(info: info, crop: cropRect, zoomShots: [], settings: settings)
         let duration = segments.map { ClipTimeline(segments: $0).duration } ?? info.duration
         let tags = FrameTags(info: info, converted: converted)
+        let zoom = stage.map {
+            zoomStage(picture: cropRect.size, stage: $0, fps: stages.rate, fpsExpression: stages.rateExpression, duration: duration, tags: tags)
+        }
+        guard let graphics, drawn else { return GraphicsPlan(move: zoom.map { EffectStage(parts: $0.parts + ["[zoout]null[mvout]"]) }) }
         let output = canvas ?? scaledSize(for: cropRect.size, limit: settings.sizeLimit) ?? cropRect.size
+        let move = GraphicsMotion(graphics).flatMap {
+            try? moveStage($0, frame: stage ?? cropRect.size, fps: stages.rate, fpsExpression: stages.rateExpression,
+                           duration: duration, tags: tags)
+        }
+        let staged: EffectStage? = {
+            guard let zoom else { return move }
+            guard let move else { return EffectStage(parts: zoom.parts + ["[zoout]null[mvout]"]) }
+            return EffectStage(parts: zoom.parts + move.parts.map { $0.replacingOccurrences(of: "[mvin]", with: "[zoout]") })
+        }()
         return GraphicsPlan(
-            move: GraphicsMotion(graphics).flatMap {
-                try? moveStage($0, frame: cropRect.size, fps: stages.rate, fpsExpression: stages.rateExpression,
-                               duration: duration, tags: tags)
-            },
+            move: staged,
             jobs: GraphicsRender.jobs(for: graphics, fps: stages.rateExpression, outputWidth: output.width),
             overlayFrame: output, matrix: converted ? "bt709" : info.yuvMatrix, tags: tags)
     }

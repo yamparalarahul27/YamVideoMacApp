@@ -304,6 +304,9 @@ struct AgentState: Encodable {
         var width = 1080, height = 1920
         var title: String, description: String, tags: [String]
         var panels: String, captions: String
+        /// 1 fills the frame; lower is zoomed out, with `picture` (the window widened) at the top.
+        var zoom: Double
+        var picture: WireRect
         var cover: Double?
         var hidden: [UUID]
         var placements: [String: GraphicTransform]

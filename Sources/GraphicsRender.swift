@@ -125,6 +125,30 @@ extension FFmpeg {
         return EffectStage(parts: parts)
     }
 
+    /// A zoomed-out Short: graph parts reading `[mvin]` (the picture) and writing `[zoout]`
+    /// (the stage), what `zoomOut` draws in the preview. The picture sits at the top of the
+    /// taller stage; below, the fill of the move aside, made from the picture grown to
+    /// cover the stage; the picture's bottom edge fades into it through a still ramp in the
+    /// alpha plane, repeated for every frame.
+    static func zoomStage(picture: CGSize, stage: CGSize, fps: Double, fpsExpression: String,
+                          duration: Double, tags: FrameTags, name: String = "zo") -> EffectStage {
+        let w = Int(stage.width), h = Int(stage.height), ph = Int(picture.height)
+        let cover = Int((picture.width * stage.height / picture.height).rounded())
+        let frames = Int((duration * max(1, fps)).rounded(.up)) + 2
+        let fade = ShortFormat.zoomFade * GraphicsMotion.unit(stage)
+        let alpha = "mergeplanes=map0s=0:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2:map3s=1:map3p=0:format=yuva444p10le"
+        return EffectStage(parts: [
+            "[mvin]setsar=1,format=yuv444p10le,split=2[\(name)a][\(name)b]",
+            "[\(name)b]scale=\(cover):\(h):flags=bilinear,crop=\(w):\(h),"
+                + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim, tags: tags) + "[\(name)f]",
+            "color=c=black:s=\(w)x\(h):r=\(fpsExpression):d=\(num(0.5 / max(1, fps))),format=yuv444p10le,"
+                + "geq=lum='1023*clip((\(ph)-Y-0.5)/\(num(fade)),0,1)':cb=512:cr=512,\(tags.filter),loop=loop=\(frames):size=1[\(name)g]",
+            "[\(name)a]pad=\(w):\(h):0:0:color=black,setsar=1[\(name)p]",
+            "[\(name)p][\(name)g]\(alpha)[\(name)m]",
+            "[\(name)f][\(name)m]overlay=x=0:y=0:format=yuv444p10:eof_action=pass,format=yuv420p10le[zoout]",
+        ])
+    }
+
     /// Frames with the picture at one place: the fill, as in the move aside, with the
     /// picture scaled (Lanczos, as the preview) and laid over it. The end screen's frame
     /// and a Short's split frame both move this way.

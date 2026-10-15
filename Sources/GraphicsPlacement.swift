@@ -60,11 +60,12 @@ enum GraphicPlacement {
 
     /// The lines a graphic snaps to on a Short's canvas: YouTube's clear area, the centre
     /// line, its own place, and the card or panel zone it belongs to.
-    static func shortGuides(for graphic: Graphic, bounds: GraphicBounds, panels: ShortPanels) -> Guides {
+    static func shortGuides(for graphic: Graphic, bounds: GraphicBounds, panels: ShortPanels, zoom: Double = 1) -> Guides {
         let clear = ShortFormat.clearArea
-        let zone = ShortLayout(panels: panels).zone(of: graphic.kind)
+        let layout = ShortLayout(panels: panels, zoom: zoom)
+        let zone = layout.zone(of: graphic.kind)
         let vertical: [Double] = [clear.minX, ShortFormat.size.width / 2, clear.maxX, bounds.content.minX, bounds.content.maxX, zone.origin.x]
-        let horizontal: [Double] = [clear.minY, clear.maxY, bounds.content.minY, bounds.content.maxY, zone.origin.y, ShortLayout.captionBottom]
+        let horizontal: [Double] = [clear.minY, clear.maxY, bounds.content.minY, bounds.content.maxY, zone.origin.y, layout.captionSpot]
         return Guides(vertical: Array(Set(vertical)).sorted(), horizontal: Array(Set(horizontal)).sorted())
     }
 
@@ -203,7 +204,9 @@ struct GraphicsPlacementLayer: View {
     }
 
     private func guides(for graphic: Graphic, bounds: GraphicBounds) -> GraphicPlacement.Guides {
-        if case .short(let panels) = input.track.canvas { return GraphicPlacement.shortGuides(for: graphic, bounds: bounds, panels: panels) }
+        if case .short(let panels, let zoom) = input.track.canvas {
+            return GraphicPlacement.shortGuides(for: graphic, bounds: bounds, panels: panels, zoom: zoom)
+        }
         return GraphicPlacement.guides(for: graphic, bounds: bounds, style: input.track.style)
     }
 

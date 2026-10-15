@@ -163,10 +163,11 @@ struct VideoProject: Codable, Equatable {
     /// a graphic's move and scale on the picture. 8: adds what YouTube needs per recording.
     /// 9: adds the thumbnail maker's design. 10: adds the end screen graphic and the choice of
     /// YouTube element for each of its boxes. 11: adds the auto edit options, each recording's
-    /// transcript and the captions choice. 12: adds each recording's Shorts. Every edited
+    /// transcript and the captions choice. 12: adds each recording's Shorts. 13: adds a
+    /// Short's zoom (zoomed out, at the top over a blurred copy). Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 12
+    static let currentVersion = 13
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -241,6 +242,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 12, clips.contains(where: { $0.shorts != nil }) {
             try reject("The project claims an older format but contains Shorts."); return
+        }
+        if version < 13, clips.contains(where: { $0.shorts?.contains { $0.zoom != nil } == true }) {
+            try reject("The project claims an older format but contains a zoomed-out Short."); return
         }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
         guard Set(clips.map(\.id)).count == clips.count else {

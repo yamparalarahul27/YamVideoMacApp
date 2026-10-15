@@ -119,6 +119,12 @@ struct ShortInspector: View {
                     model.setShortWindow(short.id, down: $0, live: $1)
                 }
             }
+            slider("Zoom out", value: 1 - short.zoomLevel, range: 0...(1 - ShortFormat.zooms.lowerBound),
+                   format: { $0 < 0.005 ? "Off" : "\(Int(((1 - $0) * 100).rounded())) %" }) { value, live in
+                let zoom = 1 - value
+                model.updateShort(short.id, label: "Short Zoom", live: live) { $0.zoom = zoom > 0.995 ? nil : (zoom * 1000).rounded() / 1000 }
+            }
+            .help("Shows more of the picture around the window, smaller and at the top, fading into a blurred copy below; cards and captions sit lower, under the face")
             HStack {
                 Button("Centre on Speaker") { model.centreShortOnSpeaker(short.id) }
                     .help("Apple Vision finds the face in the middle of the Short and centres the window on it")
@@ -126,16 +132,18 @@ struct ShortInspector: View {
                     .disabled(short.window == nil)
             }
             .controlSize(.small)
-            let rect = short.frame(info: info, crop: item.crop)
-            Text("\(Int(rect.width))×\(Int(rect.height)) of the picture, made 1080×1920" + (rect.height < 1920 ? " (scaled up)" : ""))
-                .font(.caption2).foregroundStyle(.secondary)
+            let rect = short.picture(info: info, crop: item.crop)
+            let stage = ShortFormat.stage(for: rect.size) ?? rect.size
+            Text("\(Int(rect.width))×\(Int(rect.height)) of the picture" + (stage != rect.size ? ", at the top over a blurred copy" : "")
+                 + ", made 1080×1920" + (stage.height < 1920 ? " (scaled up)" : ""))
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func slider(_ label: String, value: Double, range: ClosedRange<Double>, format: @escaping (Double) -> String,
                         set: @escaping (Double, Bool) -> Void) -> some View {
         HStack(spacing: 6) {
-            Text(label).font(.caption2).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
+            Text(label).font(.caption2).foregroundStyle(.secondary).frame(width: 54, alignment: .leading)
             Slider(value: Binding(get: { value }, set: { set($0, true) }), in: range) { editing in
                 if !editing { set(value, false); model.endGesture() }
             }
@@ -159,6 +167,10 @@ struct ShortInspector: View {
             }
             .pickerStyle(.segmented).labelsHidden()
             Text(short.captions.detail).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if short.zoomLevel < 1, short.captions == .stepUp {
+                Text("Zoomed out, they stay below a card instead, under the face.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if !model.settings.captionUse(hasFile: item.subtitles != nil).burns {
                 Text("Captions are not burned in, so this only matters once they are (Captions in the inspector or Auto Edit).")
                     .font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
