@@ -26,12 +26,16 @@ extension FFmpeg {
                           duration: Double, tags: FrameTags, name: String = "mv") throws -> EffectStage {
         let rate = max(1, fps)
         let total = Int((duration * rate).rounded())
+        // The end screen's frames: from the one at its start to the last.
+        let screenFirst = motion.screen.map { max(0, Int(($0.start * rate + 0.000001).rounded(.down))) }
         // Windows by frame: from a frame before each panel starts to two after it has
-        // slid away, joined where they meet.
+        // slid away, joined where they meet, and never into the end screen.
         var windows: [(first: Int, end: Int?, spans: [PanelSpan])] = []
         for span in motion.spans {
             let first = max(0, Int((span.start * rate).rounded(.down)) - 1)
-            let end = Int(((span.end + GraphicsTrack.slide) * rate).rounded(.up)) + 2
+            var end = Int(((span.end + GraphicsTrack.slide) * rate).rounded(.up)) + 2
+            if let screenFirst { end = min(end, screenFirst) }
+            guard end > first else { continue }
             if let last = windows.last, let lastEnd = last.end, first <= lastEnd {
                 windows[windows.count - 1] = (last.first, max(lastEnd, end), last.spans + [span])
             } else {
@@ -39,32 +43,82 @@ extension FFmpeg {
             }
         }
         // A window reaching the end runs to the last frame, whatever the exact count.
-        if let last = windows.last, let end = last.end, end >= total - 2 { windows[windows.count - 1].end = nil }
+        if screenFirst == nil, let last = windows.last, let end = last.end, end >= total - 2 { windows[windows.count - 1].end = nil }
 
-        var segments: [(first: Int, end: Int?, window: Int?)] = []
+        enum Piece { case pass, panel(Int), screen(Double) }
+        var segments: [(first: Int, end: Int?, piece: Piece)] = []
         var cursor = 0
         for (index, window) in windows.enumerated() {
-            if window.first > cursor { segments.append((cursor, window.first, nil)) }
-            segments.append((window.first, window.end, index))
+            if window.first > cursor { segments.append((cursor, window.first, .pass)) }
+            segments.append((window.first, window.end, .panel(index)))
             cursor = window.end ?? Int.max
         }
-        if cursor < Int.max { segments.append((cursor, nil, nil)) }
+        if let screenFirst {
+            if screenFirst > cursor { segments.append((cursor, screenFirst, .pass)) }
+            // While the picture moves, each frame has its own size and place; once it has
+            // arrived, the rest of the video shares one.
+            var index = max(cursor, screenFirst)
+            while motion.screenProgress(at: Double(index) / rate) < 1 {
+                let amount = motion.screenProgress(at: Double(index) / rate)
+                segments.append((index, index + 1, amount > 0.0001 ? .screen(amount) : .pass))
+                index += 1
+            }
+            segments.append((index, nil, .screen(1)))
+        } else if cursor < Int.max {
+            segments.append((cursor, nil, .pass))
+        }
 
         var parts = ["[mvin]split=\(segments.count)" + segments.indices.map { "[\(name)s\($0)]" }.joined()]
         for (index, segment) in segments.enumerated() {
             let trim = "trim=start_frame=\(segment.first)" + (segment.end.map { ":end_frame=\($0)" } ?? "") + ",setpts=PTS-STARTPTS"
             let output = "[\(name)c\(index)]"
-            guard let window = segment.window else {
+            switch segment.piece {
+            case .pass:
                 parts.append("[\(name)s\(index)]\(trim),format=yuv420p10le\(output)")
-                continue
+            case .panel(let window):
+                let frames = (segment.end ?? (total + 2)) - segment.first
+                parts += try moveWindow(motion, spans: windows[window].spans, first: segment.first, frames: frames,
+                                        frame: frame, rate: rate, fpsExpression: fpsExpression, tags: tags,
+                                        input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)w\(window)_")
+            case .screen(let amount):
+                parts += screenWindow(motion, amount: amount, frame: frame, tags: tags,
+                                      input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)e\(index)_")
             }
-            let frames = (segment.end ?? (total + 2)) - segment.first
-            parts += try moveWindow(motion, spans: windows[window].spans, first: segment.first, frames: frames,
-                                    frame: frame, rate: rate, fpsExpression: fpsExpression, tags: tags,
-                                    input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)w\(window)_")
         }
-        parts.append(segments.indices.map { "[\(name)c\($0)]" }.joined() + "concat=n=\(segments.count):v=1:a=0[mvout]")
+        // concat times a segment by its frames' mean spacing, so a one-frame segment adds no
+        // time at all. From the end screen's first frame on, each frame is timed by its
+        // number on the frame grid this stage works on (the joined video starts at 0).
+        let retime = screenFirst.map { ",setpts='if(lt(N,\($0)),PTS,N/(\(fpsExpression))/TB)'" } ?? ""
+        parts.append(segments.indices.map { "[\(name)c\($0)]" }.joined() + "concat=n=\(segments.count):v=1:a=0\(retime)[mvout]")
         return EffectStage(parts: parts)
+    }
+
+    /// Frames of the end screen with the picture at one place: the fill, as in the move
+    /// aside, with the picture scaled (Lanczos, as the preview) and laid over it.
+    private static func screenWindow(_ motion: GraphicsMotion, amount: Double, frame: CGSize, tags: FrameTags,
+                                     input: String, output: String, name: String) -> [String] {
+        let w = Int(frame.width), h = Int(frame.height)
+        let place = motion.screenPlacement(amount: amount, size: frame)
+        return [
+            "\(input),format=yuv444p10le,split=2[\(name)a][\(name)b]",
+            "[\(name)b]" + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim * amount, tags: tags) + "[\(name)f]",
+            "[\(name)a]scale=\(place.width):\(place.height):flags=lanczos+accurate_rnd+full_chroma_int[\(name)p]",
+            "[\(name)f][\(name)p]overlay=x=\(place.x):y=\(place.y):format=yuv444p10:eof_action=pass,format=yuv420p10le\(output)",
+        ]
+    }
+
+    /// The fill behind a moved picture, on 10-bit 4:4:4 frames: the frame grown by
+    /// `fillScale` and cut back to the frame, at quarter size, blurred, darkened and
+    /// desaturated by `gain`, then brought back up.
+    private static func fillChain(width w: Int, height h: Int, gain: Double, tags: FrameTags) -> String {
+        let unit = Double(w) / 1920
+        let black = tags.fullRange ? 0 : 64
+        let quarter = (w: Int((Double(w) / 4).rounded()), h: Int((Double(h) / 4).rounded()))
+        let grown = (w: Int((Double(w) * GraphicsMotion.fillScale / 4).rounded()), h: Int((Double(h) * GraphicsMotion.fillScale / 4).rounded()))
+        let chroma = String(format: "(val-512)*%.6f+512", gain * GraphicsMotion.fillSaturation)
+        return "scale=\(grown.w):\(grown.h):flags=bilinear,"
+            + "gblur=sigma=\(num(GraphicsMotion.fillBlur * unit / 4)):steps=3,crop=\(quarter.w):\(quarter.h),"
+            + String(format: "lutyuv=y='(val-%d)*%.6f+%d'", black, gain, black) + ":u='\(chroma)':v='\(chroma)',scale=\(w):\(h):flags=bilinear"
     }
 
     /// One panel window of the move, its frames timed from 0.
