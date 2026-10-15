@@ -25,6 +25,8 @@ body.yg-full { background: #000; }
 #bg-video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
 #yg-root { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
 
+/* Places: one per graphic, the whole stage, carrying its move and scale on the picture. */
+.yg-place { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
 /* Hosts: one per graphic, sized to its zone. */
 .yg-host { position: absolute; opacity: 0; }
 .yg-inner { position: relative; width: 100%; height: 100%; }

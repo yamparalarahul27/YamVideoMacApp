@@ -147,10 +147,10 @@ struct ProjectClip: Codable, Equatable {
 struct VideoProject: Codable, Equatable {
     /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
     /// and the per-recording subtitle file. 4: adds per-recording colour. 5: adds
-    /// whole-frame blur effects and timeline markers. 6: adds per-recording graphics. Every
-    /// edited project is written as the current version; older builds reject it rather
-    /// than silently dropping edits.
-    static let currentVersion = 6
+    /// whole-frame blur effects and timeline markers. 6: adds per-recording graphics. 7: adds
+    /// a graphic's move and scale on the picture. Every edited project is written as the
+    /// current version; older builds reject it rather than silently dropping edits.
+    static let currentVersion = 7
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -205,6 +205,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 6, clips.contains(where: { $0.graphics != nil }) {
             try reject("The project claims an older format but contains graphics."); return
+        }
+        if version < 7, clips.contains(where: { $0.graphics?.items.contains { $0.transform != nil } == true }) {
+            try reject("The project claims an older format but contains graphics moved on the picture."); return
         }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return

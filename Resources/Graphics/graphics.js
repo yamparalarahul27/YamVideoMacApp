@@ -921,6 +921,7 @@
     }
 
     const firstInSpan = new Set(p.spans.map((s) => s.items[0]));
+    const places = {};
     for (const graphic of items) {
       const zone = zoneOf(graphic.kind);
       const rect = zone === "column" ? COLUMN : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
@@ -930,15 +931,116 @@
       const inner = h("div", { class: "yg-inner" + (zone === "panel" && !style.moveVideo ? " yg-scaled" : "") });
       if (zone === "panel" && style.moveVideo && panelOffset && look === "glass") inner.style.transform = "translateX(" + panelOffset + "px)";
       append(host, inner);
-      append(container, host);
+      // The place carries the owner's move and scale; the host keeps the template's own
+      // motion, so the two never fight over one transform.
+      const place = h("div", { class: "yg-place" });
+      place.style.transformOrigin = rect.left + "px " + rect.top + "px";
+      setPlace(place, graphic.transform);
+      append(place, host);
+      append(container, place);
+      places[graphic.id] = { place, host, rect, graphic };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
       (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn));
     }
 
-    current = { tl, node: container, plan: p };
+    current = { tl, node: container, plan: p, places, shift };
     root.__timelines = root.__timelines || {};
     root.__timelines[opts.compositionId || "yam-graphics"] = tl;
     return tl;
+  }
+
+  /** A graphic's move and scale on the picture: `transform` {x, y, scale} in design
+   * pixels, scaled from the top-left corner of the graphic's zone. */
+  function setPlace(place, transform) {
+    const x = num(transform && transform.x, 0), y = num(transform && transform.y, 0), s = num(transform && transform.scale, 1);
+    place.style.transform = x || y || s !== 1 ? "translate(" + x + "px," + y + "px) scale(" + s + ")" : "";
+  }
+
+  /** Moves and scales graphics without rebuilding them: {id: transform or null}. */
+  function place(transforms) {
+    if (!current) return;
+    for (const id in transforms) {
+      const entry = current.places[id];
+      if (entry) setPlace(entry.place, transforms[id]);
+    }
+  }
+
+  // What a graphic draws: SVG shapes, images, boxes with a fill or a border, and text,
+  // measured tightly. Containers that only hold others add nothing of their own.
+  function paintedRects(el) {
+    if (el instanceof SVGElement) {
+      if (el.tagName === "svg" || el.tagName === "g" || el.tagName === "defs") return [];
+      return [el.getBoundingClientRect()];
+    }
+    if (el.tagName === "IMG") return [el.getBoundingClientRect()];
+    const cs = getComputedStyle(el);
+    const fill = cs.backgroundImage !== "none" || !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(cs.backgroundColor);
+    const border = ["Top", "Right", "Bottom", "Left"].some((side) => parseFloat(cs["border" + side + "Width"]) > 0);
+    if (fill || border) return [el.getBoundingClientRect()];
+    const rects = [];
+    for (const node of el.childNodes) {
+      if (node.nodeType !== 3 || !node.textContent.trim()) continue;
+      const range = document.createRange();
+      range.selectNode(node);
+      rects.push(range.getBoundingClientRect());
+    }
+    return rects;
+  }
+  function shows(el, host) {
+    for (let node = el; node; node = node.parentElement) {
+      const cs = getComputedStyle(node);
+      if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) < 0.02) return false;
+      if (node === host) return true;
+    }
+    return true;
+  }
+  /** The box a graphic draws now, in design pixels, or null when nothing of it shows. */
+  function drawnBox(entry) {
+    const stage = document.getElementById("stage") || document.body;
+    const sr = stage.getBoundingClientRect();
+    const k = sr.width / 1920 || 1;
+    if (!shows(entry.host, entry.host)) return null;
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const el of entry.host.querySelectorAll("*")) {
+      if (!shows(el, entry.host)) continue;
+      for (const r of paintedRects(el)) {
+        if (r.width <= 0 && r.height <= 0) continue;
+        left = Math.min(left, r.left); top = Math.min(top, r.top);
+        right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
+      }
+    }
+    if (!(right > left && bottom > top)) return null;
+    return { x: (left - sr.left) / k, y: (top - sr.top) / k, w: (right - left) / k, h: (bottom - top) / k };
+  }
+
+  /** Each graphic's box once it has fully come in (half a second before it ends), without
+   * its own move and scale, and the point its scale works from: {id: {x, y, w, h, ox, oy}}.
+   * The playhead is put back afterwards. */
+  function bounds() {
+    if (!current) return {};
+    const tl = current.tl, now = tl.time(), out = {};
+    for (const id in current.places) {
+      const entry = current.places[id], g = entry.graphic;
+      const saved = entry.place.style.transform;
+      entry.place.style.transform = "";
+      tl.time(Math.max(0, Math.max(g.start, g.end - 0.5) - current.shift), false);
+      const box = drawnBox(entry);
+      entry.place.style.transform = saved;
+      if (box) out[id] = Object.assign(box, { ox: entry.rect.left, oy: entry.rect.top });
+    }
+    tl.time(now, false);
+    return out;
+  }
+
+  /** The graphics showing now, as drawn, move and scale included: {id: {x, y, w, h}}. */
+  function boxes() {
+    if (!current) return {};
+    const out = {};
+    for (const id in current.places) {
+      const box = drawnBox(current.places[id]);
+      if (box) out[id] = box;
+    }
+    return out;
   }
 
   /** Reads the inline JSON and loads it. Used by page.html. */
@@ -950,7 +1052,7 @@
   /** Moves the playhead. Events stay on, so count-ups and the route dot update. */
   function seek(seconds) { if (current) current.tl.time(Math.max(0, seconds), false); }
 
-  const api = { VERSION, plan, load, boot, seek, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
+  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

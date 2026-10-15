@@ -115,6 +115,44 @@ struct GraphicsStyle: Codable, Equatable {
     }
 }
 
+/// Where a graphic sits on the picture: moved `x`, `y` design pixels from its place in the
+/// template and scaled by `scale` from the top-left corner of its zone. The engine applies
+/// it, so the preview and the export agree.
+struct GraphicTransform: Codable, Equatable {
+    var x: Double = 0
+    var y: Double = 0
+    var scale: Double = 1
+
+    static let scales = 0.4...2.5
+    /// How far a graphic may move: a whole frame either way.
+    static let reach = CGSize(width: 1920, height: 1080)
+
+    init(x: Double = 0, y: Double = 0, scale: Double = 1) { self.x = x; self.y = y; self.scale = scale }
+
+    var isIdentity: Bool { x == 0 && y == 0 && scale == 1 }
+
+    /// Where a design-pixel point of the template lands, for a zone whose top-left is `origin`.
+    func apply(_ point: CGPoint, origin: CGPoint) -> CGPoint {
+        CGPoint(x: origin.x + x + scale * (point.x - origin.x), y: origin.y + y + scale * (point.y - origin.y))
+    }
+
+    func apply(_ rect: CGRect, origin: CGPoint) -> CGRect {
+        CGRect(origin: apply(rect.origin, origin: origin), size: CGSize(width: rect.width * scale, height: rect.height * scale))
+    }
+
+    /// The first thing out of range, or nil.
+    var problem: String? {
+        guard x.isFinite, y.isFinite, scale.isFinite else { return "A graphic's position and size must be finite numbers." }
+        guard Self.scales.contains(scale) else {
+            return "A graphic's scale must be from \(Self.scales.lowerBound.formatted()) to \(Self.scales.upperBound.formatted())."
+        }
+        guard abs(x) <= Self.reach.width, abs(y) <= Self.reach.height else {
+            return "A graphic can move at most \(Int(Self.reach.width)) px across and \(Int(Self.reach.height)) px down or up."
+        }
+        return nil
+    }
+}
+
 /// One timed graphic. `start` and `end` are edited-recording seconds, like zoom starts.
 /// Beat times inside `props` (`at`, `…At`) are seconds after `start`.
 struct Graphic: Identifiable, Codable, Equatable {
@@ -125,11 +163,13 @@ struct Graphic: Identifiable, Codable, Equatable {
     var props: [String: JSONValue]
     /// glass or ink for this graphic alone; nil follows the style.
     var look: GraphicsLook?
+    /// Moved or resized on the picture; nil is the template's own place and size.
+    var transform: GraphicTransform?
 
     init(id: UUID = UUID(), kind: GraphicKind, start: Double, end: Double,
-         props: [String: JSONValue] = [:], look: GraphicsLook? = nil) {
+         props: [String: JSONValue] = [:], look: GraphicsLook? = nil, transform: GraphicTransform? = nil) {
         self.id = id; self.kind = kind; self.start = start; self.end = end
-        self.props = props; self.look = look
+        self.props = props; self.look = look; self.transform = transform
     }
 
     var length: Double { end - start }
@@ -160,6 +200,13 @@ struct GraphicsTrack: Codable, Equatable {
     }
 
     var isEmpty: Bool { items.isEmpty && style == GraphicsStyle() }
+
+    /// The same graphics without their moves and sizes on the picture, to tell a drag apart.
+    var withoutPlacement: GraphicsTrack {
+        var copy = self
+        for index in copy.items.indices { copy.items[index].transform = nil }
+        return copy
+    }
 
     /// glass or ink, after the style and the kind have had their say.
     func look(of graphic: Graphic) -> GraphicsLook {
@@ -202,6 +249,7 @@ struct GraphicsTrack: Codable, Equatable {
                 return String(format: "A graphic must show for at least %.1f s.", Self.minimumLength)
             }
             guard graphic.look != .mix else { return "A single graphic's look is glass or ink." }
+            if let problem = graphic.transform?.problem { return problem }
             let props = JSONValue.object(graphic.props)
             if let data = try? JSONEncoder().encode(props), data.count > Self.maximumPropsBytes {
                 return "The \(name) has too much text or data."
@@ -242,6 +290,9 @@ struct GraphicsTrack: Codable, Equatable {
                 "props": try JSONValue.object(graphic.props).mappingStrings(forKey: "image", image),
             ]
             if let look = graphic.look { item["look"] = .string(look.rawValue) }
+            if let transform = graphic.transform, !transform.isIdentity {
+                item["transform"] = .object(["x": .number(transform.x), "y": .number(transform.y), "scale": .number(transform.scale)])
+            }
             items.append(.object(item))
         }
         let root: JSONValue = .object([
@@ -446,7 +497,11 @@ enum GraphicsEngine {
                 return standard.path
             }
             let look = item["look"]?.string.flatMap(GraphicsLook.init(rawValue:))
-            track.items.append(Graphic(id: id, kind: kind, start: start, end: end, props: props.object ?? [:], look: look))
+            let transform = item["transform"]?.object.map { place in
+                GraphicTransform(x: place["x"]?.number ?? 0, y: place["y"]?.number ?? 0, scale: place["scale"]?.number ?? 1)
+            }
+            track.items.append(Graphic(id: id, kind: kind, start: start, end: end, props: props.object ?? [:], look: look,
+                                       transform: transform?.isIdentity == true ? nil : transform))
         }
         return track
     }
