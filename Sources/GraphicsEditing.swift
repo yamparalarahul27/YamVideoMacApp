@@ -93,9 +93,12 @@ extension AppModel {
     }
 
     /// Moves a graphic so it starts at `start`, keeping its length, inside the recording.
+    /// The end screen keeps its end where the video ends, so moving it changes its length,
+    /// within YouTube's 5 to 20 seconds.
     func moveGraphic(_ id: UUID, to start: Double, live: Bool = false) {
         let duration = selectedItem?.editedDuration ?? 0
         mutateGraphic(id, gesture: live ? "graphic-move-\(id)" : nil, label: "Move Graphic") { graphic in
+            if graphic.kind == .endScreen { graphic.place(endScreenStart: start, duration: duration); return }
             let length = graphic.length
             graphic.start = max(0, min(start, duration - length))
             graphic.end = graphic.start + length
@@ -106,8 +109,34 @@ extension AppModel {
     func setGraphicEdge(_ id: UUID, start: Double? = nil, end: Double? = nil, live: Bool = false) {
         let duration = selectedItem?.editedDuration ?? 0
         mutateGraphic(id, gesture: live ? "graphic-edge-\(id)" : nil, label: "Change Graphic Length") { graphic in
+            if graphic.kind == .endScreen {
+                if let start { graphic.place(endScreenStart: start, duration: duration) }
+                return
+            }
             if let start { graphic.start = max(0, min(start, graphic.end - GraphicsTrack.minimumLength)) }
             if let end { graphic.end = min(duration, max(end, graphic.start + GraphicsTrack.minimumLength)) }
+        }
+    }
+
+    /// Adds an end screen to the selected recording: the last 20 s, or as much of them as is
+    /// clear of its other graphics, and selects it.
+    func addEndScreen() {
+        guard let index = selectedIndex, items[index].info != nil else { statusMessage = "Select a recording first."; return }
+        let track = items[index].graphics ?? GraphicsTrack()
+        let duration = items[index].editedDuration
+        guard track.endScreen == nil else {
+            selectedGraphicID = track.endScreen?.id
+            statusMessage = "This recording already has an end screen."
+            return
+        }
+        guard let span = track.newEndScreenSpan(duration: duration) else {
+            statusMessage = "There is no room for an end screen: YouTube's end screen needs 5 to 20 s at the end with no other graphic showing."
+            return
+        }
+        let graphic = Graphic(kind: .endScreen, start: span.start, end: span.end, props: EndScreen.defaultProps)
+        switch perform([.addGraphic(clip: items[index].id, graphic: graphic)], label: "Add End Screen") {
+        case .success: selectedGraphicID = graphic.id
+        case .failure(let error): statusMessage = error.message
         }
     }
 
@@ -119,6 +148,13 @@ extension AppModel {
 
     func setGraphicLook(_ id: UUID, _ look: GraphicsLook?) {
         mutateGraphic(id, label: "Graphic Look") { $0.look = look }
+    }
+
+    func setEndScreenLayout(_ id: UUID, videos: Int? = nil, side: EndScreenLayout.Side? = nil) {
+        mutateGraphic(id, label: "End Screen Layout") { graphic in
+            if let videos { graphic.props["videos"] = .number(Double(videos)) }
+            if let side { graphic.props["side"] = .string(side.rawValue) }
+        }
     }
 
     func moveSelectedGraphicToPlayhead() {
@@ -150,5 +186,14 @@ extension AppModel {
         if case .failure(let error) = perform([.setGraphicsStyle(clip: items[index].id, style: style)]) {
             statusMessage = error.message
         }
+    }
+}
+
+extension Graphic {
+    /// An end screen starting at `start` (or as near as YouTube's 5 to 20 seconds allow),
+    /// ending where the video ends.
+    mutating func place(endScreenStart start: Double, duration: Double) {
+        end = duration
+        self.start = max(0, min(max(start, duration - EndScreen.lengths.upperBound), duration - EndScreen.lengths.lowerBound))
     }
 }

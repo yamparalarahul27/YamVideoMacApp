@@ -26,9 +26,13 @@ struct GraphicInspector: View {
                     model.setGraphicEdge(graphic.id, start: $0)
                     return model.selectedGraphic?.start ?? graphic.start
                 }
-                TimelineTimeField(label: "to", value: graphic.end) {
-                    model.setGraphicEdge(graphic.id, end: $0)
-                    return model.selectedGraphic?.end ?? graphic.end
+                if graphic.kind == .endScreen {
+                    Text(String(format: "to the end (%.1f s)", graphic.length)).foregroundStyle(.secondary)
+                } else {
+                    TimelineTimeField(label: "to", value: graphic.end) {
+                        model.setGraphicEdge(graphic.id, end: $0)
+                        return model.selectedGraphic?.end ?? graphic.end
+                    }
                 }
             }
             .font(.caption)
@@ -39,10 +43,38 @@ struct GraphicInspector: View {
                 Button(role: .destructive) { model.removeSelectedGraphic() } label: { Label("Delete", systemImage: "trash") }
             }
             .controlSize(.small)
-            placement
-            Text("Times inside the graphic are seconds after it starts.")
+            if graphic.kind == .endScreen {
+                endScreen
+            } else {
+                placement
+                Text("Times inside the graphic are seconds after it starts.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            GraphicPropsEditor(graphicID: graphic.id, value: .object(graphic.props), path: [], depth: 0,
+                               hidden: graphic.kind == .endScreen ? ["videos", "side", "guides"] : [])
+        }
+    }
+}
+
+extension GraphicInspector {
+    /// The end screen's boxes: how many video cards, and which side the speaker takes.
+    var endScreen: some View {
+        let layout = EndScreenLayout(props: graphic.props)
+        return VStack(alignment: .leading, spacing: 6) {
+            Picker("Video boxes", selection: Binding(get: { layout.videos }, set: { model.setEndScreenLayout(graphic.id, videos: $0) })) {
+                Text("One").tag(1)
+                Text("Two").tag(2)
+            }
+            .pickerStyle(.segmented)
+            Picker("Speaker", selection: Binding(get: { layout.side }, set: { model.setEndScreenLayout(graphic.id, side: $0) })) {
+                ForEach(EndScreenLayout.Side.allCases) { Text($0 == .left ? "Left" : "Right").tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Text("The speaker moves into the frame and the boxes stay empty where YouTube puts its end screen elements: "
+                 + "the Subscribe circle and \(layout.videos == 1 ? "a video card" : "two video cards"). Choose what goes in each "
+                 + "box in Publish; YouTube Studio is where they are placed, since YouTube's upload cannot set them.")
                 .font(.caption2).foregroundStyle(.secondary)
-            GraphicPropsEditor(graphicID: graphic.id, value: .object(graphic.props), path: [], depth: 0)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -95,6 +127,9 @@ struct GraphicsSection: View {
             HStack {
                 Button("Import…") { model.chooseGraphicsFile() }
                     .help("Load a graphics file (graphics.json) onto this recording")
+                Button("End Screen") { model.addEndScreen() }
+                    .disabled(item.graphics?.endScreen != nil || item.editedDuration < EndScreen.lengths.lowerBound)
+                    .help("Add YouTube's end screen layout to the last 5–20 seconds: the speaker in a frame, with boxes kept clear for YouTube's elements")
                 Spacer()
                 Button("Clear All") {
                     model.perform([.replaceGraphics(clip: item.id, graphics: [], style: nil)], label: "Clear Graphics")
@@ -142,6 +177,8 @@ private struct GraphicPropsEditor: View {
     let value: JSONValue
     let path: [GraphicPropPath]
     let depth: Int
+    /// Top-level keys the inspector shows in its own way.
+    var hidden: Set<String> = []
 
     /// Fields people read first come first; the rest follow alphabetically.
     private static let order = ["kicker", "number", "title", "subtitle", "detail", "from", "to", "url",
@@ -150,7 +187,7 @@ private struct GraphicPropsEditor: View {
     var body: some View {
         switch value {
         case .object(let fields):
-            ForEach(Self.sortedKeys(fields), id: \.self) { key in
+            ForEach(Self.sortedKeys(fields).filter { !hidden.contains($0) }, id: \.self) { key in
                 field(key: key, value: fields[key]!, path: path + [.key(key)])
             }
         case .array(let elements):
