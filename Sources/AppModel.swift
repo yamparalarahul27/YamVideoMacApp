@@ -117,7 +117,7 @@ final class AppModel: ObservableObject {
     var projectID = UUID()
 
     private var previewTask: Task<Void, Never>?
-    private var conversionTask: Task<Void, Never>?
+    var conversionTask: Task<Void, Never>?
     private var thumbnailCache: [String: NSImage] = [:]
 
     static let acceptedTypes: [UTType] = [

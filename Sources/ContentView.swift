@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @State private var isDropTarget = false
     @State private var exporting: ExportScope?
+    @State private var publishing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,6 +76,12 @@ struct ContentView: View {
                     }
                     .help("Stop the export (⌘.)")
                 } else {
+                    Button { publishing = true } label: {
+                        Label("Publish…", systemImage: "play.rectangle")
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .disabled(model.isMovieMode || model.selectedItem?.info == nil)
+                    .help("Title, description, tags, chapters and thumbnail for YouTube, with a preview, and Export for YouTube")
                     Button { exporting = model.isMovieMode ? .movie : .selected } label: {
                         Label("Export…", systemImage: "square.and.arrow.up")
                     }
@@ -86,6 +93,7 @@ struct ContentView: View {
             }
         }
         .sheet(item: $exporting) { scope in ExportSheet(scope: scope).environmentObject(model) }
+        .sheet(isPresented: $publishing) { PublishSheet().environmentObject(model) }
         .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
         .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
             loadDroppedURLs(providers) { urls in model.addDropped(urls) }

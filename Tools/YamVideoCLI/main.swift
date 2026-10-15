@@ -23,6 +23,7 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl redo --transaction ID
   yamvideoctl save [--path FILE.yamvideo] [--overwrite]
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
+  yamvideoctl export --youtube --path FOLDER --clip ID [--overwrite]   video, captions, thumbnail and upload text
   yamvideoctl analyze --kind silence|zooms --clip ID
   yamvideoctl cancel JOB
   yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--time SECONDS] [--movie]
@@ -52,7 +53,7 @@ struct Arguments {
     var flags: Set<String> = []
     var positional: [String] = []
 
-    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "pretty", "wait", "help"]
+    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "pretty", "wait", "help"]
 
     init(_ raw: [String]) throws {
         var index = 0
@@ -254,6 +255,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("movie") { request["scope"] = "movie" }
         else { request["scope"] = "recording"; request["clip"] = try value("clip") }
         if arguments.flags.contains("overwrite") { request["overwrite"] = true }
+        if arguments.flags.contains("youtube") { request["youtube"] = true }
         try requireAddress()
     case "analyze":
         request["method"] = "analyze"
