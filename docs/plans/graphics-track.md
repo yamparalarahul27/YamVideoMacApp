@@ -1,9 +1,9 @@
 # Graphics track — implementation plan
 
 **Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
-the app: data, commands, preview, timeline, inspector) and G1 part 2 (export with
-graphics from the app) and G2b (move and resize on the picture) are implemented; see
-sections 8 to 11. Feature 3 of section 6a (the Publish panel) is next. Phase 5 of
+the app: data, commands, preview, timeline, inspector), G1 part 2 (export with graphics
+from the app), G2b (move and resize on the picture) and the Publish panel (G3) are
+implemented; see sections 8 to 12. Feature 4 of section 6a (the thumbnail maker) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -227,9 +227,7 @@ from docs/plans/graphics-track.md".
 
 1. **Export with graphics from the app (G1 part 2).** Done 2026-10-15; section 10.
 2. **Move and resize on the picture (G2b).** Done 2026-10-15; section 11.
-3. **Publish panel with a YouTube preview (G3).** Section 6; also the category (Science &
-   Technology for this channel), tags (500 characters), chapters of at least 10 s each
-   (YouTube turns chapters off otherwise), and the subtitles file with timing.
+3. **Publish panel with a YouTube preview (G3).** Done 2026-10-15; section 12.
 4. **Thumbnail maker (G3).** Section 6.
 5. **End screen layout (G3).** Section 6.
 6. **Auto edit options.** The choices Claude asked before the first edit become app
@@ -416,3 +414,53 @@ from docs/plans/graphics-track.md".
 - **Open.** Hands-on dragging in the running app (the gestures are covered by the maths
   and model checks, not by a pointer). A graphic can be placed partly off the frame; the
   preview shows its box, and agents see it in the reported box.
+
+## 12. Publish panel status (2026-10-15)
+
+- **Data.** Each recording keeps what YouTube needs (`PublishInfo`, project version 8):
+  title, description, tags, category (Science & Technology by default), chapters, a
+  thumbnail image, the captions' language, and the channel name for the preview. Chapter
+  times are edited-recording seconds. Like markers, they follow their footage through
+  cuts and go with it when it is cut away; the first chapter stays at 0:00.
+- **YouTube's rules, checked as you type.** These block Export for YouTube: no title, a
+  title over 100 characters, `<` or `>` in the title or description, a description over
+  5,000 characters with its chapters, tags over 500 characters as YouTube counts them
+  (quotes around a phrase, commas between), and a thumbnail file that has gone. These
+  only warn: chapters YouTube would turn off (first not at 0:00, fewer than three, one
+  shorter than ten seconds), and no thumbnail (YouTube picks a frame).
+- **Chapters suggested** from named markers and from panel title, rule, checklist and
+  title-card graphics: an "Intro" at 0:00 unless something starts in the first ten
+  seconds, then candidates at least ten seconds apart that end ten seconds before the
+  video does.
+- **Captions on the edited timeline** (`Sources/Captions.swift`). SRT and WebVTT cues are
+  moved through cuts, reordering and speed changes: each surviving part shows while its
+  footage plays. The upload gets this as an SRT named with its language. The same file
+  is now burned into exports of cut or retimed recordings, which fixes the drift noted in
+  PR #6. ASS keeps its source timing and is left out of the upload.
+- **Publish sheet** (toolbar **Publish…**): the fields with live counts and issues,
+  chapters (add at the playhead, suggest, edit, delete), the thumbnail (choose an image,
+  or **Use Frame at Playhead**, which saves the composed picture with its graphics next
+  to the recording), and the captions file. A preview shows a sketch of YouTube's watch
+  page (player, title, channel, description with chapters) and a search result with the
+  thumbnail at its real 360 px width.
+- **Export for YouTube** writes into a folder: the MP4 (H.264 whatever the export format
+  is set to), `<title>.<language>.srt`, `<title> thumbnail.jpg` (the middle of the image
+  at 16:9, 1280×720, under 2 MB), `<title> YouTube.txt` with every field to paste, and
+  `<title>.youtube.json` with the same for an agent. The video is written under a
+  temporary name and moved into place when done. The upload stays with the owner.
+- **Agents.** `setPublishInfo` (only the keys given change; thumbnail is a path),
+  `state.clips[].publish`, `publishIssues` and `suggestedChapters`, and `export` with
+  `youtube: true` and a folder (`yamvideoctl export --youtube`), whose result lists every
+  file.
+- **Tests** (1019 checks): the counts and every rule, chapter suggestions, the timestamp
+  format both ways, the round trip and version gate, chapters through a cut, captions
+  through cuts, reordering and speed, a real export whose burned caption shows when its
+  footage plays (not at its source time), the thumbnail conversion, a full Export for
+  YouTube from a GIF-set project, refusal without a title, and agents writing, patching,
+  being refused and exporting.
+- **Real use (this Mac).** An agent wrote the details for the 24 s demo through
+  `yamvideoctl`, used a composed preview at 11.5 s as the thumbnail, and exported for
+  YouTube: MP4, 1280×720 thumbnail, upload text and JSON. The chapter warning showed as a
+  warning, not a refusal. `Tools/Snapshot` shows the sheet with both previews.
+- **Open.** Upload itself (by the owner, or an agent in the owner's browser). End screen
+  element boxes (feature 5) and the thumbnail maker (feature 4) build on this.
