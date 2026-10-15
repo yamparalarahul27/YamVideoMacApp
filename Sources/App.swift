@@ -165,6 +165,9 @@ struct YamVideoApp: App {
                 Divider()
                 Button("Add Marker at Playhead") { model.addMarkerAtPlayhead() }
                 Button("Add Blur Effect at Playhead") { model.addBlurEffect() }
+                Divider()
+                Button("Auto Edit…") { model.showingAutoEdit = true }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
                 }.disabled(model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
             }
             CommandGroup(after: .newItem) {

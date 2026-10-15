@@ -124,7 +124,11 @@ struct TimelineView: View {
             catch { if !Task.isCancelled { audioError = error.localizedDescription } }
         }
         .sheet(isPresented: $reviewingSilence) {
-            if let overview { SilenceReviewView(clip: item, overview: overview).environmentObject(model) }
+            if let overview {
+                SilenceReviewView(clip: item, overview: overview,
+                                  stumbles: item.transcript.map { StumbleFinder.stumbles(in: $0.words) } ?? [])
+                    .environmentObject(model)
+            }
         }
     }
 

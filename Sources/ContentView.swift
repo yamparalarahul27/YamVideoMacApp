@@ -76,6 +76,12 @@ struct ContentView: View {
                     }
                     .help("Stop the export (⌘.)")
                 } else {
+                    Button { model.showingAutoEdit = true } label: {
+                        Label("Auto Edit…", systemImage: "wand.and.stars")
+                    }
+                    .labelStyle(.titleAndIcon)
+                    .disabled(model.isMovieMode || model.selectedItem?.info == nil)
+                    .help("Transcribe, cut pauses and stumbles, and set captions and loudness, the way you chose")
                     Button { publishing = true } label: {
                         Label("Publish…", systemImage: "play.rectangle")
                     }
@@ -95,6 +101,7 @@ struct ContentView: View {
         .sheet(item: $exporting) { scope in ExportSheet(scope: scope).environmentObject(model) }
         .sheet(isPresented: $publishing) { PublishSheet().environmentObject(model) }
         .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
+        .sheet(isPresented: $model.showingAutoEdit) { AutoEditSheet().environmentObject(model) }
         .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
             loadDroppedURLs(providers) { urls in model.addDropped(urls) }
             return true

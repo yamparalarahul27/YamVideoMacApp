@@ -438,6 +438,11 @@ private struct RecordingInspector: View {
         }
     }
 
+    private var captionUse: Binding<CaptionUse> {
+        Binding(get: { model.settings.captionUse(hasFile: item.subtitles != nil) },
+                set: { use in var changed = model.settings; changed.captions = use; model.updateSettings(changed); model.refreshPreview() })
+    }
+
     private var subtitles: some View {
         InspectorSection("Captions") {
             if let file = item.subtitles {
@@ -447,21 +452,16 @@ private struct RecordingInspector: View {
                     Spacer()
                     Button("Change…") { model.chooseSubtitles() }.controlSize(.small)
                     Button { model.clearSubtitles() } label: { Image(systemName: "xmark.circle") }
-                        .buttonStyle(.borderless).help("Export without captions").accessibilityLabel("Remove captions")
+                        .buttonStyle(.borderless)
+                        .help(item.transcript == nil ? "Export without captions" : "Use captions from the transcript instead")
+                        .accessibilityLabel("Remove caption file")
                 }
-                Picker("Placement", selection: settingsBinding.subtitlePlacement) {
-                    ForEach(SubtitlePlacement.allCases) { Text($0.label).tag($0) }
-                }
-                .onChange(of: model.settings.subtitlePlacement) { _, _ in model.refreshPreview() }
-                Text(model.settings.subtitlePlacement.detail).font(.caption2).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Picker("Size", selection: settingsBinding.subtitleSize) {
-                    ForEach(SubtitleSize.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: model.settings.subtitleSize) { _, _ in model.refreshPreview() }
-                if !model.subtitlesAvailable {
-                    warning("This ffmpeg was built without libass and cannot burn captions in. Run brew install ffmpeg-full and relaunch, or remove the file to export without them.")
+            } else if let transcript = item.transcript {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.quote").foregroundStyle(.secondary)
+                    Text("From the transcript · \(transcript.words.count) words").font(.caption).lineLimit(1)
+                    Spacer()
+                    Button("Choose File…") { model.chooseSubtitles() }.controlSize(.small)
                 }
             } else {
                 HStack {
@@ -469,9 +469,32 @@ private struct RecordingInspector: View {
                     Spacer()
                     Button("Choose…") { model.chooseSubtitles() }.controlSize(.small)
                 }
-                Text("Burns an .srt, .vtt or .ass file into the picture. One next to the video with the same name is found automatically.")
+                Text("An .srt, .vtt or .ass file; one next to the video with the same name is found automatically. Auto Edit can make captions from what is said.")
                     .font(.caption2).foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if item.subtitles != nil || item.transcript != nil {
+                Picker("Use", selection: captionUse) {
+                    ForEach(CaptionUse.allCases) { Text($0.label).tag($0) }
+                }
+                Text(captionUse.wrappedValue.detail).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if captionUse.wrappedValue.burns {
+                    Picker("Placement", selection: settingsBinding.subtitlePlacement) {
+                        ForEach(SubtitlePlacement.allCases) { Text($0.label).tag($0) }
+                    }
+                    .onChange(of: model.settings.subtitlePlacement) { _, _ in model.refreshPreview() }
+                    Text(model.settings.subtitlePlacement.detail).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Picker("Size", selection: settingsBinding.subtitleSize) {
+                        ForEach(SubtitleSize.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: model.settings.subtitleSize) { _, _ in model.refreshPreview() }
+                    if !model.subtitlesAvailable {
+                        warning("This ffmpeg was built without libass and cannot burn captions in. Run brew install ffmpeg-full and relaunch, or choose SRT for upload.")
+                    }
+                }
             }
         }
     }
