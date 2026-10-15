@@ -117,7 +117,7 @@ extension AppModel {
             captions = item.shortCaptionOverlay(short, settings: settings)
             shortCaptionCache = (key, captions)
         }
-        let track = item.graphics?.forShort(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels))
+        let track = item.graphics?.forShort(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels, zoom: short.zoomLevel))
         return GraphicsOverlayInput(clip: item.id, track: track, duration: item.editedDuration, fps: info.fpsExpression,
                                     frame: short.frame(info: info, crop: item.crop).size, time: previewTime, captions: captions)
     }
@@ -451,7 +451,7 @@ extension AppModel {
         context.interpolationQuality = .high
         context.draw(frame, in: CGRect(origin: .zero, size: size))
         guard let picture = context.makeImage() else { throw FFmpegError(message: "The Short's frame could not be drawn.") }
-        let track = item.graphics?.forShort(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels))
+        let track = item.graphics?.forShort(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels, zoom: short.zoomLevel))
         let overlay = captions ? item.shortCaptionOverlay(short, settings: settings) : nil
         guard !track.items.isEmpty || overlay != nil else { return (picture, []) }
         let snapshot = try await GraphicsSnapshot.draw(track, duration: clip.timeline.duration, fps: info.fpsExpression, time: time,
@@ -520,40 +520,71 @@ extension AppModel {
 
 // MARK: - YouTube's furniture
 
-/// Where YouTube draws over a Short, faintly: icons along the top, the like and share rail
-/// on the right, and the channel, title and sound along the bottom (Google's guidance).
+/// YouTube's Shorts player as a viewer sees it over the Short, faintly: the icons along the
+/// top, the like, comment and share rail down the lower right, and the channel, title and
+/// sound along the bottom, each over YouTube's own shading. The clear area is dashed.
 struct ShortFurniture: View {
     var body: some View {
         GeometryReader { geo in
             let k = geo.size.width / ShortFormat.size.width
             let f = ShortFormat.furniture
+            let clear = ShortFormat.clearArea
             ZStack(alignment: .topLeading) {
-                band(width: geo.size.width, height: f.top * k, label: "YouTube's icons")
-                band(width: geo.size.width, height: f.bottom * k, label: "Channel · title · sound")
-                    .offset(y: geo.size.height - f.bottom * k)
-                VStack(spacing: 14 * k * 2) {
-                    ForEach(["hand.thumbsup", "hand.thumbsdown", "text.bubble", "arrowshape.turn.up.right", "arrow.2.squarepath"], id: \.self) { icon in
-                        Image(systemName: icon).font(.system(size: max(9, 60 * k)))
-                    }
-                }
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: f.right * k)
-                .offset(x: geo.size.width - f.right * k, y: geo.size.height - f.bottom * k - 760 * k)
+                LinearGradient(colors: [.black.opacity(0.3), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(width: geo.size.width, height: f.top * k)
+                LinearGradient(colors: [.clear, .black.opacity(0.4)], startPoint: .top, endPoint: .bottom)
+                    .frame(width: geo.size.width, height: (f.bottom + 120) * k)
+                    .offset(y: geo.size.height - (f.bottom + 120) * k)
                 Rectangle()
                     .stroke(Color.white.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                    .frame(width: ShortFormat.clearArea.width * k, height: ShortFormat.clearArea.height * k)
-                    .offset(x: ShortFormat.clearArea.minX * k, y: ShortFormat.clearArea.minY * k)
+                    .frame(width: clear.width * k, height: clear.height * k)
+                    .offset(x: clear.minX * k, y: clear.minY * k)
             }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .overlay(alignment: .topTrailing) {
+                HStack(spacing: 48 * k) {
+                    symbol("magnifyingglass", k: k)
+                    symbol("ellipsis", k: k).rotationEffect(.degrees(90))
+                }
+                .padding(.top, 90 * k).padding(.trailing, 60 * k)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                VStack(spacing: 36 * k) {
+                    ForEach([("hand.thumbsup.fill", "Like"), ("hand.thumbsdown.fill", "Dislike"), ("text.bubble.fill", "Comment"),
+                             ("arrowshape.turn.up.right.fill", "Share"), ("arrow.triangle.2.circlepath", "Remix")], id: \.0) { icon, label in
+                        VStack(spacing: 8 * k) {
+                            symbol(icon, k: k)
+                            Text(label).font(.system(size: max(6, 28 * k), weight: .medium))
+                        }
+                    }
+                    RoundedRectangle(cornerRadius: 14 * k).stroke(Color.white.opacity(0.8), lineWidth: max(1, 5 * k))
+                        .frame(width: 76 * k, height: 76 * k)
+                }
+                .frame(width: f.right * k, height: (ShortFormat.size.height - ShortFormat.railTop - 80) * k, alignment: .bottom)
+                .padding(.bottom, 80 * k)
+            }
+            .overlay(alignment: .bottomLeading) {
+                VStack(alignment: .leading, spacing: 22 * k) {
+                    HStack(spacing: 18 * k) {
+                        Circle().fill(Color.white.opacity(0.35)).frame(width: 72 * k, height: 72 * k)
+                        Text("@yourchannel").font(.system(size: max(7, 36 * k), weight: .semibold))
+                        Text("Subscribe").font(.system(size: max(6, 30 * k), weight: .semibold)).foregroundStyle(.black)
+                            .padding(.horizontal, 22 * k).padding(.vertical, 10 * k).background(Color.white.opacity(0.85), in: Capsule())
+                    }
+                    Text("Your Short's title").font(.system(size: max(7, 38 * k)))
+                    Label("Original sound", systemImage: "music.note").font(.system(size: max(6, 30 * k)))
+                }
+                .lineLimit(1)
+                .frame(width: clear.width * k, alignment: .leading)
+                .padding(.leading, f.left * k).padding(.bottom, 96 * k)
+            }
+            .foregroundStyle(.white.opacity(0.75))
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func band(width: CGFloat, height: CGFloat, label: String) -> some View {
-        Rectangle().fill(Color.black.opacity(0.22))
-            .frame(width: width, height: height)
-            .overlay(alignment: .center) {
-                Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.6))
-            }
+    private func symbol(_ name: String, k: CGFloat) -> some View {
+        Image(systemName: name).font(.system(size: max(9, 58 * k)))
     }
 }

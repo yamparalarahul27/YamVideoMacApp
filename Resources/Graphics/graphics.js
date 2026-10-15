@@ -29,7 +29,8 @@
   /**
    * Pure: where a Short (a 1080×1920 canvas) puts things. Each zone is where the template's
    * own zone (the 640×900 column, the 960×1080 panel) has its top-left corner, and its size.
-   * The app has the same numbers (ShortLayout in Sources/Shorts.swift).
+   * Zoomed out, the cards, the bottom sheet and the captions sit `drop` pixels lower, under
+   * the face. The app has the same numbers (ShortLayout in Sources/Shorts.swift).
    */
   const SHORT_STAGE = { left: 0, top: 0, width: 1080, height: 1920 };
   const SHORT_PANELS = {
@@ -37,15 +38,18 @@
     shade: { x: 0, y: 312, scale: 0.96 },
     split: { x: 53, y: 802, scale: 0.85 },
   };
-  function shortLayout(panels) {
+  function shortLayout(panels, drop) {
     const name = SHORT_PANELS[panels] ? panels : "sheet";
+    const d = typeof drop === "number" && isFinite(drop) ? Math.max(0, Math.min(400, drop)) : 0;
+    const panel = Object.assign({}, SHORT_PANELS[name]);
+    if (name === "sheet") panel.y += d;
     return {
-      panels: name, stage: SHORT_STAGE,
-      column: { x: 72, y: 760, scale: 1.2 },
-      panel: SHORT_PANELS[name],
-      sheetTop: 700, lift: 240,
+      panels: name, stage: SHORT_STAGE, drop: d,
+      column: { x: 72, y: 760 + d, scale: 1.2 },
+      panel,
+      sheetTop: 700 + d, lift: 240,
       splitFrame: { x: 333, y: 112, w: 414, h: 736 },
-      captionBottom: 1320,
+      captionBottom: 1320 + d,
     };
   }
 
@@ -936,7 +940,7 @@
 
     const p = plan(data);
     const style = Object.assign({}, DEFAULT_STYLE, data.style || {});
-    const short = data.layout && data.layout.canvas === "short" ? shortLayout(data.layout.panels) : null;
+    const short = data.layout && data.layout.canvas === "short" ? shortLayout(data.layout.panels, data.layout.drop) : null;
     const stage = short ? SHORT_STAGE : STAGE;
     setStage(stage);
     document.documentElement.style.setProperty("--yg-accent", style.accent);
@@ -965,6 +969,7 @@
       const inkSpan = span.items.every((id) => lookOf(byID.get(id), style) === "ink");
       if (inkSpan) {
         const veil = h("div", { class: "yg-veil " + placement });
+        if (short && short.panels === "sheet" && short.drop) veil.style.top = short.drop + "px";
         if (short && short.panels === "split") append(veil, splitFrame(short));
         append(container, veil);
         tl.fromTo(veil, { opacity: 0 }, { opacity: 1, duration: PANEL_SLIDE, ease: "power2.out" }, toTime(span.start));
@@ -972,6 +977,7 @@
         continue;
       }
       const bg = h("div", { class: "yg-panel-bg " + (style.panel === "solid" ? "solid" : "shade") + " " + placement });
+      if (short && short.panels === "sheet" && short.drop) { bg.style.top = short.sheetTop + "px"; bg.style.height = (SHORT_STAGE.height - short.sheetTop) + "px"; }
       if (short && short.panels === "split") append(bg, splitFrame(short));
       append(container, bg);
       if (short) {
@@ -1083,7 +1089,7 @@
 
   let captionList = null;
   let captionNode = null;
-  /** {size, outline, items: [{start, end, lines, bottom}]}, or null for none. */
+  /** {size, outline, left, right, items: [{start, end, lines, bottom}]}, or null for none. */
   function captions(data) {
     captionList = data && Array.isArray(data.items) ? data : null;
     if (!captionNode) {
@@ -1104,7 +1110,7 @@
     if (!found) return;
     // libass's line ends 0.236 em under the baseline, a 1.18 em CSS line 0.32 em under it.
     const box = h("div", { class: "yg-cap", style: "bottom:" + (stageSize().height - found.bottom - 0.084 * captionList.size) + "px;font-size:" + captionList.size +
-      "px;-webkit-text-stroke-width:" + (2 * captionList.outline) + "px;" });
+      "px;-webkit-text-stroke-width:" + (2 * captionList.outline) + "px;left:" + num(captionList.left, 40) + "px;right:" + num(captionList.right, 40) + "px;" });
     found.lines.forEach((line, i) => { if (i) append(box, h("br")); append(box, line); });
     append(captionNode, box);
   }

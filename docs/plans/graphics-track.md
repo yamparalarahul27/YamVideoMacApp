@@ -682,11 +682,15 @@ cards; instead a Short can link to a **related video**, set in YouTube Studio (C
 the Short → Related video). The upload API cannot set that link. Custom Shorts thumbnails
 have been rolling out since July 2026 (Partner Program channels first); everyone else
 picks a frame. YouTube draws its own furniture over a Short: icons along the top, the
-like/comment/share rail on the right, and the channel, title and sound at the bottom.
-Google's ad guidance keeps text out of the top 288 px, the bottom 672 px, the left 48 px
-and the right 192 px of a 1080×1920 frame.
+like/comment/share rail down the lower right, and the channel, title and sound along the
+bottom. YouTube publishes no numbers for Shorts; measurements of the app put its furniture
+in about the top 240 px, the bottom 400 px (a fifth) and a rail of up to 192 px down the
+right from about halfway, with 48 px kept clear on the left. That leaves a clear area of
+840×1280 from (48, 240). Google's guide for vertical ads is stricter (the top 288 px and
+the bottom 672 px) because those ads also play outside Shorts; for a Short it hid a third
+of the frame and put the rail beside the face, so the app follows the Shorts player.
 
-**Data** (project version 12). `ProjectClip.shorts: [Short]?`, nil when there are none.
+**Data** (project version 12; 13 adds `zoom`). `ProjectClip.shorts: [Short]?`, nil when there are none.
 
 ```
 Short
@@ -701,6 +705,7 @@ Short
   cover: Double?                // seconds into the Short for the cover frame
   panels: sheet | shade | split // how panel graphics lay out (owner's choice per Short)
   captions: stepUp | over | hide  // burned-in captions while a graphic covers the lower half
+  zoom: Double?                 // 0.5625–1; nil = 1, fills the frame (version 13)
 ```
 
 **Owner's answers (2026-10-15).** A Short is a part of a recording (several per
@@ -717,6 +722,22 @@ picture (after colour, blur areas and before zooms, where the crop goes today) a
 to 1080×1920: a 4K recording gives a 1215×2160 window, scaled down; a 1080p one gives
 608×1080, scaled up. Everything else in the edit (sections, speed, colour, blur areas,
 blur effects, zooms) applies as it does to the long video.
+
+**Zoom out** (after the first real Short, 2026-10-15). On a close-up the face filled the
+top half, so the card (from y 760) sat on the chin and captions stepping up above it sat
+on the eyes. The owner chose a gentle zoom out with the bottom blurred to blend (3:4
+over a square or keeping it full; mock-ups on their footage). `zoom` (a slider, Zoom out,
+in the Short's window controls; `zoom` for agents) widens the window about its centre to
+`window.width / zoom` (inside the crop), keeps it full height, and draws it at the top of
+a taller 9:16 stage (`window.width / zoom` wide, `× 16/9` tall, so the picture keeps its
+own pixels until the delivery scale). Below it, the move aside's fill (the picture grown
+to cover the stage, blurred, darkened); the picture's bottom edge fades into it over
+240 design px. Core Image (`zoomOut`) and ffmpeg (`zoomStage`, before the move stage,
+which then works on the stage) draw the same, with a parity test. Zoomed out the face
+sits higher and smaller, so the cards, the bottom sheet and the captions sit lower by
+`drop = 400 × (1 − zoom)` design px (100 at 3:4, 175 at a square), and over a card the
+captions stay below it rather than step up over the face; over a sheet they still step
+above it (it is lower now, and the picture lifts). The engine gets `drop` with the layout.
 
 **Graphics on a 9:16 canvas.** The engine gets a second layout, `short`, with a
 1080×1920 stage. The same template kinds draw; only their zones move:
@@ -743,10 +764,11 @@ blur effects, zooms) applies as it does to the long video.
   its own `placements`. A graphic can also be hidden in one Short.
 
 **Captions.** The safe-area placement (their bottom about 600 px above the frame's
-bottom) and a size made for a vertical frame: today's Medium is 75 px on a 1080-tall
+bottom, centred in the clear area so long lines stay left of the rail) and a size made
+for a vertical frame: today's Medium is 75 px on a 1080-tall
 frame, and stays about 75 px on the 1920-tall Short, where the same libass size would be
-133 px and wrap to five lines (checked). Captions are split for the narrow frame (about
-24 characters a line, two lines at most). While a card or panel covers the lower half,
+133 px and wrap to five lines (checked). Captions are split for the clear area (about
+18 characters a line at Medium, two lines at most). While a card or panel covers the lower half,
 the Short's `captions` option moves them up above it, keeps them over it, or hides them.
 So that the preview can show this while it plays, the app lays the captions out (lines,
 size, where each one sits) and both renderers draw that layout: the engine in the
@@ -800,7 +822,8 @@ the limits (3:00, the window inside the picture and 9:16, no overlap).
   in Preview and the ffmpeg move stage in export (`moveWindow` with a vertical axis, and
   the end screen's per-frame placement reused for the split).
 - **Captions.** `ShortCaptionLayout` splits captions into pieces of at most two lines of
-  about 21 characters (Medium, 72 px), places each one's bottom at the safe-area spot
+  about 18 characters (Medium, 72 px), centres them in the clear area (left 48, right
+  192, so they stay left of YouTube's rail), places each one's bottom at the safe-area spot
   (1320) or, while a card or panel covers the lower half, as the Short's option says
   (Step up: above the card zone at 736, above the sheet at 676, at the split frame's foot
   at 832; a full shade leaves them be. Stay over. Hide). The export burns an ASS file on
@@ -810,7 +833,9 @@ the limits (3:00, the window inside the picture and 9:16, no overlap).
 - **App.** The viewer has Edit frame | Preview | Short. The Short viewer plays the
   selected Short in 9:16 with its graphics and captions, stops at its end, keeps playing
   through edits (so the panel layout and captions option can be tried while it plays),
-  shows YouTube's furniture faintly (toggle), and lets graphics be dragged and resized
+  shows YouTube's Shorts player faintly (toggle: the top icons, the like/comment/share
+  rail down the lower right, the channel, title and sound along the bottom, and the clear
+  area dashed), and lets graphics be dragged and resized
   for that Short alone. A Shorts row on the timeline (drag to move, edges to change the
   length). Inspector: the recording's Shorts list with Add Short at Playhead; the Short
   section with From/to, the window (Across, Size, Down, Centre on Speaker, Reset), Panels,
@@ -870,8 +895,20 @@ the limits (3:00, the window inside the picture and 9:16, no overlap).
   frame evenly spaced; `reveal` showed the Short in the owner's viewer. `Tools/Snapshot`
   shows the Short viewer with YouTube's furniture, the inspector, the split layout and
   Publish's Short mode with its player sketch.
-- **Open.** Real footage of a person (the window follows no movement: one fixed window
-  per Short, by the owner's choice; following the speaker can come later). Checking the
-  safe-area numbers against YouTube's app on a phone. Hands-on dragging in the Short
-  viewer. Custom Shorts covers depend on YouTube's rollout to the channel. Movie mode has
+- **Safe area, after use.** On the owner's first real Short the overlay looked wrong: it
+  drew Google's ad guide as grey bands over the top 15 % and bottom 35 %, put the rail
+  beside the face, and the captions (600 px up) sat inside its own bottom band while long
+  lines ran under where the rail really is. The overlay now draws the Shorts player as a
+  viewer sees it (numbers in the design above), and captions are centred in the clear
+  area; tests check the exported captions end left of the rail and the viewer matches.
+- **Zoom out** (version 13): `Short.zoom`, `picture(info:crop:)` (the window widened),
+  `ShortFormat.stage(for:)`, `ShortLayout(panels:zoom:)` with `drop`, `cardZone`,
+  `sheetLine` and `captionSpot`; `GraphicsCanvas.short(panels, zoom:)`; `zoomOut` in the
+  preview and `FFmpeg.zoomStage` in the export (with or without graphics); the Zoom out
+  slider; `zoom` and `picture` in agent state. Tests: the maths, the layout against the
+  engine at three zooms, captions below a card, preview/export parity with the sheet's
+  lift, the blurred fill, the version gate, an agent's zoom and its refusal.
+- **Open.** Following the speaker (one fixed window per Short, by the owner's choice).
+  Checking the overlay against a screenshot of YouTube's app on the owner's phone.
+  Hands-on dragging in the Short viewer. Custom Shorts covers depend on YouTube's rollout to the channel. Movie mode has
   no Shorts.

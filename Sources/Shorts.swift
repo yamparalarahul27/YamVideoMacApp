@@ -76,15 +76,20 @@ struct Short: Codable, Equatable, Identifiable {
     var cover: Double?
     var panels = ShortPanels.sheet
     var captions = ShortCaptions.stepUp
+    /// How far the picture is zoomed out: nil (or 1) fills the frame; lower shows more of
+    /// the picture around the window, at the top, with its bottom edge fading into a
+    /// blurred copy below, down to `ShortFormat.zooms.lowerBound`, a square.
+    var zoom: Double?
 
     init(id: UUID = UUID(), start: Double, end: Double, window: CGRect? = nil) {
         self.id = id; self.start = start; self.end = end; self.window = window
     }
 
     var length: Double { end - start }
+    var zoomLevel: Double { zoom ?? 1 }
 
     private enum CodingKeys: String, CodingKey {
-        case id, start, end, window, title, description, tags, hidden, placements, cover, panels, captions
+        case id, start, end, window, title, description, tags, hidden, placements, cover, panels, captions, zoom
     }
 
     /// Missing keys keep their defaults, so a partial object is complete.
@@ -109,6 +114,7 @@ struct Short: Codable, Equatable, Identifiable {
         cover = try c.decodeIfPresent(Double.self, forKey: .cover)
         panels = try c.decodeIfPresent(ShortPanels.self, forKey: .panels) ?? .sheet
         captions = try c.decodeIfPresent(ShortCaptions.self, forKey: .captions) ?? .stepUp
+        zoom = try c.decodeIfPresent(Double.self, forKey: .zoom)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -125,11 +131,24 @@ struct Short: Codable, Equatable, Identifiable {
         try c.encodeIfPresent(cover, forKey: .cover)
         try c.encode(panels, forKey: .panels)
         try c.encode(captions, forKey: .captions)
+        try c.encodeIfPresent(zoom, forKey: .zoom)
     }
 
     /// The window the Short shows: its own, or the full height of `crop`, centred.
     func frame(info: MediaInfo, crop: CGRect?) -> CGRect {
         window ?? ShortFormat.defaultWindow(in: (crop ?? info.fullFrame).evenClamped(in: info.fullFrame), info: info)
+    }
+
+    /// The part of the picture the Short reads: its window, or when zoomed out the window
+    /// widened about its centre (as far as the crop allows), in even source pixels. The
+    /// picture is drawn at the top of a taller 9:16 stage (`ShortFormat.stage(for:)`).
+    func picture(info: MediaInfo, crop: CGRect?) -> CGRect {
+        let window = frame(info: info, crop: crop)
+        guard zoomLevel < 1 else { return window }
+        let area = (crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        let width = min(area.width, max(window.width, (window.width / zoomLevel / 2).rounded() * 2))
+        let x = min(max(area.minX, window.midX - width / 2), area.maxX - width)
+        return CGRect(x: (x / 2).rounded(.down) * 2, y: window.minY, width: width, height: window.height).intersection(info.fullFrame)
     }
 
     /// What the timeline and lists call it.
@@ -157,6 +176,11 @@ struct Short: Codable, Equatable, Identifiable {
             }
             guard abs(window.width / window.height - ShortFormat.aspect) <= 0.01 else {
                 return String(format: "The Short's window is 9:16 (its width is its height × 9 ÷ 16); this one is %.0f×%.0f.", window.width, window.height)
+            }
+        }
+        if let zoom {
+            guard zoom.isFinite, ShortFormat.zooms.contains(zoom) else {
+                return "A Short's zoom is from \(ShortFormat.zooms.lowerBound.formatted()) (zoomed out to a square at the top) to 1 (fills the frame)."
             }
         }
         guard title.count <= 1000, description.count <= 20_000, tags.count <= 200 else {
@@ -218,16 +242,26 @@ struct Short: Codable, Equatable, Identifiable {
 enum ShortFormat {
     /// The canvas: design pixels of the Short, and the exported size.
     static let size = CGSize(width: 1080, height: 1920)
+    /// How far a Short can zoom out: from filling the frame to a square at the top.
+    static let zooms = 0.5625...1.0
+    /// A zoomed-out picture's bottom edge fades into the blurred fill over this many design
+    /// pixels.
+    static let zoomFade = 240.0
     static let aspect = 9.0 / 16.0
     /// YouTube treats a vertical video of up to 3 minutes as a Short.
     static let lengths = 1.0...180.0
     static let defaultLength = 60.0
     static let maximumCount = 20
-    /// Where YouTube draws over a Short (Google's guidance for vertical video in Shorts):
-    /// icons along the top, the like and share rail on the right, and the channel, title
-    /// and sound along the bottom. Text and faces belong in the clear area between.
-    static let furniture = (top: 288.0, bottom: 672.0, left: 48.0, right: 192.0)
-    static let clearArea = CGRect(x: 48, y: 288, width: 840, height: 960)
+    /// Where YouTube's Shorts player draws over a Short on a phone: its icons along the top,
+    /// the like, comment and share rail down the lower right (from `railTop`), and the
+    /// channel, title and sound along the bottom fifth. YouTube publishes no numbers for
+    /// Shorts; these follow measurements of the app. Google's guide for vertical ads, which
+    /// also play outside Shorts, is stricter (the top 288 px and the bottom 672 px). Text
+    /// and faces belong in the clear area between.
+    static let furniture = (top: 240.0, bottom: 400.0, left: 48.0, right: 192.0)
+    /// Where the like, comment and share rail starts down the right edge.
+    static let railTop = 960.0
+    static let clearArea = CGRect(x: 48, y: 240, width: 840, height: 1280)
     static let relatedVideoStep = "YouTube Studio → Content → Shorts → this Short → Related video"
     static let relatedVideoNote = "Shorts have no end screen. To send viewers to the long video, open " + relatedVideoStep
         + " and choose it; the upload API cannot set that link."
@@ -244,6 +278,14 @@ enum ShortFormat {
             return "In a Short a graphic can move at most \(Int(size.width)) px across and \(Int(size.height)) px down or up."
         }
         return nil
+    }
+
+    /// The 9:16 stage a Short's picture of `size` is drawn on when it is wider than 9:16
+    /// (zoomed out): as wide as the picture, with the picture at its top. Nil for a 9:16
+    /// picture, which is its own stage.
+    static func stage(for size: CGSize) -> CGSize? {
+        guard size.height > 0, size.width / size.height > aspect * 1.02 else { return nil }
+        return CGSize(width: size.width, height: (size.width / aspect / 2).rounded() * 2)
     }
 
     /// The largest 9:16 window in `frame`, centred, in even pixels.
@@ -274,6 +316,15 @@ struct ShortLayout: Equatable {
     }
 
     var panels: ShortPanels
+    /// The Short's zoom: zoomed out, the face sits higher and smaller, so the cards, the
+    /// bottom sheet and the captions sit lower by `drop`.
+    var zoom = 1.0
+
+    init(panels: ShortPanels, zoom: Double = 1) { self.panels = panels; self.zoom = zoom }
+
+    /// How much lower the cards, the bottom sheet and the captions sit, zoomed out: none
+    /// filling the frame, 175 design pixels for a square.
+    var drop: Double { ((1 - min(1, max(ShortFormat.zooms.lowerBound, zoom))) * 400).rounded() }
 
     /// Cards sit in the lower middle, below the face, inside YouTube's clear area.
     static let column = Zone(origin: CGPoint(x: 72, y: 760), scale: 1.2)
@@ -286,22 +337,30 @@ struct ShortLayout: Equatable {
     /// The safe-area spot: libass's MarginV 90 of 288, 600 px above the bottom.
     static let captionBottom = 1320.0
 
+    /// The column zone, `drop` lower when zoomed out.
+    var cardZone: Zone { Zone(origin: CGPoint(x: Self.column.origin.x, y: Self.column.origin.y + drop), scale: Self.column.scale) }
+    /// Where the bottom sheet's soft edge starts.
+    var sheetLine: Double { Self.sheetTop + drop }
+    /// Where captions sit when nothing covers them.
+    var captionSpot: Double { Self.captionBottom + drop }
+
     var panel: Zone {
         switch panels {
-        case .sheet: return Zone(origin: CGPoint(x: 29, y: 717), scale: 0.9)
+        case .sheet: return Zone(origin: CGPoint(x: 29, y: 717 + drop), scale: 0.9)
         case .shade: return Zone(origin: CGPoint(x: 0, y: 312), scale: 0.96)
         case .split: return Zone(origin: CGPoint(x: 53, y: 802), scale: 0.85)
         }
     }
 
     /// Where captions step up to (their bottom) while a graphic in `zone` shows, or nil
-    /// where they are clear of it already.
+    /// where they are clear of it already. Zoomed out, a card sits under the face and the
+    /// captions stay below it, since above it would be the face.
     func captionLine(for zone: GraphicZone) -> Double? {
         switch zone {
-        case .column: return Self.column.origin.y - 24
+        case .column: return zoom < 1 ? nil : cardZone.origin.y - 24
         case .panel:
             switch panels {
-            case .sheet: return Self.sheetTop - 24
+            case .sheet: return sheetLine - 24
             case .shade: return nil
             case .split: return Self.splitFrame.maxY - 16
             }
@@ -311,7 +370,7 @@ struct ShortLayout: Equatable {
 
     /// The zone a kind draws in.
     func zone(of kind: GraphicKind) -> Zone {
-        kind.zone == .panel ? panel : Self.column
+        kind.zone == .panel ? panel : cardZone
     }
 }
 
@@ -394,7 +453,7 @@ extension GraphicsTrack {
     func forShort(_ short: Short, recordingTime: Bool = false) -> GraphicsTrack {
         let shift = recordingTime ? 0 : short.start
         var track = GraphicsTrack(style: style, items: [])
-        track.canvas = .short(short.panels)
+        track.canvas = .short(short.panels, zoom: short.zoomLevel)
         for graphic in items.sorted(by: { $0.start < $1.start }) {
             guard graphic.kind != .endScreen, !short.hidden.contains(graphic.id),
                   graphic.start >= short.start - 0.0005, graphic.start < short.end - Self.minimumLength + 0.000001 else { continue }
@@ -418,7 +477,7 @@ extension VideoItem {
         var item = self
         let timeline = self.timeline.cut(from: short.start, to: short.end)
         item.segments = timeline.segments
-        if let info { item.crop = short.frame(info: info, crop: crop) }
+        if let info { item.crop = short.picture(info: info, crop: crop) }
         item.aspectLock = ShortFormat.aspect; item.aspectLabel = "9:16"
         item.zoomShots = zoomShots.filter { $0.start >= short.start - 0.0005 && $0.end <= short.end + 0.0005 }.map {
             var shot = $0; shot.start = max(0, shot.start - short.start); return shot
@@ -495,8 +554,13 @@ enum ShortCaptionLayout {
     /// 1.18 em, measured), where the engine's CSS sizes the em; and lines are that far apart.
     static let lineHeight = 1.18
 
-    /// How many characters fit on one line of the 1080-wide frame, with room each side.
-    static func lineCharacters(_ size: SubtitleSize) -> Int { Int((920 / (fontSize(size) * 0.6)).rounded(.down)) }
+    /// Captions sit centred in the clear area, left of YouTube's like and share rail.
+    static let margins = (left: ShortFormat.clearArea.minX, right: ShortFormat.size.width - ShortFormat.clearArea.maxX)
+
+    /// How many characters fit on one line of the clear area, with room each side.
+    static func lineCharacters(_ size: SubtitleSize) -> Int {
+        Int(((ShortFormat.clearArea.width - 40) / (fontSize(size) * 0.6)).rounded(.down))
+    }
 
     /// Words in lines of at most `limit` characters (a longer word has a line to itself).
     static func wrap(_ text: String, limit: Int) -> [String] {
@@ -535,7 +599,7 @@ enum ShortCaptionLayout {
     /// panel covers the lower half, when the Short's option steps it up above the graphic,
     /// leaves it over it, or hides it. `graphics` are the Short's own (`forShort`).
     static func layout(_ captions: [Caption], graphics: GraphicsTrack?, option: ShortCaptions, size: SubtitleSize) -> [ShortCaption] {
-        let layout: ShortLayout? = { if case .short(let panels)? = graphics?.canvas { return ShortLayout(panels: panels) }; return nil }()
+        let layout: ShortLayout? = { if case .short(let panels, let zoom)? = graphics?.canvas { return ShortLayout(panels: panels, zoom: zoom) }; return nil }()
         // The times a graphic covers the lower half, and the line captions step up to then.
         var covers: [(start: Double, end: Double, line: Double?)] = []
         if let graphics, let layout {
@@ -559,7 +623,7 @@ enum ShortCaptionLayout {
             for (from, to) in zip(edges, edges.dropFirst()) where to - from >= shortest - 0.000001 {
                 let middle = (from + to) / 2
                 let over = covers.filter { middle >= $0.start && middle < $0.end }
-                var bottom = ShortLayout.captionBottom
+                var bottom = layout?.captionSpot ?? ShortLayout.captionBottom
                 if !over.isEmpty {
                     switch option {
                     case .hide: continue
@@ -593,7 +657,7 @@ enum ShortCaptionLayout {
             "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
             "[V4+ Styles]",
             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-            "Style: Short,Helvetica,\(Int((fontSize(size) * lineHeight).rounded())),&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,\(Int(outline(size))),0,2,40,40,\(height - Int(ShortLayout.captionBottom)),1",
+            "Style: Short,Helvetica,\(Int((fontSize(size) * lineHeight).rounded())),&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,\(Int(outline(size))),0,2,\(Int(margins.left)),\(Int(margins.right)),\(height - Int(ShortLayout.captionBottom)),1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -620,6 +684,9 @@ enum ShortCaptionLayout {
 struct CaptionOverlay: Equatable, Encodable {
     var size: Double
     var outline: Double
+    /// The room kept each side; captions are centred between.
+    var left = ShortCaptionLayout.margins.left
+    var right = ShortCaptionLayout.margins.right
     var items: [ShortCaption]
 
     init(_ items: [ShortCaption], size: SubtitleSize) {

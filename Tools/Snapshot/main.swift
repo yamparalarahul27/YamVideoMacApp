@@ -262,7 +262,15 @@ func run() async throws {
         model.updateShort(short.id, label: "Short Panels") { $0.panels = .split }
         await pump(2.5)
         await render(window(), size: size, to: output.appendingPathComponent("5r-short-split.png"))
+        // Zoomed out: the picture at the top over a blurred copy, the cards and captions lower.
+        model.updateShort(short.id, label: "Short Zoom") { $0.panels = .sheet; $0.zoom = 0.75 }
+        model.setPreviewFraction(0.2)
+        await pump(2.5)
+        await render(window(), size: size, to: output.appendingPathComponent("5s-short-zoom.png"))
+        await render(InspectorPane().environmentObject(model).frame(width: 340, height: 1300), size: CGSize(width: 340, height: 1300),
+               to: output.appendingPathComponent("5t-short-zoom-inspector.png"))
         model.setViewer(.frame)
+        model.undo()
     }
     model.undo(); model.undo(); model.undo(); model.undo(); model.undo()
     model.undo()

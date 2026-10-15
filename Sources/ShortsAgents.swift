@@ -5,7 +5,7 @@ import Foundation
 // state, a Short's composed preview, and exporting a Short (for YouTube or alone).
 
 extension AppModel {
-    static let shortKeys = ["id", "start", "end", "window", "title", "description", "tags", "hidden", "placements", "cover", "panels", "captions"]
+    static let shortKeys = ["id", "start", "end", "window", "title", "description", "tags", "hidden", "placements", "cover", "panels", "captions", "zoom"]
 
     /// A Short from an agent's keys over `old` (or a new one on `clip`): only the keys
     /// given change. `speaker` is the window Vision found, for `window: "speaker"`.
@@ -120,6 +120,15 @@ extension AppModel {
             }
             short.captions = captions
         }
+        if let value = patch["zoom"] {
+            if value == .null { short.zoom = nil }
+            else {
+                guard let zoom = value.number, zoom.isFinite else {
+                    throw EditError.invalid("zoom is a number from \(ShortFormat.zooms.lowerBound.formatted()) (a square at the top) to 1 (fills the frame), or null.")
+                }
+                short.zoom = zoom == 1 ? nil : zoom
+            }
+        }
         return short
     }
 
@@ -147,7 +156,8 @@ extension AppModel {
                 id: short.id, start: short.start, end: short.end, length: short.length,
                 window: WireRect(short.frame(info: info, crop: clip.crop)), windowSet: short.window != nil,
                 title: short.title, description: short.description, tags: short.tags,
-                panels: short.panels.rawValue, captions: short.captions.rawValue, cover: short.cover,
+                panels: short.panels.rawValue, captions: short.captions.rawValue, zoom: short.zoomLevel,
+                picture: WireRect(short.picture(info: info, crop: clip.crop)), cover: short.cover,
                 hidden: short.hidden, placements: Dictionary(uniqueKeysWithValues: short.placements.map { ($0.key.uuidString, $0.value) }),
                 graphics: (track?.items ?? []).map { .init(id: $0.id, kind: $0.kind.rawValue, start: $0.start, end: $0.end, placed: $0.transform != nil) },
                 captionsBurned: burned && !captions.isEmpty,

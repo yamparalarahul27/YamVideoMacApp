@@ -4046,8 +4046,8 @@ moveItem.info = moveInfo; moveItem.crop = moveInfo.fullFrame; moveItem.graphics 
 struct Picture { let width: Int, height: Int; let values: [Double]
     func at(_ x: Int, _ y: Int, _ channel: Int) -> Double { values[(y * width + x) * 3 + channel] }
 }
-func nativePicture(_ item: VideoItem, frame: Int) async throws -> Picture {
-    let player = try await PlaybackController.makeItem(item, settings: ExportSettings())
+func nativePicture(_ item: VideoItem, frame: Int, short: Short? = nil) async throws -> Picture {
+    let player = try await PlaybackController.makeItem(item, settings: ExportSettings(), short: short)
     let generator = AVAssetImageGenerator(asset: player.asset)
     generator.videoComposition = player.videoComposition
     generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
@@ -5475,6 +5475,15 @@ versionProject.version = 11
 do { try versionProject.validate(); check(false, "a version 11 project with Shorts is refused") }
 catch { check(error.localizedDescription.contains("Shorts"), "an older version claiming Shorts is refused", error.localizedDescription) }
 
+var zoomVersionShort = Short(start: 1, end: 6); zoomVersionShort.zoom = 0.75
+var zoomProject = VideoProject(clips: [ProjectClip({ var item = shortItemSource; item.shorts = [zoomVersionShort]; return item }())],
+                               settings: ExportSettings(), selection: shortItemSource.id)
+check((try? VideoProject.decodeMigrating(from: JSONEncoder().encode(zoomProject)))?.clips[0].shorts?.first?.zoom == 0.75,
+      "a zoomed-out Short round-trips as version 13")
+zoomProject.version = 12
+do { try zoomProject.validate(); check(false, "a version 12 project with a zoomed-out Short is refused") }
+catch { check(error.localizedDescription.contains("zoomed-out"), "an older version claiming a zoomed-out Short is refused", error.localizedDescription) }
+
 print("\nShorts through cuts")
 let shWholeTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 12)])
 let pauseCut = ClipTimeline(segments: [TimelineSegment(start: 0, end: 4), TimelineSegment(start: 5, end: 12)])
@@ -5516,7 +5525,10 @@ check(clippedTrack.items.count == 2 && abs(clippedTrack.items[0].end - 2.2) < 0.
       "a graphic running past the Short's end ends with it")
 check(GraphicsTrack(items: [screenAtEnd]).forShort(Short(start: 6, end: 12)).items.isEmpty, "Shorts have no end screen, so it is left out")
 let laidOutData = String(decoding: try laidOut.engineData(duration: 6.2, fps: "30"), as: UTF8.self)
-check(laidOutData.contains(#""layout":{"canvas":"short","panels":"sheet"}"#), "the engine is told to lay them out on the 9:16 canvas", laidOutData)
+check(laidOutData.contains(#""layout":{"canvas":"short","drop":0,"panels":"sheet"}"#), "the engine is told to lay them out on the 9:16 canvas", laidOutData)
+var zoomedOut = laidOut; zoomedOut.canvas = .short(.sheet, zoom: 0.75)
+check(String(decoding: try zoomedOut.engineData(duration: 6.2, fps: "30"), as: UTF8.self).contains(#""drop":100"#),
+      "zoomed out, it is told how much lower the cards and the sheet sit")
 check(GraphicsRender.jobs(for: laidOut, fps: "30", outputWidth: 1080).allSatisfy { $0.unit.track.canvas == .short(.sheet) && $0.scale == 1 }
           && Set(GraphicsRender.jobs(for: laidOut, fps: "30", outputWidth: 1080).map(\.key)).isDisjoint(with: Set(GraphicsRender.jobs(for: GraphicsTrack(items: laidOut.items), fps: "30", outputWidth: 1080).map(\.key))),
       "a Short's graphics are drawn as units of their own, not reusing the 16:9 frames")
@@ -5537,16 +5549,19 @@ check(shortCut.zoomShots.count == 1 && abs(shortCut.zoomShots[0].start - 2.2) < 
       "zooms inside it, its part of a blur effect and its graphics come along in its own time")
 
 if let nodeBinary {
-    let script = "const g=require(process.argv[1]);console.log(JSON.stringify(['sheet','shade','split'].map(p=>{const l=g.shortLayout(p);"
-        + "return [l.column.x,l.column.y,l.column.scale,l.panel.x,l.panel.y,l.panel.scale,l.sheetTop,l.lift,l.splitFrame.x,l.splitFrame.y,l.splitFrame.w,l.splitFrame.h,l.captionBottom,l.stage.width,l.stage.height]})))"
-    let engine = try await Shell.run(nodeBinary, ["-e", script, "\(repository)/Resources/Graphics/graphics.js"])
-    let swift = ShortPanels.allCases.map { panels -> [Double] in
-        let layout = ShortLayout(panels: panels), column = ShortLayout.column, panel = layout.panel, frame = ShortLayout.splitFrame
-        return [column.origin.x, column.origin.y, column.scale, panel.origin.x, panel.origin.y, panel.scale, ShortLayout.sheetTop, ShortLayout.lift,
-                frame.minX, frame.minY, frame.width, frame.height, ShortLayout.captionBottom, ShortFormat.size.width, ShortFormat.size.height]
+    for zoom in [1.0, 0.75, 0.5625] {
+        let drop = ShortLayout(panels: .sheet, zoom: zoom).drop
+        let script = "const g=require(process.argv[1]);console.log(JSON.stringify(['sheet','shade','split'].map(p=>{const l=g.shortLayout(p,\(drop));"
+            + "return [l.column.x,l.column.y,l.column.scale,l.panel.x,l.panel.y,l.panel.scale,l.sheetTop,l.lift,l.splitFrame.x,l.splitFrame.y,l.splitFrame.w,l.splitFrame.h,l.captionBottom,l.stage.width,l.stage.height]})))"
+        let engine = try await Shell.run(nodeBinary, ["-e", script, "\(repository)/Resources/Graphics/graphics.js"])
+        let swift = ShortPanels.allCases.map { panels -> [Double] in
+            let layout = ShortLayout(panels: panels, zoom: zoom), column = layout.cardZone, panel = layout.panel, frame = ShortLayout.splitFrame
+            return [column.origin.x, column.origin.y, column.scale, panel.origin.x, panel.origin.y, panel.scale, layout.sheetLine, ShortLayout.lift,
+                    frame.minX, frame.minY, frame.width, frame.height, layout.captionSpot, ShortFormat.size.width, ShortFormat.size.height]
+        }
+        let parsed = (try? JSONSerialization.jsonObject(with: engine.stdout) as? [[Double]]) ?? []
+        check(parsed == swift, "the engine and the app lay a Short out with the same numbers (zoom \(zoom))", engine.stdoutText)
     }
-    let parsed = (try? JSONSerialization.jsonObject(with: engine.stdout) as? [[Double]]) ?? []
-    check(parsed == swift, "the engine and the app lay a Short out with the same numbers", engine.stdoutText)
 }
 let splitLayout = ShortLayout.splitFrame
 check(abs(splitLayout.width / splitLayout.height - 9.0 / 16) < 0.001 && abs(splitLayout.midX - 540) < 1 && splitLayout.maxY < 960,
@@ -5562,12 +5577,20 @@ print("\nCaptions in a Short")
 let longCaption = Caption(start: 0, end: 4, text: "This is a much longer caption that will not fit on two short lines at all")
 let fitted = ShortCaptionLayout.fit([longCaption], size: .medium)
 let shLimit = ShortCaptionLayout.lineCharacters(.medium)
-check(fitted.count == 2 && fitted.allSatisfy { piece in piece.text.components(separatedBy: "\n").count <= 2
+check(fitted.count >= 2 && fitted.allSatisfy { piece in piece.text.components(separatedBy: "\n").count <= 2
           && piece.text.components(separatedBy: "\n").allSatisfy { $0.count <= shLimit } }
-          && fitted[0].start == 0 && fitted[1].end == 4 && abs(fitted[0].end - fitted[1].start) < 0.000001,
+          && fitted.first?.start == 0 && fitted.last?.end == 4 && zip(fitted, fitted.dropFirst()).allSatisfy { abs($0.end - $1.start) < 0.000001 },
       "a long caption is shown in pieces of two short lines, sharing its time", "\(fitted)")
-check(ShortCaptionLayout.fontSize(.medium) == 72 && ShortCaptionLayout.fontSize(.large) == 90 && shLimit >= 18 && shLimit <= 24,
-      "captions in a Short are sized for a phone: 72 px for Medium, about 21 characters a line")
+check(ShortCaptionLayout.fontSize(.medium) == 72 && ShortCaptionLayout.fontSize(.large) == 90 && shLimit >= 16 && shLimit <= 22
+          && Double(shLimit) * 72 * 0.6 <= ShortFormat.clearArea.width,
+      "captions in a Short are sized for a phone: 72 px for Medium, about 18 characters a line, within the clear area", "\(shLimit)")
+let clearShort = ShortFormat.clearArea, furnitureShort = ShortFormat.furniture
+check(clearShort.minX == furnitureShort.left && clearShort.minY == furnitureShort.top && clearShort.maxX == 1080 - furnitureShort.right
+          && clearShort.maxY == 1920 - furnitureShort.bottom && ShortLayout.captionBottom <= clearShort.maxY
+          && ShortFormat.railTop > ShortLayout.splitFrame.maxY,
+      "the clear area is what YouTube's Shorts player leaves, and the captions' spot is inside it", "\(clearShort)")
+check(ShortCaptionLayout.margins.left == 48 && ShortCaptionLayout.margins.right == 192,
+      "captions are centred in the clear area, left of YouTube's like and share rail")
 let cardShort = GraphicsTrack(items: [gfx(.namePlate, 1, 3)], canvas: .short(.sheet))
 let spoken = [Caption(start: 0, end: 2, text: "Over the card"), Caption(start: 3.5, end: 4.5, text: "After it")]
 let stepped = ShortCaptionLayout.layout(spoken, graphics: cardShort, option: .stepUp, size: .medium)
@@ -5585,9 +5608,27 @@ func panelLine(_ panels: ShortPanels) -> Double {
 check(panelLine(.sheet) == ShortLayout.sheetTop - 24 && panelLine(.shade) == ShortLayout.captionBottom && panelLine(.split) == ShortLayout.splitFrame.maxY - 16,
       "over a bottom sheet they step above it; a full shade leaves them be; in a split they sit at the frame's foot",
       "\(panelLine(.sheet)) \(panelLine(.shade)) \(panelLine(.split))")
+print("\nZooming a Short out")
+let zoomedLayout = ShortLayout(panels: .sheet, zoom: 0.75)
+check(ShortLayout(panels: .sheet).drop == 0 && zoomedLayout.drop == 100 && ShortLayout(panels: .sheet, zoom: 0.5625).drop == 175
+          && zoomedLayout.cardZone.origin.y == 860 && zoomedLayout.panel.origin.y == 817 && zoomedLayout.sheetLine == 800 && zoomedLayout.captionSpot == 1420
+          && ShortLayout(panels: .shade, zoom: 0.75).panel.origin.y == 312 && ShortLayout(panels: .sheet, zoom: 0.5625).captionSpot <= ShortFormat.clearArea.maxY,
+      "zoomed out, the cards, the bottom sheet and the captions sit lower, still clear of YouTube's text; the full shade stays put")
+let zoomedCard = GraphicsTrack(items: [gfx(.namePlate, 1, 3)], canvas: .short(.sheet, zoom: 0.75))
+let zoomedSteps = ShortCaptionLayout.layout(spoken, graphics: zoomedCard, option: .stepUp, size: .medium)
+check(zoomedSteps.count == 2 && zoomedSteps.allSatisfy { $0.bottom == 1420 },
+      "zoomed out, captions stay below a card, under the face, rather than step up over it", "\(zoomedSteps)")
+let zoomedSheet = ShortCaptionLayout.layout([Caption(start: 1.5, end: 2.5, text: "During the panel")],
+                                            graphics: GraphicsTrack(items: [gfx(.rule, 1, 3)], canvas: .short(.sheet, zoom: 0.75)), option: .stepUp, size: .medium)
+check(zoomedSheet.first?.bottom == 776, "over the lower bottom sheet they step above it", "\(zoomedSheet)")
+let zoomedMotion = GraphicsMotion({ var track = GraphicsTrack(items: [gfx(.rule, 1, 3)], canvas: .short(.sheet, zoom: 0.75)); track.style.panel = .shade; return track }())
+check(zoomedMotion?.drop == 100 && zoomedMotion.flatMap { $0.frostRamp(for: $0.spans[0]) }.map { abs($0.from * 1920 - 800) < 0.001 } == true,
+      "the frost under the lower sheet starts where it does")
+
 let assText = ShortCaptionLayout.ass(stepped, size: .medium)
 check(assText.contains("PlayResX: 1080") && assText.contains("PlayResY: 1920") && assText.contains("WrapStyle: 2")
-          && assText.contains("Style: Short,Helvetica,85,") && assText.contains("Dialogue: 0,0:00:01.00,0:00:02.00,Short,,0,0,1184,,Over the card"),
+          && assText.contains("Style: Short,Helvetica,85,") && assText.contains(",2,48,192,600,1\n")
+          && assText.contains("Dialogue: 0,0:00:01.00,0:00:02.00,Short,,0,0,1184,,Over the card"),
       "the ASS file places each caption on the Short's own pixel grid", assText)
 let groupedWords = spokenWords([("One", 0), ("two", 0.3), ("three", 0.6), ("four", 0.9), ("five", 1.2), ("six", 1.5), ("seven", 1.8),
                                 ("eight", 2.1), ("nine", 2.4), ("ten", 2.7), ("eleven", 3.0), ("twelve", 3.3)], end: 4)
@@ -5637,6 +5678,85 @@ var liftCheck = GraphicsTrack(items: [gfx(.rule, 1, 2)], canvas: .short(.sheet))
 liftCheck.style.moveVideo = false
 check(GraphicsMotion(liftCheck) == nil && GraphicsMotion(GraphicsTrack(items: [gfx(.rule, 1, 2)], canvas: .short(.shade)))?.short == .shade,
       "without Move video aside a bottom sheet leaves the picture still; a full shade always frosts it")
+
+print("\nA zoomed-out Short")
+var zoomCheck = Short(start: 0, end: 4.5)
+let fillWindow = zoomCheck.frame(info: moveInfo, crop: moveInfo.fullFrame)
+check(zoomCheck.picture(info: moveInfo, crop: moveInfo.fullFrame) == fillWindow && ShortFormat.stage(for: fillWindow.size) == nil,
+      "a Short that fills the frame reads its window, which is its own stage")
+zoomCheck.zoom = 0.75
+let zoomPicture = zoomCheck.picture(info: moveInfo, crop: moveInfo.fullFrame)
+let zoomStageSize = ShortFormat.stage(for: zoomPicture.size)
+check(abs(zoomPicture.width - fillWindow.width / 0.75) <= 2 && zoomPicture.height == fillWindow.height && abs(zoomPicture.midX - fillWindow.midX) <= 2
+          && Int(zoomPicture.minX) % 2 == 0 && Int(zoomPicture.width) % 2 == 0
+          && zoomStageSize.map { $0.width == zoomPicture.width && abs($0.width / $0.height - 9.0 / 16) < 0.003
+                                 && abs(zoomPicture.height / $0.height - 0.75) < 0.01 } == true,
+      "zoomed out to 0.75, the window widens by a third about its centre, on a 9:16 stage a third taller than the picture",
+      "\(zoomPicture) \(String(describing: zoomStageSize))")
+var shEdgeZoom = Short(start: 0, end: 4.5, window: CGRect(x: 0, y: 0, width: 406, height: 720)); shEdgeZoom.zoom = 0.5625
+let shEdgePicture = shEdgeZoom.picture(info: moveInfo, crop: moveInfo.fullFrame)
+check(shEdgePicture.minX == 0 && abs(shEdgePicture.width - 722) <= 2 && shEdgePicture.height == 720,
+      "at the picture's edge it widens inwards, to a square at most", "\(shEdgePicture)")
+var badZoom = Short(start: 0, end: 4); badZoom.zoom = 0.4
+check(badZoom.problem(duration: 10, info: moveInfo)?.contains("0.5625") == true, "a zoom further out than a square is refused, saying what is allowed")
+badZoom.zoom = 0.75
+let zoomCoded = try JSONDecoder().decode(Short.self, from: JSONEncoder().encode(badZoom))
+let bareShort = try JSONDecoder().decode(Short.self, from: Data(#"{"start": 0, "end": 4}"#.utf8))
+check(badZoom.problem(duration: 10, info: moveInfo) == nil && zoomCoded.zoom == 0.75 && bareShort.zoom == nil,
+      "zoom is stored, and without it a Short fills the frame")
+var zoomSource = VideoItem(url: moveClip); zoomSource.info = moveInfo; zoomSource.crop = moveInfo.fullFrame
+check(zoomSource.shortItem(zoomCheck).crop == zoomPicture, "a zoomed-out Short's export reads the widened picture")
+
+var zoomParityItem = VideoItem(url: moveClip)
+zoomParityItem.info = moveInfo; zoomParityItem.crop = moveInfo.fullFrame; zoomParityItem.status = .ready
+zoomParityItem.graphics = moveTrack
+var zoomParityShort = Short(start: 0, end: 4.5); zoomParityShort.zoom = 0.75; zoomParityShort.panels = .sheet
+zoomParityItem.shorts = [zoomParityShort]
+let zoomCrop = zoomParityShort.picture(info: moveInfo, crop: moveInfo.fullFrame)
+let zoomFrame = ShortFormat.stage(for: zoomCrop.size)!
+let zoomPlan = FFmpeg.graphicsPlan(zoomParityItem.shortItem(zoomParityShort).graphics, info: moveInfo, crop: zoomCrop, segments: nil,
+                                   settings: ExportSettings(), converted: false, canvas: ShortFormat.size)
+let plainZoomPlan = FFmpeg.graphicsPlan(nil, info: moveInfo, crop: zoomCrop, segments: nil, settings: ExportSettings(), converted: false, canvas: ShortFormat.size)
+check(zoomPlan.move != nil && plainZoomPlan.move?.parts.last?.hasSuffix("[mvout]") == true
+          && FFmpeg.graphicsPlan(nil, info: moveInfo, crop: fillWindow, segments: nil, settings: ExportSettings(), converted: false, canvas: ShortFormat.size).move == nil,
+      "the export zooms a Short out with or without graphics, and leaves one that fills the frame alone")
+let zoomGraph = "[0:v]crop=\(Int(zoomCrop.width)):\(Int(zoomCrop.height)):\(Int(zoomCrop.minX)):\(Int(zoomCrop.minY))[mvin];"
+    + (zoomPlan.move?.parts.joined(separator: ";") ?? "")
+let zw = Int(zoomFrame.width), zh = Int(zoomFrame.height)
+var zoomWorst = (offset: 0, frame: 0.0)
+var zoomSizes = true
+for frame in [15, 33, 45, 66, 100] {
+    let native = try await nativePicture(zoomParityItem, frame: frame, short: zoomParityShort)
+    let exported = try await ffmpegPicture(moveClip, graph: zoomGraph, frame: frame, width: zw, height: zh)
+    zoomSizes = zoomSizes && native.width == zw && native.height == zh
+    guard native.width == zw, native.height == zh else { continue }
+    var best = (offset: 0, mean: Double.infinity)
+    for dy in -3...3 {
+        var total = 0.0, count = 0
+        for y in stride(from: 12, to: zh - 12, by: 4) { for x in stride(from: 8, to: zw - 8, by: 3) {
+            for channel in 0..<3 { total += abs(native.at(x, y, channel) - exported.at(x, y + dy, channel)) }; count += 3
+        } }
+        if total / Double(count) < best.mean { best = (dy, total / Double(count)) }
+    }
+    zoomWorst.offset = max(zoomWorst.offset, abs(best.offset))
+    zoomWorst.frame = max(zoomWorst.frame, meanDifference(native, exported, xs: 4..<(zw - 4)))
+}
+print(String(format: "       zoomed-out parity: worst offset %d px, whole frame %.2f of 255", zoomWorst.offset, zoomWorst.frame))
+check(zoomSizes && zoomWorst.offset <= 2 && zoomWorst.frame < 3.5,
+      "a zoomed-out Short: the export draws the picture at the top, the blurred fill below and the sheet's lift as the preview does",
+      String(format: "sizes %@, offset %d, frame %.2f", zoomSizes ? "ok" : "differ", zoomWorst.offset, zoomWorst.frame))
+let zoomStill = try await ffmpegPicture(moveClip, graph: zoomGraph, frame: 15, width: zw, height: zh)
+/// Edges across a band of rows: second differences, which a smooth gradient has none of.
+func bandDetail(_ picture: Picture, _ rows: Range<Int>) -> Double {
+    var total = 0.0, count = 0
+    for y in stride(from: rows.lowerBound, to: rows.upperBound, by: 6) { for x in 1..<(picture.width - 1) {
+        total += abs(picture.at(x + 1, y, 1) - 2 * picture.at(x, y, 1) + picture.at(x - 1, y, 1)); count += 1
+    } }
+    return total / Double(max(1, count))
+}
+let pictureRows = Int(zoomCrop.height)
+let fillDetail = bandDetail(zoomStill, (pictureRows + 30)..<(zh - 10)), pictureDetail = bandDetail(zoomStill, 20..<(pictureRows - 260))
+check(fillDetail < pictureDetail * 0.25, "below the picture is the soft blurred copy", String(format: "%.3f vs %.3f", fillDetail, pictureDetail))
 
 print("\nExporting a Short")
 let shortStandIn = scratch.appendingPathComponent("short-stand-in.png")
@@ -5694,6 +5814,22 @@ if await FFmpeg.supportsSubtitles() {
         }
         return rows.isEmpty ? nil : (rows.min()!, rows.max()!)
     }
+    /// The columns with white caption text between `rows`.
+    func whiteColumns(_ image: CGImage, rows: (top: Int, bottom: Int)) -> (left: Int, right: Int)? {
+        let width = image.width, height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var columns: [Int] = []
+        for x in 0..<width {
+            for y in stride(from: rows.top, through: min(rows.bottom, height - 1), by: 2) {
+                let i = (y * width + x) * 4
+                if bytes[i] > 235 && bytes[i + 1] > 235 && bytes[i + 2] > 235 { columns.append(x); break }
+            }
+        }
+        return columns.isEmpty ? nil : (columns.min()!, columns.max()!)
+    }
     func exportedFrame(_ time: Double) async throws -> CGImage {
         let png = scratch.appendingPathComponent("short-frame-\(Int(time * 100)).png")
         _ = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(time), "-i", shortOut.path, "-frames:v", "1", png.path])
@@ -5709,6 +5845,13 @@ if await FFmpeg.supportsSubtitles() {
           "burned-in captions sit at the safe-area spot, 600 px above the bottom", "\(String(describing: exportedRows))")
     check(exportedRows != nil && previewRows != nil && abs(exportedRows!.top - previewRows!.top) <= 14 && abs(exportedRows!.bottom - previewRows!.bottom) <= 14,
           "the Short viewer draws its captions where the export burns them", "export \(String(describing: exportedRows)), preview \(String(describing: previewRows))")
+    let exportedColumns = exportedRows.flatMap { whiteColumns(laterExport, rows: $0) }
+    let previewColumns = previewRows.flatMap { whiteColumns(laterPreview, rows: $0) }
+    check(exportedColumns.map { $0.right <= Int(ShortFormat.clearArea.maxX) && abs(Double($0.left + $0.right) / 2 - ShortFormat.clearArea.midX) < 12 } == true,
+          "burned-in captions are centred in the clear area, left of YouTube's like and share rail", "\(String(describing: exportedColumns))")
+    check(exportedColumns != nil && previewColumns != nil && abs(exportedColumns!.left - previewColumns!.left) <= 14
+              && abs(exportedColumns!.right - previewColumns!.right) <= 14,
+          "the Short viewer centres its captions as the export does", "export \(String(describing: exportedColumns)), preview \(String(describing: previewColumns))")
     let duringCard = whiteRows(try await exportedFrame(1.5))
     check(duringCard.map { $0.bottom < 760 && $0.bottom > 600 } == true, "while the card shows they step up above it", "\(String(describing: duringCard))")
 } else {
@@ -5815,6 +5958,13 @@ check(tooLongReply.contains("0–12.00") && overlapReply.contains("overlap") && 
           && panelsReply.contains("sheet, shade, split") && hiddenReply.contains("No graphic") && windowReply.contains("9:16"),
       "agents are refused with what is allowed: the recording's length, no overlap, the keys, the panel layouts, real graphics, a 9:16 window",
       [tooLongReply, overlapReply, keyReply, panelsReply, hiddenReply, windowReply].joined(separator: " | "))
+let zoomReply = await shortRefusal("short-bad-7", ["type": "updateShort", "clipID": clipText, "shortID": addedID, "short": ["zoom": 0.3]])
+let zoomApplied = await shortApply("short-zoom", [["type": "updateShort", "clipID": clipText, "shortID": addedID, "short": ["zoom": 0.75]]])
+shortsState = ((agentResult(await agentCall(shortAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["shorts"] as? [[String: Any]]) ?? []
+check(zoomReply.contains("0.5625") && zoomApplied["ok"] as? Bool == true && shortsState.first?["zoom"] as? Double == 0.75
+          && (shortsState.first?["picture"] as? [String: Double])?["width"].map { $0 > 406 } == true,
+      "an agent zooms a Short out with zoom, and state shows the widened picture; too far out is refused with what is allowed",
+      "\(zoomReply) \(zoomApplied) \(String(describing: shortsState.first?["picture"]))")
 var previewRequest: [String: Any] = ["method": "preview", "clip": clipText, "short": addedID, "time": 1.5, "composed": true]
 let shortPreview = agentResult(await agentCall(shortAgent, previewRequest))
 check(shortPreview["width"] as? Int == 1080 && shortPreview["height"] as? Int == 1920 && shortPreview["short"] as? String == addedID

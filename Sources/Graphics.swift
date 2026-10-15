@@ -186,11 +186,14 @@ struct Graphic: Identifiable, Codable, Equatable {
 /// its choice of panel layout.
 enum GraphicsCanvas: Equatable {
     case landscape
-    case short(ShortPanels)
+    /// A Short, with its panel layout and how far its picture is zoomed out.
+    case short(ShortPanels, zoom: Double = 1)
 
     /// The design canvas, in design pixels.
     var size: CGSize { self == .landscape ? CGSize(width: 1920, height: 1080) : ShortFormat.size }
-    var panels: ShortPanels? { if case .short(let panels) = self { return panels }; return nil }
+    var panels: ShortPanels? { if case .short(let panels, _) = self { return panels }; return nil }
+    /// A Short's layout; nil on the 16:9 video.
+    var shortLayout: ShortLayout? { if case .short(let panels, let zoom) = self { return ShortLayout(panels: panels, zoom: zoom) }; return nil }
 }
 
 /// The graphics of one recording.
@@ -358,7 +361,9 @@ struct GraphicsTrack: Codable, Equatable {
             ]),
             "items": .array(items),
         ]
-        if let panels = canvas.panels { root["layout"] = .object(["canvas": .string("short"), "panels": .string(panels.rawValue)]) }
+        if let layout = canvas.shortLayout {
+            root["layout"] = .object(["canvas": .string("short"), "panels": .string(layout.panels.rawValue), "drop": .number(layout.drop)])
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(JSONValue.object(root))
@@ -433,6 +438,8 @@ struct GraphicsMotion: Equatable {
     /// picture under a full shade, or the picture shrinking into the split frame. Nil on
     /// the 16:9 video.
     var short: ShortPanels?
+    /// How much lower a zoomed-out Short's bottom sheet starts (`ShortLayout.drop`).
+    var drop = 0.0
 
     struct ScreenMove: Equatable {
         var start: Double
@@ -451,6 +458,7 @@ struct GraphicsMotion: Equatable {
             ? track.endScreen.map { ScreenMove(start: $0.start, frame: EndScreenLayout(props: $0.props).frame) } : nil
         guard !spans.isEmpty || screen != nil else { return nil }
         self.spans = spans; self.style = track.style; self.screen = screen; self.short = track.canvas.panels
+        self.drop = track.canvas.shortLayout?.drop ?? 0
     }
 
     /// Design pixels on this frame: 1920 of them across the long side, on the 16:9 video
@@ -507,9 +515,10 @@ struct GraphicsMotion: Equatable {
             guard style.panel == .shade else { return nil }
             return (0.5, (960 + style.edge) / 1920, 28)
         case .sheet?:
-            if span.ink { return ((ShortLayout.sheetTop - 40) / 1920, (ShortLayout.sheetTop + 260) / 1920, 14) }
+            let top = ShortLayout.sheetTop + drop
+            if span.ink { return ((top - 40) / 1920, (top + 260) / 1920, 14) }
             guard style.panel == .shade else { return nil }
-            return (ShortLayout.sheetTop / 1920, (ShortLayout.sheetTop + style.edge) / 1920, 28)
+            return (top / 1920, (top + style.edge) / 1920, 28)
         case .shade?:
             return (-1, -1 + 0.5 / 1920, span.ink ? 14 : 28)
         case .split?:
