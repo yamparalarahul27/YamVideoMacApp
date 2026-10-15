@@ -39,9 +39,40 @@ struct GraphicInspector: View {
                 Button(role: .destructive) { model.removeSelectedGraphic() } label: { Label("Delete", systemImage: "trash") }
             }
             .controlSize(.small)
+            placement
             Text("Times inside the graphic are seconds after it starts.")
                 .font(.caption2).foregroundStyle(.secondary)
             GraphicPropsEditor(graphicID: graphic.id, value: .object(graphic.props), path: [], depth: 0)
+        }
+    }
+}
+
+extension GraphicInspector {
+    /// Where the graphic sits on the picture: a move from its place in the template, in
+    /// design pixels of a 1920-wide frame, and its size.
+    var placement: some View {
+        let transform = graphic.transform ?? GraphicTransform()
+        func place(_ change: (inout GraphicTransform) -> Void) {
+            var edited = transform
+            change(&edited)
+            if let problem = edited.problem { model.statusMessage = problem; return }
+            model.placeGraphic(graphic.id, edited)
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                CommitNumberField(label: "Across", value: transform.x) { value in place { $0.x = value.rounded() } }
+                CommitNumberField(label: "Down", value: transform.y) { value in place { $0.y = value.rounded() } }
+            }
+            HStack(spacing: 10) {
+                CommitNumberField(label: "Size %", value: (transform.scale * 100).rounded()) { value in place { $0.scale = value / 100 } }
+                Spacer()
+                Button("Reset Position") { model.resetGraphicPlace(graphic.id) }
+                    .controlSize(.small)
+                    .disabled(graphic.transform == nil)
+            }
+            Text("In Preview, drag the graphic to move it or a corner to resize it; ⌥ turns snapping off, and ⌥ arrow keys nudge it. Across and down are pixels of a 1920-wide frame.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -92,7 +123,7 @@ struct GraphicsSection: View {
                     get: { Color(nsColor: NSColor(hex: style.accent) ?? .systemYellow) },
                     set: { color in model.setGraphicsStyle { $0.accent = NSColor(color).hexString } }),
                     supportsOpacity: false)
-                Text("Preview shows the graphics over the video. Export with graphics comes in the next update; until then, render from the graphics file.")
+                Text("Preview shows the graphics over the video, and exports draw them in.")
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

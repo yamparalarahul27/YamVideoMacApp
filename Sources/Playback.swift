@@ -387,6 +387,9 @@ struct PlaybackCanvas: View {
     @ObservedObject var playback: PlaybackController
     /// The selected recording's graphics, drawn over the picture.
     var graphics: GraphicsOverlayInput? = nil
+    /// Lets the owner select, move and resize the graphics on the picture.
+    var editsGraphics = false
+    var onGraphicBounds: ([UUID: GraphicBounds]) -> Void = { _ in }
     var body: some View {
         ZStack {
             Color.black
@@ -396,10 +399,15 @@ struct PlaybackCanvas: View {
                     // The player fits the picture inside its bounds; the overlay matches it.
                     let scale = min(geo.size.width / graphics.frame.width, geo.size.height / graphics.frame.height)
                     let size = CGSize(width: graphics.frame.width * scale, height: graphics.frame.height * scale)
-                    GraphicsOverlay(input: graphics)
+                    GraphicsOverlay(input: graphics, onBounds: onGraphicBounds)
                         .frame(width: size.width, height: size.height)
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
                         .allowsHitTesting(false)
+                    if editsGraphics {
+                        GraphicsPlacementLayer(input: graphics)
+                            .frame(width: size.width, height: size.height)
+                            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                    }
                 }
             }
             if playback.isLoading { ProgressView("Preparing preview…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)) }

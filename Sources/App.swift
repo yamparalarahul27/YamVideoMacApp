@@ -28,6 +28,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 guard !model.isMovieMode else { return false }
+                // ⌥ arrows nudge the selected graphic on the picture: 1 px, or 10 with ⇧.
+                if modifiers.subtracting(.shift) == .option, model.inspectorFocus == .graphic, model.selectedGraphic != nil {
+                    let step = modifiers.contains(.shift) ? 10.0 : 1.0
+                    switch event.keyCode {
+                    case 123: model.nudgeSelectedGraphic(dx: -step, dy: 0); return true
+                    case 124: model.nudgeSelectedGraphic(dx: step, dy: 0); return true
+                    case 125: model.nudgeSelectedGraphic(dx: 0, dy: step); return true
+                    case 126: model.nudgeSelectedGraphic(dx: 0, dy: -step); return true
+                    default: break
+                    }
+                }
                 switch (event.keyCode, modifiers) {
                 case (123, .command): model.selectAdjacentSegment(-1)
                 case (124, .command): model.selectAdjacentSegment(1)

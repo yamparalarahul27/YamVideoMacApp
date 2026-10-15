@@ -366,7 +366,9 @@ struct CropEditorPane: View {
             Divider()
 
             if model.showPlayback {
-                PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay).frame(maxHeight: .infinity)
+                PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay, editsGraphics: !model.isConverting,
+                               onGraphicBounds: { model.graphicBounds = $0 })
+                    .frame(maxHeight: .infinity)
             } else {
             CropCanvas(
                 image: model.previewImage,

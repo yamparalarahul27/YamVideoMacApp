@@ -493,6 +493,8 @@ final class AppModel: ObservableObject {
 
     @Published var selectedShotID: ZoomShot.ID? { didSet { focusInspector(selectedShotID, .zoom) } }
     @Published var selectedGraphicID: UUID? { didSet { focusInspector(selectedGraphicID, .graphic) } }
+    /// Each graphic's box on the picture, as the Preview's engine measured it.
+    @Published var graphicBounds: [UUID: GraphicBounds] = [:]
 
     /// Selecting something shows it in the inspector; clearing the thing shown falls
     /// back to the recording.
