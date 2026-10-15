@@ -81,9 +81,9 @@
     if (Array.isArray(child)) { child.forEach((c) => append(node, c)); return; }
     node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
   }
+  /** A short uppercase label in the accent colour. No leading bar: viewers read it as a dash. */
   function kicker(text, pill) {
-    const bar = h("span", { class: "yg-bar" });
-    return { bar, node: h("div", { class: "yg-kicker" + (pill ? " yg-pill" : "") }, bar, h("span", { text: text || "" })) };
+    return { bar: null, node: h("div", { class: "yg-kicker" + (pill ? " yg-pill" : "") }, h("span", { text: text || "" })) };
   }
   function pad2(n) { return n < 10 ? "0" + n : String(n); }
   function num(value, fallback) { return typeof value === "number" && isFinite(value) ? value : fallback; }
@@ -138,12 +138,12 @@
       if (photo) c.tl.fromTo(photo, { opacity: 0, scale: 0.6, rotation: -10 }, { opacity: 1, scale: 1, rotation: 0, duration: 0.6, ease: "back.out(1.7)" }, c.at(num(item.at, 0.2) + 0.15));
       const stat = item.stat;
       if (stat) {
-        const suffix = stat.suffix || "";
-        const value = h("span", { class: "yg-fl-val", text: Math.round(num(stat.from, 0)) + suffix });
+        const digits = h("span", { text: String(Math.round(num(stat.from, 0))) });
+        const value = h("span", { class: "yg-fl-val" }, digits, stat.suffix ? h("span", { class: "yg-fl-x", text: stat.suffix }) : null);
         const pill = h("div", { class: "yg-fl-stat yg-glass" }, h("span", { class: "yg-fl-lbl yg-muted", text: stat.label }), value);
         append(list, pill);
         c.up(pill, num(stat.at, 1));
-        c.count(value, num(stat.from, 0), num(stat.to, 0), suffix, num(stat.at, 1) + 0.2, 2.4);
+        c.count(digits, num(stat.from, 0), num(stat.to, 0), "", num(stat.at, 1) + 0.2, 2.4);
         c.pop(value, num(stat.at, 1) + 2.6);
       }
     }
@@ -189,7 +189,24 @@
     c.exitColumn();
   };
 
+  /** Waypoints [{name, lat, lon, label?}] as an SVG path, north up, fitted in w×h. */
+  function mapPath(points, w, h, pad) {
+    const lat0 = points.reduce((a, q) => a + q.lat, 0) / points.length;
+    const k = Math.cos(lat0 * Math.PI / 180);
+    const xs = points.map((q) => q.lon * k), ys = points.map((q) => -q.lat);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const scale = Math.min((w - 2 * pad) / Math.max(1e-6, maxX - minX), (h - 2 * pad) / Math.max(1e-6, maxY - minY));
+    const offX = (w - (maxX - minX) * scale) / 2, offY = (h - (maxY - minY) * scale) / 2;
+    const at = points.map((q, i) => ({ x: offX + (xs[i] - minX) * scale, y: offY + (ys[i] - minY) * scale, q }));
+    const grid = [];
+    for (let lat = Math.ceil(Math.min(...points.map((q) => q.lat))); lat <= Math.max(...points.map((q) => q.lat)); lat++) {
+      grid.push(offY + (-lat - minY) * scale);
+    }
+    return { at, d: at.map((p, i) => (i ? "L" : "M") + p.x.toFixed(1) + " " + p.y.toFixed(1)).join(" "), grid, scale };
+  }
+
   KINDS.route = function (inner, p, c) {
+    if (Array.isArray(p.waypoints) && p.waypoints.length >= 2) return routeMap(inner, p, c);
     const k = kicker(p.kicker);
     const title = h("div", { class: "yg-rt-title", text: (p.from || "") + " → " + (p.to || "") });
     const d = "M470 38 C 390 38, 350 112, 268 116 S 120 150, 66 166";
@@ -223,6 +240,61 @@
     c.exitColumn();
   };
 
+  /** The route card with a real path: waypoints by latitude and longitude, drawn north up. */
+  function routeMap(inner, p, c) {
+    const points = p.waypoints.filter((q) => isFinite(q.lat) && isFinite(q.lon));
+    const W = 536, H = 330;
+    const map = mapPath(points, W, H, 34);
+    const k = kicker(p.kicker);
+    const first = points[0].name || p.from || "", last = points[points.length - 1].name || p.to || "";
+    const title = h("div", { class: "yg-rt-title", text: (p.from || first) + " → " + (p.to || last) });
+    const path = h("path", { d: map.d, stroke: "var(--yg-accent)", "stroke-width": 6, fill: "none", "stroke-linecap": "round", "stroke-linejoin": "round" });
+    const svg = h("svg", { class: "yg-rt-svg yg-map", viewBox: "0 0 " + W + " " + H },
+      map.grid.map((y) => h("line", { x1: 0, x2: W, y1: y.toFixed(1), y2: y.toFixed(1), stroke: "rgba(255,255,255,0.06)", "stroke-width": 1 })),
+      h("path", { d: map.d, stroke: "rgba(255,255,255,0.14)", "stroke-width": 6, fill: "none", "stroke-linecap": "round", "stroke-linejoin": "round", "stroke-dasharray": "2 12" }),
+      path);
+    const labels = [];
+    map.at.forEach((m, i) => {
+      const end = i === 0 || i === map.at.length - 1;
+      append(svg, h("circle", { cx: m.x.toFixed(1), cy: m.y.toFixed(1), r: end ? 9 : 5,
+        fill: i === map.at.length - 1 ? "var(--yg-accent)" : (end ? "#0d0f13" : "rgba(255,255,255,0.75)"),
+        stroke: end ? "#f4f5f7" : "none", "stroke-width": end ? 4 : 0 }));
+      if (end || m.q.label) {
+        const right = m.x < W * 0.55;
+        const gap = end ? 22 : 14;
+        // The start label sits above its dot, clear of the path leaving it.
+        const above = i === 0;
+        const label = h("text", { x: (above ? m.x + 10 : m.x + (right ? gap : -gap)).toFixed(1),
+          y: (above ? m.y - 18 : m.y + 7).toFixed(1), fill: "#f4f5f7",
+          "font-family": "Inter", "font-weight": end ? 700 : 400, "font-size": end ? 22 : 18,
+          "text-anchor": above ? "end" : (right ? "start" : "end"), text: m.q.name });
+        append(svg, label);
+        labels.push({ node: label, index: i });
+      }
+    });
+    const bike = h("circle", { cx: map.at[0].x.toFixed(1), cy: map.at[0].y.toFixed(1), r: 13, fill: "var(--yg-accent)", stroke: "#0d0f13", "stroke-width": 5 });
+    append(svg, bike);
+    const km = p.distance ? h("div", { class: "yg-rt-km" }, h("span", { class: "yg-accent", text: p.distance }),
+      p.roads ? h("span", { class: "yg-muted", text: p.roads }) : null) : null;
+    append(inner, h("div", { class: "yg-rt-panel yg-glass" }, k.node, title, svg, km));
+    const drawAt = num(p.drawAt, 1.8), drawFor = num(p.drawFor, 3.2);
+    c.enterColumn();
+    c.up(title, 0.4);
+    c.draw(path, drawAt, drawFor);
+    c.along(bike, path, drawAt, drawFor);
+    labels.forEach((l) => c.pop(l.node, drawAt + drawFor * (l.index / Math.max(1, map.at.length - 1))));
+    if (km) c.up(km, drawAt + drawFor);
+    if (p.question) {
+      const chips = (p.chips || []).map((chip) => ({ at: num(chip.at, 0), node: h("span", { class: "yg-chip" }, h("span", { class: "yg-x", text: "✕" }), h("span", { text: chip.text })) }));
+      const risks = h("div", { class: "yg-rt-risks yg-glass", style: "top:" + (km ? 560 : 530) + "px;" }, h("div", { class: "yg-rt-q", text: p.question }),
+        h("div", { class: "yg-rt-chips" }, chips.map((x) => x.node)));
+      append(inner, risks);
+      c.up(risks, num(p.questionAt, drawAt + drawFor + 1));
+      chips.forEach((x) => c.pop(x.node, x.at));
+    }
+    c.exitColumn();
+  }
+
   KINDS.link = function (inner, p, c) {
     const k = kicker(p.kicker, true);
     const url = String(p.url || "");
@@ -247,16 +319,23 @@
     const k = kicker(p.kicker);
     const title = h("div", { class: "yg-ec-title", text: p.title });
     const detail = h("div", { class: "yg-ec-d yg-muted", text: p.detail });
-    const bell = h("svg", { viewBox: "0 0 28 28", fill: "none", stroke: "#fff", "stroke-width": 2.6, "stroke-linecap": "round", "stroke-linejoin": "round" },
-      h("path", { d: "M7 19V12a7 7 0 0 1 14 0v7l2 2H5z" }), h("path", { d: "M11.5 24a2.5 2.5 0 0 0 5 0" }));
+    // A filled bell with a clapper, and two ring arcs that show while it rings.
+    const bellBody = h("path", { fill: "#fff", d: "M23 4.5c1.4 0 2.5 1.1 2.5 2.5v1.3c5.3 1.1 9 5.8 9 11.2v8.2l3.3 3.9c.7.8.1 2-1 2H9.2c-1.1 0-1.7-1.2-1-2l3.3-3.9v-8.2c0-5.4 3.7-10.1 9-11.2V7c0-1.4 1.1-2.5 2.5-2.5z" });
+    const clapper = h("path", { fill: "#fff", d: "M18.6 37.6h8.8a4.4 4.4 0 0 1-8.8 0z" });
+    const ringLeft = h("path", { d: "M6.5 12.5a16 16 0 0 0-3 9.5", stroke: "#fff", "stroke-width": 3, "stroke-linecap": "round", fill: "none" });
+    const ringRight = h("path", { d: "M39.5 12.5a16 16 0 0 1 3 9.5", stroke: "#fff", "stroke-width": 3, "stroke-linecap": "round", fill: "none" });
+    const bellShape = h("g", {}, bellBody, clapper);
+    const bell = h("span", { class: "yg-ec-bell" }, h("svg", { viewBox: "0 0 46 46" }, ringLeft, ringRight, bellShape));
     const button = p.button ? h("div", { class: "yg-ec-btn" }, bell, h("span", { text: p.button })) : null;
     append(inner, h("div", { class: "yg-ec-panel yg-glass" }, k.node, title, detail, button));
     c.enterColumn();
-    c.grow(k.bar, 0.2);
     c.up([title, detail], 0.3, 0.12);
     if (button) {
-      c.pop(button, 1.4);
-      c.tl.fromTo(bell, { rotation: 0 }, { rotation: 14, transformOrigin: "50% 10%", duration: 0.12, yoyo: true, repeat: 5, ease: "sine.inOut" }, c.at(2.4));
+      c.pop(button, 1.2);
+      const ringAt = 2.2;
+      c.tl.fromTo(bellShape, { rotation: 0 }, { rotation: 16, svgOrigin: "23 6", duration: 0.11, yoyo: true, repeat: 7, ease: "sine.inOut" }, c.at(ringAt));
+      c.tl.fromTo([ringLeft, ringRight], { opacity: 0, scale: 0.6, svgOrigin: "23 22" }, { opacity: 1, scale: 1, svgOrigin: "23 22", duration: 0.25, ease: "power2.out" }, c.at(ringAt));
+      c.tl.to([ringLeft, ringRight], { opacity: 0, duration: 0.3, ease: "power2.in" }, c.at(ringAt + 0.9));
     }
     c.exitColumn();
   };
@@ -680,7 +759,7 @@
     const px = x + 400;
     c.draw(k.path(c.ink.box(px, top + 30, 260, 66)), tilesAt + 0.2, 0.5);
     const low = k.text(d.button || "Start ride", px + 36, top + 42, "yg-sub yg-dimmed");
-    low.style.opacity = "0.35";
+    tl.fromTo(low, { opacity: 0 }, { opacity: 0.35, duration: 0.4, ease: "power2.out" }, c.at(tilesAt + 0.4));
     const sticker = h("div", { class: "yg-sticker", text: d.button || "Start ride",
       style: "left:" + px + "px;top:" + (top + 30) + "px;width:260px;height:66px;background:var(--yg-accent);color:#111;" });
     k.add(sticker);
@@ -730,10 +809,15 @@
       exitPanel() { tl.to(host, { opacity: 0, duration: 0.35, ease: "power2.in" }, end(-0.35)); },
       up(targets, rel, stagger) { tl.fromTo(targets, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out", stagger: stagger || 0 }, at(rel)); },
       pop(targets, rel, stagger) { tl.fromTo(targets, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(1.8)", stagger: stagger || 0 }, at(rel)); },
-      grow(targets, rel) { tl.fromTo(targets, { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power3.out" }, at(rel)); },
+      grow(targets, rel) {
+        if (!targets || (Array.isArray(targets) && !targets.length)) return;
+        tl.fromTo(targets, { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power3.out" }, at(rel));
+      },
       draw(path, rel, duration) {
         const length = path.getTotalLength();
-        tl.fromTo(path, { strokeDasharray: length, strokeDashoffset: length }, { strokeDashoffset: 0, duration, ease: "power2.inOut" }, at(rel));
+        // Hidden until it starts: an undrawn stroke with round caps still shows a dot.
+        tl.fromTo(path, { opacity: 0 }, { opacity: 1, duration: 0.01 }, at(rel));
+        tl.fromTo(path, { strokeDasharray: length + 1, strokeDashoffset: length + 1 }, { strokeDashoffset: 0, duration, ease: "power2.inOut" }, at(rel));
       },
       along(dot, path, rel, duration) {
         const length = path.getTotalLength();

@@ -191,6 +191,31 @@ need Node.js to export" and offers to export without them.
     saved choices (see the Auto edit options plan), plan graphics from the transcript, add
     them with `replaceGraphics`, export, and write the title, description and chapters. It
     uses only `yamvideoctl` commands, so every step lands in the app as an undo step.
+- **G2b — move and resize on the picture (owner's request).** Select a graphic, then drag
+  it or its corner handles in the Preview area. Each graphic gets an optional
+  `transform {x, y, scale}` in design pixels; the engine applies it to the graphic's
+  host, so preview and export agree. A drag is one gesture and one undo step
+  (`updateGraphic`), with snapping to the column, the panel and the frame's safe area.
+- **G3 — Publish panel (owner's request).** The project stores what YouTube needs:
+  title, description, tags, chapters and a thumbnail. Chapters come from the graphics
+  and markers. A preview shows the video as YouTube shows it: the watch page (player,
+  title, channel, description with chapters) and a search-result card with the
+  thumbnail at its real size. **Export for YouTube** writes the MP4, the `.srt`, the
+  thumbnail and a text file. The upload itself stays with the owner or an agent in the
+  owner's browser.
+- **G3 — end screen (owner's request).** An `endScreen` kind for the last 5–20 s
+  (YouTube's limit): the speaker moves into a smaller frame over a blurred backdrop, and
+  the frame keeps empty, marked boxes exactly where YouTube's end screen elements sit
+  (the Subscribe circle and one or two 16:9 video cards), so nothing covers them. The
+  Publish panel stores which element goes in which box. YouTube's upload API cannot set
+  end screen elements, so placing them stays a YouTube Studio step, by the owner or an
+  agent in the owner's browser. Today's end card (top-right column) conflicts with those
+  elements; the first video works around it by placing them in the left half.
+- **G3 — thumbnail maker.** Pick a frame on the timeline; Apple Vision
+  (`VNGenerateForegroundInstanceMaskRequest`) cuts the speaker out; a thumbnail
+  template (large title, accent tag, optional icon or product photo, outline on the
+  cut-out) renders at 1280×720 through the same engine. The first video's thumbnail was
+  made this way by hand on 2026-10-15.
 - **G3 — more.** 9:16 layouts for Shorts; graphics in Movie mode; caption styles.
 
 ## 7. Acceptance gates
