@@ -552,6 +552,9 @@ enum ProjectReducer {
             try editClip(clip, in: &outcome) { record, _ in
                 if let problem = info.problem { throw EditError.invalid(problem) }
                 let duration = record.timeline.duration
+                if let design = info.design, design.time > duration + 0.0005 {
+                    throw EditError.invalid("The thumbnail's frame must be within the edited recording (0–\(PublishInfo.timestamp(duration))).")
+                }
                 if let late = info.chapters.first(where: { $0.time > duration + 0.0005 }) {
                     throw EditError.invalid("A chapter at \(PublishInfo.timestamp(late.time)) is after the end of the edited recording (\(PublishInfo.timestamp(duration))).")
                 }
@@ -673,8 +676,12 @@ enum ProjectReducer {
                 record.graphics = remapped.track
                 removed.graphics = remapped.removed
             }
-            if var publish = record.publish, !publish.chapters.isEmpty {
+            if var publish = record.publish {
                 publish.chapters = timeline.remap(publish.chapters, from: old)
+                // The thumbnail's frame follows its footage, or stays inside the recording.
+                if let time = publish.design?.time {
+                    publish.design?.time = timeline.carry(time, from: old) ?? min(time, timeline.duration)
+                }
                 record.publish = publish
             }
             record.segments = timeline.segments

@@ -15,6 +15,7 @@ Reading
   yamvideoctl events [--after N] [--limit N]
   yamvideoctl preview --clip ID --time SECONDS [--composed] [--cropped] [--original] [--revision N]
   yamvideoctl preview --movie --time SECONDS
+  yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
   yamvideoctl job JOB [--wait]
 
 Editing (always against the revision you read: --session, --project, --revision)
@@ -53,7 +54,7 @@ struct Arguments {
     var flags: Set<String> = []
     var positional: [String] = []
 
-    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "pretty", "wait", "help"]
+    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "save", "pretty", "wait", "help"]
 
     init(_ raw: [String]) throws {
         var index = 0
@@ -257,6 +258,10 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("overwrite") { request["overwrite"] = true }
         if arguments.flags.contains("youtube") { request["youtube"] = true }
         try requireAddress()
+    case "thumbnail":
+        request["method"] = "thumbnail"
+        request["clip"] = try value("clip")
+        if arguments.flags.contains("save") { request["save"] = true }
     case "analyze":
         request["method"] = "analyze"
         request["kind"] = try value("kind")

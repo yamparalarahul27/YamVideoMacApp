@@ -209,6 +209,46 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
         return (image, boxes)
     }
 
+    /// Loads `index` offscreen at `size` pixels with the stage fitted to it, runs `script`
+    /// (which may await) and returns the picture.
+    static func capture(page index: URL, folder: URL, size: CGSize, script: String) async throws -> CGImage {
+        try await GraphicsSnapshot().capture(page: index, folder: folder, size: size, script: script)
+    }
+
+    private func capture(page index: URL, folder: URL, size: CGSize, script: String) async throws -> CGImage {
+        let backing = NSScreen.main?.backingScaleFactor ?? 2
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: size.width / backing, height: size.height / backing),
+                             configuration: WKWebViewConfiguration())
+        view.setValue(false, forKey: "drawsBackground")
+        view.navigationDelegate = self
+        self.view = view
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            loading = continuation
+            view.loadFileURL(index, allowingReadAccessTo: folder)
+        }
+        _ = try await view.callAsyncJavaScript("""
+            const stage = document.getElementById('stage');
+            stage.style.transformOrigin = '0 0';
+            stage.style.transform = 'scale(' + (window.innerWidth / 1920) + ')';
+            await document.fonts.ready;
+            \(script)
+            return true;
+            """, arguments: [:], contentWorld: .page)
+        let configuration = WKSnapshotConfiguration()
+        configuration.rect = view.bounds
+        configuration.afterScreenUpdates = true
+        let snapshot = try await view.takeSnapshot(configuration: configuration)
+        guard let picture = snapshot.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw FFmpegError(message: "The picture could not be drawn.")
+        }
+        context.interpolationQuality = .high
+        context.draw(picture, in: CGRect(origin: .zero, size: size))
+        guard let image = context.makeImage() else { throw FFmpegError(message: "The picture could not be drawn.") }
+        return image
+    }
+
     /// Each graphic's box once fully in, unmoved, as the Preview measures it.
     static func bounds(_ track: GraphicsTrack, duration: Double, fps: String) async throws -> [UUID: GraphicBounds] {
         try await GraphicsSnapshot().measure(track, duration: duration, fps: fps)

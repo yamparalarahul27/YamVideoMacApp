@@ -87,6 +87,7 @@ private struct PublishForm: View {
     @EnvironmentObject var model: AppModel
     let item: VideoItem
     let publish: PublishInfo
+    @State private var makingThumbnail = false
 
     private func issues(_ field: String) -> [PublishInfo.Issue] {
         publish.issues(duration: item.editedDuration).filter { $0.field == field }
@@ -183,6 +184,8 @@ private struct PublishForm: View {
                     .frame(width: 160, height: 90)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 VStack(alignment: .leading, spacing: 6) {
+                    Button("Make Thumbnail…") { makingThumbnail = true }
+                        .help("A frame with the speaker cut out, a big title and a tag, made 1280×720")
                     Button("Choose Image…") { model.chooseThumbnail() }
                     Button("Use Frame at Playhead") { model.useFrameAsThumbnail() }
                         .help("Saves the picture at the playhead, graphics included, next to the recording")
@@ -195,6 +198,9 @@ private struct PublishForm: View {
             Text("Exported as a 1280×720 JPEG under 2 MB, the middle of the image at 16:9.")
                 .font(.caption2).foregroundStyle(.secondary)
             issueLines("thumbnail")
+        }
+        .sheet(isPresented: $makingThumbnail) {
+            ThumbnailMakerSheet(item: item, playhead: model.previewTime).environmentObject(model)
         }
     }
 
