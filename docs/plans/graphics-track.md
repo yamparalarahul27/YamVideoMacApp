@@ -3,8 +3,8 @@
 **Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
 the app: data, commands, preview, timeline, inspector), G1 part 2 (export with graphics
 from the app), G2b (move and resize on the picture), the Publish panel, the thumbnail
-maker and the end screen layout (G3) are implemented; see sections 8 to 14. Feature 6 of
-section 6a (Auto edit options) is next. Phase 5 of
+maker, the end screen layout (G3) and Auto edit options are implemented; see sections 8
+to 15. Feature 7 of section 6a (YamDraw ink clips) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -232,7 +232,7 @@ from docs/plans/graphics-track.md".
 3. **Publish panel with a YouTube preview (G3).** Done 2026-10-15; section 12.
 4. **Thumbnail maker (G3).** Done 2026-10-15; section 13.
 5. **End screen layout (G3).** Done 2026-10-15; section 14.
-6. **Auto edit options.** The choices Claude asked before the first edit become app
+6. **Auto edit options.** Done 2026-10-15; section 15. The choices Claude asked before the first edit become app
    settings stored in the project and readable by agents: transcript model (whisper.cpp
    large-v3-turbo q5 or base.en, downloaded only with consent) and language; cut style
    (Tight: pauses of 0.42 s or more cut to about 0.22 s, plus stumbles from the
@@ -579,3 +579,89 @@ from docs/plans/graphics-track.md".
   boxes against Studio's own element sizes (YouTube does not publish them). Real footage of
   a person. Layouts with a link element (Partner Program) or four elements. Mid-move a
   composed preview lists no box for the end screen until its boxes pop in.
+
+## 15. Auto edit options status (2026-10-15)
+
+- **The answers** (project version 11, `VideoProject.autoEdit`): transcript model
+  (`large-v3-turbo-q5_0`, the default, or `base.en`, English only) and language (any
+  whisper code, or auto), cut style (Tight, the default: pauses of 0.42 s or more become
+  about 0.22 s, plus stumbles from the transcript; Natural: the silence review's -40 dB,
+  0.8 s, 0.15 s; Review each cut: Tight's cuts, chosen by the owner), captions (SRT for
+  upload, the default; Burn in and SRT; None) and normalise loudness (on, -14 LUFS).
+  Nil until answered, and then the first video's choices apply. New Project carries them
+  over, like the export settings.
+- **Transcribing on this Mac.** `Whisper.swift` runs Homebrew's `whisper-cli` (whisper.cpp,
+  installed with ffmpeg-full here; `brew install whisper-cpp` otherwise) on 16 kHz mono
+  audio with `-dtw <model> -nfa -ojf`, and reads each word's time from its first token's
+  DTW time. Models download only on the owner's click in Auto Edit, from whisper.cpp's
+  Hugging Face page into `~/Library/Application Support/YamVideo/Whisper`
+  (`YAMVIDEO_WHISPER_DIR` overrides it), checked against the published size and SHA-256.
+  A transcript is stored per recording (`ProjectClip.transcript`, source seconds, one undo
+  step named Transcribe) and cached per file, model and language, so undoing never means
+  waiting for whisper again. Measured on this Mac: whisper's word times run 0.05–0.15 s
+  late against the audio, and it tidies some repeats away on its own ("the the" heard as
+  "the"); a verbatim-style prompt made it drop whole sentences, so none is used.
+- **Stumbles** (`StumbleFinder`): fillers (um, uh, erm, ah, hmm), a word said twice
+  ("the the", but not "very very", "had had" or "that that"), a restart of up to four
+  words ("I think we, I think we"), and a broken-off word ("wh-").
+- **Cuts** (`CutPlanner`): quiet stretches and stumbles that touch become one cut, so
+  "videos. [pause] Um, [pause] the" loses the pause, the um and the pause after it in one
+  go. Where a cut meets quiet, the rule's padding stays (0.11 s each side for Tight);
+  where it meets speech it ends at the quietest 50 ms in the 0.3 s before the next word,
+  the one nearest 0.08 s before whisper's time, because those times run late. Without
+  stumbles it is exactly the silence review's cut list (the review now uses it). Every cut
+  says what it takes out ("Filler “Um,” and pause").
+- **Captions from the transcript** (`Transcript.captions`): the words still in the edit, up
+  to two lines of about 42 characters, broken at sentence ends, remaining pauses over
+  0.6 s and wherever the edit jumps back; a caption may run across a cut. They are written
+  as a source-timed SRT named by its content and then go through the existing paths, so
+  they follow every later cut. `ExportSettings.captions` (burnIn, upload, off) decides
+  what exports and Export for YouTube do; nil keeps the old behaviour (a chosen caption
+  file is burned in and uploaded; a transcript is not used). A chosen file comes before
+  the transcript.
+- **App.** **Auto Edit…** in the toolbar and the Timeline menu (⇧⌘E): the answers, each
+  change one undo step; the models with Download… (a confirmation names the size and
+  source) and Downloaded; the recording's transcript with Transcribe Now/Again and Remove;
+  and **Auto Edit**, which transcribes when the cut style or captions need words, finds the
+  cuts and applies them with the captions and loudness as one undo step (Auto Edit), or,
+  for Review each cut, opens the review list. The silence review shows stumbles beside
+  pauses (with a switch, off from Review Silence…, on from Auto Edit) and each cut's
+  reason. The inspector's Captions section shows captions from the transcript and a Use
+  picker (placement and size only when burned in); Publish says where the uploaded
+  captions come from.
+- **Agents.** `setAutoEditOptions` (only the keys given), `importTranscript` (whisper's
+  `-ojf` JSON or `{model, language, words}`), `clearTranscript`; methods `transcribe` (a
+  job with progress), `transcript` (words with `editedStart`, null when cut; captions on
+  the edited timeline; stumbles), `autoEdit` (the whole edit as a job, one undo step;
+  with review nothing is cut and the cuts come back) and `analyze` kind `autoEdit`.
+  `state.autoEdit` has the answers, whether they were saved, whether whisper is
+  installed and which models are downloaded; each recording has `transcript` and
+  `captions` {use, source}. Refusals say what is allowed: only the owner can download a
+  model, and an autoEdit that needs words it cannot get says how to go on without them.
+  `yamvideoctl transcribe | transcript | autoedit`, `analyze --kind autoEdit`, and three
+  MCP tools.
+- **Found on the way.** Adding a stderr callback to `Shell.run` silently rebound the one
+  unlabelled trailing closure (ffmpeg's progress) to stderr; it is labelled now.
+- **Tests** (1173 checks, 82 new): the defaults and refusals; stumbles of each kind and emphasis
+  kept; Natural and Tight cut lists to the frame on synthetic levels, joined cuts, padding
+  only against quiet, nothing more to cut a second time; captions across cuts and their
+  edited times; whisper's JSON (markers, [BLANK_AUDIO], DTW and fallback times); the
+  owner's flow on a real recording (plan, apply as one step, undo keeping the transcript,
+  a stale plan refused, review keeping an unchecked cut); the captions rule; the version
+  gate; agents setting answers, importing, reading, proposing, auto editing (credited in
+  Undo), review, refusals without a model; burned-in transcript captions changing the
+  picture; and, when the base.en model is downloaded, a real transcription of speech made
+  with `say` (0.7 s, or 6.9 s when the model first loads), with its um and restart found.
+- **Real use (this Mac).** An 18 s 1080p recording spoken with `say` (pauses, an um, an uh
+  and a restart), in an isolated instance driven only through `yamvideoctl`: an agent read
+  the answers, set base.en and Burn in and SRT, and ran `autoedit`. It transcribed 45 words
+  in about a second, cut the um, the restart "I think we,", the uh (whisper wrote "Ah")
+  and the long pauses, 18.3 s → 11.8 s, as one undo step credited to Claude, with captions
+  from the transcript and normalised audio. The export measured -14.27 LUFS and shows
+  the captions on the edited video without the um; Export for YouTube's SRT has six
+  captions without the cut words. `Tools/Snapshot` shows the Auto Edit sheet, the review
+  list and the inspector.
+- **Open.** The Large v3 Turbo model is not downloaded on this Mac, so it is untested
+  here, as is real footage of a person in a room. Stumbles whisper tidies away cannot be
+  found. Captions and the transcript are per language only as transcribed. Movies still leave
+  captions out, as before.
