@@ -194,6 +194,8 @@ struct VideoItem: Identifiable {
     var graphics: GraphicsTrack?
     /// What YouTube needs for this recording. Nil until something is written.
     var publish: PublishInfo?
+    /// What was said, word by word, in source seconds. Nil until transcribed.
+    var transcript: Transcript?
     /// Whole-frame blurs, sorted and non-overlapping, in edited-recording seconds.
     var blurEffects: [VideoBlurEffect] = []
     /// Named points on the edited timeline, sorted by time.
@@ -496,6 +498,9 @@ struct ExportSettings: Equatable, Codable {
     /// False leaves each recording's graphics, and the move aside under its panels, out of
     /// exports. Nil (the default) draws them.
     var graphics: Bool?
+    /// What exports do with captions: burn them in and upload them, upload only, or
+    /// neither. Nil keeps the behaviour from before it could be chosen; see `captionUse`.
+    var captions: CaptionUse?
 
     var drawsGraphics: Bool { graphics ?? true }
 

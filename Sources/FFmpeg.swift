@@ -1308,7 +1308,7 @@ enum FFmpeg {
     ) async throws -> ShellResult {
         let span = to - from
 
-        let result = try await Shell.run(ffmpeg, args) { line in
+        let result = try await Shell.run(ffmpeg, args, onStdoutLine: { line in
             guard duration > 0 else { return }
             let parts = line.split(separator: "=", maxSplits: 1).map {
                 $0.trimmingCharacters(in: .whitespaces)
@@ -1320,7 +1320,7 @@ enum FFmpeg {
                 let fraction = min(1, micros / 1_000_000 / duration)
                 onProgress(min(0.999, from + fraction * span))
             }
-        }
+        })
 
         if Task.isCancelled {
             if let target { try? FileManager.default.removeItem(at: target) }

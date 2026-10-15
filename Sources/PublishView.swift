@@ -207,15 +207,20 @@ private struct PublishForm: View {
 
     private var captions: some View {
         InspectorSection("Captions") {
-            if let subtitles = item.subtitles {
+            let use = model.settings.captionUse(hasFile: item.subtitles != nil)
+            if !use.uploads, item.subtitles != nil || item.transcript != nil {
+                Text("Captions are off, so none go up with the video. Turn them on under Captions in the inspector or in Auto Edit.")
+            } else if let subtitles = item.subtitles {
                 if Captions.retimable.contains(subtitles.pathExtension.lowercased()) {
                     Text("\(subtitles.lastPathComponent) goes up as an SRT timed on the edited video, so it stays in step with your cuts.")
                 } else {
                     Text("\(subtitles.lastPathComponent) cannot be retimed (only SRT and VTT can), so it is left out of the upload files.")
                         .foregroundStyle(.orange)
                 }
+            } else if item.captionsSource(model.settings) == "transcript" {
+                Text("Captions made from the transcript go up as an SRT on the edited video, without the words you cut.")
             } else {
-                Text("No captions file. Choose one under Captions in the inspector to upload it with the video.")
+                Text("No captions yet. Auto Edit makes them from what is said, or choose a file under Captions in the inspector.")
             }
             HStack {
                 Text("Language").foregroundStyle(.secondary)

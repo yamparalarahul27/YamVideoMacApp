@@ -16,6 +16,7 @@ Reading
   yamvideoctl preview --clip ID --time SECONDS [--composed] [--cropped] [--original] [--revision N]
   yamvideoctl preview --movie --time SECONDS
   yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
+  yamvideoctl transcript --clip ID                words with source and edited times, captions, stumbles
   yamvideoctl job JOB [--wait]
 
 Editing (always against the revision you read: --session, --project, --revision)
@@ -25,7 +26,10 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl save [--path FILE.yamvideo] [--overwrite]
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl export --youtube --path FOLDER --clip ID [--overwrite]   video, captions, thumbnail and upload text
-  yamvideoctl analyze --kind silence|zooms --clip ID
+  yamvideoctl analyze --kind silence|zooms|autoEdit --clip ID [--style tight|natural|review]
+  yamvideoctl transcribe --clip ID [--model large-v3-turbo-q5_0|base.en] [--language CODE]
+  yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
+                                                 transcribe if needed, cut, set captions and loudness
   yamvideoctl cancel JOB
   yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--time SECONDS] [--movie]
   yamvideoctl request --file REQUEST.json        send a raw protocol request
@@ -267,6 +271,22 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         request["kind"] = try value("kind")
         request["clip"] = try value("clip")
         for name in ["threshold", "minimum", "padding"] { if let number = try arguments.double(name) { request[name] = number } }
+        if let style = arguments.values["style"] { request["style"] = style }
+        try requireSession()
+    case "transcribe":
+        request["method"] = "transcribe"
+        request["clip"] = try value("clip")
+        if let model = arguments.values["model"] { request["model"] = model }
+        if let language = arguments.values["language"] { request["language"] = language }
+        try requireSession()
+    case "transcript":
+        request["method"] = "transcript"
+        request["clip"] = try value("clip")
+    case "autoedit", "autoEdit":
+        request["method"] = "autoEdit"
+        request["clip"] = try value("clip")
+        if let style = arguments.values["style"] { request["style"] = style }
+        if let label = arguments.values["label"] { request["label"] = label }
         try requireSession()
     case "preview":
         request["method"] = "preview"
@@ -298,7 +318,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
     default:
         throw Failure.usage("Unknown command \"\(arguments.command)\". Run yamvideoctl --help.")
     }
-    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel"]
+    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit"]
     if edits.contains(request["method"] as? String ?? ""), request["requestID"] == nil {
         request["requestID"] = arguments.values["request-id"] ?? UUID().uuidString
     }

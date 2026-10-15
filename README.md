@@ -178,7 +178,8 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Publish to YouTube** | **Publish…** in the toolbar keeps the title, description, tags, category, chapters and thumbnail with the recording, counts them against YouTube's limits as you type, and previews the watch page and a search result. **Suggest from Markers and Graphics** makes chapters from named markers and panel graphics; they follow their footage when you cut. **Export for YouTube…** writes the MP4, the captions as an SRT timed on the edited video, a 1280×720 thumbnail under 2 MB, and a text file with everything to paste into YouTube Studio |
 | **Make a thumbnail** | In **Publish…**, **Make Thumbnail…** takes a frame, cuts you out with Apple Vision and puts a big title (words between asterisks in the accent colour), a tag and an optional product photo beside you, with a white outline and a darker or blurred background. The live preview shows it large and at YouTube's search size; **Save Thumbnail** makes the 1280×720 PNG next to the recording and uses it for the video |
 | **End screen for YouTube** | In the inspector's **Graphics** section (or **Publish…**), **End Screen** keeps the last 5–20 seconds for YouTube's end screen: you move into a half-size frame over a blurred copy of the picture, and empty, marked boxes stay where YouTube puts its Subscribe circle and one or two video cards, so nothing covers them. Drag its block on the timeline to choose where it starts; it always runs to the end. In **Publish…**, choose what goes in each box (Subscribe or another channel; Best for viewer, Most recent upload, a chosen video or a playlist). YouTube's upload cannot place these, so **Export for YouTube…** writes each element and its box into the upload text for YouTube Studio's End screen editor |
-| **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector. Choose where it sits and how big it is. SRT and VTT captions follow cuts and speed changes |
+| **Auto edit a talking head** | **Auto Edit…** in the toolbar (⇧⌘E) keeps your answers with the project: the transcript model (Large v3 Turbo, or Base for English) and language, how tight to cut, what to do with captions, and whether to normalise loudness to -14 LUFS. **Auto Edit** transcribes the recording on this Mac with whisper.cpp (`brew install whisper-cpp`; the model downloads once, when you click), cuts pauses and, with **Tight**, the “um”s, repeated words and restarts found in the transcript, and sets captions and loudness, all as one undo step. **Review each cut** lists the cuts to listen to and choose first. Agents read and follow the same answers |
+| **Captions** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector; a transcribed recording gets captions from what is said, without the words you cut. **Use** chooses **SRT for upload** (they go up beside the video with Export for YouTube), **Burn in and SRT**, or **None**. Choose where burned-in captions sit and how big they are. SRT, VTT and transcript captions follow cuts and speed changes |
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
 | **Correct Pocket 3 D-Log M colour** | In the inspector's **Colour** section set **Recorded colour** to **DJI Pocket 3 D-Log M**. The first time, **Get DJI Conversion** opens DJI's download page and **Import Conversion File…** takes the `.cube` you saved. After that, **Natural Colour** is one click, and one Undo. Auto never assumes D-Log M: a `DJI_` file name only makes it ask |
 | **Adjust the look** | **Brightness**, **Warmth**, **Contrast** and **Colour strength**, each with its own reset. Exact values are under **Details**. A drag is one undo step, and the picture follows it straight away |
@@ -368,7 +369,7 @@ Sources/
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v5)
+  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v11)
   ColorLUT.swift    .cube parser and trilinear sampling
   ColorAdjustments.swift colour settings, the four adjustments and Auto's inference
   ColorPipeline.swift table store and the colour stage shared by ffmpeg and Core Image
@@ -380,6 +381,9 @@ Sources/
   GraphicsPlacement.swift moving and resizing graphics on the picture: boxes, snapping, the Preview layer
   Publish.swift / PublishEditing.swift / PublishView.swift what YouTube needs, its rules, Export for YouTube, the Publish sheet
   Captions.swift    SRT and VTT captions moved onto the edited timeline
+  AutoEdit.swift    auto edit answers, transcripts, stumbles, the cut planner, captions from words and the captions choice
+  AutoEditing.swift / AutoEditView.swift transcribing, planning and applying an auto edit, model downloads, the Auto Edit sheet
+  Whisper.swift     whisper.cpp: finding whisper-cli, downloading and checking models, transcribing, reading its JSON
   Thumbnail.swift / ThumbnailView.swift the thumbnail maker: design, Vision cut-out, rendering, the maker sheet
   EndScreen.swift   the end screen: YouTube's rules, the layout, the element in each box, the Studio step
   GraphicsEditing.swift / GraphicsInspector.swift / GraphicsOverlay.swift graphics actions, inspector and preview layer

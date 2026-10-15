@@ -228,6 +228,28 @@ func run() async throws {
         model.undo(); model.undo()
     }
     model.undo()
+    // Auto Edit: the answers with the recording transcribed, the review list with stumbles,
+    // and the inspector's captions from the transcript.
+    let spoken = ["Hello", "and", "welcome.", "Um,", "today", "I", "want", "to", "to", "show", "you", "how", "I", "edit", "my", "videos."]
+    let words = (0..<spoken.count).map { index in
+        TranscriptWord(text: spoken[index], start: Double(index) / Double(spoken.count) * length * 0.9,
+                       end: Double(index + 1) / Double(spoken.count) * length * 0.9)
+    }
+    _ = model.perform([.setTranscript(clip: model.items[0].id, transcript: Transcript(model: "base.en", language: "en", words: words))])
+    model.setAutoEditOptions { $0.cutStyle = .review; $0.captions = .burnIn }
+    model.autoEditMessage = "Cut 12 pauses and 3 stumbles, 0:41 shorter. Captions: Burn in and SRT. Loudness: -14 LUFS, -1 dBTP."
+    await render(AutoEditSheet().environmentObject(model), size: CGSize(width: 540, height: 680),
+           to: output.appendingPathComponent("5l-auto-edit.png"))
+    model.autoEditMessage = nil
+    if let plan = try? await model.planAutoEdit(model.items[0].id, options: model.autoEditOptions), let overview = plan.overview {
+        await render(SilenceReviewView(clip: model.items[0], overview: overview, stumbles: plan.stumbles, initialRule: plan.style.pauses,
+                                       includeStumbles: true, plan: plan).environmentObject(model),
+               size: CGSize(width: 610, height: 625), to: output.appendingPathComponent("5m-auto-edit-review.png"))
+    }
+    model.selectedSegmentID = nil; model.selectedShotID = nil; model.selectedRegionID = nil
+    await render(InspectorPane().environmentObject(model).frame(width: 340, height: 1100), size: CGSize(width: 340, height: 1100),
+           to: output.appendingPathComponent("5n-captions-inspector.png"))
+    model.undo(); model.undo()
     await render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
            to: output.appendingPathComponent("6-local-agents.png"))
 

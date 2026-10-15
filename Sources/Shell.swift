@@ -73,12 +73,14 @@ struct ShellResult {
 enum Shell {
     /// Runs a command to completion, capturing both streams.
     /// `onStdoutLine` receives stdout line-by-line as it arrives (used for ffmpeg progress);
-    /// when it is supplied, stdout is not captured in the result.
+    /// when it is supplied, stdout is not captured in the result. `onStderrLine` sees
+    /// stderr the same way, which is still captured.
     static func run(
         _ executable: String,
         _ arguments: [String],
         environment: [String: String]? = nil,
-        onStdoutLine: (@Sendable (String) -> Void)? = nil
+        onStdoutLine: (@Sendable (String) -> Void)? = nil,
+        onStderrLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -115,8 +117,17 @@ enum Shell {
         }
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            errBox.append(errPipe.fileHandleForReading.readDataToEndOfFile())
-            group.leave()
+            defer { group.leave() }
+            if let onStderrLine {
+                let splitter = LineSplitter()
+                while let chunk = try? errPipe.fileHandleForReading.read(upToCount: 65536), !chunk.isEmpty {
+                    errBox.append(chunk)
+                    splitter.feed(chunk, onStderrLine)
+                }
+                splitter.feed(Data([10]), onStderrLine)
+            } else {
+                errBox.append(errPipe.fileHandleForReading.readDataToEndOfFile())
+            }
         }
 
         await withTaskCancellationHandler {

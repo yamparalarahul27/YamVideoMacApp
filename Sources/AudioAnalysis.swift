@@ -14,43 +14,34 @@ struct SilenceCut: Identifiable {
     let timelineStart: Double
     let duration: Double
     var included = true
+    /// Stumbles from the transcript this cut takes out, if any.
+    var stumbles: [Stumble] = []
+    /// Whether it also shortens a pause.
+    var pause = true
+
+    /// What it takes out, for the review list: "Pause", "Filler “um” and pause".
+    var reason: String {
+        let words = stumbles.map(\.label).joined(separator: ", ")
+        if words.isEmpty { return "Pause" }
+        return pause ? words + " and pause" : words
+    }
+    /// For agents: "pause", "filler", "repeat", "restart", "fragment".
+    var kinds: [String] {
+        var kinds: [String] = []
+        for kind in stumbles.map(\.kind.rawValue) where !kinds.contains(kind) { kinds.append(kind) }
+        return pause ? kinds + ["pause"] : kinds
+    }
 }
 
 struct AudioOverview: Sendable {
     static let interval = 0.05
     let levels: [AudioLevel]
 
+    /// The silence review's cuts: every pause of at least `minimum`, keeping `padding` of
+    /// it on each side. The auto edit's planner, without stumbles.
     func cuts(in timeline: ClipTimeline, fps: Double, threshold: Double, minimum: Double, padding: Double) -> [SilenceCut] {
-        var quiet: [(Double, Double)] = []
-        var beginning: Double?
-        var previousEnd = 0.0
-        for level in levels {
-            // Never infer silence across an unmeasured gap.
-            if level.time > previousEnd + Self.interval * 0.5, let start = beginning {
-                quiet.append((start, previousEnd)); beginning = nil
-            }
-            if level.decibels <= threshold {
-                if beginning == nil { beginning = level.time }
-            } else if let start = beginning { quiet.append((start, level.time)); beginning = nil }
-            previousEnd = level.time + Self.interval
-        }
-        if let beginning { quiet.append((beginning, previousEnd)) }
-        var result: [SilenceCut] = []
-        for segment in timeline.segments {
-            for (start, end) in quiet where end - start >= minimum {
-                let lower = max(segment.start, ceil((start + padding) * fps) / fps)
-                let upper = min(segment.end, floor((end - padding) * fps) / fps)
-                guard upper - lower >= max(1 / fps, 0.1) else { continue }
-                let head = (lower - segment.start) / segment.speed
-                let tail = (segment.end - upper) / segment.speed
-                guard (head < 0.000001 || head >= 1 / fps - 0.000001),
-                      (tail < 0.000001 || tail >= 1 / fps - 0.000001) else { continue }
-                result.append(SilenceCut(segmentID: segment.id, start: lower, end: upper,
-                    timelineStart: timeline.offset(of: segment.id) + (lower - segment.start) / segment.speed,
-                    duration: (upper - lower) / segment.speed))
-            }
-        }
-        return result
+        CutPlanner.cuts(levels: self, timeline: timeline, fps: fps,
+                        rule: PauseRule(threshold: threshold, minimum: minimum, padding: padding))
     }
 }
 
@@ -148,9 +139,17 @@ struct SilenceReviewView: View {
     @Environment(\.dismiss) var dismiss
     let clip: VideoItem
     let overview: AudioOverview
+    /// Stumbles from the recording's transcript, offered beside the pauses.
+    var stumbles: [Stumble] = []
+    var initialRule = PauseRule.natural
+    var includeStumbles = false
+    /// The auto edit being reviewed: applying also sets its captions and loudness.
+    var plan: AutoEditPlan?
     @State private var threshold = -40.0
     @State private var minimum = 0.8
     @State private var padding = 0.15
+    @State private var cuttingStumbles = false
+    @State private var configured = false
     @State private var cuts: [SilenceCut] = []
     @State private var error: String?
     private var listeningSettings: ExportSettings {
@@ -161,26 +160,32 @@ struct SilenceReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Review silence cuts").font(.title2.weight(.semibold))
-            Text("Low audio levels can also be intentional pauses. Listen before applying. Your source stays intact.")
-                .font(.callout).foregroundStyle(.secondary)
+            Text(plan == nil ? "Review silence cuts" : "Review the auto edit's cuts").font(.title2.weight(.semibold))
+            Text(plan == nil
+                 ? "Low audio levels can also be intentional pauses. Listen before applying. Your source stays intact."
+                 : "Pauses, and stumbles from the transcript. Listen, uncheck any you want to keep, then apply; captions and loudness are set in the same step.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             PlaybackCanvas(playback: model.playback).frame(height: 190)
             HStack {
                 Text("Threshold \(Int(threshold)) dB").frame(width: 120, alignment: .leading)
                 Slider(value: $threshold, in: -60 ... -20, step: 2).accessibilityLabel("Silence threshold")
             }
             HStack {
-                Text("Pause ≥ \(String(format: "%.1f", minimum))s").frame(width: 120, alignment: .leading)
-                Slider(value: $minimum, in: 0.3...3, step: 0.1).accessibilityLabel("Minimum silence length")
+                Text("Pause ≥ \(String(format: "%.2f", minimum))s").frame(width: 120, alignment: .leading)
+                Slider(value: $minimum, in: 0.3...3, step: 0.02).accessibilityLabel("Minimum silence length")
             }
             HStack {
                 Text("Keep \(String(format: "%.2f", padding))s edges").frame(width: 120, alignment: .leading)
-                Slider(value: $padding, in: 0.05...0.4, step: 0.05).accessibilityLabel("Speech padding")
+                Slider(value: $padding, in: 0.05...0.4, step: 0.01).accessibilityLabel("Speech padding")
+            }
+            if !stumbles.isEmpty {
+                Toggle("Stumbles from the transcript (\(stumbles.count): “um”s, repeats and restarts)", isOn: $cuttingStumbles)
             }
             List {
                 ForEach($cuts) { $cut in
                     HStack {
-                        Toggle("\(timelineTime(cut.timelineStart)) · remove \(String(format: "%.2f", cut.duration))s", isOn: $cut.included)
+                        Toggle("\(timelineTime(cut.timelineStart)) · remove \(String(format: "%.2f", cut.duration))s"
+                               + (stumbles.isEmpty ? "" : " · \(cut.reason)"), isOn: $cut.included)
                         Spacer()
                         Button("Listen") {
                             model.playback.prepare(clip, settings: listeningSettings, at: max(0, cut.timelineStart - 0.5), play: true)
@@ -196,10 +201,18 @@ struct SilenceReviewView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Apply Cuts") { apply() }.buttonStyle(.borderedProminent).disabled(saved == 0)
+                Button(plan == nil ? "Apply Cuts" : "Apply") { apply() }.buttonStyle(.borderedProminent).disabled(saved == 0 && plan == nil)
             }
         }.padding(20).frame(width: 610, height: 625)
-        .onAppear { update(); model.playback.prepare(clip, settings: listeningSettings, at: 0, play: false) }
+        .onAppear {
+            if !configured {
+                configured = true
+                threshold = initialRule.threshold; minimum = initialRule.minimum; padding = initialRule.padding
+                cuttingStumbles = includeStumbles
+            }
+            update(); model.playback.prepare(clip, settings: listeningSettings, at: 0, play: false)
+        }
+        .onChange(of: cuttingStumbles) { _, _ in update() }
         .onChange(of: threshold) { _, _ in update() }
         .onChange(of: minimum) { _, _ in update() }
         .onChange(of: padding) { _, _ in update() }
@@ -207,9 +220,16 @@ struct SilenceReviewView: View {
     }
     private func update() {
         error = nil
-        cuts = overview.cuts(in: clip.timeline, fps: clip.info!.fps, threshold: threshold, minimum: minimum, padding: padding)
+        cuts = CutPlanner.cuts(levels: overview, timeline: clip.timeline, fps: clip.info!.fps,
+                               rule: PauseRule(threshold: threshold, minimum: minimum, padding: padding),
+                               stumbles: cuttingStumbles ? stumbles : [])
     }
     private func apply() {
+        if var plan {
+            plan.cuts = cuts
+            if let problem = model.applyReviewedAutoEdit(plan) { error = problem } else { dismiss() }
+            return
+        }
         guard model.selectedItem.map(ProjectClip.init) == ProjectClip(clip) else {
             error = "The recording changed. Close this review and analyze the current edit."; return
         }

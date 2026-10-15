@@ -96,6 +96,11 @@ enum EditCommand: Equatable {
     case setGraphicsStyle(clip: UUID, style: GraphicsStyle)
     /// What YouTube needs for the recording; an empty one clears it.
     case setPublishInfo(clip: UUID, info: PublishInfo)
+    /// The project's auto edit answers: transcript model and language, cut style,
+    /// captions and loudness.
+    case setAutoEditOptions(AutoEditOptions)
+    /// What was said in the recording, word by word in source seconds, or nil to forget it.
+    case setTranscript(clip: UUID, transcript: Transcript?)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -142,6 +147,8 @@ enum EditCommand: Equatable {
         case .replaceGraphics: return "Edit Graphics"
         case .setGraphicsStyle: return "Graphics Style"
         case .setPublishInfo: return "Publish Details"
+        case .setAutoEditOptions: return "Auto Edit Options"
+        case .setTranscript(_, let transcript): return transcript == nil ? "Remove Transcript" : "Transcribe"
         }
     }
 }
@@ -560,6 +567,16 @@ enum ProjectReducer {
                 }
                 info.chapters.sort { $0.time < $1.time }
                 record.publish = info.isEmpty ? nil : info
+            }
+
+        case .setAutoEditOptions(let options):
+            if let problem = options.problem { throw EditError.invalid(problem) }
+            outcome.project.autoEdit = options
+
+        case .setTranscript(let clip, let transcript):
+            try editClip(clip, in: &outcome) { record, info in
+                if let problem = transcript?.problem(duration: info.duration) { throw EditError.invalid(problem) }
+                record.transcript = transcript
             }
 
         case .copyColor(let source, let targets, let includeInterpretation):

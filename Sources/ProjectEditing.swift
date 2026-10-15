@@ -39,7 +39,7 @@ struct SessionRecovery: Codable {
 extension AppModel {
     var project: VideoProject {
         VideoProject(projectID: projectID, clips: items.map(ProjectClip.init), settings: settings,
-                     selection: selection, movieSettings: movieSettings)
+                     selection: selection, movieSettings: movieSettings, autoEdit: autoEdit)
     }
 
     nonisolated static var recoveryURL: URL {
@@ -185,6 +185,7 @@ extension AppModel {
         }
         settings = snapshot.settings
         movieSettings = snapshot.movieSettings ?? MovieSettings()
+        autoEdit = snapshot.autoEdit
         movieTime = 0; movieOutput = nil
         selection = items.contains(where: { $0.id == snapshot.selection }) ? snapshot.selection : items.first?.id
         selectedSegmentID = nil; selectedShotID = nil; selectedRegionID = nil; selectedGraphicID = nil
@@ -255,8 +256,9 @@ extension AppModel {
 
     func newProject() {
         guard !isConverting else { return }
-        // Export settings carry over; recordings, edits and the movie do not.
-        replaceDocument(VideoProject(projectID: UUID(), clips: [], settings: settings, selection: nil, movieSettings: nil),
+        // Export settings and the auto edit answers carry over; recordings, edits and the movie do not.
+        replaceDocument(VideoProject(projectID: UUID(), clips: [], settings: settings, selection: nil, movieSettings: nil,
+                                     autoEdit: autoEdit),
                         label: "New Project", fileURL: nil, saved: nil)
         isMovieMode = false
         statusMessage = "New project. Previous work is available with Undo."

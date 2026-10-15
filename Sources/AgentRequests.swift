@@ -55,6 +55,11 @@ struct AgentRequest: Codable {
     var threshold: Double?
     var minimum: Double?
     var padding: Double?
+    /// transcribe: the whisper model and language, when not the project's own answers.
+    var model: String?
+    var language: String?
+    /// analyze kind autoEdit and autoEdit: a cut style other than the project's own.
+    var style: String?
 }
 
 struct WireRect: Codable, Equatable {
@@ -163,6 +168,8 @@ struct WireCommand: Codable, Equatable {
     var graphicsStyle: [String: JSONValue]?
     /// Only the keys to change: title, description, tags, category, chapters, thumbnail, language, channel.
     var publish: [String: JSONValue]?
+    /// Only the keys to change: model, language, cutStyle, captions, normaliseAudio.
+    var autoEdit: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -173,7 +180,7 @@ struct WireCommand: Codable, Equatable {
         "setColorAdjustments", "resetColorAdjustments", "copyColorAdjustments",
         "addBlurEffect", "updateBlurEffect", "removeBlurEffect", "addMarker", "updateMarker", "removeMarker",
         "addGraphic", "updateGraphic", "removeGraphic", "replaceGraphics", "setGraphicsStyle", "importGraphics",
-        "setPublishInfo",
+        "setPublishInfo", "setAutoEditOptions", "importTranscript", "clearTranscript",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -270,6 +277,27 @@ struct AgentState: Encodable {
         /// The end screen, when the recording has one: when it shows, the speaker's frame,
         /// and each box with the YouTube element chosen for it, to place in YouTube Studio.
         var endScreen: JSONValue?
+        /// What was transcribed, when it has been; the words themselves come from `transcript`.
+        var transcript: TranscriptSummary?
+        /// What exports do with its captions, and where they come from.
+        var captions: CaptionsState
+    }
+    struct TranscriptSummary: Encodable {
+        var model: String, language: String, words: Int
+        /// Words still in the edit.
+        var keptWords: Int
+    }
+    /// use: burnIn, upload or off; source: file (its caption file), transcript, or nil (none).
+    struct CaptionsState: Encodable { var use: String; var source: String? }
+    /// The project's auto edit answers (the defaults until `saved`), whether this Mac can
+    /// transcribe (whisper: ready or needsWhisper), and which models it has.
+    struct AutoEdit: Encodable {
+        struct Model: Encodable { var id: String; var label: String; var size: String; var downloaded: Bool; var englishOnly: Bool }
+        var options: AutoEditOptions
+        var saved: Bool
+        var whisper: String
+        var whisperDetail: String?
+        var models: [Model]
     }
     /// Edited-recording seconds; `weight` follows `VideoBlurEffect.weight`.
     struct Effect: Encodable {
@@ -319,6 +347,7 @@ struct AgentState: Encodable {
     var selection: Selection
     var settings: JSONValue
     var graphicsRenderer: GraphicsRenderer
+    var autoEdit: AutoEdit
     var movie: Movie
     var clips: [Clip]
 }
@@ -384,6 +413,82 @@ struct PreviewGraphic: Encodable {
     var rect: WireRect
 }
 
+/// A recording's words, captions and stumbles, for `transcript`.
+struct AgentTranscript: Encodable {
+    struct Word: Encodable {
+        var text: String; var start: Double; var end: Double; var editedStart: Double?
+        enum CodingKeys: String, CodingKey { case text, start, end, editedStart }
+        /// editedStart is written as null for a cut word, not left out.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(text, forKey: .text); try container.encode(start, forKey: .start)
+            try container.encode(end, forKey: .end); try container.encode(editedStart, forKey: .editedStart)
+        }
+    }
+    struct Line: Encodable { var start: Double; var end: Double; var text: String }
+    struct Found: Encodable {
+        var kind: String; var text: String; var start: Double; var end: Double; var editedStart: Double?
+        enum CodingKeys: String, CodingKey { case kind, text, start, end, editedStart }
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(kind, forKey: .kind); try container.encode(text, forKey: .text)
+            try container.encode(start, forKey: .start); try container.encode(end, forKey: .end)
+            try container.encode(editedStart, forKey: .editedStart)
+        }
+    }
+    var clip: UUID
+    var model: String
+    var language: String
+    var text: String
+    /// Source seconds; editedStart is where the word now plays, null when it was cut.
+    var words: [Word]
+    /// Edited seconds, as uploaded or burned in when captions come from the transcript.
+    var captions: [Line]
+    var stumbles: [Found]
+}
+
+/// What an auto edit found, and did.
+struct AutoEditResult: Encodable {
+    struct Cut: Encodable {
+        var sectionID: UUID, start: Double, end: Double, editedStart: Double, duration: Double
+        /// pause, filler, repeat, restart, fragment.
+        var reasons: [String]
+        var removes: String
+    }
+    struct Section: Encodable { var id: UUID; var start: Double; var end: Double; var speed: Double }
+    struct Settings: Encodable { var captions: String; var audio: String }
+    var kind = "autoEdit"
+    var style: String
+    var applied: Bool
+    var transcribed: Bool
+    var hasTranscript: Bool
+    var cuts: [Cut]
+    var proposedSections: [Section]
+    var savedSeconds: Double
+    /// What exports do once applied: captions (burnIn, upload, off) and audio.
+    var settings: Settings
+    var note: String?
+    var transactionID: UUID?
+    var revision: Int?
+    var removedZooms: [UUID]?
+    var removedEffects: [UUID]?
+    var removedMarkers: [UUID]?
+    var removedGraphics: [UUID]?
+
+    init(_ plan: AutoEditPlan, applied: Bool, transcribed: Bool, note: String?) {
+        style = plan.style.rawValue
+        self.applied = applied; self.transcribed = transcribed; self.note = note
+        hasTranscript = plan.hasTranscript || transcribed
+        cuts = plan.includedCuts.map {
+            Cut(sectionID: $0.segmentID, start: $0.start, end: $0.end, editedStart: $0.timelineStart, duration: $0.duration,
+                reasons: $0.kinds, removes: $0.reason)
+        }
+        proposedSections = plan.sections.map { Section(id: $0.id, start: $0.start, end: $0.end, speed: $0.speed) }
+        savedSeconds = plan.savedSeconds
+        settings = Settings(captions: (plan.settings.captions ?? .off).rawValue, audio: plan.settings.audio.rawValue)
+    }
+}
+
 struct AgentSaveResult: Encodable {
     var path: String
     var projectID: UUID
@@ -397,7 +502,7 @@ struct AgentSaveResult: Encodable {
 @MainActor
 extension AppModel {
     static let agentMethods = ["catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
-                               "analyze", "export", "job", "cancel", "reveal"]
+                               "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit"]
 
     /// Answers one request line with one response line. Never throws: every failure is
     /// a structured error response.
@@ -425,7 +530,8 @@ extension AppModel {
         case "thumbnail": return agentResponse(await agentThumbnail(request), instanceID)
         case "job": return agentResponse(agentJob(request), instanceID)
         case "reveal": return agentResponse(agentReveal(request), instanceID)
-        case "apply", "undo", "redo", "save", "export", "analyze", "cancel":
+        case "transcript": return agentResponse(agentTranscript(request), instanceID)
+        case "apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit":
             return await idempotent(request, instanceID: instanceID) {
                 switch request.method {
                 case "apply": return self.agentResponse(await self.agentApply(request), instanceID)
@@ -433,6 +539,8 @@ extension AppModel {
                 case "save": return self.agentResponse(self.agentSave(request), instanceID)
                 case "export": return self.agentResponse(self.agentExport(request), instanceID)
                 case "analyze": return self.agentResponse(self.agentAnalyze(request), instanceID)
+                case "transcribe": return self.agentResponse(self.agentTranscribe(request), instanceID)
+                case "autoEdit": return self.agentResponse(self.agentAutoEdit(request), instanceID)
                 default: return self.agentResponse(self.agentCancel(request), instanceID)
                 }
             }
@@ -597,7 +705,12 @@ extension AppModel {
                                                                                                graphics: clip.graphics),
                 suggestedChapters: clip.info == nil ? [] : PublishInfo.suggestedChapters(markers: clip.markers ?? [], graphics: clip.graphics,
                                                                                          duration: clip.timeline.duration),
-                endScreen: EndScreenPlan(graphics: clip.graphics, publish: clip.publish, duration: clip.timeline.duration)?.json)
+                endScreen: EndScreenPlan(graphics: clip.graphics, publish: clip.publish, duration: clip.timeline.duration)?.json,
+                transcript: clip.transcript.map {
+                    .init(model: $0.model, language: $0.language, words: $0.words.count, keptWords: $0.keptWords(clip.timeline).count)
+                },
+                captions: .init(use: document.settings.captionUse(hasFile: clip.subtitles != nil).rawValue,
+                                source: clip.item().captionsSource(document.settings)))
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -618,6 +731,12 @@ extension AppModel {
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             graphicsRenderer: graphicsRendererState,
+            autoEdit: .init(options: document.autoEdit ?? AutoEditOptions(), saved: document.autoEdit != nil,
+                            whisper: Whisper.cliPath == nil ? "needsWhisper" : "ready",
+                            whisperDetail: Whisper.cliPath == nil ? Whisper.missingMessage : nil,
+                            models: TranscriptModel.allCases.map {
+                                .init(id: $0.rawValue, label: $0.label, size: $0.sizeLabel, downloaded: Whisper.hasModel($0), englishOnly: $0.englishOnly)
+                            }),
             movie: .init(canvas: (document.movieSettings ?? MovieSettings()).canvas.rawValue, duration: movieOffset, clips: movieClips),
             clips: clips)
     }
@@ -1064,6 +1183,19 @@ extension AppModel {
             let clipID = try field(wire.clipID, "clipID")
             return .setPublishInfo(clip: clipID, info: try mergedPublish(try field(wire.publish, "publish"),
                                                                         onto: try record(clipID).publish ?? PublishInfo()))
+        case "setAutoEditOptions":
+            return .setAutoEditOptions(try Self.mergedAutoEdit(try field(wire.autoEdit, "autoEdit"), onto: document.autoEdit ?? AutoEditOptions()))
+        case "importTranscript":
+            let clipID = try field(wire.clipID, "clipID")
+            _ = try record(clipID)
+            let path = (try field(wire.path, "path") as NSString).expandingTildeInPath
+            guard let data = FileManager.default.contents(atPath: path) else {
+                throw EditError(code: .missingMedia, message: "No file at \(path).")
+            }
+            do { return .setTranscript(clip: clipID, transcript: try Self.readTranscript(data)) }
+            catch { throw EditError.invalid("\((path as NSString).lastPathComponent) cannot be used as a transcript: \(Self.describe(error))") }
+        case "clearTranscript":
+            return .setTranscript(clip: try field(wire.clipID, "clipID"), transcript: nil)
         case "importGraphics":
             let path = (try field(wire.path, "path") as NSString).expandingTildeInPath
             guard FileManager.default.fileExists(atPath: path) else {
@@ -1079,6 +1211,43 @@ extension AppModel {
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
         }
+    }
+
+    /// Auto edit answers named in `patch` replace the current ones; the rest are kept.
+    static func mergedAutoEdit(_ patch: [String: JSONValue], onto options: AutoEditOptions) throws -> AutoEditOptions {
+        guard case .object(var fields) = try JSONValue.from(options) else { throw EditError.invalid("Could not read the current options.") }
+        let allowed: [String: [String]] = [
+            "model": TranscriptModel.allCases.map(\.rawValue), "cutStyle": CutStyle.allCases.map(\.rawValue),
+            "captions": CaptionUse.allCases.map(\.rawValue), "language": [], "normaliseAudio": [],
+        ]
+        for (key, value) in patch {
+            guard let values = allowed[key] else {
+                throw EditError.invalid("Unknown auto edit option \"\(key)\". Options: \(allowed.keys.sorted().joined(separator: ", ")).")
+            }
+            if !values.isEmpty {
+                guard case .string(let text) = value, values.contains(text) else {
+                    throw EditError.invalid("\(key) must be one of: \(values.joined(separator: ", ")).")
+                }
+            }
+            fields[key] = value
+        }
+        let merged: AutoEditOptions
+        do { merged = try AgentProtocol.decoder.decode(AutoEditOptions.self, from: AgentProtocol.encoder.encode(JSONValue.object(fields))) }
+        catch { throw EditError.invalid("An auto edit option has the wrong type (language is text, normaliseAudio true or false).") }
+        if let problem = merged.problem { throw EditError.invalid(problem) }
+        return merged
+    }
+
+    /// whisper-cli's full JSON (-ojf, with -dtw for word times), or a transcript as state
+    /// shows one: {model, language, words: [{text, start, end}]} in source seconds.
+    static func readTranscript(_ data: Data) throws -> Transcript {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], object["transcription"] != nil {
+            let params = object["params"] as? [String: Any]
+            let model = ((params?["model"] as? String).map { ($0 as NSString).lastPathComponent } ?? "whisper")
+                .replacingOccurrences(of: "ggml-", with: "").replacingOccurrences(of: ".bin", with: "")
+            return try Whisper.parse(data, model: model, language: params?["language"] as? String ?? "en")
+        }
+        return try AgentProtocol.decoder.decode(Transcript.self, from: data)
     }
 
     /// Settings named in `patch` replace the current ones; the rest are kept.
@@ -1104,6 +1273,7 @@ extension AppModel {
         var every = ExportSettings()
         every.outputFolder = URL(fileURLWithPath: "/")
         every.graphics = true
+        every.captions = .upload
         guard case .object(let fields)? = try? JSONValue.from(every) else { return [] }
         return Set(fields.keys)
     }()
@@ -1268,7 +1438,7 @@ extension AppModel {
                 url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.map(\.rect),
                 style: settings.blurStyle, strength: settings.blurStrength, toneMap: info.isHDR && settings.toneMapHDR,
                 color: clip.item().colorFilters(settings, original: request.original ?? false),
-                subtitles: clip.subtitles, subtitleStyle: settings.subtitleForceStyle,
+                subtitles: clip.item().burnedCaptions(settings), subtitleStyle: settings.subtitleForceStyle,
                 maxWidth: cropped ? info.width : min(info.width, 1600))
             guard let bitmap = NSBitmapImageRep(data: data), var image = bitmap.cgImage else {
                 throw EditError.invalid("The frame could not be decoded.")
@@ -1340,7 +1510,7 @@ extension AppModel {
 
     private func startJob(id: UUID = UUID(), kind: String, clip: UUID?, origin: EditOrigin,
                           work: @escaping @MainActor () async throws -> JSONValue) -> AgentJob {
-        let job = AgentJob(id: id, kind: kind, status: "running", progress: kind == "export" ? 0 : nil,
+        let job = AgentJob(id: id, kind: kind, status: "running", progress: ["export", "transcribe", "autoEdit"].contains(kind) ? 0 : nil,
                            sourceRevision: revision, clip: clip, origin: origin.label, createdAt: Date())
         agentJobs[job.id] = job
         agentJobTasks[job.id] = Task { [weak self] in
@@ -1401,9 +1571,144 @@ extension AppModel {
                     Suggestion(start: $0.shot.start, hold: $0.shot.hold, level: $0.shot.level, target: WirePoint($0.shot.target), score: $0.score)
                 }))
             })
+        case "autoEdit":
+            let options = committedProject.autoEdit ?? AutoEditOptions()
+            let style: CutStyle?
+            do { style = try Self.cutStyle(request.style) } catch let error as EditError { return .failure(error) } catch { return .failure(.invalid("\(error)")) }
+            let clip = committedProject.clips.first { $0.id == clipID }!
+            return .success(startJob(kind: "analyze", clip: clipID, origin: agentOrigin(request)) { [weak self] in
+                guard let self else { throw CancellationError() }
+                let plan = try await self.planAutoEdit(clipID, options: options, style: style)
+                var note: String?
+                if plan.style.cutsStumbles, clip.transcript == nil {
+                    note = "No transcript yet, so these are pauses only. Run transcribe first to cut stumbles too."
+                }
+                return try JSONValue.from(AutoEditResult(plan, applied: false, transcribed: false, note: note))
+            })
         default:
-            return .failure(.invalid("kind must be \"silence\" or \"zooms\"."))
+            return .failure(.invalid("kind must be \"silence\", \"zooms\" or \"autoEdit\"."))
         }
+    }
+
+    static func cutStyle(_ name: String?) throws -> CutStyle? {
+        guard let name else { return nil }
+        guard let style = CutStyle(rawValue: name) else {
+            throw EditError.invalid("style must be one of: \(CutStyle.allCases.map(\.rawValue).joined(separator: ", ")).")
+        }
+        return style
+    }
+
+    /// The model and language a transcription uses: the request's, else the project's answers.
+    private func transcriptChoice(_ request: AgentRequest) throws -> (TranscriptModel, String) {
+        let options = committedProject.autoEdit ?? AutoEditOptions()
+        var model = options.model
+        if let name = request.model {
+            guard let chosen = TranscriptModel(rawValue: name) else {
+                throw EditError.invalid("model must be one of: \(TranscriptModel.allCases.map(\.rawValue).joined(separator: ", ")).")
+            }
+            model = chosen
+        }
+        let language = request.language ?? (model.englishOnly ? "en" : options.language)
+        var check = AutoEditOptions(); check.model = model; check.language = language
+        if let problem = check.problem { throw EditError.invalid(problem) }
+        guard Whisper.cliPath != nil else { throw EditError(code: .unsupportedCapability, message: Whisper.missingMessage) }
+        guard Whisper.hasModel(model) else { throw EditError(code: .unsupportedCapability, message: Whisper.needsModelMessage(model)) }
+        return (model, language)
+    }
+
+    /// Transcribes a recording with whisper.cpp on this Mac, as a job; the words land as
+    /// one undo step named Transcribe.
+    private func agentTranscribe(_ request: AgentRequest) -> Result<AgentJob, EditError> {
+        if let refusal = checkSession(request, required: true) { return .failure(refusal) }
+        if agentsPaused { return .failure(EditError(code: .agentsPaused, message: "Agent edits are paused in YamVideo. Ask the owner to resume them.")) }
+        guard let clipID = request.clip, let clip = committedProject.clips.first(where: { $0.id == clipID }), let info = clip.info else {
+            return .failure(EditError(code: .missingMedia, message: "transcribe needs a loaded recording in clip."))
+        }
+        guard info.hasAudio else { return .failure(.invalid("\(clip.url.lastPathComponent) has no audio to transcribe.")) }
+        let model: TranscriptModel, language: String
+        do { (model, language) = try transcriptChoice(request) } catch let error as EditError { return .failure(error) } catch { return .failure(.invalid("\(error)")) }
+        let origin = agentOrigin(request)
+        let id = UUID()
+        return .success(startJob(id: id, kind: "transcribe", clip: clipID, origin: origin) { [weak self] in
+            guard let self else { throw CancellationError() }
+            let (transcript, receipt) = try await self.transcribe(clipID, model: model, language: language, origin: origin) { fraction in
+                Task { @MainActor [weak self] in self?.agentJobs[id]?.progress = fraction }
+            }
+            struct Done: Encodable {
+                var model: String, language: String, words: Int, stumbles: Int
+                var transactionID: UUID?, revision: Int
+            }
+            return try JSONValue.from(Done(model: transcript.model, language: transcript.language, words: transcript.words.count,
+                                           stumbles: StumbleFinder.stumbles(in: transcript.words).count,
+                                           transactionID: receipt.transactionID, revision: receipt.revision))
+        })
+    }
+
+    /// The whole auto edit as a job, by the project's answers: transcribe when the cut
+    /// style or captions need the words and there are none, find the cuts, then apply
+    /// them with the captions and loudness choices as one undo step. With Review each cut
+    /// nothing is applied: the cuts come back for the owner to choose from.
+    private func agentAutoEdit(_ request: AgentRequest) -> Result<AgentJob, EditError> {
+        if let refusal = checkSession(request, required: true) { return .failure(refusal) }
+        if agentsPaused { return .failure(EditError(code: .agentsPaused, message: "Agent edits are paused in YamVideo. Ask the owner to resume them.")) }
+        guard let clipID = request.clip, let clip = committedProject.clips.first(where: { $0.id == clipID }), clip.info != nil else {
+            return .failure(EditError(code: .missingMedia, message: "autoEdit needs a loaded recording in clip."))
+        }
+        let options = committedProject.autoEdit ?? AutoEditOptions()
+        let style: CutStyle?
+        do { style = try Self.cutStyle(request.style) } catch let error as EditError { return .failure(error) } catch { return .failure(.invalid("\(error)")) }
+        var choice: (TranscriptModel, String)?
+        if needsTranscript(clip, options: options, style: style), clip.transcript == nil {
+            do { choice = try transcriptChoice(request) } catch let error as EditError {
+                return .failure(EditError(code: error.code, message: error.message
+                    + " (The cut style or captions need a transcript. Without one, use style natural and captions off, or import one with importTranscript.)"))
+            } catch { return .failure(.invalid("\(error)")) }
+        }
+        let origin = agentOrigin(request)
+        let label = request.label ?? "Auto Edit"
+        let id = UUID()
+        return .success(startJob(id: id, kind: "autoEdit", clip: clipID, origin: origin) { [weak self] in
+            guard let self else { throw CancellationError() }
+            if let (model, language) = choice {
+                try await self.transcribe(clipID, model: model, language: language, origin: origin) { fraction in
+                    Task { @MainActor [weak self] in self?.agentJobs[id]?.progress = fraction * 0.9 }
+                }
+            }
+            let plan = try await self.planAutoEdit(clipID, options: options, style: style)
+            self.agentJobs[id]?.progress = 0.95
+            if plan.style == .review {
+                return try JSONValue.from(AutoEditResult(plan, applied: false, transcribed: choice != nil, note:
+                    "The owner chose Review each cut, so nothing was cut. Show the owner these cuts; apply the ones they keep with replaceSections, and settings with setExportSettings."))
+            }
+            switch self.applyAutoEdit(plan, origin: origin, label: label) {
+            case .success(let receipt):
+                var result = AutoEditResult(plan, applied: true, transcribed: choice != nil, note: nil)
+                result.transactionID = receipt.transactionID; result.revision = receipt.revision
+                result.removedZooms = receipt.removedZooms; result.removedEffects = receipt.removedEffects
+                result.removedMarkers = receipt.removedMarkers; result.removedGraphics = receipt.removedGraphics
+                return try JSONValue.from(result)
+            case .failure(let error): throw error
+            }
+        })
+    }
+
+    /// The words of a recording in source seconds with where each now plays (editedStart,
+    /// null when cut), its captions on the edited timeline, and the stumbles found in it.
+    private func agentTranscript(_ request: AgentRequest) -> Result<AgentTranscript, EditError> {
+        guard let clipID = request.clip, let clip = committedProject.clips.first(where: { $0.id == clipID }) else {
+            return .failure(.notFound("transcript needs a recording's id in clip."))
+        }
+        guard let transcript = clip.transcript else {
+            return .failure(.notFound("\(clip.url.lastPathComponent) has no transcript yet. Run transcribe (state.autoEdit lists the models on this Mac), or importTranscript."))
+        }
+        let timeline = clip.timeline
+        return .success(AgentTranscript(
+            clip: clipID, model: transcript.model, language: transcript.language, text: transcript.text,
+            words: transcript.words.map { .init(text: $0.text, start: $0.start, end: $0.end, editedStart: timeline.time(forSource: $0.start)) },
+            captions: Captions.edited(transcript.captions(timeline: timeline), timeline: timeline).map { .init(start: $0.start, end: $0.end, text: $0.text) },
+            stumbles: StumbleFinder.stumbles(in: transcript.words).map {
+                .init(kind: $0.kind.rawValue, text: $0.text, start: $0.start, end: $0.end, editedStart: timeline.time(forSource: $0.start))
+            }))
     }
 
     /// Exports exactly the document at `expectedRevision` to an explicit path. Like the
@@ -1492,7 +1797,7 @@ extension AppModel {
                     try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
-                                            segments: item.segments, settings: exportSettings, subtitles: item.subtitles,
+                                            segments: item.segments, settings: exportSettings, subtitles: item.burnedCaptions(exportSettings),
                                             color: item.colorStage(exportSettings), effects: item.blurEffects,
                                             graphics: item.exportGraphics(exportSettings), onProgress: progress)
                 case .movie(let plan):
@@ -1537,7 +1842,7 @@ extension AppModel {
             return .failure(.invalid(blocking.message + " (state.clips[].publishIssues lists everything; setPublishInfo changes it.)"))
         }
         let files = YouTubeExport.files(in: folder, publish: publish, fallback: item.url.deletingPathExtension().lastPathComponent,
-                                        captions: item.subtitles.map { Captions.retimable.contains($0.pathExtension.lowercased()) } ?? false,
+                                        captions: item.uploadsCaptions(settings),
                                         unique: false)
         if request.overwrite != true, let existing = files.all.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
             return .failure(.invalid("\(existing.lastPathComponent) already exists. Pass overwrite: true to replace it."))
