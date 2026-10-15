@@ -218,6 +218,33 @@ need Node.js to export" and offers to export without them.
   made this way by hand on 2026-10-15.
 - **G3 — more.** 9:16 layouts for Shorts; graphics in Movie mode; caption styles.
 
+## 6a. Next features, in order (2026-10-15)
+
+The owner's priority after the first video. Start a new session with "start feature 1
+from docs/plans/graphics-track.md".
+
+1. **Export with graphics from the app (G1 part 2).** Render each unit (graphic or panel
+   span) with HyperFrames to a cached PNG sequence; overlay them in the app's ffmpeg graph
+   after zoom and scale, before subtitles; port `moveAside` (move, blurred fill, edge
+   fade, frost) to ffmpeg with a Core Image parity test. Until this lands, the final video
+   comes from `Tools/Graphics/assemble.mjs` and `hyperframes render`.
+2. **Move and resize on the picture (G2b).** Section 6.
+3. **Publish panel with a YouTube preview (G3).** Section 6; also the category (Science &
+   Technology for this channel), tags (500 characters), chapters of at least 10 s each
+   (YouTube turns chapters off otherwise), and the subtitles file with timing.
+4. **Thumbnail maker (G3).** Section 6.
+5. **End screen layout (G3).** Section 6.
+6. **Auto edit options.** The choices Claude asked before the first edit become app
+   settings stored in the project and readable by agents: transcript model (whisper.cpp
+   large-v3-turbo q5 or base.en, downloaded only with consent) and language; cut style
+   (Tight: pauses of 0.42 s or more cut to about 0.22 s, plus stumbles from the
+   transcript; Natural: the silence sheet's defaults; Review each cut); captions (SRT for
+   upload, burn in and SRT, none); audio normalised to -14 LUFS. Word timing needs
+   `whisper-cli -dtw large.v3.turbo -nfa`.
+7. **YamDraw ink clips.** Section 2a, item 2.
+8. **Authoring (G2).** Section 6: Add Graphic menu, looks, video templates and the
+   `youtube-edit` Claude skill.
+
 ## 7. Acceptance gates
 
 - **Frame match:** for each kind, a G0 `full` render matches the hand-built composition
