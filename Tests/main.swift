@@ -3854,8 +3854,8 @@ check(gfxEditor.perform([.setGraphicsStyle(clip: gfxClip, style: mixTrack.style)
 equal(gfxEditor.undoTitle, "Undo Graphics Style", "each change is a named undo step")
 
 let savedGraphics = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(gfxEditor.project))
-check(savedGraphics == gfxEditor.project && savedGraphics.version == 6 && savedGraphics.clips[0].graphics?.items.count == 3,
-      "graphics survive a version 6 round trip")
+check(savedGraphics == gfxEditor.project && savedGraphics.version == VideoProject.currentVersion && savedGraphics.clips[0].graphics?.items.count == 3,
+      "graphics survive a project round trip")
 var olderClaim = savedGraphics; olderClaim.version = 5
 check((try? olderClaim.validate()) == nil, "a version 5 file with graphics is refused")
 var olderPlain = savedGraphics; olderPlain.version = 5; olderPlain.clips[0].graphics = nil
@@ -4292,6 +4292,149 @@ if case .ready = await HyperFrames.status() {
     check(during > 60 && before < 30, "the exported video shows the card in its column while the graphic is on", "during \(during), before \(before)")
 } else {
     print("  --   HyperFrames render skipped (not downloaded)")
+}
+
+// MARK: - Graphics on the picture
+
+extension CGImage {
+    static func blank(width: Int, height: Int) -> CGImage {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(red: 0.2, green: 0.3, blue: 0.4, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
+    }
+}
+
+print("\nGraphics on the picture")
+let zoneOrigin = CGPoint(x: 1240, y: 72)
+let card = GraphicBounds(content: CGRect(x: 1240, y: 96, width: 430, height: 184), origin: zoneOrigin)
+let moved100 = GraphicTransform(x: -100, y: 40, scale: 1)
+check(card.placed(moved100) == CGRect(x: 1140, y: 136, width: 430, height: 184), "a move shifts the box by its pixels")
+let grown = GraphicTransform(x: 0, y: 0, scale: 2)
+check(card.placed(grown) == CGRect(x: 1240, y: 120, width: 860, height: 368), "a scale grows the box from its zone's top-left corner")
+check(GraphicTransform(scale: 3).problem?.contains("0.4") == true && GraphicTransform(x: 2500).problem?.contains("1920") == true
+          && GraphicTransform(x: .nan).problem != nil && GraphicTransform(x: -300, y: 200, scale: 1.5).problem == nil,
+      "a move or scale out of range is refused, saying what is allowed")
+check(GraphicsTrack(items: [Graphic(kind: .namePlate, start: 0, end: 1, transform: GraphicTransform(scale: 9))]).problem(duration: 3) != nil,
+      "the track refuses a graphic scaled out of range")
+
+let noSnap = GraphicPlacement.moved(GraphicTransform(), by: CGSize(width: -1150, height: 0), bounds: card, guides: nil, tolerance: 6)
+check(noSnap.transform == GraphicTransform(x: -1150, y: 0, scale: 1) && noSnap.vertical == nil, "without guides a move goes exactly where it is dragged")
+let plateGraphic = Graphic(kind: .namePlate, start: 0, end: 1)
+let cardGuides = GraphicPlacement.guides(for: plateGraphic, bounds: card, style: GraphicsStyle())
+let safeSnap = GraphicPlacement.moved(GraphicTransform(), by: CGSize(width: -1148, height: 0), bounds: card, guides: cardGuides, tolerance: 6)
+check(safeSnap.transform.x == -1144 && safeSnap.vertical == 96, "a left edge near the safe area snaps onto it", "\(safeSnap)")
+let homeSnap = GraphicPlacement.moved(GraphicTransform(x: -300, y: 0), by: CGSize(width: 297, height: 3), bounds: card, guides: cardGuides, tolerance: 6)
+check(homeSnap.transform == GraphicTransform(), "a graphic dragged back near its own place snaps home", "\(homeSnap)")
+let centreSnap = GraphicPlacement.moved(GraphicTransform(), by: CGSize(width: -495, height: 0), bounds: card, guides: cardGuides, tolerance: 6)
+check(centreSnap.vertical == 960 && abs(card.placed(centreSnap.transform).midX - 960) < 0.5, "its centre snaps to the middle of the frame", "\(centreSnap)")
+let bigger = GraphicPlacement.resized(GraphicTransform(), corner: .bottomRight, to: CGPoint(x: 1240 + 645, y: 96 + 100),
+                                      bounds: card, guides: nil, tolerance: 6)
+let biggerBox = card.placed(bigger.transform)
+check(abs(bigger.transform.scale - 1.5) < 0.001 && abs(biggerBox.minX - 1240) < 0.5 && abs(biggerBox.minY - 96) < 0.5,
+      "dragging the bottom-right corner keeps the top-left corner and the shape", "\(bigger) \(biggerBox)")
+let fromTopLeft = GraphicPlacement.resized(GraphicTransform(), corner: .topLeft, to: CGPoint(x: 1670 - 215, y: 280 - 92),
+                                           bounds: card, guides: nil, tolerance: 6)
+let fromTopLeftBox = card.placed(fromTopLeft.transform)
+check(abs(fromTopLeft.transform.scale - 0.5) < 0.001 && abs(fromTopLeftBox.maxX - 1670) < 0.5 && abs(fromTopLeftBox.maxY - 280) < 0.5,
+      "dragging the top-left corner keeps the bottom-right corner", "\(fromTopLeft) \(fromTopLeftBox)")
+let nearFull = GraphicPlacement.resized(GraphicTransform(), corner: .bottomRight, to: CGPoint(x: 1670 + 4, y: 150),
+                                        bounds: card, guides: cardGuides, tolerance: 6)
+check(nearFull.transform == GraphicTransform(), "a size close to the template's own snaps to it", "\(nearFull)")
+let tiny = GraphicPlacement.resized(GraphicTransform(), corner: .bottomRight, to: CGPoint(x: 1241, y: 97), bounds: card, guides: nil, tolerance: 6)
+check(tiny.transform.scale == GraphicTransform.scales.lowerBound, "a graphic cannot be shrunk below its smallest size")
+
+let placing = AppModel(recoveryURL: nil)
+placing.restore(VideoProject(clips: [ProjectClip(gradeOther)], settings: ExportSettings(), selection: gradeOther.id))
+let placedPlate = Graphic(kind: .namePlate, start: 0.2, end: 1.4, props: ["title": .string("Plate")])
+_ = placing.perform([.replaceGraphics(clip: gradeOther.id, graphics: [placedPlate], style: nil)])
+placing.showPlayback = true
+let undoBeforeDrag = placing.undoEntries.count
+for step in 1...5 { placing.placeGraphic(placedPlate.id, GraphicTransform(x: Double(-20 * step), y: Double(10 * step)), live: true) }
+check(placing.showPlayback, "dragging a graphic keeps Preview showing")
+placing.endGesture()
+check(placing.undoEntries.count == undoBeforeDrag + 1 && placing.undoTitle == "Undo Move Graphic on Picture"
+          && placing.items[0].graphics?.items[0].transform == GraphicTransform(x: -100, y: 50),
+      "a drag on the picture is one undo step", placing.undoTitle)
+placing.selectedGraphicID = placedPlate.id
+placing.nudgeSelectedGraphic(dx: 1, dy: 0)
+check(placing.items[0].graphics?.items[0].transform?.x == -99, "⌥ arrow keys nudge the graphic a pixel")
+placing.resetGraphicPlace(placedPlate.id)
+check(placing.items[0].graphics?.items[0].transform == nil, "Reset Position puts it back, stored as no transform at all")
+placing.placeGraphic(placedPlate.id, GraphicTransform(x: 0, y: 0, scale: 1))
+check(placing.items[0].graphics?.items[0].transform == nil, "the template's own place is never stored as a transform")
+placing.placeGraphic(placedPlate.id, GraphicTransform(x: -600, y: 0, scale: 1.25))
+check(placing.items[0].graphics?.items[0].transform == GraphicTransform(x: -600, y: 0, scale: 1.25), "a placement is stored")
+
+let placedData = String(decoding: try placing.items[0].graphics!.engineData(duration: 3, fps: "30"), as: UTF8.self)
+check(placedData.contains(#""transform":{"scale":1.25,"x":-600,"y":0}"#), "the engine gets the move and the scale", placedData)
+let placedSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(placing.project))
+check(placedSaved == placing.project && placedSaved.version == 7, "placements survive a version 7 round trip")
+var placedAsSix = placedSaved; placedAsSix.version = 6
+check((try? placedAsSix.validate()) == nil, "a version 6 file with placements is refused, so an older build never drops them")
+var unplacedSix = placedSaved; unplacedSix.version = 6; unplacedSix.clips[0].graphics?.items[0].transform = nil
+check((try? unplacedSix.validate()) != nil, "a version 6 file without placements still opens")
+let placedFile = scratch.appendingPathComponent("placed.json")
+try placedData.write(to: placedFile, atomically: true, encoding: .utf8)
+check(try GraphicsEngine.importFile(placedFile).items[0].transform == GraphicTransform(x: -600, y: 0, scale: 1.25),
+      "a graphics file carries placements in and out")
+
+print("\nGraphics on the picture for agents")
+var placeRequest = address(placing)
+placeRequest["method"] = "apply"; placeRequest["requestID"] = "place-1"; placeRequest["client"] = "Claude"
+placeRequest["commands"] = [["type": "updateGraphic", "clipID": gradeOther.id.uuidString, "graphicID": placedPlate.id.uuidString,
+                             "graphic": ["transform": ["y": 120]]]]
+let placeReply = await agentCall(placing, placeRequest)
+check(placeReply["ok"] as? Bool == true && placing.items[0].graphics?.items[0].transform == GraphicTransform(x: -600, y: 120, scale: 1.25),
+      "an agent moves a graphic; keys it leaves out keep their values", "\(placeReply)")
+var badPlace = address(placing)
+badPlace["method"] = "apply"; badPlace["requestID"] = "place-2"
+badPlace["commands"] = [["type": "updateGraphic", "clipID": gradeOther.id.uuidString, "graphicID": placedPlate.id.uuidString,
+                         "graphic": ["transform": ["scale": 4]]]]
+let badPlaceReply = await agentCall(placing, badPlace)
+check(agentError(badPlaceReply) == "invalid_command" && ((badPlaceReply["error"] as? [String: Any])?["message"] as? String ?? "").contains("2.5"),
+      "an agent's out-of-range scale is refused with the range", "\(badPlaceReply)")
+let placedState = (agentResult(await agentCall(placing, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["graphics"] as? [String: Any]
+let placedItem = (placedState?["items"] as? [[String: Any]])?.first
+check((placedItem?["transform"] as? [String: Any])?["y"] as? Double == 120, "state shows the placement")
+
+// The engine itself: measured boxes, and a placement moving the drawn graphic.
+let measuredTrack = GraphicsTrack(items: [Graphic(id: placedPlate.id, kind: .namePlate, start: 0.2, end: 1.4,
+                                                  props: ["kicker": .string("Yamparala Media"), "title": .string("Yamparala Rahul"), "detail": .string("UX Design Engineer")])])
+let measured = try await GraphicsSnapshot.bounds(measuredTrack, duration: 3, fps: "30")
+let plateBox = measured[placedPlate.id]
+check(plateBox.map { $0.origin == zoneOrigin && $0.content.minX >= 1238 && $0.content.minX < 1300 && $0.content.width > 250
+                     && $0.content.width < 640 && $0.content.minY > 60 && $0.content.height < 400 } == true,
+      "the engine measures a name plate's card in the column", "\(String(describing: plateBox))")
+let gradeFrame = CGImage.blank(width: 1280, height: 720)
+let unplacedShot = try await GraphicsSnapshot.draw(measuredTrack, duration: 3, fps: "30", time: 1.0, over: gradeFrame)
+var placedTrack = measuredTrack; placedTrack.items[0].transform = GraphicTransform(x: -600, y: 120, scale: 1.25)
+let placedShot = try await GraphicsSnapshot.draw(placedTrack, duration: 3, fps: "30", time: 1.0, over: gradeFrame)
+if let before = unplacedShot.boxes[placedPlate.id], let after = placedShot.boxes[placedPlate.id], let plateBox {
+    let expected = plateBox.placed(GraphicTransform(x: -600, y: 120, scale: 1.25))
+    let k = 1280.0 / 1920
+    check(abs(after.minX - expected.minX * k) < 2 && abs(after.minY - expected.minY * k) < 2 && abs(after.width - before.width * 1.25) < 2,
+          "the drawn graphic lands where its placement says, at its new size", "before \(before) after \(after) expected \(expected)")
+} else {
+    check(false, "the snapshot reports the graphic's box", "\(unplacedShot.boxes) \(placedShot.boxes)")
+}
+check(placedShot.image.width == 1280 && placedShot.image.height == 720, "the snapshot keeps the picture's size")
+
+if case .ready = await HyperFrames.status() {
+    // An export draws the graphic where it was placed.
+    let placedOut = scratch.appendingPathComponent("placed.mp4")
+    var exportTrack = measuredTrack; exportTrack.items[0].transform = GraphicTransform(x: -600, y: 300, scale: 1)
+    try await FFmpeg.export(input: landscape, output: placedOut, info: info, crop: info.fullFrame, settings: ExportSettings(),
+                            graphics: exportTrack) { _ in }
+    let target = plateBox.map { $0.placed(exportTrack.items[0].transform) } ?? .zero
+    let k = 1280.0 / 1920
+    let inside = (Int(target.midX * k), Int(target.midY * k)), home = (Int((plateBox?.content.midX ?? 0) * k), Int((plateBox?.content.midY ?? 0) * k))
+    let placedPixel = try await pixel(placedOut, x: inside.0, y: inside.1, at: 1.0)
+    let sourcePixel = try await pixel(landscape, x: inside.0, y: inside.1, at: 1.0)
+    let homeChanged = try await unchanged(placedOut, plainOut, x: home.0, y: home.1, at: 1.0)
+    check(abs(placedPixel.0 - sourcePixel.0) + abs(placedPixel.1 - sourcePixel.1) + abs(placedPixel.2 - sourcePixel.2) > 40 && homeChanged,
+          "the export draws the graphic where it was placed, not where the template puts it", "\(placedPixel) vs \(sourcePixel)")
 }
 
 print("\n\(checks - failures)/\(checks) checks passed")

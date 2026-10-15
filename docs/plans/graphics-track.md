@@ -2,8 +2,8 @@
 
 **Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
 the app: data, commands, preview, timeline, inspector) and G1 part 2 (export with
-graphics from the app) are implemented; see sections 8 to 10. Feature 2 of section 6a
-(move and resize on the picture) is next. Phase 5 of
+graphics from the app) and G2b (move and resize on the picture) are implemented; see
+sections 8 to 11. Feature 3 of section 6a (the Publish panel) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -226,7 +226,7 @@ The owner's priority after the first video. Start a new session with "start feat
 from docs/plans/graphics-track.md".
 
 1. **Export with graphics from the app (G1 part 2).** Done 2026-10-15; section 10.
-2. **Move and resize on the picture (G2b).** Section 6.
+2. **Move and resize on the picture (G2b).** Done 2026-10-15; section 11.
 3. **Publish panel with a YouTube preview (G3).** Section 6; also the category (Science &
    Technology for this channel), tags (500 characters), chapters of at least 10 s each
    (YouTube turns chapters off otherwise), and the subtitles file with timing.
@@ -377,3 +377,42 @@ from docs/plans/graphics-track.md".
   move costs about 1 s of processing per second of panel, mostly resizing; a faster path
   can come later if long panels feel slow. In the demo, a long ink checklist line ran past
   the frame's edge: a template limit, not the export.
+
+## 11. G2b status (2026-10-15)
+
+- **Data.** Each graphic has an optional `transform {x, y, scale}`: a move in design
+  pixels from its place in the template, and a scale (0.4–2.5) from the top-left corner
+  of its zone. The template's own place is stored as no transform. Project version 7;
+  an older version holding transforms is refused, so a build without this feature never
+  drops them on save.
+- **Engine.** Each graphic now sits in a `.yg-place` wrapper that carries the transform,
+  so the template's own motion on the host is untouched. `YamGraphics.place()` moves
+  graphics without rebuilding them (used while dragging). `bounds()` measures each
+  graphic's drawn box once it has fully come in, without its transform: the painted
+  boxes, images, SVG shapes and tight text. `boxes()` measures what shows at the current
+  time. The export draws the transform because the same engine renders the units.
+- **Preview.** Click a graphic on the picture to select it, drag it to move it, and drag
+  a corner to resize it; the opposite corner stays put and the graphic keeps its shape. It
+  snaps to the title-safe area (5 % in), the centre lines, its own place in the template,
+  and the column or the panel; orange guide lines show the snap. ⌥ turns snapping off, as
+  on the timeline. A drag is one gesture and one undo step ("Move Graphic on Picture",
+  "Resize Graphic") and keeps Preview open. ⌥ arrow keys nudge the selected graphic
+  (⇧ for 10 px). A graphic not on screen at the playhead shows a dashed box.
+- **Inspector.** Across, Down and Size %, and Reset Position.
+- **Agents.** `transform` on `addGraphic` and `updateGraphic` (only the keys given
+  change); out-of-range values are refused with the range. `preview` with `composed: true`
+  now draws the graphics, using the same engine page in an offscreen WebKit view, and
+  returns each showing graphic's box in the preview's pixels.
+- **Tests** (970 checks): the transform maths, snapping to the safe area, the centre and
+  home, corner resizes keeping the opposite corner, snapping to 100 %, the size limits, a
+  drag being one undo step that keeps Preview open, nudge and reset, the version gate,
+  graphics files carrying placements, agent edits and refusals, the engine's measured
+  box, a placed graphic landing where its transform says in the offscreen drawing, and a
+  real export drawing it there.
+- **Real use (on this Mac).** An agent moved a name plate to the lower left at 120 %
+  through `yamvideoctl`. The composed preview reported its box, and the exported frame
+  matched the preview. `Tools/Snapshot` shows the selection box on the moved card and the
+  inspector fields.
+- **Open.** Hands-on dragging in the running app (the gestures are covered by the maths
+  and model checks, not by a pointer). A graphic can be placed partly off the frame; the
+  preview shows its box, and agents see it in the reported box.

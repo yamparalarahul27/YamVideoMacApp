@@ -77,7 +77,7 @@ extension AppModel {
     /// Applies `transform` to one graphic. With a `gesture` key the change shows live and
     /// is committed as one undo step when the gesture ends; an edit the rules refuse
     /// (an overlap, or running past the end) leaves the graphic where it was.
-    func mutateGraphic(_ id: UUID, gesture: String? = nil, label: String = "Edit Graphic",
+    func mutateGraphic(_ id: UUID, gesture: String? = nil, label: String = "Edit Graphic", keepPreview: Bool = false,
                        _ transform: (inout Graphic) -> Void) {
         guard let index = selectedIndex,
               let graphic = items[index].graphics?.items.first(where: { $0.id == id }) else { return }
@@ -86,7 +86,7 @@ extension AppModel {
         guard edited != graphic else { return }
         let command = EditCommand.updateGraphic(clip: items[index].id, graphic: edited)
         if let gesture {
-            _ = updateGesture(gesture, label: label, [command])
+            _ = updateGesture(gesture, label: label, [command], keepPreview: keepPreview)
             return
         }
         if case .failure(let error) = perform([command], label: label) { statusMessage = error.message }
