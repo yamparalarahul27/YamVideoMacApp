@@ -60,6 +60,8 @@ struct AgentRequest: Codable {
     var language: String?
     /// analyze kind autoEdit and autoEdit: a cut style other than the project's own.
     var style: String?
+    /// preview, export and reveal: one of the recording's Shorts (then `time` is seconds into it).
+    var short: UUID?
 }
 
 struct WireRect: Codable, Equatable {
@@ -170,6 +172,10 @@ struct WireCommand: Codable, Equatable {
     var publish: [String: JSONValue]?
     /// Only the keys to change: model, language, cutStyle, captions, normaliseAudio.
     var autoEdit: [String: JSONValue]?
+    var shortID: UUID?
+    /// A Short's keys to set: start, end, window, title, description, tags, hidden,
+    /// placements, cover, panels, captions (and id for a new one).
+    var short: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -181,6 +187,7 @@ struct WireCommand: Codable, Equatable {
         "addBlurEffect", "updateBlurEffect", "removeBlurEffect", "addMarker", "updateMarker", "removeMarker",
         "addGraphic", "updateGraphic", "removeGraphic", "replaceGraphics", "setGraphicsStyle", "importGraphics",
         "setPublishInfo", "setAutoEditOptions", "importTranscript", "clearTranscript",
+        "addShort", "updateShort", "removeShort",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -206,6 +213,7 @@ struct AgentReceipt: Encodable {
     var createdIDs: [UUID]
     var removedZooms: [UUID]
     var removedGraphics: [UUID] = []
+    var removedShorts: [UUID] = []
     var affectedClips: [UUID]
 }
 
@@ -281,6 +289,29 @@ struct AgentState: Encodable {
         var transcript: TranscriptSummary?
         /// What exports do with its captions, and where they come from.
         var captions: CaptionsState
+        /// Its Shorts: vertical 1080×1920 versions of parts of it.
+        var shorts: [ShortState]
+    }
+    /// A Short as an agent needs it. Times are edited-recording seconds; `graphics` are the
+    /// ones that show in it, in its own time from 0, and `window` is the 9:16 part of the
+    /// picture it shows (source pixels), set or the default.
+    struct ShortState: Encodable {
+        struct Shown: Encodable { var id: UUID; var kind: String; var start: Double; var end: Double; var placed: Bool }
+        var id: UUID
+        var start: Double, end: Double, length: Double
+        var window: WireRect
+        var windowSet: Bool
+        var width = 1080, height = 1920
+        var title: String, description: String, tags: [String]
+        var panels: String, captions: String
+        var cover: Double?
+        var hidden: [UUID]
+        var placements: [String: GraphicTransform]
+        var graphics: [Shown]
+        /// Whether its captions are burned in, and how many show.
+        var captionsBurned: Bool
+        var captionCount: Int
+        var issues: [PublishInfo.Issue]
     }
     struct TranscriptSummary: Encodable {
         var model: String, language: String, words: Int
@@ -326,6 +357,9 @@ struct AgentState: Encodable {
         /// `section` is the one last clicked; `sections` is everything selected, in
         /// timeline order.
         var clip: UUID?, section: UUID?, sections: [UUID], zoom: UUID?, blurArea: UUID?, effect: UUID?, marker: UUID?, graphic: UUID?
+        var short: UUID?
+        /// frame (the edit frame), preview (the 16:9 edit playing) or short (the selected Short, 9:16).
+        var viewer: String
         var playhead: Double, movieMode: Bool, movieTime: Double
     }
     struct Busy: Encodable {
@@ -405,6 +439,8 @@ struct AgentPreview: Encodable {
     /// In a composed preview, the graphics showing at that time and where each is drawn,
     /// in this image's pixels.
     var graphics: [PreviewGraphic]?
+    /// A Short's preview: its id. `time` is then seconds into the Short and the picture 1080×1920.
+    var short: UUID?
 }
 
 struct PreviewGraphic: Encodable {
@@ -595,7 +631,7 @@ extension AppModel {
         return response
     }
 
-    private func checkSession(_ request: AgentRequest, required: Bool) -> EditError? {
+    func checkSession(_ request: AgentRequest, required: Bool) -> EditError? {
         if required, request.sessionID == nil || request.projectID == nil {
             return EditError(code: .invalidRequest, message: "Include sessionID and projectID from `state`.")
         }
@@ -619,7 +655,7 @@ extension AppModel {
         if agentClients.count > 12 { agentClients.removeLast(agentClients.count - 12) }
     }
 
-    private func agentOrigin(_ request: AgentRequest) -> EditOrigin {
+    func agentOrigin(_ request: AgentRequest) -> EditOrigin {
         let name = String((request.client ?? "").unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmed = String(name.prefix(40))
@@ -710,7 +746,8 @@ extension AppModel {
                     .init(model: $0.model, language: $0.language, words: $0.words.count, keptWords: $0.keptWords(clip.timeline).count)
                 },
                 captions: .init(use: document.settings.captionUse(hasFile: clip.subtitles != nil).rawValue,
-                                source: clip.item().captionsSource(document.settings)))
+                                source: clip.item().captionsSource(document.settings)),
+                shorts: Self.shortStates(clip, settings: document.settings))
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -728,6 +765,7 @@ extension AppModel {
             selection: .init(clip: selection, section: selectedSegmentID,
                              sections: selectedItem.map { sectionSelection.ordered(in: $0.timeline).map(\.id) } ?? [],
                              zoom: selectedShotID, blurArea: selectedRegionID, effect: selectedEffectID, marker: selectedMarkerID, graphic: selectedGraphicID,
+                             short: selectedShortID, viewer: viewer == .short ? "short" : viewer == .preview ? "preview" : "frame",
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             graphicsRenderer: graphicsRendererState,
@@ -838,14 +876,21 @@ extension AppModel {
                 }
             }
             let document = committedProject
-            let commands = try wire.map { try resolve($0, in: document, probed: probed, tables: tables) }
+            // A Short asked to be centred on the speaker is looked at with Vision first.
+            var speakers: [Int: CGRect] = [:]
+            for (index, command) in wire.enumerated() where command.short?["window"] == .string("speaker") {
+                speakers[index] = try await speakerWindow(for: command, in: document)
+            }
+            let commands = try wire.enumerated().map { index, command in
+                try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index])
+            }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
                                  dryRun: request.dryRun ?? false)
             return result.map {
                 AgentReceipt(revision: $0.revision, transactionID: $0.transactionID, changed: $0.changed,
                              dryRun: request.dryRun ?? false, createdIDs: $0.createdIDs, removedZooms: $0.removedZooms,
-                             removedGraphics: $0.removedGraphics, affectedClips: $0.affectedClips)
+                             removedGraphics: $0.removedGraphics, removedShorts: $0.removedShorts, affectedClips: $0.affectedClips)
             }
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid(error.localizedDescription)) }
@@ -853,7 +898,7 @@ extension AppModel {
 
     /// One wire command as an `EditCommand`, against the committed document.
     private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
-                         tables: [String: LUTAssetRef] = [:]) throws -> EditCommand {
+                         tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -1196,6 +1241,20 @@ extension AppModel {
             catch { throw EditError.invalid("\((path as NSString).lastPathComponent) cannot be used as a transcript: \(Self.describe(error))") }
         case "clearTranscript":
             return .setTranscript(clip: try field(wire.clipID, "clipID"), transcript: nil)
+        case "addShort":
+            let clip = try record(try field(wire.clipID, "clipID"))
+            var patch = wire.short ?? [:]
+            if patch["id"] == nil, let id = wire.shortID { patch["id"] = .string(id.uuidString) }
+            return .addShort(clip: clip.id, short: try Self.mergedShort(patch, onto: nil, clip: clip, speaker: speaker))
+        case "updateShort":
+            let clip = try record(try field(wire.clipID, "clipID"))
+            let id = try field(wire.shortID, "shortID")
+            guard let old = clip.shorts?.first(where: { $0.id == id }) else {
+                throw EditError.notFound("No Short \(id) on recording \(clip.id). state.clips[].shorts lists them.")
+            }
+            return .updateShort(clip: clip.id, short: try Self.mergedShort(try field(wire.short, "short"), onto: old, clip: clip, speaker: speaker))
+        case "removeShort":
+            return .removeShort(clip: try field(wire.clipID, "clipID"), short: try field(wire.shortID, "shortID"))
         case "importGraphics":
             let path = (try field(wire.path, "path") as NSString).expandingTildeInPath
             guard FileManager.default.fileExists(atPath: path) else {
@@ -1382,6 +1441,16 @@ extension AppModel {
                 selectedGraphicID = graphic
                 if let item = selectedItem, item.editedDuration > 0 { setPreviewFraction(found.start / item.editedDuration) }
             }
+            if let id = request.short {
+                guard let short = selectedItem?.short(id) else {
+                    return .failure(.notFound("No Short \(id) on the selected recording."))
+                }
+                showShort(short)
+                if let time = request.time, let item = selectedItem, item.editedDuration > 0 {
+                    setPreviewFraction(min(short.end, short.start + max(0, time)) / item.editedDuration)
+                }
+                return .success(agentState().selection)
+            }
             if let time = request.time, let item = selectedItem, item.editedDuration > 0 {
                 setPreviewFraction(time / item.editedDuration)
             }
@@ -1412,6 +1481,7 @@ extension AppModel {
         }
         let document = committedProject
         let requestedRevision = revision
+        if let short = request.short { return await agentShortPreview(request, short: short, document: document, revision: requestedRevision) }
         do {
             let time = try require(request.time, "time")
             let (clipID, local): (UUID, Double)
@@ -1482,7 +1552,7 @@ extension AppModel {
         return (image, drawn)
     }
 
-    private func writePreview(_ image: CGImage, clipID: UUID, local: Double, source: Double, revision: Int,
+    func writePreview(_ image: CGImage, clipID: UUID, local: Double, source: Double, revision: Int,
                               cropped: Bool, original: Bool, composed: Bool) throws -> AgentPreview {
         guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
             throw EditError.invalid("The frame could not be encoded.")
@@ -1508,7 +1578,7 @@ extension AppModel {
         return .success(job)
     }
 
-    private func startJob(id: UUID = UUID(), kind: String, clip: UUID?, origin: EditOrigin,
+    func startJob(id: UUID = UUID(), kind: String, clip: UUID?, origin: EditOrigin,
                           work: @escaping @MainActor () async throws -> JSONValue) -> AgentJob {
         let job = AgentJob(id: id, kind: kind, status: "running", progress: ["export", "transcribe", "autoEdit"].contains(kind) ? 0 : nil,
                            sourceRevision: revision, clip: clip, origin: origin.label, createdAt: Date())
@@ -1721,6 +1791,7 @@ extension AppModel {
         let origin = agentOrigin(request)
         if let refusal = admit(origin, expectedRevision: expected) { return .failure(refusal) }
         guard let path = request.path else { return .failure(EditError(code: .invalidRequest, message: "export needs path.")) }
+        if let short = request.short { return agentShortExport(request, short: short, path: path, origin: origin) }
         if request.youtube == true { return agentYouTubeExport(request, folder: path, origin: origin) }
         let output = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
         let format = settings.format

@@ -85,14 +85,14 @@ exits. `./test.sh` runs the same check against a test instance.
 | `yamvideo_get_state` | The project as committed, with stable IDs and timing. |
 | `yamvideo_apply_edits` | 1–100 typed commands as one undo step, against a revision; `dryRun` to check first. |
 | `yamvideo_get_events` | What changed since a cursor, and who changed it. |
-| `yamvideo_render_preview` | A frame as a PNG (path, and the image unless `attachImage` is false). `composed` renders it as the owner's Preview plays it, with zooms and whole-frame effects; `original` leaves the colour correction out, for a before/after pair at one revision. |
+| `yamvideo_render_preview` | A frame as a PNG (path, and the image unless `attachImage` is false). `composed` renders it as the owner's Preview plays it, with zooms and whole-frame effects; `original` leaves the colour correction out, for a before/after pair at one revision. `short` draws one of the recording's Shorts as its viewer shows it, 1080×1920, with `time` in seconds into the Short. |
 | `yamvideo_analyze` | Silence, auto edit or zoom suggestions as a job; applies nothing. |
 | `yamvideo_transcribe` | Transcribe a recording on this Mac with whisper.cpp, as a job; one undo step. |
 | `yamvideo_get_transcript` | The words with source and edited times, the captions and the stumbles. |
 | `yamvideo_auto_edit` | The owner's auto edit (`state.autoEdit.options`) as a job: transcribe, cut, captions and loudness in one undo step. |
 | `yamvideo_get_job`, `yamvideo_cancel_job` | Job status and result (optionally waiting), or cancel. |
 | `yamvideo_save_project` | Save in place, first save, or a copy — no dialog. |
-| `yamvideo_export` | Export one recording or the movie as a job. |
+| `yamvideo_export` | Export one recording or the movie as a job. `youtube` writes the upload files into a folder; `short` exports one of the recording's Shorts (1080×1920). |
 | `yamvideo_undo`, `yamvideo_redo` | The named step only, never someone else's. |
 | `yamvideo_reveal` | Move your view to something the agent wants to show you: a recording, section, zoom, blur effect, marker or time. |
 

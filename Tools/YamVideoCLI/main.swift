@@ -15,6 +15,7 @@ Reading
   yamvideoctl events [--after N] [--limit N]
   yamvideoctl preview --clip ID --time SECONDS [--composed] [--cropped] [--original] [--revision N]
   yamvideoctl preview --movie --time SECONDS
+  yamvideoctl preview --clip ID --short ID --time SECONDS   a Short as its viewer shows it, 1080×1920
   yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
   yamvideoctl transcript --clip ID                words with source and edited times, captions, stumbles
   yamvideoctl job JOB [--wait]
@@ -26,12 +27,13 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl save [--path FILE.yamvideo] [--overwrite]
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl export --youtube --path FOLDER --clip ID [--overwrite]   video, captions, thumbnail and upload text
+  yamvideoctl export [--youtube] --path OUT.mp4|FOLDER --clip ID --short ID [--overwrite]   a Short, 1080×1920
   yamvideoctl analyze --kind silence|zooms|autoEdit --clip ID [--style tight|natural|review]
   yamvideoctl transcribe --clip ID [--model large-v3-turbo-q5_0|base.en] [--language CODE]
   yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
                                                  transcribe if needed, cut, set captions and loudness
   yamvideoctl cancel JOB
-  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--time SECONDS] [--movie]
+  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--short ID] [--time SECONDS] [--movie]
   yamvideoctl request --file REQUEST.json        send a raw protocol request
 
 EDITS.json is a list of commands, or an object with "commands" and optionally
@@ -261,6 +263,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         else { request["scope"] = "recording"; request["clip"] = try value("clip") }
         if arguments.flags.contains("overwrite") { request["overwrite"] = true }
         if arguments.flags.contains("youtube") { request["youtube"] = true }
+        if let short = arguments.values["short"] { request["short"] = short }
         try requireAddress()
     case "thumbnail":
         request["method"] = "thumbnail"
@@ -296,6 +299,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("cropped") { request["cropped"] = true }
         if arguments.flags.contains("original") { request["original"] = true }
         if arguments.flags.contains("composed") { request["composed"] = true }
+        if let short = arguments.values["short"] { request["short"] = short; request["composed"] = true }
     case "job":
         request["method"] = "job"; request["job"] = try job()
     case "cancel":
@@ -308,6 +312,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let effect = arguments.values["effect"] { request["effect"] = effect }
         if let marker = arguments.values["marker"] { request["marker"] = marker }
         if let graphic = arguments.values["graphic"] { request["graphic"] = graphic }
+        if let short = arguments.values["short"] { request["short"] = short }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }
     case "request":

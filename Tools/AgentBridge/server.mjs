@@ -72,6 +72,7 @@ const server = new McpServer(
       "Look before and after with yamvideo_render_preview; pass composed: true to see zooms and whole-frame blur effects exactly as the owner's Preview shows them. Analysis proposes cuts or zooms but applies nothing. Ask the owner before exporting or saving over their file.",
       "Markers (state.clips[].markers) are the owner's notes on the timeline; read their labels to learn what they mean by \"the bit after the intro\", and add your own to point at moments.",
       "The owner's answers for a first edit (transcript model and language, cut style, captions, loudness) are in state.autoEdit.options. yamvideo_auto_edit follows them in one undoable step; yamvideo_get_transcript gives the words with edited times, for placing graphics and chapters on what is said.",
+      "A YouTube Short is a vertical 1080×1920 version of up to 3:00 of a recording (state.clips[].shorts): add one with addShort (window \"speaker\" centres it on the face), look at it with yamvideo_render_preview and short, and export it with yamvideo_export and short (youtube: true writes the upload files).",
     ].join("\n"),
   },
 );
@@ -113,6 +114,7 @@ server.registerTool("yamvideo_apply_edits", {
     "Whole-frame blur: addBlurEffect {clipID, start, end? or duration? (3), amount? 0–80 (24), mix? 0–1 (1), fadeIn? (0.25), fadeOut? (0.25), enabled?, effectID?} · updateBlurEffect {clipID, effectID, any of those} · removeBlurEffect {clipID, effectID}",
     "Markers: addMarker {clipID, time, label?, color? red|orange|yellow|green|blue|purple, markerID?} · updateMarker {clipID, markerID, time?, label?, color?} · removeMarker {clipID, markerID}",
     "Graphics (state.clips[].graphics; times are edited-recording seconds; beat times inside props such as at or …At are seconds after the graphic's start; image values are absolute file paths): addGraphic {clipID, graphic: {kind, start, end, props, look?: glass|ink, id?}} · updateGraphic {clipID, graphicID, graphic: {only the fields to change; props replaces all props}} · removeGraphic {clipID, graphicID} · replaceGraphics {clipID, graphics:[…], graphicsStyle?} · setGraphicsStyle {clipID, graphicsStyle: {accent?, panel?: shade|solid, moveVideo?, edge? 0–400, look?: glass|ink|mix}} · importGraphics {clipID, path to a graphics.json as Tools/Graphics uses}. Kinds: namePlate, featureList, titleCard, phoneScreens, route, link, endCard (right column) and panelTitle, rule, checklist (side panel).",
+    "Shorts (state.clips[].shorts; vertical 1080×1920, up to 3:00, the same edit, graphics and captions laid out for a phone): addShort {clipID, short?: {start?, end?, window?: {x, y, width, height} 9:16 source pixels | \"speaker\" | \"centre\", title?, description?, tags?, hidden?: [graphicID], placements?: {graphicID: {x, y, scale}}, cover?, panels?: sheet|shade|split, captions?: stepUp|over|hide, id?}} · updateShort {clipID, shortID, short: only the keys to change} · removeShort {clipID, shortID}",
     "splitSection, zoom and effect starts, marker times and a new graphic's start accept timeSpace \"movie\" to give a movie time instead. yamvideo_describe has every field's range, default and an example.",
   ].join("\n"),
   inputSchema: {
@@ -141,6 +143,7 @@ server.registerTool("yamvideo_render_preview", {
     timeSpace: z.enum(["recording", "movie"]).optional(),
     composed: z.boolean().optional().describe("Render as the owner's Preview plays it: crop, zoom, colour, blur areas and whole-frame effects at this exact time. Use it to check an effect or a zoom."),
     cropped: z.boolean().optional(),
+    short: id.optional().describe("One of the recording's Shorts (state.clips[].shorts[].id): draws it 1080×1920 as its viewer shows it, graphics and captions laid out for 9:16, with each graphic's box. time is then seconds into the Short."),
     original: z.boolean().optional().describe("Leave the recording's colour correction out."),
     expectedRevision: z.number().int().nonnegative().optional().describe("Refuse if the project is no longer at this revision."),
     attachImage: z.boolean().optional().describe("Include the PNG in the result (default true)."),
@@ -238,6 +241,8 @@ server.registerTool("yamvideo_export", {
     path: z.string(),
     scope: z.enum(["recording", "movie"]),
     clip: id.optional(),
+    youtube: z.boolean().optional().describe("Export for YouTube: path is an existing folder for the video, its captions, thumbnail (or a Short's cover) and upload text."),
+    short: id.optional().describe("Export one of the recording's Shorts (with clip): a 1080×1920 MP4, or with youtube its upload files."),
     overwrite: z.boolean().optional(),
     requestID,
   },
@@ -258,6 +263,7 @@ server.registerTool("yamvideo_reveal", {
   description: "Move the owner's view to a recording, section, zoom, blur effect, marker or time, selecting it. Edits never move their view; use this only when it helps them see what you mean.",
   inputSchema: {
     clip: id.optional(), section: id.optional(), zoom: id.optional(), effect: id.optional(), marker: id.optional(),
+    graphic: id.optional(), short: id.optional().describe("A Short: shows it in the owner's Short viewer; time is then seconds into it."),
     time: z.number().nonnegative().optional(), timeSpace: z.enum(["recording", "movie"]).optional(),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
