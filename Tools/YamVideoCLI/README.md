@@ -92,7 +92,7 @@ Rectangles are `{"x", "y", "width", "height"}` in source pixels, origin top-left
 | `addMarker` | `clipID`, `time`, `label`?, `color`? (red, orange, yellow, green, blue, purple), `markerID`? |
 | `updateMarker` / `removeMarker` | `clipID`, `markerID`, and for update any of `time`, `label`, `color` |
 | `addGraphic` | `clipID`, `graphic`: `{kind, start, end, props, look?, id?}` |
-| `updateGraphic` | `clipID`, `graphicID`, `graphic`: only the fields to change (`start` keeps the length; `props` replaces all props) |
+| `updateGraphic` | `clipID`, `graphicID`, `graphic`: only the fields to change (`start` keeps the length; `props` replaces all props; `transform` `{x, y, scale}` moves and scales it on the picture, only the keys given) |
 | `removeGraphic` | `clipID`, `graphicID` |
 | `replaceGraphics` | `clipID`, `graphics`, `graphicsStyle`? |
 | `setGraphicsStyle` | `clipID`, `graphicsStyle`: any of `accent`, `panel` (shade, solid), `moveVideo`, `edge` (0–400), `look` (glass, ink, mix) |
@@ -110,7 +110,7 @@ section's ID and reports the new right one in `createdIDs`.
 | command | what it does |
 |---|---|
 | `undo` / `redo --transaction ID` | Undo or redo the named step. Refused (`history_conflict`) if another edit is now on top — an agent never undoes someone else's work by accident. |
-| `preview --clip ID --time T [--composed] [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--composed` renders it as the owner's Preview plays it — crop, zoom, colour, blur areas and whole-frame effects — at the export's frame size. `--original` leaves the colour correction out. |
+| `preview --clip ID --time T [--composed] [--cropped] [--original]` | Renders one frame to a PNG and returns its path, tagged with the revision and source time it shows. `--composed` renders it as the owner's Preview plays it — crop, zoom, colour, blur areas, whole-frame effects and graphics — at the export's frame size, and lists each graphic showing with its box in `graphics`. `--original` leaves the colour correction out. |
 | `catalog` | Every command and request, described for an agent: fields, units, ranges, defaults, examples and conventions. |
 | `analyze --kind silence\|zooms --clip ID` | Starts a job that proposes cuts or zooms for the revision it read. It applies nothing. |
 | `export --path OUT (--clip ID \| --movie)` | Starts an export job of exactly the revision named. Editing is locked until it ends, and your Stop (⌘.) cancels it. A recording's graphics are drawn in; `state.graphicsRenderer.status` says whether this Mac can (`ready`, `needsNode`, `needsDownload`). Only the owner can download HyperFrames, so on `unsupported_capability` ask them, or export without graphics. |

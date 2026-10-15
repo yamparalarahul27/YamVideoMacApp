@@ -173,6 +173,7 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
 | **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest |
+| **Move and resize graphics** | In **Preview**, click a graphic on the picture to select it, drag it to move it, or drag a corner to resize it. It snaps to the title-safe area, the centre lines, its own place, and the column or panel; hold ⌥ to place it freely. ⌥ arrow keys nudge it. The inspector has **Across**, **Down**, **Size %** and **Reset Position**. Exports draw it where you put it |
 | **Export with graphics** | Export draws a recording's graphics into the video, with the picture sliding aside under each panel exactly as **Preview** shows it. The first time, the Export sheet's **Graphics** section offers **Download HyperFrames…** (a free renderer and the browser it draws with, about 220 MB, once). Each graphic is drawn once and reused until it changes, so later exports are quicker. Untick **Draw graphics into the video** to export without them. Movies leave graphics out for now |
 | **Burn in subtitles** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector. Choose where it sits and how big it is |
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
@@ -373,6 +374,7 @@ Sources/
   VisualEffectsEditing.swift / VisualEffectsView.swift effect and marker actions, lane and inspectors
   Graphics.swift    graphics data, validation, remapping, the move aside and the engine page
   GraphicsRender.swift graphics in exports: the move aside in ffmpeg, render units, HyperFrames, the cache
+  GraphicsPlacement.swift moving and resizing graphics on the picture: boxes, snapping, the Preview layer
   GraphicsEditing.swift / GraphicsInspector.swift / GraphicsOverlay.swift graphics actions, inspector and preview layer
   AgentCatalog.swift every agent command described for agents, served by `catalog`
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
