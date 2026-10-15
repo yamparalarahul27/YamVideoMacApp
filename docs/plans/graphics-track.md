@@ -3,8 +3,8 @@
 **Updated:** 2026-10-15. **Status:** G0 (the template engine), G1 part 1 (graphics in
 the app: data, commands, preview, timeline, inspector), G1 part 2 (export with graphics
 from the app), G2b (move and resize on the picture), the Publish panel, the thumbnail
-maker, the end screen layout (G3) and Auto edit options are implemented; see sections 8
-to 15. Feature 7 of section 6a (YamDraw ink clips) is next. Phase 5 of
+maker, the end screen layout (G3), Auto edit options and Shorts (9:16, G3) are implemented;
+see sections 8 to 17. Feature 7 of section 6a (YamDraw ink clips) is next. Phase 5 of
 [local co-editing](local-coediting.md) merged first, so graphics use schema version 6.
 **Parent plan:** [Local co-editing](local-coediting.md), section 7 ("Remotion and later
 layers"). This plan is the layer design that section asks for, limited to graphic overlays.
@@ -21,7 +21,8 @@ change its text, timing, images and style, and export from the app. Example requ
 "the side panel must come in as an overlay with a shade, not as a solid block".
 
 Not in scope: free-form drawing, arbitrary HTML from users or agents, audio in graphics,
-vertical (9:16) layouts (phase G3), and graphics in Movie mode (phase G3).
+and graphics in Movie mode (phase G3). Vertical (9:16) layouts came later, as Shorts
+(section 16).
 
 ## 2. Decisions
 
@@ -220,7 +221,8 @@ exports without them.
   template (large title, accent tag, optional icon or product photo, outline on the
   cut-out) renders at 1280×720 through the same engine. The first video's thumbnail was
   made this way by hand on 2026-10-15.
-- **G3 — more.** 9:16 layouts for Shorts; graphics in Movie mode; caption styles.
+- **G3 — more.** 9:16 layouts for Shorts (done 2026-10-15, sections 16 and 17); graphics in Movie
+  mode; caption styles.
 
 ## 6a. Next features, in order (2026-10-15)
 
@@ -239,6 +241,7 @@ from docs/plans/graphics-track.md".
    transcript; Natural: the silence sheet's defaults; Review each cut); captions (SRT for
    upload, burn in and SRT, none); audio normalised to -14 LUFS. Word timing needs
    `whisper-cli -dtw large.v3.turbo -nfa`.
+   Then, by the owner's choice: **Shorts (9:16).** Done 2026-10-15; sections 16 and 17.
 7. **YamDraw ink clips.** Section 2a, item 2.
 8. **Authoring (G2).** Section 6: Add Graphic menu, looks, video templates and the
    `youtube-edit` Claude skill.
@@ -665,3 +668,209 @@ from docs/plans/graphics-track.md".
   here, as is real footage of a person in a room. Stumbles whisper tidies away cannot be
   found. Captions and the transcript are per language only as transcribed. Movies still leave
   captions out, as before.
+
+## 16. Shorts (9:16) — design (2026-10-15)
+
+The owner chose Shorts ahead of feature 7. A Short is a vertical version of part of a
+recording, made from the same edit, graphics and captions, for YouTube Shorts.
+
+**YouTube's rules** (checked 2026-10-15; YouTube's own help pages are thin, third-party
+guides agree): a video is a Short when it is vertical (or square) and at most 3 minutes
+long; there is no minimum and no hashtag is needed. Shorts have no end screens and no
+cards; instead a Short can link to a **related video**, set in YouTube Studio (Content →
+the Short → Related video). The upload API cannot set that link. Custom Shorts thumbnails
+have been rolling out since July 2026 (Partner Program channels first); everyone else
+picks a frame. YouTube draws its own furniture over a Short: icons along the top, the
+like/comment/share rail on the right, and the channel, title and sound at the bottom.
+Google's ad guidance keeps text out of the top 288 px, the bottom 672 px, the left 48 px
+and the right 192 px of a 1080×1920 frame.
+
+**Data** (project version 12). `ProjectClip.shorts: [Short]?`, nil when there are none.
+
+```
+Short
+  id: UUID
+  start, end: Double            // edited-recording seconds; up to 180 s long; Shorts of
+                                // one recording do not overlap
+  window: CGRect?               // the 9:16 part of the picture, in source pixels like the
+                                // crop; nil = the full height, centred
+  title, description, tags      // the Short's own upload details
+  hidden: [UUID]                // graphics left out of this Short
+  placements: [UUID: GraphicTransform]   // moves and sizes on the 1080×1920 canvas
+  cover: Double?                // seconds into the Short for the cover frame
+  panels: sheet | shade | split // how panel graphics lay out (owner's choice per Short)
+  captions: stepUp | over | hide  // burned-in captions while a graphic covers the lower half
+```
+
+**Owner's answers (2026-10-15).** A Short is a part of a recording (several per
+recording). How panels look and what captions do under a graphic are **options in the
+UI**, chosen per Short, and the Short preview shows the captions while it plays, so the
+owner can decide while watching. One fixed window per Short, centred on the face.
+
+Through cuts a Short keeps covering the same footage: its new start and end are the
+first and last surviving frames of what it covered (a pause cut inside it makes it
+shorter). A Short whose footage is all cut away is dropped and reported, like a zoom.
+
+**Output.** 1080×1920, H.264, at the recording's frame rate. The window is cut from the
+picture (after colour, blur areas and before zooms, where the crop goes today) and scaled
+to 1080×1920: a 4K recording gives a 1215×2160 window, scaled down; a 1080p one gives
+608×1080, scaled up. Everything else in the edit (sections, speed, colour, blur areas,
+blur effects, zooms) applies as it does to the long video.
+
+**Graphics on a 9:16 canvas.** The engine gets a second layout, `short`, with a
+1080×1920 stage. The same template kinds draw; only their zones move:
+
+- **Column kinds** (name plate, feature list, title card, phone screens, route, link, end
+  card): a card zone in the lower middle, below the face and inside YouTube's clear area
+  (about x 72–840, from y 760), at 120 %.
+- **Panel kinds** (panel title, rule, checklist), in one of three layouts per Short.
+  Panels closer than 1 s still share one panel. Each layout's picture move is native, with
+  the same curve (smoothstep over 0.8 s) in Core Image and the ffmpeg move stage, and a
+  parity test:
+  - **Bottom sheet** (default): the shade, or the ink haze, rises from the bottom with its
+    soft edge on top (about y 760, fading over `style.edge`); the panel's 960×1080 content
+    draws at about 75 % in it. With Move video aside on, the picture lifts by an eighth of
+    the frame (240 px), over the same blurred fill, its bottom edge fading into the fill,
+    and the frost under the sheet.
+  - **Full shade**: the whole picture frosts and dims; the panel draws at full size in the
+    middle of YouTube's clear area. The picture does not move.
+  - **Split**: the picture shrinks into a frame in the top half (as the end screen's frame
+    does, and back out after), over the fill; the panel draws below it at about 70 %.
+- **The end screen is left out**: Shorts have no end screens. A Short that runs into the
+  end screen's time shows the picture as it is.
+- **Moves on the picture** (G2b) made for the 16:9 video do not carry over; a Short has
+  its own `placements`. A graphic can also be hidden in one Short.
+
+**Captions.** The safe-area placement (their bottom about 600 px above the frame's
+bottom) and a size made for a vertical frame: today's Medium is 75 px on a 1080-tall
+frame, and stays about 75 px on the 1920-tall Short, where the same libass size would be
+133 px and wrap to five lines (checked). Captions are split for the narrow frame (about
+24 characters a line, two lines at most). While a card or panel covers the lower half,
+the Short's `captions` option moves them up above it, keeps them over it, or hides them.
+So that the preview can show this while it plays, the app lays the captions out (lines,
+size, where each one sits) and both renderers draw that layout: the engine in the
+preview, and libass from an ASS file with the frame's own pixel grid (no wrapping of its
+own) in the export. The uploaded SRT holds every caption, on the Short's own timeline.
+
+**Publish and Export for YouTube.** Each Short has its own title, description and tags
+(the recording's category and language). Blocking: no title, the same title and text
+rules as the long video, and a Short over 3:00. Warnings: no cover frame, and the related
+video link to set in Studio. Export for YouTube on a Short writes the 1080×1920 MP4, its
+SRT, `<title> cover.jpg` (1080×1920, the cover frame with its graphics), the upload text
+(with a SHORT section: its length, the related-video step, the cover) and the JSON
+(`short: true`, `relatedVideo` with `uploadAPICanSet: false`).
+
+**App.** A Shorts row on the timeline (a block per Short: drag to move, drag an edge to
+change the length, never over 3:00). Selecting one shows the Short in Preview: the 9:16
+picture with its graphics and, faintly, YouTube's furniture, so nothing lands under it.
+The inspector's Short section: start and length, the window (Across, Size, Centre on
+Speaker, which finds the face with Apple Vision), the graphics in it (show or hide each,
+Across/Down/Size for a placement), and the cover (Use Playhead). Publish edits a selected
+Short's title, description and tags, shows it in a Shorts-player sketch, and exports it.
+
+**Agents.** `addShort` (with no times: the whole recording when it is under 3:00, else the
+minute from the playhead; `window: "speaker"` centres it on the face), `updateShort` (only
+the keys given change), `removeShort`; `state.clips[].shorts` with times, window, issues
+and which graphics show; `preview` with `short` and `composed: true` draws the 1080×1920
+frame with its graphics and boxes; `export` with `youtube: true` and `short`. Refusals say
+the limits (3:00, the window inside the picture and 9:16, no overlap).
+
+## 17. Shorts status (2026-10-15)
+
+- **Data** (project version 12): `ProjectClip.shorts`, each a `Short` (Sources/Shorts.swift)
+  with its range, window, panel layout, captions option, hidden graphics, placements,
+  cover and upload details. An older version holding Shorts is refused. Cuts carry a Short
+  over the same footage (a pause cut inside it shortens it; one cut away entirely is
+  dropped and reported in `removedShorts`); removing a graphic drops it from every
+  Short's hidden list and placements.
+- **Output.** `VideoItem.shortItem` makes the Short a recording of its own (its part of
+  the sections, its window as the crop, zooms, blur effects and graphics in its own time),
+  which the ordinary export draws at a fixed 1080×1920 canvas, whatever the size limit.
+- **Engine.** `layout: {canvas: "short", panels}` in the engine data gives a 1080×1920
+  stage (`--yg-w`, `--yg-h`; page.html's `data-width` and `data-height` follow, so
+  HyperFrames draws portrait frames). Cards go in the lower-middle zone (72, 760) at
+  120 %; panels go in their layout's zone: sheet (29, 717) at 90 %, shade (0, 312) at 96 %,
+  split (53, 802) at 85 %, under the split frame (333, 112, 414×736). `shortLayout()` in
+  graphics.js and `ShortLayout` in Swift hold the same numbers (checked). The end screen
+  is never drawn in a Short.
+- **The picture's move** (`GraphicsMotion.short`): the sheet lifts the picture 240 px over
+  the blurred fill, its bottom edge fading, with the frost under the sheet; the full shade
+  frosts the whole picture; the split shrinks it into the split frame and back. Core Image
+  in Preview and the ffmpeg move stage in export (`moveWindow` with a vertical axis, and
+  the end screen's per-frame placement reused for the split).
+- **Captions.** `ShortCaptionLayout` splits captions into pieces of at most two lines of
+  about 21 characters (Medium, 72 px), places each one's bottom at the safe-area spot
+  (1320) or, while a card or panel covers the lower half, as the Short's option says
+  (Step up: above the card zone at 736, above the sheet at 676, at the split frame's foot
+  at 832; a full shade leaves them be. Stay over. Hide). The export burns an ASS file on
+  the 1080×1920 grid (WrapStyle 2, per-caption MarginV); the Short viewer draws the same
+  layout in the engine (`YamGraphics.captions`). Transcript captions group to about 40
+  characters for a Short.
+- **App.** The viewer has Edit frame | Preview | Short. The Short viewer plays the
+  selected Short in 9:16 with its graphics and captions, stops at its end, keeps playing
+  through edits (so the panel layout and captions option can be tried while it plays),
+  shows YouTube's furniture faintly (toggle), and lets graphics be dragged and resized
+  for that Short alone. A Shorts row on the timeline (drag to move, edges to change the
+  length). Inspector: the recording's Shorts list with Add Short at Playhead; the Short
+  section with From/to, the window (Across, Size, Down, Centre on Speaker, Reset), Panels,
+  Captions under a graphic, the graphics in it (show or hide, reset place), the cover, the
+  upload details and the issues. Publish has a picker for the video or a Short; for a
+  Short: title, description, tags, cover, the related-video step, a Shorts-player sketch
+  with the cover, and Export Short for YouTube.
+- **Export Short for YouTube** writes `<title>.mp4` (1080×1920), `<title>.<lang>.srt` (on
+  the Short's own timeline), `<title> cover.jpg` (1080×1920, the cover frame with its
+  graphics and captions), `<title> YouTube.txt` (with a SHORT section: its length and
+  range, the cover, and the related video to link in Studio) and `<title>.youtube.json`
+  (`short: true`, `relatedVideo.uploadAPICanSet: false`).
+- **Agents.** `addShort`, `updateShort` (only the keys given), `removeShort`;
+  `window: "speaker"` runs Apple Vision first; refusals name the limits (3:00, the
+  recording's length, no overlap, 9:16 inside the picture, the keys, the layouts, real
+  graphics). `state.clips[].shorts`, `state.selection.short` and `viewer`; `preview` with
+  `short` (1080×1920, boxes); `export` with `short` (MP4, or with `youtube` the folder);
+  `reveal` with `short`. Catalog group "shorts"; `yamvideoctl preview|export|reveal --short`.
+- **Found on the way** (each fixed, with a check):
+  - In every export, a panel's shade unit was laid *over* the graphic that opens the panel
+    (units at the same start were sorted by id, and "panel-0" sorts after a graphic's id),
+    so that graphic came out dimmed; the preview draws the shade first. This was in 16:9
+    exports too, and the first video's own export has not been checked yet. A panel's
+    shade now goes first, in the app and in the engine's unit list.
+  - libass sizes a font by its whole line (Helvetica Bold: 1.18 em), so ASS sizes are the
+    caption's pixel size × 1.18, and the engine's lines are 1.18 em apart.
+  - A Short's window can be a pixel off 9:16 (608×1080), and scaling it to 1080×1920 kept
+    that aspect as a 1216:1215 sample aspect; the Short's scale now sets square pixels,
+    and the move stage keeps square pixels throughout (its quarter-size fill came back a
+    hair off on a 406-wide window, which mergeplanes and concat refused).
+  - The tests' stand-in graphic frames were drawn with `drawbox` on a transparent canvas,
+    which leaves the box's alpha at 0: the 16:9 overlay checks passed only because the
+    test pattern has magenta of its own there. The stand-ins are drawn with `geq` now.
+- **Tests** (1252 checks, 79 new): the rules and their messages, defaults, the version gate
+  and round trip; Shorts through cuts (a pause cut inside, a cut through the start, all
+  cut away and reported); which graphics show and in what time, placements, the end
+  screen left out, a Short's edit; the engine and app layout numbers; captions fitted,
+  stepped up, kept, hidden, the ASS file, transcript groups; preview and export agreeing
+  for each panel layout (worst offset 0 px; mean difference 0.92, 0.93 and 1.09 of 255);
+  a real 1080×1920 export (every frame, square pixels, the graphic in place while it
+  shows, captions at the safe area and stepped up above the card, the Short viewer's
+  captions within 14 px of libass's); Export Short for YouTube's files and refusals; the
+  Short viewer staying up through edits; agents adding, changing, being refused,
+  previewing, revealing, exporting and removing Shorts; and Centre on Speaker on the
+  thumbnail tests' drawn person.
+- **Real use (this Mac).** A 19.7 s 1080p recording of a drawn person right of centre,
+  speaking (made with `say`), in an isolated app instance driven only through
+  `yamvideoctl`: an agent added it, transcribed it with base.en (50 words), burned in
+  captions, placed a name plate, a rule panel and a checklist on what is said, and added a
+  Short with `window: "speaker"` (centred on the person, x 996–1604). Composed previews
+  at 2, 10.4, 14.6 and 17 s showed the card with the captions stepped up, the bottom sheet
+  lifting the picture, the checklist, and the captions back at the safe area; the full
+  shade, the split and Hide each looked as designed, and bad values were refused with
+  what is allowed. Export for YouTube took 38 s (HyperFrames drew the units) and wrote a
+  1080×1920 MP4 of 588 frames, the SRT on the Short's timeline, the cover, the upload
+  text and the JSON; the exported frames match the previews. A split export kept every
+  frame evenly spaced; `reveal` showed the Short in the owner's viewer. `Tools/Snapshot`
+  shows the Short viewer with YouTube's furniture, the inspector, the split layout and
+  Publish's Short mode with its player sketch.
+- **Open.** Real footage of a person (the window follows no movement: one fixed window
+  per Short, by the owner's choice; following the speaker can come later). Checking the
+  safe-area numbers against YouTube's app on a phone. Hands-on dragging in the Short
+  viewer. Custom Shorts covers depend on YouTube's rollout to the channel. Movie mode has
+  no Shorts.
