@@ -4498,7 +4498,7 @@ check(publisher.perform([.setPublishInfo(clip: publishClip, info: lateChapter)])
 var twoLines = draft; twoLines.title = "One\nTwo"
 check(publisher.perform([.setPublishInfo(clip: publishClip, info: twoLines)]).isFailure, "a title is one line")
 let publishSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(publisher.project))
-check(publishSaved == publisher.project && publishSaved.version == 8, "publish details survive a version 8 round trip")
+check(publishSaved == publisher.project && publishSaved.version == VideoProject.currentVersion, "publish details survive a project round trip")
 var publishAsSeven = publishSaved; publishAsSeven.version = 7
 check((try? publishAsSeven.validate()) == nil, "a version 7 file with publish details is refused")
 let publishSection = publisher.items[0].timeline.segments[0].id
@@ -4657,6 +4657,117 @@ let youtubeResult = youtubeDone["result"] as? [String: Any] ?? [:]
 check(youtubeDone["status"] as? String == "succeeded" && (youtubeResult["captions"] as? String)?.hasSuffix("Agent title.en.srt") == true
           && FileManager.default.fileExists(atPath: youtubeResult["thumbnail"] as? String ?? ""),
       "an agent exports for YouTube and gets every file's path", "\(youtubeDone)")
+
+// MARK: - Thumbnails
+
+print("\nThumbnail design")
+var thumbDesign = ThumbnailDesign(time: 1, title: "Edit for the *viewer*")
+check(thumbDesign.problem == nil, "a plain design is fine")
+var longTitle = thumbDesign; longTitle.title = String(repeating: "x", count: 91)
+var fourLines = thumbDesign; fourLines.title = "a\nb\nc\nd"
+var longTag = thumbDesign; longTag.tag = String(repeating: "t", count: 25)
+var badAccent2 = thumbDesign; badAccent2.accent = "gold"
+var bigZoom = thumbDesign; bigZoom.zoom = 2
+check([longTitle, fourLines, longTag, badAccent2, bigZoom].allSatisfy { $0.problem != nil }
+          && bigZoom.problem!.contains("1.6") && longTitle.problem!.contains("90"),
+      "a design out of range is refused, saying what is allowed")
+let partialDesign = try JSONDecoder().decode(ThumbnailDesign.self, from: Data(#"{"title": "Hi", "image": "~/x.png"}"#.utf8))
+check(partialDesign.cutout && partialDesign.background == .dim && partialDesign.side == .auto && partialDesign.image?.path.hasPrefix("/") == true,
+      "a partial design keeps the defaults, and an image path is a plain path")
+
+// A frame with a clear subject on the left: a head and a body on grey.
+let subjectFrame = scratch.appendingPathComponent("subject.png")
+let subjectMade = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=0x8a9099:s=1280x720,format=rgb24",
+    "-vf", "geq=r='if(lt(hypot(X-420,Y-420),220),220,if(lt(hypot(X-420,Y-160),110),230,138))':g='if(lt(hypot(X-420,Y-420),220),60,if(lt(hypot(X-420,Y-160),110),180,144))':b='if(lt(hypot(X-420,Y-420),220),50,if(lt(hypot(X-420,Y-160),110),150,153))'",
+    "-frames:v", "1", subjectFrame.path])
+check(subjectMade.status == 0, "made a frame with a subject", subjectMade.stderrText)
+let subjectImage = NSImage(contentsOf: subjectFrame)!.cgImage(forProposedRect: nil, context: nil, hints: nil)!
+let subjectCut = try SpeakerCutout.cut(subjectImage)
+check(subjectCut.map { $0.box.minX > 150 && $0.box.maxX < 700 && $0.box.minY > 20 && $0.box.maxY > 600 } == true,
+      "Apple Vision cuts the subject out, and its box is found", "\(String(describing: subjectCut?.box))")
+let plainFrame = CGImage.blank(width: 640, height: 360)
+check(try SpeakerCutout.cut(plainFrame) == nil, "a frame with nothing in front has no cut-out")
+
+func rgb(_ image: CGImage, _ x: Int, _ y: Int) -> (Int, Int, Int) {
+    var pixel = [UInt8](repeating: 0, count: 4)
+    let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.draw(image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
+    return (Int(pixel[0]), Int(pixel[1]), Int(pixel[2]))
+}
+func brightShare(_ image: CGImage, xs: Range<Int>) -> Double {
+    var bright = 0, total = 0
+    for y in stride(from: 60, to: 660, by: 12) { for x in stride(from: xs.lowerBound, to: xs.upperBound, by: 12) {
+        let p = rgb(image, x, y); total += 1
+        if p.0 > 225 && p.1 > 225 && p.2 > 225 { bright += 1 }
+    } }
+    return Double(bright) / Double(max(1, total))
+}
+var thumbnailDesign = ThumbnailDesign(time: 0, title: "Edit for the *viewer*")
+thumbnailDesign.tag = "3 rules"
+let subjectSources = ThumbnailMaker.Sources(frame: subjectImage, cutout: subjectCut)
+let madeThumb = try await ThumbnailMaker.render(thumbnailDesign, sources: subjectSources, accent: "#F5C42C")
+check(madeThumb.width == 1280 && madeThumb.height == 720, "a thumbnail is 1280×720")
+check(brightShare(madeThumb, xs: 660..<1240) > 0.04 && brightShare(madeThumb, xs: 660..<1240) > 2 * brightShare(madeThumb, xs: 40..<640),
+      "the title goes on the side away from the speaker", String(format: "right %.3f, left %.3f", brightShare(madeThumb, xs: 660..<1240), brightShare(madeThumb, xs: 40..<640)))
+let litSpeaker = rgb(madeThumb, 420, 440)
+check(litSpeaker.0 > 190 && litSpeaker.1 < 100, "the cut-out speaker stays bright on the darker background", "\(litSpeaker)")
+var noCut = thumbnailDesign; noCut.cutout = false
+let dimThumb = try await ThumbnailMaker.render(noCut, sources: subjectSources, accent: "#F5C42C")
+check(rgb(dimThumb, 420, 440).0 < 140, "without the cut-out the whole frame is darker", "\(rgb(dimThumb, 420, 440))")
+var tagFound = false
+for y in stride(from: 100, to: 400, by: 4) where !tagFound { for x in stride(from: 650, to: 1100, by: 4) {
+    let p = rgb(madeThumb, x, y); if p.0 > 220 && p.1 > 170 && p.1 < 215 && p.2 < 90 { tagFound = true; break }
+} }
+check(tagFound, "the tag and the *accent* words use the accent colour")
+var leftText = thumbnailDesign; leftText.side = .left
+let leftThumb = try await ThumbnailMaker.render(leftText, sources: subjectSources, accent: "#F5C42C")
+check(brightShare(leftThumb, xs: 40..<640) > 2 * brightShare(leftThumb, xs: 700..<1240), "the title can be put on the left",
+      String(format: "left %.3f, right %.3f", brightShare(leftThumb, xs: 40..<640), brightShare(leftThumb, xs: 700..<1240)))
+
+print("\nThumbnails in projects and for agents")
+let subjectClip = scratch.appendingPathComponent("subject.mov")
+let subjectVideo = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-i", subjectFrame.path, "-t", "2",
+                                                "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709",
+                                                "-color_trc", "bt709", subjectClip.path])
+check(subjectVideo.status == 0, "made a recording of the subject", subjectVideo.stderrText)
+var subjectItem = VideoItem(url: subjectClip)
+subjectItem.info = try await FFmpeg.probe(url: subjectClip); subjectItem.crop = subjectItem.info!.fullFrame
+let thumbnailer = AppModel(recoveryURL: nil)
+thumbnailer.restore(VideoProject(clips: [ProjectClip(subjectItem)], settings: ExportSettings(), selection: subjectItem.id))
+var withDesign = PublishInfo(); withDesign.title = "Subject"; withDesign.design = ThumbnailDesign(time: 1, title: "Big *title*")
+check(thumbnailer.perform([.setPublishInfo(clip: subjectItem.id, info: withDesign)]).isSuccess, "a design is kept with the publish details")
+var lateDesign = withDesign; lateDesign.design?.time = 9
+check(thumbnailer.perform([.setPublishInfo(clip: subjectItem.id, info: lateDesign)]).isFailure, "a frame after the end is refused")
+let designSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(thumbnailer.project))
+check(designSaved == thumbnailer.project && designSaved.version == 9, "the design survives a version 9 round trip")
+var designAsEight = designSaved; designAsEight.version = 8
+check((try? designAsEight.validate()) == nil, "a version 8 file with a design is refused")
+
+var designPatch = address(thumbnailer)
+designPatch["method"] = "apply"; designPatch["requestID"] = "design-1"; designPatch["client"] = "Claude"
+designPatch["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString, "publish": ["design": ["tag": "New", "zoom": 1.2]]]]
+let designReply = await agentCall(thumbnailer, designPatch)
+check(designReply["ok"] as? Bool == true && thumbnailer.items[0].publish?.design?.tag == "New"
+          && thumbnailer.items[0].publish?.design?.title == "Big *title*" && thumbnailer.items[0].publish?.design?.zoom == 1.2,
+      "an agent changes some of the design's keys and keeps the rest", "\(designReply)")
+var tryDesign = address(thumbnailer)
+tryDesign["method"] = "thumbnail"; tryDesign["clip"] = subjectItem.id.uuidString; tryDesign["design"] = ["background": "solid"]
+let tried = agentResult(await agentCall(thumbnailer, tryDesign))
+check(FileManager.default.fileExists(atPath: tried["path"] as? String ?? "") && tried["speakerFound"] as? Bool == true
+          && (tried["design"] as? [String: Any])?["background"] as? String == "solid" && tried["savedPath"] == nil
+          && thumbnailer.items[0].publish?.design?.background == .dim,
+      "an agent tries a design and looks at it without changing anything", "\(tried)")
+tryDesign["design"] = nil; tryDesign["save"] = true
+let savedThumb = agentResult(await agentCall(thumbnailer, tryDesign))
+let savedThumbPath = savedThumb["savedPath"] as? String ?? ""
+check(savedThumbPath.hasPrefix(scratch.path) && savedThumbPath.contains("subject thumbnail") && FileManager.default.fileExists(atPath: savedThumbPath),
+      "with save, the thumbnail is saved next to the recording", savedThumbPath)
+check((try? await FFmpeg.probe(url: URL(fileURLWithPath: savedThumbPath)))?.width == 1280, "at 1280×720")
+var badDesign = address(thumbnailer)
+badDesign["method"] = "thumbnail"; badDesign["clip"] = subjectItem.id.uuidString; badDesign["design"] = ["zoom": 3]
+check(((await agentCall(thumbnailer, badDesign))["error"] as? [String: Any])?["message"] as? String ?? "" == "The speaker's size is from 1 to 1.6.",
+      "a design out of range is refused before anything is drawn")
 
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)

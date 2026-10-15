@@ -34,7 +34,7 @@ func hostingViews(in view: NSView) -> [NSView] {
 }
 
 @MainActor
-func render<V: View>(_ view: V, size: CGSize, to url: URL) async {
+func render<V: View>(_ view: V, size: CGSize, to url: URL, settle: TimeInterval = 1.5) async {
     let host = NSHostingView(rootView: view)
     let window = OffscreenWindow(contentRect: CGRect(origin: .zero, size: size),
                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -45,7 +45,7 @@ func render<V: View>(_ view: V, size: CGSize, to url: URL) async {
     window.ignoresMouseEvents = true
     window.setFrameOrigin(NSScreen.main?.visibleFrame.origin ?? .zero)
     window.orderFrontRegardless()
-    await pump(1.5)
+    await pump(settle)
     CATransaction.flush()
     let frame = window.contentView!.superview ?? host
     frame.layoutSubtreeIfNeeded()
@@ -196,6 +196,17 @@ func run() async throws {
            to: output.appendingPathComponent("5f-publish-watch-page.png"))
     await render(PublishSheet(initialPreview: 1).environmentObject(model), size: CGSize(width: 1080, height: 760),
            to: output.appendingPathComponent("5g-publish-search-result.png"))
+    // The thumbnail maker: the first render cuts the speaker out, the second shows it. Its
+    // live previews are web views, which this tool cannot capture in a sheet of its own.
+    var made = model.items[0]
+    var makerDesign = ThumbnailDesign(time: min(1, length / 2), title: "Edit for the *viewer*")
+    makerDesign.tag = "3 rules"
+    made.publish?.design = makerDesign
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
+           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
+    await pump(1)
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
+           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
     model.undo()
     await render(AgentActivityView().environmentObject(model).frame(width: 400), size: CGSize(width: 400, height: 520),
            to: output.appendingPathComponent("6-local-agents.png"))
