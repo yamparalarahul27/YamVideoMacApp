@@ -114,14 +114,13 @@ enum YouTubeExport {
         try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                 crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                 regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots, segments: item.segments,
-                                settings: videoSettings, subtitles: item.subtitles, color: item.colorStage(videoSettings),
+                                settings: videoSettings, subtitles: item.burnedCaptions(videoSettings), color: item.colorStage(videoSettings),
                                 effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), onProgress: onProgress)
         try Task.checkCancellation()
         let manager = FileManager.default
         if manager.fileExists(atPath: files.video.path) { _ = try manager.replaceItemAt(files.video, withItemAt: temporary) }
         else { try manager.moveItem(at: temporary, to: files.video) }
-        if let captions = files.captions, let subtitles = item.subtitles,
-           let srt = Captions.editedSRT(subtitles, timeline: item.timeline) {
+        if let captions = files.captions, let srt = item.uploadCaptionsSRT(settings) {
             try Data(srt.utf8).write(to: captions, options: .atomic)
         }
         if let thumbnail = files.thumbnail, let source = publish.thumbnail {
@@ -225,7 +224,7 @@ extension AppModel {
         let item = items[index]
         let publish = item.publish ?? PublishInfo()
         let files = YouTubeExport.files(in: folder, publish: publish, fallback: item.url.deletingPathExtension().lastPathComponent,
-                                        captions: item.subtitles.map { Captions.retimable.contains($0.pathExtension.lowercased()) } ?? false,
+                                        captions: item.uploadsCaptions(settings),
                                         unique: true)
         let exportSettings = settings
         let id = item.id

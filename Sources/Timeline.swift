@@ -118,6 +118,8 @@ struct ProjectClip: Codable, Equatable {
     var graphics: GraphicsTrack?
     /// Version 8 onwards. Nil until something is written for YouTube.
     var publish: PublishInfo?
+    /// Version 11 onwards. Nil until the recording is transcribed.
+    var transcript: Transcript?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -129,6 +131,7 @@ struct ProjectClip: Codable, Equatable {
         markers = item.markers.isEmpty ? nil : item.markers
         graphics = item.graphics?.isEmpty == false ? item.graphics : nil
         publish = item.publish?.isEmpty == false ? item.publish : nil
+        transcript = item.transcript
     }
 
     func item() -> VideoItem {
@@ -142,6 +145,7 @@ struct ProjectClip: Codable, Equatable {
         item.markers = markers ?? []
         item.graphics = graphics
         item.publish = publish
+        item.transcript = transcript
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -154,9 +158,10 @@ struct VideoProject: Codable, Equatable {
     /// whole-frame blur effects and timeline markers. 6: adds per-recording graphics. 7: adds
     /// a graphic's move and scale on the picture. 8: adds what YouTube needs per recording.
     /// 9: adds the thumbnail maker's design. 10: adds the end screen graphic and the choice of
-    /// YouTube element for each of its boxes. Every edited project is written as the current
+    /// YouTube element for each of its boxes. 11: adds the auto edit options, each recording's
+    /// transcript and the captions choice. Every edited project is written as the current
     /// version; older builds reject it rather than silently dropping edits.
-    static let currentVersion = 10
+    static let currentVersion = 11
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -168,6 +173,8 @@ struct VideoProject: Codable, Equatable {
     var settings: ExportSettings
     var selection: UUID?
     var movieSettings: MovieSettings?
+    /// Version 11 onwards. Nil until the owner or an agent answers them.
+    var autoEdit: AutoEditOptions? = nil
 
     /// Reads, validates and upgrades a project file in one step. A pre-identity file gets
     /// an identity derived from its own bytes, so opening the same unsaved legacy file
@@ -224,6 +231,10 @@ struct VideoProject: Codable, Equatable {
         if version < 10, clips.contains(where: { $0.publish?.endScreen != nil || $0.graphics?.endScreen != nil }) {
             try reject("The project claims an older format but contains an end screen."); return
         }
+        if version < 11, autoEdit != nil || settings.captions != nil || clips.contains(where: { $0.transcript != nil }) {
+            try reject("The project claims an older format but contains auto edit options, a transcript or a captions choice."); return
+        }
+        if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return
         }
@@ -243,7 +254,7 @@ struct VideoProject: Codable, Equatable {
             }
             guard let info = clip.info else {
                 guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
-                      clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil else {
+                      clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil, clip.transcript == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -302,6 +313,9 @@ struct VideoProject: Codable, Equatable {
             }
             if let graphics = clip.graphics, let problem = graphics.problem(duration: duration) {
                 try reject(problem); return
+            }
+            if let problem = clip.transcript?.problem(duration: info.duration) {
+                try reject("The project contains an invalid transcript: \(problem)"); return
             }
             for rect in [clip.crop].compactMap({ $0 }) + clip.blurRegions.map(\.rect) {
                 guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,

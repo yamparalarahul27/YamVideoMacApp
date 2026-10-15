@@ -58,6 +58,24 @@ final class AppModel: ObservableObject {
     @Published var showPlayback = false
     @Published var isMovieMode = false
     @Published var movieSettings = MovieSettings()
+    /// The project's auto edit answers; nil until saved once. See `autoEditOptions`.
+    @Published var autoEdit: AutoEditOptions?
+    @Published var showingAutoEdit = false
+    /// What the owner's auto edit is doing while it runs: transcribing, finding cuts.
+    @Published var autoEditRun: AutoEditRun?
+    /// Cuts waiting for the owner when the cut style is Review each cut.
+    @Published var autoEditReview: AutoEditPlan?
+    /// The last auto edit's outcome, or why it stopped.
+    @Published var autoEditMessage: String?
+    @Published var autoEditError: String?
+    /// The owner's model download while it runs, 0–1.
+    @Published var modelDownload: (model: TranscriptModel, fraction: Double)?
+    @Published var modelDownloadError: String?
+    var autoEditTask: Task<Void, Never>?
+    var modelDownloadTask: Task<Void, Never>?
+    /// Transcripts by recording, model and language, so undoing one, or an edit refused
+    /// mid-export, never means waiting for whisper again.
+    var transcriptCache: [String: Transcript] = [:]
     @Published var movieTime = 0.0
     @Published var movieProgress: Double?
     @Published var movieOutput: URL?
@@ -339,7 +357,7 @@ final class AppModel: ObservableObject {
         // Tone mapping changes every pixel, so it belongs in the key too, and so does
         // anything that changes how the captions are drawn.
         let toneMap = info.isHDR && settings.toneMapHDR
-        let subtitles = item.subtitles
+        let subtitles = item.burnedCaptions(settings)
         let subtitleStyle = settings.subtitleForceStyle
         let subtitleKey = subtitles.map { "\($0.path)-\(subtitleStyle)" } ?? "none"
         let frameKey = "\(item.id)-\(Int((seconds * max(1, info.fps)).rounded()))-\(blurKey)-\(toneMap)-\(subtitleKey)"
@@ -782,7 +800,7 @@ final class AppModel: ObservableObject {
                         zoomShots: item.zoomShots,
                         segments: item.segments,
                         settings: exportSettings,
-                        subtitles: item.subtitles,
+                        subtitles: item.burnedCaptions(exportSettings),
                         color: item.colorStage(exportSettings),
                         effects: item.blurEffects,
                         graphics: item.exportGraphics(exportSettings)
@@ -855,7 +873,7 @@ final class AppModel: ObservableObject {
         return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
-            segments: item.segments, settings: settings, subtitles: item.subtitles,
+            segments: item.segments, settings: settings, subtitles: item.burnedCaptions(settings),
             color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings)
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }

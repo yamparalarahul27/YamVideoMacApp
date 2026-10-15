@@ -415,6 +415,7 @@ extension AppModel {
         }
         settings = document.settings
         movieSettings = document.movieSettings ?? MovieSettings()
+        autoEdit = document.autoEdit
 
         if previousOrder.contains(where: { id in !items.contains { $0.id == id } }) { playback.clear() }
         if let current = selection, !items.contains(where: { $0.id == current }) {
