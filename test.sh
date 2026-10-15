@@ -27,6 +27,9 @@ xcrun swiftc \
 	"$ROOT/Sources/Playback.swift" \
 	"$ROOT/Sources/Graphics.swift" \
 	"$ROOT/Sources/GraphicsRender.swift" \
+	"$ROOT/Sources/Publish.swift" \
+	"$ROOT/Sources/Captions.swift" \
+	"$ROOT/Sources/PublishEditing.swift" \
 	"$ROOT/Sources/GraphicsEditing.swift" \
 	"$ROOT/Sources/GraphicsOverlay.swift" \
 	"$ROOT/Sources/GraphicsPlacement.swift" \
