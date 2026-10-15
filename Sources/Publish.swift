@@ -83,11 +83,13 @@ struct PublishInfo: Codable, Equatable {
     var channel = ""
     /// How the thumbnail maker made the thumbnail, so it can be made again or changed.
     var design: ThumbnailDesign?
+    /// Which YouTube element goes in each box of the end screen. Nil keeps the defaults.
+    var endScreen: EndScreenElements?
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case title, description, tags, category, chapters, thumbnail, language, channel, design
+        case title, description, tags, category, chapters, thumbnail, language, channel, design, endScreen
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +108,7 @@ struct PublishInfo: Codable, Equatable {
         language = try c.decodeIfPresent(String.self, forKey: .language) ?? defaults.language
         channel = try c.decodeIfPresent(String.self, forKey: .channel) ?? defaults.channel
         design = try c.decodeIfPresent(ThumbnailDesign.self, forKey: .design)
+        endScreen = try c.decodeIfPresent(EndScreenElements.self, forKey: .endScreen)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -119,6 +122,7 @@ struct PublishInfo: Codable, Equatable {
         try c.encode(language, forKey: .language)
         try c.encode(channel, forKey: .channel)
         try c.encodeIfPresent(design, forKey: .design)
+        try c.encodeIfPresent(endScreen, forKey: .endScreen)
     }
 
     var isEmpty: Bool { self == PublishInfo() }
@@ -162,6 +166,7 @@ struct PublishInfo: Codable, Equatable {
         }
         if let thumbnail, !thumbnail.isFileURL { return "The thumbnail must be a local image." }
         if let problem = design?.problem { return problem }
+        if let problem = endScreen?.problem { return problem }
         return nil
     }
 
@@ -174,8 +179,9 @@ struct PublishInfo: Codable, Equatable {
         var message: String
     }
 
-    /// Everything YouTube would refuse or ignore, for a recording `duration` seconds long.
-    func issues(duration: Double) -> [Issue] {
+    /// Everything YouTube would refuse or ignore, for a recording `duration` seconds long
+    /// with these graphics (for the end screen).
+    func issues(duration: Double, graphics: GraphicsTrack? = nil) -> [Issue] {
         var issues: [Issue] = []
         func add(_ field: String, _ severity: Severity, _ message: String) { issues.append(Issue(field: field, severity: severity, message: message)) }
         let trimmed = title.trimmingCharacters(in: .whitespaces)
@@ -194,6 +200,17 @@ struct PublishInfo: Codable, Equatable {
             add("thumbnail", .warning, "No thumbnail: YouTube will pick a frame.")
         } else if let thumbnail, !FileManager.default.fileExists(atPath: thumbnail.path) {
             add("thumbnail", .blocking, "The thumbnail \(thumbnail.lastPathComponent) is no longer there.")
+        }
+        if let screen = graphics?.endScreen {
+            if duration < EndScreen.minimumVideo {
+                add("endScreen", .warning, String(format: "YouTube allows an end screen only on videos of %.0f s or more; this one is %.1f s.",
+                                                  EndScreen.minimumVideo, duration))
+            }
+            for issue in (endScreen ?? EndScreenElements()).issues(layout: EndScreenLayout(props: screen.props)) {
+                add("endScreen", .warning, issue)
+            }
+        } else if endScreen != nil {
+            add("endScreen", .warning, "End screen elements are chosen, but the video has no end screen layout to keep their boxes clear.")
         }
         return issues
     }
@@ -290,10 +307,12 @@ struct PublishInfo: Codable, Equatable {
         return stem.isEmpty ? fallback : stem
     }
 
-    /// The text file Export for YouTube writes: everything to paste into YouTube Studio.
-    func uploadText(files: [String]) -> String {
+    /// The text file Export for YouTube writes: everything to paste into YouTube Studio, and
+    /// the end screen elements to place there by hand.
+    func uploadText(files: [String], endScreen plan: EndScreenPlan? = nil) -> String {
         var lines = ["TITLE", title, "", "DESCRIPTION", fullDescription, "", "TAGS", tags.joined(separator: ", "), "",
                      "CATEGORY", "\(category.label) (\(category.youtubeID))", "", "LANGUAGE", language]
+        if let plan { lines += [""] + plan.uploadLines }
         if !files.isEmpty { lines += ["", "FILES"] + files }
         return lines.joined(separator: "\n") + "\n"
     }

@@ -77,7 +77,7 @@ enum YouTubeExport {
     }
 
     /// The structured version of the text file, for an agent filling in YouTube Studio.
-    static func json(_ publish: PublishInfo, files: Files) throws -> Data {
+    static func json(_ publish: PublishInfo, files: Files, endScreen plan: EndScreenPlan? = nil) throws -> Data {
         let chapters: [JSONValue] = publish.chapters.sorted { $0.time < $1.time }.map {
             .object(["time": .number($0.time), "timestamp": .string(PublishInfo.timestamp($0.time)), "title": .string($0.title)])
         }
@@ -85,15 +85,16 @@ enum YouTubeExport {
                                               "text": .string(files.text.lastPathComponent)]
         if let captions = files.captions { fileNames["captions"] = .string(captions.lastPathComponent) }
         if let thumbnail = files.thumbnail { fileNames["thumbnail"] = .string(thumbnail.lastPathComponent) }
-        let root: JSONValue = .object([
+        var root: [String: JSONValue] = [
             "title": .string(publish.title), "description": .string(publish.fullDescription),
             "tags": .array(publish.tags.map(JSONValue.string)),
             "category": .object(["name": .string(publish.category.label), "id": .number(Double(publish.category.youtubeID))]),
             "language": .string(publish.language), "chapters": .array(chapters), "files": .object(fileNames),
-        ])
+        ]
+        if let plan { root["endScreen"] = plan.json }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        return try encoder.encode(root)
+        return try encoder.encode(JSONValue.object(root))
     }
 
     /// Writes the video (MP4, whatever the export format is set to), the captions on the
@@ -102,7 +103,7 @@ enum YouTubeExport {
     /// so a cancelled export leaves no half-written video.
     static func run(_ item: VideoItem, info: MediaInfo, publish: PublishInfo, settings: ExportSettings, files: Files,
                     onProgress: @escaping @Sendable (Double) -> Void) async throws {
-        if let blocking = publish.issues(duration: item.editedDuration).first(where: { $0.severity == .blocking }) {
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }
         var videoSettings = settings
@@ -127,8 +128,9 @@ enum YouTubeExport {
             try writeThumbnail(source, to: thumbnail)
         }
         let names = files.all.filter { $0 != files.text && ($0 == files.json || manager.fileExists(atPath: $0.path)) }.map(\.lastPathComponent)
-        try Data(publish.uploadText(files: names).utf8).write(to: files.text, options: .atomic)
-        try json(publish, files: files).write(to: files.json, options: .atomic)
+        let plan = EndScreenPlan(graphics: item.graphics, publish: publish, duration: item.editedDuration)
+        try Data(publish.uploadText(files: names, endScreen: plan).utf8).write(to: files.text, options: .atomic)
+        try json(publish, files: files, endScreen: plan).write(to: files.json, options: .atomic)
     }
 }
 
@@ -179,7 +181,7 @@ extension AppModel {
         let time = previewTime
         Task {
             do {
-                let frame = try await composedFrame(clip, at: time, settings: settings).image
+                let frame = try await composedFrame(clip, at: time, settings: settings, guides: false).image
                 let folder = clip.url.deletingLastPathComponent()
                 let stem = clip.url.deletingPathExtension().lastPathComponent + " thumbnail"
                 var target = folder.appendingPathComponent(stem + ".png")
@@ -202,7 +204,8 @@ extension AppModel {
     /// Asks for a folder, then writes the video, captions, thumbnail and upload text there.
     func promptForYouTubeExport() {
         guard let item = selectedItem, item.info != nil else { return }
-        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration).first(where: { $0.severity == .blocking }) {
+        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics)
+            .first(where: { $0.severity == .blocking }) {
             statusMessage = blocking.message
             return
         }
