@@ -9,6 +9,7 @@ let usage = """
 yamvideoctl — read and edit the project open in YamVideo on this Mac
 
 Reading
+  yamvideoctl manual                             the Agents Manual: the rules and a recipe for each job (read it first)
   yamvideoctl catalog                            every command, with fields, units, ranges and examples
   yamvideoctl sessions
   yamvideoctl state
@@ -28,7 +29,7 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl export --youtube --path FOLDER --clip ID [--overwrite]   video, captions, thumbnail and upload text
   yamvideoctl export [--youtube] --path OUT.mp4|FOLDER --clip ID --short ID [--overwrite]   a Short, 1080×1920
-  yamvideoctl analyze --kind silence|zooms|autoEdit --clip ID [--style tight|natural|review]
+  yamvideoctl analyze --kind silence|zooms|screenZooms|autoEdit|thumbnailFrames --clip ID [--style tight|natural|review] [--limit N]
   yamvideoctl transcribe --clip ID [--model large-v3-turbo-q5_0|base.en] [--language CODE]
   yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
                                                  transcribe if needed, cut, set captions and loudness
@@ -275,6 +276,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         request["clip"] = try value("clip")
         for name in ["threshold", "minimum", "padding"] { if let number = try arguments.double(name) { request[name] = number } }
         if let style = arguments.values["style"] { request["style"] = style }
+        if let limit = try arguments.int("limit") { request["limit"] = limit }
         try requireSession()
     case "transcribe":
         request["method"] = "transcribe"
@@ -355,6 +357,21 @@ func run() -> Int32 {
             }
             emit(["ok": true, "result": ["sessions": sessions]])
             return 0
+        }
+        if arguments.command == "manual" {
+            // The running app's copy; else the copy in the app next to this tool, so an
+            // agent can read it before the app is open.
+            if let record = try? chooseInstance(arguments),
+               let response = try? send(["protocolVersion": AgentProtocol.version, "method": "manual"], to: record, timeout: timeout),
+               let text = (response["result"] as? [String: Any])?["text"] as? String {
+                print(text); return 0
+            }
+            let here = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).resolvingSymlinksInPath().deletingLastPathComponent()
+            for candidate in [here.appendingPathComponent("YamVideo.app/Contents/Resources/AgentsManual.md"),
+                              here.deletingLastPathComponent().appendingPathComponent("Resources/AgentsManual.md")] {
+                if let text = try? String(contentsOf: candidate, encoding: .utf8) { print(text); return 0 }
+            }
+            exitWithProblem("not_found", "The Agents Manual was not found. Build YamVideo with build.sh, or open it, and try again.")
         }
         let request = try makeRequest(arguments)
         let record = try chooseInstance(arguments)

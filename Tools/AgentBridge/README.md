@@ -80,13 +80,14 @@ exits. `./test.sh` runs the same check against a test instance.
 
 | tool | does |
 |---|---|
-| `yamvideo_describe` | Every command with its fields, units, ranges, defaults and an example, and the rules every request follows — from the app itself. Agents are told to start here. |
+| `yamvideo_manual` | The Agents Manual: the rules for work with the owner and a recipe for each common job, from the app itself. Agents are told to start here. |
+| `yamvideo_describe` | Every command with its fields, units, ranges, defaults and an example, and the rules every request follows — from the app itself. Agents read it after the manual. |
 | `yamvideo_list_sessions` | Running instances and their open project. |
 | `yamvideo_get_state` | The project as committed, with stable IDs and timing. |
 | `yamvideo_apply_edits` | 1–100 typed commands as one undo step, against a revision; `dryRun` to check first. |
 | `yamvideo_get_events` | What changed since a cursor, and who changed it. |
 | `yamvideo_render_preview` | A frame as a PNG (path, and the image unless `attachImage` is false). `composed` renders it as the owner's Preview plays it, with zooms and whole-frame effects; `original` leaves the colour correction out, for a before/after pair at one revision. `short` draws one of the recording's Shorts as its viewer shows it, 1080×1920, with `time` in seconds into the Short. |
-| `yamvideo_analyze` | Silence, auto edit or zoom suggestions as a job; applies nothing. |
+| `yamvideo_analyze` | Silence, auto edit, zoom, screen zoom or thumbnail frame suggestions as a job; applies nothing. `thumbnailFrames` gives the moments where the speaker smiles and faces the camera, with a contact sheet PNG. |
 | `yamvideo_transcribe` | Transcribe a recording on this Mac with whisper.cpp, as a job; one undo step. |
 | `yamvideo_get_transcript` | The words with source and edited times, the captions and the stumbles. |
 | `yamvideo_auto_edit` | The owner's auto edit (`state.autoEdit.options`) as a job: transcribe, cut, captions and loudness in one undo step. |

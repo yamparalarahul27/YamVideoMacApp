@@ -183,6 +183,13 @@ struct YamVideoApp: App {
                     .keyboardShortcut(".")
                     .disabled(!model.isConverting)
             }
+            CommandGroup(replacing: .help) {
+                Button("Agents Manual") { AgentsManual.open() }
+                Button("Copy Brief for an Agent") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(AgentsManual.brief(ctl: AgentSetup.paths?.ctl), forType: .string)
+                }
+            }
             CommandGroup(after: .toolbar) {
                 Button("Reset Crop") { model.resetCrop() }
                     .keyboardShortcut("0", modifiers: [.command, .shift])

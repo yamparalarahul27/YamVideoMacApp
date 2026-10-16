@@ -506,8 +506,30 @@ from docs/plans/graphics-track.md".
   `yamvideoctl`, drew it with a blurred background, saved it next to the recording and
   made it the video's thumbnail. The live preview was checked with WebKit's own snapshot;
   `Tools/Snapshot` cannot capture a web view in a sheet of its own.
-- **Open.** Real footage of a person (the tests use a drawn subject). Several looks or
-  layouts to choose from, and saving a design as a look for the next video.
+- **Clear place (2026-10-16).** The design's `place` is `frame` (the speaker where the
+  frame has them; the default, as before) or `clear`. With `clear`, the engine moves the
+  cut-out to the far side until each band of its outline (24 bands of rows of the
+  speaker's box) is clear of the tag, the title's lines and the picture beside it. It
+  moves as little as possible, and makes the speaker smaller (from `zoom` down to 40 %)
+  only when the head (the top 30 % of the box) would leave the picture. The frame behind
+  still has the speaker in the old place, so `clear` goes with the plain background. On
+  the YamDrive design system video the headshot is centred and the shoulders are wide, so
+  in `frame` the title always overlapped the head.
+- **More options (2026-10-16).** Background `white` (dark title, no scrim, a soft
+  shadow round the speaker), `outlineWidth` (2–16 px, 9 by default), and `highlight`
+  (the *accent* words in dark text on a band of the accent, 78 % of the line, so the
+  bands of two lines do not touch). With a screen recording, the maker cuts the speaker
+  out of their own picture at every moment, not out of the layout's bubble.
+- **Suggest Frames (2026-10-16).** `FrameAnalyzer` reads the key frames of the kept
+  footage (about one a second; 10 s for 9 minutes), measures the largest face with
+  Apple Vision (landmarks and face capture quality: smile from the mouth's width and
+  its corners, eyes open, facing from the nose against the eyes), then reads ten frames
+  a second round the best 16 moments and keeps the best frame of each. Moments are 3 s
+  of the edit apart. The maker shows them as faces to click; agents use `analyze` with
+  kind `thumbnailFrames` and get a contact sheet. On the YamDrive design system video it
+  took 18 s and found the two smiles picked by hand.
+- **Open.** Several looks or layouts to choose from, and saving a design as a look for
+  the next video. A hand in front of the speaker does not lower a frame's score yet.
 
 ## 14. End screen status (2026-10-15)
 

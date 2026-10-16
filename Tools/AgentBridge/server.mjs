@@ -64,7 +64,8 @@ const server = new McpServer(
   {
     instructions: [
       "YamVideo is a Mac video editor. These tools read and edit the project the owner has open, while they keep editing it too.",
-      "Start with yamvideo_describe: it lists every edit command with its fields, units, ranges, defaults and an example, and the rules every request follows. It comes from the app, so it is always current.",
+      "Start with yamvideo_manual: the Agents Manual has the rules for work with the owner and a recipe for each common job (first edit, cuts, captions, screen and layouts, zooms, graphics, chapters and text, thumbnail, Shorts, export).",
+      "Then yamvideo_describe: it lists every edit command with its fields, units, ranges, defaults and an example, and the rules every request follows. It comes from the app, so it is always current.",
       "Workflow: call yamvideo_get_state, plan, check with yamvideo_apply_edits dryRun, then apply with the sessionID, projectID and revision you read. All commands in one call apply together or not at all.",
       "If you get revision_conflict, someone else (often the owner) edited meanwhile: read state again and replan. Never retry an edit with a guessed revision.",
       "Each applied call is one undo step credited to you. Use yamvideo_undo only for your own most recent step (the transactionID from state.history.undo).",
@@ -76,6 +77,17 @@ const server = new McpServer(
     ].join("\n"),
   },
 );
+
+server.registerTool("yamvideo_manual", {
+  title: "Read the Agents Manual",
+  description: "How to work with the owner in YamVideo: the rules, and a recipe for each common job. It comes from the app, so it matches this build. Read it once at the start of a session.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async () => {
+  const response = await request("manual", {});
+  const text = response?.result?.text;
+  return text ? { content: [{ type: "text", text }] } : result(response);
+});
 
 server.registerTool("yamvideo_describe", {
   title: "Describe what YamVideo can do",
@@ -164,9 +176,10 @@ server.registerTool("yamvideo_render_preview", {
 
 server.registerTool("yamvideo_analyze", {
   title: "Analyze a recording",
-  description: "Start a background job: \"silence\" proposes cuts (and the resulting sections) from audio levels; \"autoEdit\" proposes the cuts the owner's cut style makes, pauses and stumbles from the transcript, each with its reasons; \"zooms\" proposes zooms from local visual activity. Nothing is applied — apply chosen results with yamvideo_apply_edits. Poll with yamvideo_get_job.",
+  description: "Start a background job: \"silence\" proposes cuts (and the resulting sections) from audio levels; \"autoEdit\" proposes the cuts the owner's cut style makes, pauses and stumbles from the transcript, each with its reasons; \"zooms\" proposes zooms from local visual activity, \"screenZooms\" the same on the screen recording; \"thumbnailFrames\" finds the best moments for the thumbnail (a smile, eyes open, facing the camera) with a contact sheet PNG to look at. Nothing is applied — apply chosen results with yamvideo_apply_edits. Poll with yamvideo_get_job.",
   inputSchema: {
-    sessionID: address.sessionID, projectID: address.projectID, clip: id, kind: z.enum(["silence", "zooms", "autoEdit"]),
+    sessionID: address.sessionID, projectID: address.projectID, clip: id, kind: z.enum(["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames"]),
+    limit: z.number().int().min(1).max(20).optional().describe("For thumbnailFrames: how many moments (default 8)."),
     style: z.enum(["tight", "natural", "review"]).optional().describe("For autoEdit: a cut style other than the owner's."),
     threshold: z.number().optional().describe("Silence threshold in dB (default -40)."),
     minimum: z.number().positive().optional().describe("Shortest pause to cut, seconds (default 0.8)."),

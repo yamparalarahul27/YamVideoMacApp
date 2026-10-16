@@ -1212,8 +1212,9 @@
   // ───────────────────────── Thumbnail ─────────────────────────
 
   const SVG_NS = "http://www.w3.org/2000/svg";
-  /** A white outline round whatever it filters: the alpha, grown, filled white, under it. */
-  function outlineFilter() {
+  /** A white outline round whatever it filters: the alpha, grown by `width` px, filled white, under it. */
+  function outlineFilter(width) {
+    const radius = Math.max(1, Math.min(16, num(width, 9)));
     const svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("width", "0"); svg.setAttribute("height", "0");
     svg.style.position = "absolute";
@@ -1221,8 +1222,8 @@
     const attrs = { id: "yg-outline", x: "-5%", y: "-5%", width: "110%", height: "110%" };
     for (const key in attrs) filter.setAttribute(key, attrs[key]);
     const steps = [
-      ["feMorphology", { in: "SourceAlpha", operator: "dilate", radius: "9", result: "dilated" }],
-      ["feGaussianBlur", { in: "dilated", stdDeviation: "1.4", result: "grown" }],
+      ["feMorphology", { in: "SourceAlpha", operator: "dilate", radius: String(radius), result: "dilated" }],
+      ["feGaussianBlur", { in: "dilated", stdDeviation: String(Math.min(1.4, radius * 0.3)), result: "grown" }],
       ["feFlood", { "flood-color": "#ffffff", result: "white" }],
       ["feComposite", { in: "white", in2: "grown", operator: "in", result: "ring" }],
     ];
@@ -1242,7 +1243,7 @@
     return svg;
   }
 
-  /** Lines of the title; words between asterisks take the accent colour. Text only. */
+  /** Lines of the title; words between asterisks take the accent colour (or its band, with highlight). Text only. */
   function accented(node, text) {
     String(text).split("\n").slice(0, 3).forEach((line, index) => {
       if (index > 0) node.appendChild(document.createElement("br"));
@@ -1263,6 +1264,57 @@
   }
 
   /**
+   * Moves the cut-out speaker clear of the title column (tag, title lines and picture):
+   * each band of the speaker's outline keeps clear of the text beside it, so wide
+   * shoulders below the title do not push the head away. The speaker moves as little as
+   * possible toward the far side, and gets smaller (never past `zoom`, growing from the
+   * bottom of their box) when the head would leave the picture. Returns the scale.
+   */
+  function placeClear(root, cut, column, speaker, head, bands, zoom, textOnLeft) {
+    const stage = root.getBoundingClientRect();
+    const k = 1920 / (stage.width || 1920);
+    const text = [];
+    const add = (r) => {
+      if (r.width <= 0 || r.height <= 0) return;
+      text.push({ x0: (r.left - stage.left) * k, x1: (r.right - stage.left) * k, y0: (r.top - stage.top) * k, y1: (r.bottom - stage.top) * k });
+    };
+    for (const node of column.children) {
+      if (node.classList.contains("yg-thumb-title")) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        Array.from(range.getClientRects()).forEach(add);
+      } else add(node.getBoundingClientRect());
+    }
+    const gapX = 56, gapY = 24, margin = 40;
+    const box = { x: num(speaker.x, 0), y: num(speaker.y, 0), w: num(speaker.w, 1920), h: num(speaker.h, 1080) };
+    const ox = box.x + box.w / 2, oy = box.y + box.h;
+    const map = (r, s) => ({ x0: ox + (num(r.x, 0) - ox) * s, x1: ox + (num(r.x, 0) + num(r.w, 0) - ox) * s,
+                             y0: oy + (num(r.y, 0) - oy) * s, y1: oy + (num(r.y, 0) + num(r.h, 0) - oy) * s });
+    const parts = bands && bands.length ? bands : [box];
+    const top = head || box;
+    // For a scale: the smallest move (toward the far side) that clears the text, and the
+    // largest that keeps the head inside the picture.
+    const limits = (s) => {
+      let need = textOnLeft ? -Infinity : Infinity;
+      for (const part of parts) {
+        const q = map(part, s);
+        for (const t of text) {
+          if (q.y1 <= t.y0 - gapY || q.y0 >= t.y1 + gapY) continue;
+          need = textOnLeft ? Math.max(need, t.x1 + gapX - q.x0) : Math.min(need, t.x0 - gapX - q.x1);
+        }
+      }
+      const h = map(top, s);
+      return textOnLeft ? { low: need, high: 1920 - margin - h.x1 } : { low: margin - h.x0, high: need };
+    };
+    let s = zoom, found = limits(s);
+    for (let next = zoom; next >= 0.4 && found.low > found.high; next -= 0.02) { s = next; found = limits(s); }
+    let tx = textOnLeft ? Math.max(found.low, Math.min(0, found.high)) : Math.min(found.high, Math.max(0, found.low));
+    if (!isFinite(tx)) tx = 0;
+    cut.style.transform = "translateX(" + tx.toFixed(1) + "px) scale(" + s.toFixed(4) + ")";
+    return s;
+  }
+
+  /**
    * A YouTube thumbnail on the stage (drawn at 1280×720): the frame, the speaker cut out
    * and outlined, a big title with *accent* words, a tag, and a photo. Resolves with the
    * title's size once the pictures have loaded and the title fits.
@@ -1274,10 +1326,11 @@
     if (old) old.remove();
     const d = data || {};
     document.documentElement.style.setProperty("--yg-accent", d.accent || DEFAULT_STYLE.accent);
-    const root = h("div", { id: "yg-thumb", class: "yg-thumb bg-" + (d.background || "dim") + " side-" + (d.side === "left" ? "left" : "right") });
+    const root = h("div", { id: "yg-thumb", class: "yg-thumb bg-" + (d.background || "dim") + " side-" + (d.side === "left" ? "left" : "right")
+      + (d.highlight ? " highlight" : "") });
     const pictures = [];
     const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
-    append(root, outlineFilter());
+    append(root, outlineFilter(d.outlineWidth));
     if (d.frame) append(root, picture(d.frame, "yg-thumb-bg"));
     append(root, h("div", { class: "yg-thumb-scrim" }));
     if (d.cutout) {
@@ -1297,7 +1350,15 @@
     append(root, column);
     append(document.getElementById("stage") || document.body, root);
     const loaded = pictures.map((img) => (img.decode ? img.decode().catch(() => null) : Promise.resolve()));
-    return Promise.all(loaded).then(() => document.fonts.ready).then(() => fitTitle(title, column));
+    return Promise.all(loaded).then(() => document.fonts.ready).then(() => {
+      const size = fitTitle(title, column);
+      const cut = root.querySelector(".yg-thumb-cut");
+      if (d.place === "clear" && cut) {
+        const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
+        placeClear(root, cut, column, d.speaker || { x: 0, y: 0, w: 1920, h: 1080 }, d.head, d.bands, zoom, d.side === "left");
+      }
+      return size;
+    });
   }
 
   /** Reads the inline JSON and loads it. Used by page.html. A thumbnail page starts empty

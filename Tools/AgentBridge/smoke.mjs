@@ -29,6 +29,10 @@ try {
     throw new Error("yamvideo_describe did not describe addBlurEffect with an example.");
   }
   steps.catalog = catalog.commands.length;
+  // The manual comes through as plain text, for an agent to read first.
+  const manual = (await client.callTool({ name: "yamvideo_manual", arguments: {} })).content.find((part) => part.type === "text")?.text ?? "";
+  if (!manual.startsWith("# YamVideo Agents Manual")) throw new Error("yamvideo_manual did not return the Agents Manual.");
+  steps.manual = manual.length;
 
   steps.sessions = parse(await client.callTool({ name: "yamvideo_list_sessions", arguments: {} })).ok;
   const state = parse(await client.callTool({ name: "yamvideo_get_state", arguments: {} })).result;

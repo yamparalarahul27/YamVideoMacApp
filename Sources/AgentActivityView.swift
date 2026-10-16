@@ -103,6 +103,16 @@ struct AgentActivityView: View {
                 }
             }
 
+            HStack {
+                Button("Agents Manual") { AgentsManual.open() }
+                    .controlSize(.small)
+                    .help("The rules and a recipe for each job that agents follow in YamVideo")
+                copyButton("Copy Brief for an Agent", AgentsManual.brief(ctl: AgentSetup.paths?.ctl))
+            }
+            Text("Paste the brief into Claude, Codex or another agent to start it the right way.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             DisclosureGroup("Connect an agent", isExpanded: Binding(
                 get: { showSetup ?? model.agentClients.isEmpty }, set: { showSetup = $0 })) {
                 setup.padding(.top, 6)

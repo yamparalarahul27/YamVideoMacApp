@@ -43,6 +43,8 @@ xcrun swiftc \
 	"$ROOT/Sources/Captions.swift" \
 	"$ROOT/Sources/PublishEditing.swift" \
 	"$ROOT/Sources/Thumbnail.swift" \
+	"$ROOT/Sources/FrameSuggestions.swift" \
+	"$ROOT/Sources/AgentsManual.swift" \
 	"$ROOT/Sources/GraphicsEditing.swift" \
 	"$ROOT/Sources/GraphicsOverlay.swift" \
 	"$ROOT/Sources/GraphicsPlacement.swift" \

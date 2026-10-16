@@ -35,6 +35,8 @@ codesign --force --sign - --timestamp=none "$BUILD/yamvideoctl" >/dev/null 2>&1 
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 # The graphics engine: the preview loads it in a web view, the export renders with it.
 cp -R "$ROOT/Resources/Graphics" "$APP/Contents/Resources/Graphics"
+# The Agents Manual: the app gives it to agents (the manual request, yamvideoctl manual).
+cp "$ROOT/Resources/AgentsManual.md" "$APP/Contents/Resources/AgentsManual.md"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 echo "==> Generating app icon"
