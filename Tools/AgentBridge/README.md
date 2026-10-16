@@ -95,7 +95,10 @@ exits. `./test.sh` runs the same check against a test instance.
 | `yamvideo_save_project` | Save in place, first save, or a copy — no dialog. |
 | `yamvideo_export` | Export one recording or the movie as a job. `youtube` writes the upload files into a folder; `short` exports one of the recording's Shorts (1080×1920). |
 | `yamvideo_undo`, `yamvideo_redo` | The named step only, never someone else's. |
-| `yamvideo_reveal` | Move your view to something the agent wants to show you: a recording, section, zoom, blur effect, marker or time. |
+| `yamvideo_reveal` | Move your view to something the agent wants to show you: a recording, section, zoom, blur effect, marker, time or idea. |
+| `yamvideo_get_library` | Your ideas, apart from any project, with the Library's own revision. |
+| `yamvideo_apply_library` | Add or change ideas (title, notes, topic, links, images) and link projects to them, as one undo step on the Ideas page. |
+| `yamvideo_library_undo`, `yamvideo_library_redo` | The agent's own Library step only. |
 
 Colour is edited like everything else: `setInputProfile`, `importTechnicalLUT` (a path
 to DJI's `.cube`, checked before the edit), `setColorCorrection`, `setColorAdjustments`,

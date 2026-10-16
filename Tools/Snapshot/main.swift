@@ -125,6 +125,11 @@ func run() async throws {
 
     let size = CGSize(width: 1360, height: 880)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Ideas pages.
+    if ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"] == "ideas" {
+        try await ideas(model, output: output, size: size, minimum: CGSize(width: 1140, height: 800))
+        return
+    }
 
     model.selectedShotID = nil; model.selectedRegionID = nil
     model.selectedSegmentID = model.items[0].timeline.segments[0].id
@@ -355,6 +360,63 @@ func run() async throws {
     await pump(1)
     await render(InspectorPane().environmentObject(model).frame(width: inspector.width, height: inspector.height), size: inspector,
            to: output.appendingPathComponent("15-marker.png"))
+    try await ideas(model, output: output, size: size, minimum: minimum)
+}
+
+/// The Ideas page (distribution plan, phase 1): empty, with ideas by stage, and Studio
+/// showing the idea its project was made from. Its own Library, never the owner's.
+@MainActor
+func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("yamvideo-snapshot-library-\(UUID().uuidString)")
+    model.loadLibrary(from: folder)
+    model.showModule(.ideas)
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    await pump(1)
+    await render(window(), size: size, to: output.appendingPathComponent("16a-ideas-empty.png"))
+
+    let claude = ContentItem(title: "How I edit with Claude", notes: "Hook: one recording, and Claude cuts it while I watch.\n\nShow the bridge, Auto Edit and the Shorts it makes. End on the Ideas page.",
+                             topic: "AI workflow", links: ["https://www.youtube.com/watch?v=example", "https://claude.com/claude-code"])
+    let items = [
+        ContentItem(title: "YamDrive design system walkthrough", notes: "Screen + speaker. Tokens, components, the docs site.", topic: "Design systems"),
+        ContentItem(title: "Shorts safe area explained", topic: "YouTube tips"),
+        ContentItem(title: "Pocket 3 colour in five minutes", notes: "D-Log M to Rec.709 with DJI's LUT, then Natural colour.", topic: "Gear"),
+        claude,
+    ]
+    for item in items { model.performLibrary([.addIdea(item)]) }
+    // Two reference images, drawn here.
+    var images: [URL] = []
+    for (index, hue) in [0.62, 0.08].enumerated() {
+        let url = folder.appendingPathComponent("reference-\(index).png")
+        let image = NSImage(size: NSSize(width: 640, height: 360), flipped: false) { rect in
+            NSColor(hue: hue, saturation: 0.55, brightness: 0.85, alpha: 1).setFill(); rect.fill()
+            NSColor.white.withAlphaComponent(0.85).setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: 120, dy: 90), xRadius: 24, yRadius: 24).fill()
+            return true
+        }
+        if let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try png.write(to: url); images.append(url)
+        }
+    }
+    model.addIdeaImages(images, to: claude.id)
+    // The open project belongs to the design system idea.
+    let projectFile = folder.appendingPathComponent("YamDrive design system walkthrough.yamvideo")
+    model.save(to: projectFile, asCopy: false)
+    model.performLibrary([.linkProject(id: items[0].id, link: ProjectLink(projectID: model.projectID, path: projectFile.path))])
+    model.performLibrary([.updateIdea(id: items[2].id, title: nil, notes: "Before and after on the same frame.", topic: nil, links: nil)],
+                         label: "Sharpen the Pocket 3 idea", origin: .agent("Claude"), expectedRevision: model.library.revision)
+    model.selectedIdeaID = claude.id
+    model.showModule(.ideas)
+    await pump(1.5)
+    await render(window(), size: size, to: output.appendingPathComponent("16b-ideas.png"))
+    await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
+           to: output.appendingPathComponent("16c-ideas-minimum.png"))
+    model.selectedIdeaID = items[0].id
+    await pump(1)
+    await render(window(), size: size, to: output.appendingPathComponent("16d-idea-in-production.png"))
+    model.showModule(.studio)
+    await pump(1.5)
+    await render(window(), size: size, to: output.appendingPathComponent("16e-studio-with-idea.png"))
+    try? FileManager.default.removeItem(at: folder)
 }
 
 Task { @MainActor in

@@ -55,6 +55,9 @@ xcrun swiftc \
 	"$ROOT/Sources/GraphicsEditing.swift" \
 	"$ROOT/Sources/GraphicsOverlay.swift" \
 	"$ROOT/Sources/GraphicsPlacement.swift" \
+	"$ROOT/Sources/Library.swift" \
+	"$ROOT/Sources/LibraryEditing.swift" \
+	"$ROOT/Sources/LibraryAgents.swift" \
 	"$ROOT/Sources/AppModel.swift" \
 	"$ROOT/Sources/ProjectEditing.swift" \
 	"$ROOT/Sources/EditCommands.swift" \

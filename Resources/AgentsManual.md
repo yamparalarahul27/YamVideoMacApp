@@ -44,7 +44,10 @@ edit, and each edit becomes one undo step with your name on it.
    owner. If a reply says `unsupported_capability`, ask them.
 9. **Do not move the owner's view.** Use `reveal` only when the owner asks, or to show
    them a result they asked for.
-10. **Write to the owner in simple English.** Use short sentences, one word for one
+10. **Never post.** YamVideo does not sign in to, post to or read from YouTube,
+    Instagram, X or LinkedIn, and you must not either, not even through a browser. The
+    owner publishes by hand. You prepare everything for them.
+11. **Write to the owner in simple English.** Use short sentences, one word for one
     thing, and the active voice (ASD-STE100 Simplified Technical English). Use the same
     style in labels, titles and app text you write.
 
@@ -219,9 +222,32 @@ The owner can do the same in the app: Graphics section → Find Brands.
 - YouTube's upload API cannot set end screen elements. The export says which element
   goes in which box, for YouTube Studio.
 
+### 4.11 Ideas
+
+The Library keeps the owner's ideas, apart from any project. Each idea has a title,
+notes, a topic, links and images. A project made from an idea is linked to it, and the
+idea then shows as *In production*.
+
+1. Read the Library: `yamvideoctl library` (`yamvideo_get_library`). Keep its
+   `revision`: it is the Library's own, not the project's.
+2. Write ideas in the owner's own words. Show the owner what you will add or change,
+   and wait for a yes.
+3. Use a topic from `topics` when one fits, so ideas group together. Make a new topic
+   only for a new subject.
+4. Apply with `yamvideoctl library apply --file EDITS.json --revision N`
+   (`yamvideo_apply_library`): `addIdea`, `updateIdea`, `addIdeaImages`,
+   `linkProject`. Look at an idea's images at their `path`.
+5. Ask before `removeIdea`. To change your own step, undo it with
+   `yamvideoctl library undo --transaction ID --revision N`.
+6. `state.idea` says which idea the open project was made from. Read its notes before
+   you write the title, description and chapters (4.6), so they say what the owner
+   planned.
+7. `reveal --idea ID` shows an idea on the Ideas page.
+
 ## 5. Problems
 
-- **`revision_conflict`:** read state again and make a new plan.
+- **`revision_conflict`:** read state again and make a new plan. For a Library command,
+  read the Library again.
 - **`agents_paused`:** the owner paused agents. Wait, or ask them.
 - **A preview or thumbnail request times out after the app was rebuilt:** macOS asks the
   owner again for access to the Desktop folder. Ask the owner to click Allow.

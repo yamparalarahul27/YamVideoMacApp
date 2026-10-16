@@ -1,6 +1,8 @@
 # Distribution — implementation plan
 
-**Updated:** 2026-10-16. **Status:** planned. No phase is started.
+**Updated:** 2026-10-16. **Status:** phase 1 (the Library, the sidebar and Ideas) is
+implemented on the `distribution-ideas` branch; see section 11. Phases 2 to 5 are not
+started.
 
 ## 1. Goal
 
@@ -214,7 +216,8 @@ by `yamvideoctl`.
 
 ## 9. Questions for the start of each phase
 
-- Phase 1: Ideas as a list or as columns by stage? (Mock-ups first.)
+- Phase 1: Ideas as a list or as columns by stage? (Mock-ups first.) **Answered:** a list
+  by stage with the editor always on the right (2026-10-16).
 - Phase 2: confirm that post kit text lives in the project.
 - Phase 3: at what time of day the check-in reminders come.
 - Phase 4: which exports each platform offers today.
@@ -223,8 +226,56 @@ by `yamvideoctl`.
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | Library, sidebar, Ideas | Not started |
+| 1 | Library, sidebar, Ideas | Implemented (`distribution-ideas`) |
 | 2 | Platforms and post kits | Not started |
 | 3 | Calendar | Not started |
 | 4 | Results | Not started |
 | 5 | In-app AI | Not started |
+
+## 11. Phase 1 as built
+
+**Data.** `Sources/Library.swift`: `Library` (version 1, with a `revision` saved in the
+file), `ContentItem`, `ProjectLink`, `ContentStage` (idea, inProduction), the rules
+(title one line up to 200 characters, notes up to 20,000, topic up to 60, up to 50 http or
+https links and 50 images), `LibraryCommand` and `LibraryReducer` (all or nothing). Times
+are kept to the whole second so the file reads back equal. A topic that differs only in
+case takes the existing spelling; a bare address gets `https://`.
+
+**Storage.** `~/Library/Application Support/YamVideo/Library/Library.json` and `Images/`,
+or `YAMVIDEO_LIBRARY_PATH`. Loaded in `applicationDidFinishLaunching`, not in
+`AppModel.init`, so tests and the snapshot tool use their own folder, and nothing is written
+before it is loaded. Written atomically after every change. A file that cannot be read is
+moved aside as `Library (unreadable …).json`; images no idea uses are removed on load
+(undo history does not outlive the app).
+
+**The app.** `Sources/LibraryEditing.swift` and `Sources/IdeasView.swift`. A module
+sidebar (Ideas, Studio; ⌘1, ⌘2; remembered), the Ideas page (list by stage with a topic
+filter; the editor with title, topic and existing topics, notes, links, images dropped,
+pasted or chosen, and the project), the Library's own undo history (typing in one field
+is one step; ⌘Z on the Ideas page undoes the Library, after the text field's own undo),
+New Idea (⌥⌘N), Start a Project from This Idea (save panel first, then a new project,
+saved and linked), Link the Open Project, Open in Studio, Locate (the identity must
+match), Unlink. Studio's toolbar shows the open project's idea and goes back to it.
+Opening or saving a project moves its idea's link to the file's new place, in the undo
+history too. The timeline keys and menu act only in Studio.
+
+**Agents.** `Sources/LibraryAgents.swift`: methods `library`, `libraryApply`,
+`libraryUndo`, `libraryRedo`; `reveal` with `idea`; `state.idea` and
+`state.selection.module`/`idea`; events of kind `library` with the Library's revision.
+Commands: `addIdea`, `updateIdea`, `removeIdea`, `addIdeaImages`, `removeIdeaImage`,
+`linkProject` (a path, or the saved open project) and `unlinkProject`, in the catalog's
+`libraryCommands`. Images are copied only after every command checks; a dry run copies
+nothing. A retry is matched on the whole request with sorted keys, so a new yamvideoctl
+process retrying is still recognised. `yamvideoctl library [apply|undo|redo]`, MCP tools
+`yamvideo_get_library`, `yamvideo_apply_library`, `yamvideo_library_undo` and `_redo`,
+and recipe 4.11 in the Agents Manual (plus rule 10: never post).
+
+**Checks.** `./test.sh library` (61 checks; the whole suite is 1477). `Tools/Snapshot` renders the Ideas pages with
+`YAMVIDEO_SNAPSHOT_ONLY=ideas` (16a–16e); the toolbar does not show in snapshots, as
+before. The real-use check ran an isolated instance with `YAMVIDEO_LIBRARY_PATH` and drove
+it with yamvideoctl: a dry run, two ideas with an image, a stale revision refused, reveal,
+a saved project linked, `state.idea`, undo and redo, events, and the Library and link
+intact after a relaunch.
+
+**Left for later.** Hands-on clicks in the running app (typing, drag and drop, paste,
+the save panel); the idea chip in Studio's toolbar can only be seen in the running app.

@@ -194,17 +194,23 @@ extension AppModel {
         for item in items where item.info == nil { retry(item.id) }
     }
 
+    /// Undo in a text field undoes its typing first. On the Ideas page, Undo is the
+    /// Library's, and a field with nothing left to undo hands over to it.
     func undoEdit() {
-        if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable {
+        if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable,
+           module != .ideas || text.undoManager?.canUndo == true {
             text.undoManager?.undo(); return
         }
+        if module == .ideas { libraryUndo(); return }
         undo()
     }
 
     func redoEdit() {
-        if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable {
+        if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable,
+           module != .ideas || text.undoManager?.canRedo == true {
             text.undoManager?.redo(); return
         }
+        if module == .ideas { libraryRedo(); return }
         redo()
     }
 
@@ -245,6 +251,7 @@ extension AppModel {
             savedFingerprint = try writeProject(project, to: destination)
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             if projectID != previousID { rotateSession() }
+            noteProjectLocation()
             scheduleAutosave()
             let missing = Self.tableHashes(project).filter { !LUTStore.has($0) }
             statusMessage = missing.isEmpty ? "Saved \(destination.lastPathComponent)."
@@ -269,7 +276,7 @@ extension AppModel {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.yamVideoProject]
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { openProject(at: url) }
+        if panel.runModal() == .OK, let url = panel.url { showModule(.studio); openProject(at: url) }
     }
 
     func openProject(at url: URL) {
@@ -282,6 +289,7 @@ extension AppModel {
             replaceDocument(opened, label: "Open Project", fileURL: url, saved: opened)
             savedFingerprint = Self.fingerprint(data)
             hasUnsavedChanges = false
+            noteProjectLocation()
             statusMessage = missing.isEmpty ? "Opened \(url.lastPathComponent). Previous work is available with Undo."
                 : "Opened \(url.lastPathComponent). \(missing.count) colour conversion file(s) are missing; import DJI's conversion again in the Colour inspector."
         } catch { statusMessage = "Could not open project: \(error.localizedDescription)" }

@@ -9,31 +9,14 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !model.toolsAvailable { missingToolsBanner }
+            if !model.toolsAvailable, model.module == .studio { missingToolsBanner }
 
-            // Media, picture and inspector side by side; the timeline across the bottom at
-            // its natural height, so any extra space goes to the picture.
-            VStack(spacing: 0) {
-                HSplitView {
-                    QueueSidebar()
-                        .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
-
-                    editorPane
-                        .frame(minWidth: 480)
-                        .disabled(model.isConverting)
-
-                    InspectorPane()
-                        .frame(minWidth: 280, idealWidth: 310, maxWidth: 380)
-                        .disabled(model.isConverting)
-                }
-                .frame(minHeight: 320)
-
-                if !model.isMovieMode, let item = model.selectedItem, item.info != nil, item.crop != nil,
-                   FileManager.default.fileExists(atPath: item.url.path) {
-                    Divider()
-                    TimelineView(playback: model.playback, item: item)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .disabled(model.isConverting)
+            HStack(spacing: 0) {
+                ModuleSidebar()
+                Divider()
+                switch model.module {
+                case .ideas: IdeasPage()
+                case .studio: studio
                 }
             }
 
@@ -42,60 +25,9 @@ struct ContentView: View {
         }
         .frame(minWidth: 1140, minHeight: 800)
         .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    model.promptForFiles()
-                } label: {
-                    Label("Add Videos", systemImage: "plus")
-                }
-                .help("Add video files (⌘O)")
-
-                Button { model.saveProject() } label: { Label("Save Project", systemImage: "square.and.arrow.down") }
-                    .help("Save editable project (⌘S)")
-                Text((model.projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled") + (model.hasUnsavedChanges ? " •" : ""))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Button { model.undoEdit() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                    .help(model.undoTitle + " (⌘Z)")
-                    .disabled(model.undoEntries.isEmpty || model.isConverting)
-                Button { model.redoEdit() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
-                    .help(model.redoTitle + " (⇧⌘Z)")
-                    .disabled(model.redoEntries.isEmpty || model.isConverting)
-                Picker("Workspace", selection: Binding(get: { model.isMovieMode }, set: { model.setMovieMode($0) })) {
-                    Text("Recording").tag(false)
-                    Text("Movie").tag(true)
-                }.pickerStyle(.segmented).frame(width: 175).disabled(model.isConverting)
-                Spacer()
-
-                AgentsToolbarButton()
-
-                if model.isConverting {
-                    Button(role: .destructive) {
-                        model.cancelConversion()
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                    }
-                    .help("Stop the export (⌘.)")
-                } else {
-                    Button { model.showingAutoEdit = true } label: {
-                        Label("Auto Edit…", systemImage: "wand.and.stars")
-                    }
-                    .labelStyle(.titleAndIcon)
-                    .disabled(model.isMovieMode || model.selectedItem?.info == nil)
-                    .help("Transcribe, cut pauses and stumbles, and set captions and loudness, the way you chose")
-                    Button { publishing = true } label: {
-                        Label("Publish…", systemImage: "play.rectangle")
-                    }
-                    .labelStyle(.titleAndIcon)
-                    .disabled(model.isMovieMode || model.selectedItem?.info == nil)
-                    .help("Title, description, tags, chapters and thumbnail for YouTube, with a preview, and Export for YouTube")
-                    Button { exporting = model.isMovieMode ? .movie : .selected } label: {
-                        Label("Export…", systemImage: "square.and.arrow.up")
-                    }
-                    .labelStyle(.titleAndIcon)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.items.isEmpty || !model.toolsAvailable)
-                    .help("Choose what to export, the format and where it goes")
-                }
+            switch model.module {
+            case .ideas: ideasToolbar
+            case .studio: studioToolbar
             }
         }
         .sheet(item: $exporting) { scope in ExportSheet(scope: scope).environmentObject(model) }
@@ -103,7 +35,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
         .sheet(isPresented: $model.showingAutoEdit) { AutoEditSheet().environmentObject(model) }
         .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
-            loadDroppedURLs(providers) { urls in model.addDropped(urls) }
+            loadDroppedURLs(providers) { urls in model.receiveDropped(urls) }
             return true
         }
         .overlay {
@@ -112,6 +44,117 @@ struct ContentView: View {
                     .strokeBorder(Color.accentColor, lineWidth: 3)
                     .padding(4)
                     .allowsHitTesting(false)
+            }
+        }
+    }
+
+    // MARK: Studio
+
+    /// Media, picture and inspector side by side; the timeline across the bottom at its
+    /// natural height, so any extra space goes to the picture.
+    private var studio: some View {
+        VStack(spacing: 0) {
+            HSplitView {
+                QueueSidebar()
+                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
+
+                editorPane
+                    .frame(minWidth: 480)
+                    .disabled(model.isConverting)
+
+                InspectorPane()
+                    .frame(minWidth: 280, idealWidth: 310, maxWidth: 380)
+                    .disabled(model.isConverting)
+            }
+            .frame(minHeight: 320)
+
+            if !model.isMovieMode, let item = model.selectedItem, item.info != nil, item.crop != nil,
+               FileManager.default.fileExists(atPath: item.url.path) {
+                Divider()
+                TimelineView(playback: model.playback, item: item)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .disabled(model.isConverting)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder private var ideasToolbar: some ToolbarContent {
+        ToolbarItemGroup {
+            Button { model.newIdea() } label: { Label("New Idea", systemImage: "plus") }
+                .help("New idea (⌥⌘N)")
+            Button { model.libraryUndo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                .help(model.libraryUndoTitle + " (⌘Z)")
+                .disabled(model.libraryUndoEntries.isEmpty)
+            Button { model.libraryRedo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
+                .help(model.libraryRedoTitle + " (⇧⌘Z)")
+                .disabled(model.libraryRedoEntries.isEmpty)
+            Spacer()
+            AgentsToolbarButton()
+        }
+    }
+
+    @ToolbarContentBuilder private var studioToolbar: some ToolbarContent {
+        ToolbarItemGroup {
+            Button {
+                model.promptForFiles()
+            } label: {
+                Label("Add Videos", systemImage: "plus")
+            }
+            .help("Add video files (⌘O)")
+
+            Button { model.saveProject() } label: { Label("Save Project", systemImage: "square.and.arrow.down") }
+                .help("Save editable project (⌘S)")
+            Text((model.projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled") + (model.hasUnsavedChanges ? " •" : ""))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if let idea = model.openProjectIdea {
+                Button { model.showIdea(idea.id) } label: {
+                    Label(idea.title, systemImage: "lightbulb").labelStyle(.titleAndIcon).lineLimit(1)
+                }
+                .controlSize(.small)
+                .frame(maxWidth: 220)
+                .help("This project was made from the idea \"\(idea.title)\". Open it on the Ideas page.")
+            }
+            Button { model.undoEdit() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                .help(model.undoTitle + " (⌘Z)")
+                .disabled(model.undoEntries.isEmpty || model.isConverting)
+            Button { model.redoEdit() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
+                .help(model.redoTitle + " (⇧⌘Z)")
+                .disabled(model.redoEntries.isEmpty || model.isConverting)
+            Picker("Workspace", selection: Binding(get: { model.isMovieMode }, set: { model.setMovieMode($0) })) {
+                Text("Recording").tag(false)
+                Text("Movie").tag(true)
+            }.pickerStyle(.segmented).frame(width: 175).disabled(model.isConverting)
+            Spacer()
+
+            AgentsToolbarButton()
+
+            if model.isConverting {
+                Button(role: .destructive) {
+                    model.cancelConversion()
+                } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                }
+                .help("Stop the export (⌘.)")
+            } else {
+                Button { model.showingAutoEdit = true } label: {
+                    Label("Auto Edit…", systemImage: "wand.and.stars")
+                }
+                .labelStyle(.titleAndIcon)
+                .disabled(model.isMovieMode || model.selectedItem?.info == nil)
+                .help("Transcribe, cut pauses and stumbles, and set captions and loudness, the way you chose")
+                Button { publishing = true } label: {
+                    Label("Publish…", systemImage: "play.rectangle")
+                }
+                .labelStyle(.titleAndIcon)
+                .disabled(model.isMovieMode || model.selectedItem?.info == nil)
+                .help("Title, description, tags, chapters and thumbnail for YouTube, with a preview, and Export for YouTube")
+                Button { exporting = model.isMovieMode ? .movie : .selected } label: {
+                    Label("Export…", systemImage: "square.and.arrow.up")
+                }
+                .labelStyle(.titleAndIcon)
+                .buttonStyle(.borderedProminent)
+                .disabled(model.items.isEmpty || !model.toolsAvailable)
+                .help("Choose what to export, the format and where it goes")
             }
         }
     }

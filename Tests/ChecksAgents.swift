@@ -270,7 +270,7 @@ import Foundation
         let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "node"
         let smoke = try await Shell.run("/usr/bin/env", ["YAMVIDEO_AGENT_BRIDGE_DIR=\(bridgeDir.path)", "YAMVIDEO_CTL=\(ctl)",
                                                           "YAMVIDEO_CLIENT=Claude", node, "\(adapter)/smoke.mjs"])
-        check(smoke.status == 0, "the MCP adapter lists tools, describes the app, reads, dry-runs, applies, conflicts, previews and undoes",
+        check(smoke.status == 0, "the MCP adapter lists tools, describes the app, reads, dry-runs, applies, conflicts, previews, undoes and adds an idea",
               smoke.stdoutText + smoke.stderrText)
         check(sharedEditor.recentActivity.contains { $0.origin == .agent("Claude") && $0.label == "Smoke test blur" },
               "an edit through MCP is credited to the client named in its config")

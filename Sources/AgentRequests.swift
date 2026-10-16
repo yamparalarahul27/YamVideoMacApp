@@ -66,6 +66,8 @@ struct AgentRequest: Codable {
     var short: UUID?
     /// reveal: one of the recording's screen layouts.
     var layout: UUID?
+    /// reveal: an idea in the Library; shows it on the Ideas page.
+    var idea: UUID?
     /// setLogo and removeLogo: the brand; setLogo: what the speaker says for it.
     var name: String?
     var words: [String]?
@@ -399,7 +401,12 @@ struct AgentState: Encodable {
         /// frame (the edit frame), preview (the 16:9 edit playing) or short (the selected Short, 9:16).
         var viewer: String
         var playhead: Double, movieMode: Bool, movieTime: Double
+        /// The part of the window showing: ideas or studio. `idea` is the idea selected on the Ideas page.
+        var module: String
+        var idea: UUID?
     }
+    /// The Library idea the open project was made from (method library has the rest).
+    struct Idea: Encodable { var id: UUID; var title: String; var topic: String? }
     struct Busy: Encodable {
         var exporting: Bool, interactionInProgress: Bool, agentsPaused: Bool, runningJobs: [UUID]
     }
@@ -417,6 +424,7 @@ struct AgentState: Encodable {
     var busy: Busy
     var history: History
     var selection: Selection
+    var idea: Idea?
     var settings: JSONValue
     var graphicsRenderer: GraphicsRenderer
     var autoEdit: AutoEdit
@@ -576,7 +584,8 @@ struct AgentSaveResult: Encodable {
 @MainActor
 extension AppModel {
     static let agentMethods = ["manual", "catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
-                               "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit", "logos", "setLogo", "removeLogo"]
+                               "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit", "logos", "setLogo", "removeLogo",
+                               "library", "libraryApply", "libraryUndo", "libraryRedo"]
 
     /// Answers one request line with one response line. Never throws: every failure is
     /// a structured error response.
@@ -610,6 +619,17 @@ extension AppModel {
         case "reveal": return agentResponse(agentReveal(request), instanceID)
         case "transcript": return agentResponse(agentTranscript(request), instanceID)
         case "logos": return agentResponse(Result<AgentLogos, EditError>.success(Self.agentLogos()), instanceID)
+        case "library": return agentResponse(Result<AgentLibrary, EditError>.success(agentLibrary()), instanceID)
+        case "libraryApply", "libraryUndo", "libraryRedo":
+            // Library commands carry fields project commands do not, so a retry is matched
+            // on the whole request, with its keys in a fixed order.
+            let canonical = (try? AgentProtocol.decoder.decode(JSONValue.self, from: data)).flatMap { try? AgentProtocol.encoder.encode($0) } ?? data
+            return await idempotent(request, instanceID: instanceID, payload: canonical) {
+                switch request.method {
+                case "libraryApply": return self.agentResponse(self.agentLibraryApply(request, data: data), instanceID)
+                default: return self.agentResponse(self.agentLibraryHistory(request, redo: request.method == "libraryRedo"), instanceID)
+                }
+            }
         case "apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo":
             return await idempotent(request, instanceID: instanceID) {
                 switch request.method {
@@ -649,14 +669,14 @@ extension AppModel {
     /// Edits are remembered by request ID for the whole session: a retry with the same
     /// payload gets the original answer — before any revision check — and is never
     /// applied twice; reusing an ID for something else is refused.
-    private func idempotent(_ request: AgentRequest, instanceID: UUID, _ body: () async -> Data) async -> Data {
+    private func idempotent(_ request: AgentRequest, instanceID: UUID, payload: Data? = nil, _ body: () async -> Data) async -> Data {
         func refuse(_ code: EditError.Code, _ message: String) -> Data {
             agentResponse(Result<AgentEmpty, EditError>.failure(EditError(code: code, message: message)), instanceID)
         }
         guard let id = request.requestID, !id.isEmpty, id.count <= 128 else {
             return refuse(.invalidRequest, "Edits need a requestID (up to 128 characters) so a retry is never applied twice.")
         }
-        let hash = Self.fingerprint((try? AgentProtocol.encoder.encode(request)) ?? Data())
+        let hash = Self.fingerprint(payload ?? (try? AgentProtocol.encoder.encode(request)) ?? Data())
         if let record = agentRequests[id] {
             return record.payloadHash == hash ? record.response
                 : refuse(.requestIDReused, "Request ID \(id) was already used for a different request in this session.")
@@ -812,7 +832,9 @@ extension AppModel {
                              sections: selectedItem.map { sectionSelection.ordered(in: $0.timeline).map(\.id) } ?? [],
                              zoom: selectedShotID, blurArea: selectedRegionID, effect: selectedEffectID, marker: selectedMarkerID, graphic: selectedGraphicID,
                              short: selectedShortID, viewer: viewer == .short ? "short" : viewer == .preview ? "preview" : "frame",
-                             playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime),
+                             playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime,
+                             module: module.rawValue, idea: selectedIdeaID),
+            idea: openProjectIdea.map { .init(id: $0.id, title: $0.title, topic: $0.topic) },
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             graphicsRenderer: graphicsRendererState,
             autoEdit: .init(options: document.autoEdit ?? AutoEditOptions(), saved: document.autoEdit != nil,
@@ -1450,6 +1472,7 @@ extension AppModel {
             savedFingerprint = try writeProject(project, to: destination)
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             scheduleAutosave()
+            noteProjectLocation()
             statusMessage = "\(agentOrigin(request).label) saved \(destination.lastPathComponent)."
             return .success(AgentSaveResult(path: destination.path, projectID: projectID, revision: revision, copy: false))
         } catch {
@@ -1461,6 +1484,16 @@ extension AppModel {
     /// no revision, no undo step.
     private func agentReveal(_ request: AgentRequest) -> Result<AgentState.Selection, EditError> {
         if let refusal = checkSession(request, required: false) { return .failure(refusal) }
+        if let idea = request.idea {
+            guard library.item(idea) != nil else { return .failure(.notFound("No idea \(idea) in the Library.")) }
+            showIdea(idea)
+            return .success(agentState().selection)
+        }
+        // Everything else is in Studio.
+        if request.clip != nil || request.section != nil || request.zoom != nil || request.effect != nil || request.marker != nil
+            || request.graphic != nil || request.short != nil || request.layout != nil || request.time != nil {
+            showModule(.studio)
+        }
         if request.timeSpace == "movie" {
             setMovieMode(true)
             if let time = request.time { seekMovie(to: time) }

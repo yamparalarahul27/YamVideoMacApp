@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentServer: LocalAgentServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { AppModel.shared.loadLibrary(); AppModel.shared.restoreModule() }
         startAgentBridge()
         // Keys the timeline answers to. Here rather than as menu shortcuts because a menu
         // shortcut would take ⌘A, ⌘← and ⌘→ from a text field being typed in; this
@@ -18,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             let handled = MainActor.assumeIsolated {
                 let model = AppModel.shared
-                guard model.selectedItem?.info != nil, !model.isConverting else { return false }
+                guard model.module == .studio, model.selectedItem?.info != nil, !model.isConverting else { return false }
                 if modifiers.subtracting(.shift).isEmpty {
                     switch event.keyCode {
                     case 49: model.togglePlayback(); return true
@@ -130,16 +131,21 @@ struct YamVideoApp: App {
         .defaultSize(width: 1360, height: 880)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Project") { model.newProject() }.keyboardShortcut("n").disabled(model.isConverting)
+                Button("New Project") { model.showModule(.studio); model.newProject() }.keyboardShortcut("n").disabled(model.isConverting)
+                Button("New Idea") { model.newIdea() }.keyboardShortcut("n", modifiers: [.command, .option])
                 Button("Open Project…") { model.promptForProject() }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.isConverting)
                 Button("Save Project") { model.saveProject() }.keyboardShortcut("s")
                 Button("Save Project As…") { model.saveProject(asCopy: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .undoRedo) {
-                Button(model.undoTitle) { model.undoEdit() }
-                    .keyboardShortcut("z").disabled(model.undoEntries.isEmpty || model.isConverting)
-                Button(model.redoTitle) { model.redoEdit() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(model.redoEntries.isEmpty || model.isConverting)
+                Button(model.menuUndoTitle) { model.undoEdit() }
+                    .keyboardShortcut("z").disabled(!model.canUndoInModule)
+                Button(model.menuRedoTitle) { model.redoEdit() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.canRedoInModule)
+            }
+            CommandMenu("Go") {
+                Button("Ideas") { model.showModule(.ideas) }.keyboardShortcut("1")
+                Button("Studio") { model.showModule(.studio) }.keyboardShortcut("2")
             }
             CommandMenu("Timeline") {
                 Group {
@@ -168,7 +174,7 @@ struct YamVideoApp: App {
                 Divider()
                 Button("Auto Edit…") { model.showingAutoEdit = true }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
-                }.disabled(model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
+                }.disabled(model.module != .studio || model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
             }
             CommandGroup(after: .newItem) {
                 Button("Add Videos…") { model.promptForFiles() }
