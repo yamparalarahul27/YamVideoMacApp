@@ -87,7 +87,8 @@ pictures, and each cut cuts the screen at the same moment.
    screen's time that belongs at the playhead in **Screen at playhead** (for example the
    moment of a click you name). Use **−1 fr** and **+1 fr** to make it exact.
 2. Choose the base **Layout**: **Speaker** (you fill the frame), **Screen** (the screen
-   fills the frame, you in a round bubble) or **Side by side** (you in a tall panel on the
+   fills the frame, you in a bubble: a **Circle** or a **Rounded square** with soft corners
+   you can set) or **Side by side** (you in a tall panel on the
    left, the screen on the right).
 3. Use **Add Layout** to give part of the video another layout. Layouts show on the
    Layout lane; drag them, or drag an edge. A change of layout eases over 0.4 s.

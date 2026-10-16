@@ -6472,6 +6472,68 @@ if let shot = zsAppShot {
     check(aimed.map { abs($0.x - expected.x) < 2 && abs($0.y - expected.y) < 2 } == true,
           "a click on the screen in the Preview aims the selected screen zoom there, through the zoom on screen", "\(String(describing: aimed)) \(expected)")
 }
+print("\nBubble shape")
+var bsTrack = ScreenTrack(url: URL(fileURLWithPath: "/tmp/screen.mov"), info: ssScreenInfo)
+let bsCircle = LayoutGeometry(track: bsTrack, crop: ssSpeakerInfo.fullFrame).speakerPlace(.screen)
+bsTrack.bubble.shape = .rounded
+let bsRounded = LayoutGeometry(track: bsTrack, crop: ssSpeakerInfo.fullFrame).speakerPlace(.screen)
+check(bsCircle.radius == bsCircle.rect.width / 2 && bsRounded.rect == bsCircle.rect && abs(bsRounded.radius - bsRounded.rect.width * 0.2) < 0.0001,
+      "a rounded square is the same square as the circle, with corners 20 % of its side", "\(bsCircle) \(bsRounded)")
+bsTrack.bubble.corners = 0.35
+check(abs(LayoutGeometry(track: bsTrack, crop: ssSpeakerInfo.fullFrame).speakerPlace(.screen).radius - bsRounded.rect.width * 0.35) < 0.0001,
+      "the corners follow the setting")
+bsTrack.bubble.corners = 0.2
+bsTrack.spans = [LayoutSpan(start: 0, end: 10, layout: .speaker)]
+let bsGeometry = LayoutGeometry(track: bsTrack, crop: ssSpeakerInfo.fullFrame)
+let bsHalfway = bsTrack.state(at: 10.2, geometry: bsGeometry, endScreen: nil).speaker
+check(bsHalfway.radius > 0 && bsHalfway.radius < bsRounded.radius && bsHalfway.rect.width > bsRounded.rect.width,
+      "from the full frame the speaker eases into the rounded square", "\(bsHalfway)")
+var bsSharp = bsTrack; bsSharp.bubble.corners = 0.9
+check(bsSharp.problem(duration: 20, speaker: ssSpeakerInfo)?.contains("corners") == true, "corners outside 0.05–0.45 are refused")
+let bsOld = try JSONDecoder().decode(SpeakerBubble.self, from: Data(#"{"corner": "topLeft", "size": 0.25}"#.utf8))
+check(bsOld.shape == .circle && bsOld.corners == SpeakerBubble.defaultCorners && bsOld.corner == .topLeft,
+      "a bubble saved before shapes reads as a circle")
+
+// Preview and export agree on the soft corners, and the corner of the square shows the speaker.
+var bsLive = ssLive; bsLive.bubble.shape = .rounded
+var bsItem = ssItem; bsItem.segments = nil; bsItem.screen = bsLive
+var bsCircleItem = bsItem; bsCircleItem.screen?.bubble.shape = .circle
+let bsExport = scratch.appendingPathComponent("bs-rounded.mp4")
+try await FFmpeg.export(input: ssSpeakerURL, output: bsExport, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: bsLive) { _ in }
+let bsNative = try await nativePicture(bsItem, frame: 30)
+let bsExported = try await ffmpegPicture(bsExport, graph: nil, frame: 30, width: 1280, height: 720)
+let bsNativeCircle = try await nativePicture(bsCircleItem, frame: 30)
+check(meanDifference(bsNative, bsExported, xs: 4..<1276) < 3, "the export draws the rounded square as the preview does",
+      String(format: "%.2f", meanDifference(bsNative, bsExported, xs: 4..<1276)))
+let bsPlace = LayoutGeometry(track: bsLive, crop: ssSpeakerMedia.fullFrame).speakerPlace(.screen).rect
+func bsCorner(_ a: Picture, _ b: Picture) -> Double {
+    var total = 0.0, count = 0
+    for y in Int(bsPlace.minY) + 16..<Int(bsPlace.minY) + 24 { for x in Int(bsPlace.minX) + 16..<Int(bsPlace.minX) + 24 {
+        for channel in 0..<3 { total += abs(a.at(x, y, channel) - b.at(x, y, channel)) }; count += 3 } }
+    return total / Double(count)
+}
+check(bsCorner(bsNative, bsExported) < 6 && bsCorner(bsNative, bsNativeCircle) > 10,
+      "near a corner, inside the square but outside the circle, the speaker shows in both renderers",
+      String(format: "export %.2f, circle %.2f", bsCorner(bsNative, bsExported), bsCorner(bsNative, bsNativeCircle)))
+
+let bsAgent = AppModel(recoveryURL: nil)
+var bsAgentItem = ssItem; bsAgentItem.segments = nil; bsAgentItem.screen = ssLive
+bsAgent.restore(VideoProject(clips: [ProjectClip(bsAgentItem)], settings: ExportSettings(), selection: bsAgentItem.id))
+var bsRequest = address(bsAgent)
+bsRequest["method"] = "apply"; bsRequest["requestID"] = "bs-1"; bsRequest["client"] = "Claude"
+bsRequest["commands"] = [["type": "updateScreen", "clipID": bsAgentItem.id.uuidString, "screen": ["bubble": ["shape": "rounded", "corners": 0.25]]]]
+let bsReply = await agentCall(bsAgent, bsRequest)
+let bsState = ((agentResult(await agentCall(bsAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["screen"] as? [String: Any])?["bubble"] as? [String: Any]
+check(bsReply["ok"] as? Bool == true && bsAgent.items[0].screen?.bubble.shape == .rounded && bsAgent.items[0].screen?.bubble.corners == 0.25
+          && bsState?["shape"] as? String == "rounded" && bsState?["corners"] as? Double == 0.25,
+      "an agent sets the bubble's shape and corners, and state shows them", "\(bsReply) \(bsState ?? [:])")
+bsRequest = address(bsAgent)
+bsRequest["method"] = "apply"; bsRequest["requestID"] = "bs-2"; bsRequest["client"] = "Claude"
+bsRequest["commands"] = [["type": "updateScreen", "clipID": bsAgentItem.id.uuidString, "screen": ["bubble": ["shape": "star"]]]]
+let bsStar = await agentCall(bsAgent, bsRequest)
+check(agentError(bsStar) == "invalid_command" && ((bsStar["error"] as? [String: Any])?["message"] as? String ?? "").contains("circle, rounded"),
+      "an unknown shape is refused with the shapes allowed")
+
 print("\n\(checks - failures)/\(checks) checks passed")
 try? FileManager.default.removeItem(at: scratch)
 exit(failures == 0 ? 0 : 1)
