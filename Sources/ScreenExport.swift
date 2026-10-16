@@ -139,7 +139,9 @@ extension FFmpeg {
             : "scale=in_color_matrix=\(tags.colorspace == "unknown" ? "bt709" : tags.colorspace):in_range=\(tags.fullRange ? "pc" : "tv")"
                 + ":out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,"
         let shown = runs.indices.filter { runs[$0].state.screen != nil }
-        var parts = ["[lyin]setsar=1,split=\(runs.count)" + runs.indices.map { "[\(name)s\($0)]" }.joined()]
+        // The speaker is converted once, here, and the runs work in 10-bit 4:4:4 until the
+        // concat. A conversion in each run had a scaler of its own (ffmpeg inserts one).
+        var parts = ["[lyin]setsar=1,\(convert)format=yuv444p10le,split=\(runs.count)" + runs.indices.map { "[\(name)s\($0)]" }.joined()]
         var screenChain = rate < sourceRate - 0.0001 ? "fps=\(rateExpression)," : ""
         // The zooms, on the edited timeline, from the stream's own detail down to the place
         // the Screen layout gives it: the sums of a recording's own zooms.
@@ -164,13 +166,16 @@ extension FFmpeg {
         }
         let lanczos = "flags=lanczos+accurate_rnd+full_chroma_int"
         var firstSingle: Int?
+        // Every scaler of a run is alive until ffmpeg ends, so each has one thread (see
+        // FFmpeg.boundedScalerThreads): a video with many changes has thousands of them.
+        let before = parts.count
         for (index, run) in runs.enumerated() {
             let trim = "trim=start_frame=\(run.first)" + (run.end.map { ":end_frame=\($0)" } ?? "") + ",setpts=PTS-STARTPTS"
             let frames = (run.end ?? (total + 2)) - run.first
             if run.end.map({ $0 - run.first == 1 }) == true { firstSingle = firstSingle ?? run.first }
             let output = "[\(name)o\(index)]"
             guard let place = run.state.screen else {
-                parts.append("[\(name)s\(index)]\(trim),\(convert)format=yuv420p10le\(output)")
+                parts.append("[\(name)s\(index)]\(trim)\(output)")
                 continue
             }
             let p = "\(name)\(index)_"
@@ -186,7 +191,7 @@ extension FFmpeg {
             parts += masked(screenChain, place: place, frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)p]", name: "\(p)m")
             parts.append("[\(p)f][\(p)p]overlay=x=\(Int(place.rect.minX)):y=\(Int(place.rect.minY)):format=yuv444p10:eof_action=pass[\(p)g]")
             let window = run.state.window, speaker = run.state.speaker
-            var speakerChain = "[\(name)s\(index)]\(trim),\(convert)format=yuv444p10le"
+            var speakerChain = "[\(name)s\(index)]\(trim)"
             if window != CGRect(origin: .zero, size: geometry.frame) {
                 speakerChain += ",crop=\(Int(window.width)):\(Int(window.height)):\(Int(window.minX)):\(Int(window.minY))"
             }
@@ -195,12 +200,13 @@ extension FFmpeg {
             }
             speakerChain += ",setsar=1"
             parts += masked(speakerChain, place: speaker, frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)q]", name: "\(p)k")
-            parts.append("[\(p)g][\(p)q]overlay=x=\(Int(speaker.rect.minX)):y=\(Int(speaker.rect.minY)):format=yuv444p10:shortest=1,format=yuv420p10le\(output)")
+            parts.append("[\(p)g][\(p)q]overlay=x=\(Int(speaker.rect.minX)):y=\(Int(speaker.rect.minY)):format=yuv444p10:shortest=1\(output)")
         }
+        for index in before..<parts.count { parts[index] = FFmpeg.oneThreadScalers(parts[index]) }
         // concat times a run by its frames' mean spacing, so a one-frame run adds no time at
         // all; from the first one on, each frame is timed by its number on the frame grid.
         let retime = firstSingle.map { ",setpts='if(lt(N,\($0)),PTS,N/(\(rateExpression))/TB)'" } ?? ""
-        parts.append(runs.indices.map { "[\(name)o\($0)]" }.joined() + "concat=n=\(runs.count):v=1:a=0\(retime)[lyout]")
+        parts.append(runs.indices.map { "[\(name)o\($0)]" }.joined() + "concat=n=\(runs.count):v=1:a=0\(retime),format=yuv420p10le[lyout]")
         return EffectStage(parts: parts)
     }
 

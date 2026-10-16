@@ -857,12 +857,26 @@ enum FFmpeg {
             let endFrames = Int((elapsed * rate).rounded())
             let frames = max(1, endFrames - previousFrames)
             previousFrames += frames
-            let outputDuration = hasSpeedEdits ? Double(frames) / rate : segment.duration
-            let retime = !hasSpeedEdits ? "setpts=PTS-STARTPTS" :
-                "setpts=(PTS-STARTPTS)/\(num(segment.speed)),fps=\(fpsExpression),tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames),setpts=PTS-STARTPTS"
+            let outputDuration = Double(frames) / rate
+            guard hasSpeedEdits else {
+                // Each section is exactly its frames long, in picture and in sound: from its
+                // first frame, `frames` frames, and the audio from that frame for as long.
+                // Cut by time, the picture was rounded to whole frames and the sound was
+                // not, so each cut left a gap of part of a frame in the picture; a layout
+                // stage times frames by their number, and 152 cuts put the picture 0.3 s
+                // ahead of the sound.
+                let from = (segment.start * rate - 0.001).rounded(.up) / rate
+                parts.append("[sv\(i)]trim=start=\(num(max(0, from - 0.25 / rate))),setpts=PTS-STARTPTS,"
+                             + "tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames)[tv\(i)]")
+                if audio {
+                    parts.append("[sa\(i)]atrim=start=\(String(format: "%.6f", from)):duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS[ta\(i)]")
+                }
+                continue
+            }
+            let retime = "setpts=(PTS-STARTPTS)/\(num(segment.speed)),fps=\(fpsExpression),tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames),setpts=PTS-STARTPTS"
             parts.append("[sv\(i)]trim=start=\(num(segment.start)):end=\(num(segment.end)),\(retime)[tv\(i)]")
             if audio {
-                let tempo = !hasSpeedEdits ? "" : "," + tempoFilters(segment.speed) + ",apad,atrim=duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS"
+                let tempo = "," + tempoFilters(segment.speed) + ",apad,atrim=duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS"
                 parts.append("[sa\(i)]atrim=start=\(num(segment.start)):end=\(num(segment.end)),asetpts=PTS-STARTPTS\(tempo)[ta\(i)]")
             }
         }
@@ -1222,6 +1236,7 @@ enum FFmpeg {
     /// `-/filter_complex` (ffmpeg 7 and later). The file is named by its contents, so the
     /// command is the same each time for the same graph.
     static func spilledGraph(_ args: [String]) throws -> [String] {
+        let args = boundedScalerThreads(args)
         guard let index = args.firstIndex(of: "-filter_complex"), index + 1 < args.count,
               args[index + 1].utf8.count > inlineGraphLimit else { return args }
         let data = Data(args[index + 1].utf8)
@@ -1235,6 +1250,97 @@ enum FFmpeg {
         spilled[index] = "-/filter_complex"
         spilled[index + 1] = file.path
         return spilled
+    }
+
+    /// `args` with a bound on the threads of its `-filter_complex` graph's scalers. A
+    /// scaler starts about one thread per core and keeps them until ffmpeg ends. A graph
+    /// with one chain per frame of a move has hundreds of scalers, and once the process
+    /// reached macOS's limit of threads, new scalers could not start and ffmpeg dropped
+    /// their frames without an error. So in a graph with more than `many` scalers, all but
+    /// the first `keep` (the main chains, which see every frame) get one thread. A scaler
+    /// that names its threads keeps them.
+    static func boundedScalerThreads(_ args: [String], many: Int = 48, keep: Int = 16) -> [String] {
+        guard let index = args.firstIndex(of: "-filter_complex"), index + 1 < args.count else { return args }
+        var open = 0
+        _ = rewritingScalers(args[index + 1]) { filter in
+            if !filter.contains("threads=") { open += 1 }
+            return filter
+        }
+        guard open > many else { return args }
+        var bounded = args
+        bounded[index + 1] = oneThreadScalers(args[index + 1], keep: keep)
+        return bounded
+    }
+
+    /// `graph` with `threads=1` on each `scale` filter that names no threads, after the
+    /// first `keep` of them.
+    static func oneThreadScalers(_ graph: String, keep: Int = 0) -> String {
+        var seen = 0
+        return rewritingScalers(graph) { filter in
+            guard !filter.contains("threads=") else { return filter }
+            seen += 1
+            guard seen > keep else { return filter }
+            return filter + (filter.hasPrefix("scale=") ? ":threads=1" : "=threads=1")
+        }
+    }
+
+    /// `graph` with each `scale` filter (its name and arguments) replaced by `transform`'s
+    /// answer. Quoted text is skipped, so a comma inside quotes does not end a filter.
+    static func rewritingScalers(_ graph: String, _ transform: (String) -> String) -> String {
+        let characters = Array(graph)
+        var out = ""
+        out.reserveCapacity(characters.count + characters.count / 8)
+        var index = 0, quoted = false, atFilterStart = true
+        while index < characters.count {
+            let character = characters[index]
+            if !quoted, atFilterStart, character == "s", characters[index...].starts(with: Array("scale")) {
+                let after = index + 5
+                let next: Character? = after < characters.count ? characters[after] : nil
+                if next == nil || next == "=" || next == "," || next == ";" || next == "[" {
+                    // The filter's arguments end at the first unquoted , ; or [.
+                    var end = after, inQuote = false
+                    while end < characters.count {
+                        let c = characters[end]
+                        if c == "'" { inQuote.toggle() }
+                        if !inQuote, c == "," || c == ";" || c == "[" { break }
+                        end += 1
+                    }
+                    out += transform(String(characters[index..<end]))
+                    index = end
+                    atFilterStart = false
+                    continue
+                }
+            }
+            if character == "'" { quoted.toggle() }
+            out.append(character)
+            if !quoted { atFilterStart = character == "," || character == ";" || character == "]" }
+            index += 1
+        }
+        return out
+    }
+
+    /// Seconds of video in `url` (its first video stream), or nil when ffprobe cannot say.
+    static func videoDuration(_ url: URL) async -> Double? {
+        guard let ffprobe = ffprobePath,
+              let result = try? await Shell.run(ffprobe, ["-v", "error", "-select_streams", "v:0", "-show_entries",
+                                                          "stream=duration:format=duration", "-of", "default=noprint_wrappers=1", url.path]),
+              result.status == 0 else { return nil }
+        let values = result.stdoutText.split(separator: "\n").compactMap { line -> Double? in
+            guard let value = line.split(separator: "=").last else { return nil }
+            return Double(value)
+        }
+        // The stream's own duration comes first; a format without one has only the file's.
+        return values.first
+    }
+
+    /// Why a finished export is wrong, or nil: its video must last as long as the edit.
+    /// ffmpeg can end with success after it dropped frames, so the file is checked.
+    static func lengthProblem(video seconds: Double?, expected: Double) -> String? {
+        guard let seconds, expected > 1 else { return nil }
+        let missing = expected - seconds
+        guard missing > max(0.5, expected * 0.01) else { return nil }
+        return String(format: "The export stopped early: its video is %@ of %@. Export again; if it stops again, tell the developer.",
+                      PublishInfo.timestamp(seconds), PublishInfo.timestamp(expected))
     }
 
     /// Output size after applying the long-side limit. Nil when no rescale is needed.
@@ -1399,6 +1505,11 @@ enum FFmpeg {
                                            duration: progressDuration,
                                            from: bounds[index], to: bounds[index + 1],
                                            onProgress: onProgress)
+            if isEncode, settings.format != .gif, settings.format != .webp,
+               let problem = lengthProblem(video: await videoDuration(output), expected: progressDuration) {
+                try? FileManager.default.removeItem(at: output)
+                throw FFmpegError(message: problem)
+            }
             if measuring, index == 0 {
                 measurement = parseLoudness(result.stderrText)
             }

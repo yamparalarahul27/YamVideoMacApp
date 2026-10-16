@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # Builds a small CLI from the app's own logic files and runs the end-to-end checks.
+#   ./test.sh                  every feature
+#   ./test.sh screen shorts    only those features (and the features they start from)
+#   ./test.sh --list           the feature names
+# Each feature's checks are in Tests/Checks<Feature>.swift; Tests/Base.swift has the
+# shared values and clips, Tests/Support.swift the shared helpers.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -59,7 +64,7 @@ xcrun swiftc \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
 	"$ROOT/Sources/CropEditor.swift" \
-	"$ROOT/Tests/main.swift"
+	"$ROOT"/Tests/*.swift
 
 # The CLI too, so the checks can drive a real separate process over the socket.
 xcrun swiftc \
@@ -68,4 +73,4 @@ xcrun swiftc \
 	-o "$ROOT/build/yamvideoctl" \
 	"$ROOT/Sources/AgentProtocol.swift" "$ROOT/Tools/YamVideoCLI/main.swift"
 
-YAMVIDEO_ROOT="$ROOT" YAMVIDEO_CTL="$ROOT/build/yamvideoctl" "$BIN"
+YAMVIDEO_ROOT="$ROOT" YAMVIDEO_CTL="$ROOT/build/yamvideoctl" "$BIN" "$@"

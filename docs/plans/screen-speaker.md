@@ -181,6 +181,21 @@ where the screen file has footage.
   A video with many dozens of changes could pass macOS's argument size limit; then the
   graph goes to a file (`-/filter_complex`).
 
+- **Fixed on 2026-10-16 (the YamDrive design system video, 152 cuts and 6 layouts).**
+  1. *The video stopped at 2:47 and the audio ran on, and the export said it succeeded.*
+     Every scaler (and every conversion ffmpeg inserts) starts about one thread per core
+     and keeps it until ffmpeg ends. The layout stage had about 600 scalers and 250
+     inserted conversions; the process reached macOS's limit of 6144 threads, new scalers
+     failed with EAGAIN, and ffmpeg dropped their frames without an error. Now the runs
+     work in one format (the speaker is converted once before them and once after), each
+     run's scaler has one thread, a graph with more than 48 scalers keeps threads only for
+     its first 16, and every export checks that its video lasts as long as the edit.
+  2. *The picture drifted ahead of the sound, 0.3 s by the end.* A section cut by time
+     had a picture rounded to whole frames and a sound that was not, so each cut left a gap
+     in the picture's timestamps, and the layout stage (which times frames by their number)
+     closed them. Now each section is exactly its frames long in picture and sound, from
+     its first frame; a cut point moves by less than a frame.
+
 ## 12. Zooms on the screen
 
 The screen's browser text is small at 1080p, so the screen has push-ins of its own.
