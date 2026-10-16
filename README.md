@@ -53,7 +53,11 @@ To keep it around, drag `build/YamVideo.app` to `/Applications` — or:
 cp -R build/YamVideo.app /Applications/
 ```
 
-Run the checks with `./test.sh` (roughly 285 assertions). Tests include real encodes and
+Run the checks with `./test.sh` (about 1400 assertions, about 5 minutes: 1 to compile, 4
+to run). To run only some features, name them: `./test.sh screen shorts` runs those and
+any feature they start from; `./test.sh --list` names the features (core, editing,
+agents, playback, colour, effects, graphics, publish, thumbnail, endscreen, autoedit,
+shorts, screen). One feature takes seconds to about a minute after the compile. Tests include real encodes and
 frame-by-frame verification that blurs actually remove detail, zooms land where they
 should, burned-in captions land in the band they were aimed at, HDR clips come back
 tagged Rec.709, and normalised audio lands on target — plus video and audio section
@@ -443,7 +447,9 @@ Sources/
   ZoomSuggestions.swift local motion analysis and suggestion review
   AudioAnalysis.swift audio waveform, silence detection and reviewable cuts
   Shell.swift       process runner with streamed output
-Tests/main.swift    end-to-end checks (./test.sh)
+Tests/              end-to-end checks (./test.sh [feature ...]): main.swift runs the features,
+                    Checks<Feature>.swift has each feature's checks, Base.swift the shared
+                    values and clips, Support.swift the shared helpers
 Tools/makeicon.swift  draws the app icon at build time
 Tools/YamVideoCLI/    yamvideoctl, its guide and the two-client demo
 Tools/AgentBridge/    MCP server for Claude Code and Codex, with setup and a smoke test
