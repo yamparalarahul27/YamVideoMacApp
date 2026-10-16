@@ -24,7 +24,8 @@ struct EditReceipt: Equatable {
 /// One entry in the change feed agents poll. Job progress shares the feed, which is why
 /// its sequence is separate from the document revision.
 struct EditEvent: Equatable, Codable {
-    enum Kind: String, Codable { case edit, undo, redo, document, media, session, job }
+    /// `library` is a change to the Library (ideas); its revision is the Library's own.
+    enum Kind: String, Codable { case edit, undo, redo, document, media, session, job, library }
     var sequence: Int
     var revision: Int
     var kind: Kind
@@ -197,14 +198,14 @@ extension AppModel {
     }
 
     func appendEvent(_ kind: EditEvent.Kind, origin: EditOrigin, label: String,
-                     transaction: UUID? = nil, clips: [UUID] = []) {
-        editSession.events.append(EditEvent(sequence: editSession.nextSequence, revision: revision, kind: kind,
+                     transaction: UUID? = nil, clips: [UUID] = [], revision eventRevision: Int? = nil) {
+        editSession.events.append(EditEvent(sequence: editSession.nextSequence, revision: eventRevision ?? revision, kind: kind,
                                             origin: origin, label: label, transactionID: transaction, clips: clips))
         editSession.nextSequence += 1
         if editSession.events.count > EditSessionState.eventLimit {
             editSession.events.removeFirst(editSession.events.count - EditSessionState.eventLimit)
         }
-        if [.edit, .undo, .redo, .document, .job].contains(kind), let event = editSession.events.last {
+        if [.edit, .undo, .redo, .document, .job, .library].contains(kind), let event = editSession.events.last {
             recentActivity.insert(event, at: 0)
             if recentActivity.count > 40 { recentActivity.removeLast(recentActivity.count - 40) }
         }

@@ -37,6 +37,8 @@ struct AgentCatalog: Encodable {
     var conventions: [String]
     var workflow: [String]
     var commands: [Command]
+    /// Commands for `libraryApply`: the owner's ideas, apart from any project.
+    var libraryCommands: [Command]
     var methods: [Method]
 }
 
@@ -326,6 +328,38 @@ extension AgentCatalog {
             [clip, field("path", "string", "The moved file; same size and length.")],
             #"{"type": "relinkMedia", "clipID": "CLIP-ID", "path": "~/Movies/moved.mov"}"#)
 
+        // The Library: ideas, apart from any project (method libraryApply).
+        var libraryCommands: [Command] = []
+        func library(_ type: String, _ summary: String, _ fields: [Field], _ json: String) {
+            libraryCommands.append(Command(type: type, group: "ideas", summary: summary, fields: fields,
+                                           example: example(json.replacingOccurrences(of: "IDEA-ID", with: "00000000-0000-4000-8000-000000000001"))))
+        }
+        let idea = field("ideaID", "uuid", "An idea's id from library.ideas[].id.")
+        library("addIdea", "Add an idea at the top of the Ideas list. Use the owner's own words; ask when unsure. Its id is in createdIDs, or choose it with ideaID to refer to it in the same request.",
+                [field("title", "string", "One line, up to \(ContentItem.titleLimit) characters."),
+                 field("ideaID", "uuid", "Your choice of id for the new idea.", required: false),
+                 field("notes", "string", "Free text, up to \(ContentItem.notesLimit) characters: the hook, the points, why it matters.", required: false, default: .string("")),
+                 field("topic", "string", "What it is about, up to \(ContentItem.topicLimit) characters. Reuse one of library.topics where it fits; a topic differing only in case takes the existing spelling.", required: false),
+                 field("links", "string[]", "Web links (http or https; a bare address gets https://), up to \(ContentItem.linkCount).", required: false),
+                 field("paths", "string[]", "Local image files (PNG, JPEG, HEIC, GIF, WebP, TIFF, BMP; 25 MB each) to copy into the Library.", required: false)],
+                #"{"type": "addIdea", "title": "How I edit with Claude", "topic": "AI workflow", "notes": "Hook: one recording, Claude cuts it while I watch.", "links": ["https://example.com/reference"]}"#)
+        library("updateIdea", "Change an idea's title, notes, topic or links. Only the fields sent change; links replaces the whole list.",
+                [idea, field("title", "string", "One line.", required: false), field("notes", "string", "Replaces the notes.", required: false),
+                 field("topic", "string", "\"\" clears it.", required: false), field("links", "string[]", "The whole new list.", required: false)],
+                #"{"type": "updateIdea", "ideaID": "IDEA-ID", "topic": "AI workflow"}"#)
+        library("removeIdea", "Delete an idea. Ask the owner first. Its linked project file is untouched; undo brings the idea back.", [idea],
+                #"{"type": "removeIdea", "ideaID": "IDEA-ID"}"#)
+        library("addIdeaImages", "Copy images into the Library and add them to an idea, up to \(ContentItem.imageCount) per idea.",
+                [idea, field("paths", "string[]", "Local image files.")],
+                #"{"type": "addIdeaImages", "ideaID": "IDEA-ID", "paths": ["~/Desktop/reference.png"]}"#)
+        library("removeIdeaImage", "Take an image off an idea.", [idea, field("image", "string", "Its name from library.ideas[].images[].name.")],
+                #"{"type": "removeIdeaImage", "ideaID": "IDEA-ID", "image": "00000000-0000-4000-8000-000000000002.png"}"#)
+        library("linkProject", "Link a saved project to an idea, which moves it to In production. A project belongs to one idea at most.",
+                [idea, field("path", "string", "A .yamvideo file. Left out: the project open in Studio, which must be saved.", required: false)],
+                #"{"type": "linkProject", "ideaID": "IDEA-ID", "path": "~/Movies/How I edit with Claude.yamvideo"}"#)
+        library("unlinkProject", "Make it only an idea again. The project file is untouched.", [idea],
+                #"{"type": "unlinkProject", "ideaID": "IDEA-ID"}"#)
+
         let session = [field("sessionID", "uuid", "From sessions or state.", required: false),
                        field("projectID", "uuid", "From sessions or state.", required: false)]
         let methods = [
@@ -387,7 +421,19 @@ extension AgentCatalog {
                 field("marker", "uuid", "A marker.", required: false), field("graphic", "uuid", "A graphic.", required: false),
                 field("short", "uuid", "A Short: selects it and shows it in the Short viewer; time is then seconds into it.", required: false),
                 field("layout", "uuid", "A screen layout: selects it and moves the playhead to it.", required: false),
+                field("idea", "uuid", "An idea: shows it on the Ideas page.", required: false),
                 field("time", "number", "A time.", required: false, unit: editedSeconds), timeSpace]),
+            Method(method: "library", summary: "The Library: the owner's ideas (title, notes, topic, links, images with their paths to look at, stage, the linked project and whether it is open), the topics in use, the Library's revision and its top undo and redo steps. The Library spans every project; state.idea says which idea the open project was made from.", fields: []),
+            Method(method: "libraryApply", summary: "1–100 Library commands (libraryCommands) as one undo step in the Library's own history, all or nothing.", fields: [
+                field("expectedRevision", "integer", "The Library revision you read (library.revision), not the project's."),
+                field("commands", "array", "The Library commands, in order."),
+                field("label", "string", "What the Undo menu on the Ideas page should call the step, at most 80 characters.", required: false),
+                field("dryRun", "boolean", "Check everything and report what would happen, changing and copying nothing.", required: false, default: .bool(false)),
+                field("requestID", "string", "Retrying the same id returns the first answer instead of applying twice.", required: false)]),
+            Method(method: "libraryUndo", summary: "Undo a Library step you made, by its transactionID; refused if another Library change is now on top.", fields: [
+                field("transactionID", "uuid", "From libraryApply's result."), field("expectedRevision", "integer", "The Library revision you read.")]),
+            Method(method: "libraryRedo", summary: "Redo it.", fields: [
+                field("transactionID", "uuid", "From libraryUndo's result."), field("expectedRevision", "integer", "The Library revision you read.")]),
         ]
 
         return AgentCatalog(
@@ -399,6 +445,8 @@ extension AgentCatalog {
                 "Commands in one apply all see the state you read, not each other's results. To refer to something you add in the same request, choose its id yourself (areaID, zoomID, effectID, markerID).",
                 "Effects, zooms, markers and screen layouts follow the footage they are on: cutting that footage removes them (apply's result lists removedZooms, removedEffects, removedMarkers and removedLayouts; undo restores them).",
                 "The owner edits too. Every apply names the revision you read; revision_conflict means read state again and re-plan, not retry blindly. agents_paused means the owner has paused agents.",
+                "The Library (ideas) is separate from the open project: it has its own revision (library.revision), its own commands (libraryCommands, sent with libraryApply) and its own undo history. Events of kind library carry the Library's revision.",
+                "YamVideo never posts to or reads from YouTube, Instagram, X or LinkedIn, and agents must not either: the owner publishes by hand.",
             ],
             workflow: [
                 "Read the manual (method manual) once per session: it has the rules and a recipe for each common job.",
@@ -410,8 +458,9 @@ extension AgentCatalog {
                 "For a YouTube Short from a long recording: addShort on its best minute or two (window: \"speaker\"), give it its own title, check it with preview and short at a few times, then export with short and youtube.",
                 "For a walkthrough with a separate screen recording: setScreen on the speaker's recording with the offset that syncs them (check with preview composed at a moment both show, such as a click), cut the speaker as usual, then replaceLayouts from the transcript (speaker for the intro and the outro, split while the speaker explains, the screen layout while the screen shows the point).",
                 "Undo your own step by transactionID if it is not right; reveal to show the owner what you did.",
+                "For ideas: read library, add or sharpen ideas with libraryApply in the owner's words, reuse library.topics, and link a project to its idea with linkProject. reveal with idea shows one to the owner.",
             ],
-            commands: commands, methods: methods)
+            commands: commands, libraryCommands: libraryCommands, methods: methods)
     }()
 
     /// Kept here rather than read from `AppModel` so the catalog needs no instance.

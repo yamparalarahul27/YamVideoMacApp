@@ -66,6 +66,24 @@ project round trips, autosave recovery, and export failure/cancellation cleanup.
 checks cover mixed dimensions, frame rates, rotated footage, silent recordings, GIF
 palettes, preview/export parity, and preserving existing exports on cancellation.
 
+## Ideas
+
+The sidebar on the left switches between **Ideas** and **Studio** (⌘1, ⌘2). Studio is
+the editor. Ideas keeps what you plan to make, apart from any project: each idea has a
+title, notes, a topic, links and images (dropped, pasted or chosen; they are copied in).
+The list groups ideas by stage, *Idea* or *In production*, and filters them by topic.
+
+**Start a Project from This Idea…** saves a new project named after the idea, links it,
+and opens Studio to add the recordings. **Link the Open Project** links one you already
+have. Studio's toolbar then shows the idea, and a click goes back to it; the link follows
+the project file when you move it. Ideas have their own Undo (⌘Z on the Ideas page).
+
+Everything stays on this Mac, in `~/Library/Application Support/YamVideo/Library`
+(`YAMVIDEO_LIBRARY_PATH` moves it, for a test instance). YamVideo never posts to or reads
+from YouTube, Instagram, X or LinkedIn: you publish by hand. Agents read and change ideas
+with `yamvideoctl library` (the `yamvideo_*_library` MCP tools). See the
+[distribution plan](docs/plans/distribution.md).
+
 ## Building a movie
 
 Use the **Movie** workspace in the toolbar after importing recordings. Include or exclude
@@ -401,7 +419,10 @@ selects something to show it to you.
 Sources/
   App.swift         @main, menu commands, Finder open-file handling
   AppModel.swift    queue, selection, preview, conversion driver
-  ContentView.swift window layout: media list, picture and inspector over a full-width timeline
+  ContentView.swift window layout: the module sidebar; in Studio, media list, picture and inspector over a full-width timeline
+  Library.swift     the Library: ideas, their rules, stages and links to projects, the Library commands and reducer
+  LibraryEditing.swift / IdeasView.swift loading and saving the Library, its undo, the owner's actions, the sidebar and the Ideas page
+  LibraryAgents.swift the Library for agents: library, libraryApply, libraryUndo and libraryRedo
   InspectorView.swift selection-following inspector: section, zoom, blur area, effect, marker, recording
   ExportSheet.swift scope, format, quality, audio and destination for one Export button
   AgentActivityView.swift Local agents status, pause switch, activity and setup commands
@@ -484,4 +505,4 @@ Graphics now show and are edited in the app (G1 part 1) and are drawn into expor
 The [distribution plan](docs/plans/distribution.md) takes the app past the export: a
 local Library of ideas, post kits for YouTube, Instagram, X and LinkedIn, a calendar with
 reminders, and results at day 1, 7 and 30, all on this Mac with no platform APIs. The
-owner publishes by hand. No phase is started yet.
+owner publishes by hand. Phase 1 (the Library, the sidebar and Ideas) is implemented.

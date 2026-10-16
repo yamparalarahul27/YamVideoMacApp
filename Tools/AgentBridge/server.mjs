@@ -272,12 +272,49 @@ for (const [name, method, verb] of [["yamvideo_undo", "undo", "Undo"], ["yamvide
   }, async (args) => result(await request(method, args)));
 }
 
+server.registerTool("yamvideo_get_library", {
+  title: "Read the owner's ideas",
+  description: "The Library, apart from any project: every idea with its title, notes, topic, links, images (with paths you can look at), stage (idea or inProduction) and linked project; the topics in use; the Library's own revision and top undo/redo steps.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async () => result(await request("library")));
+
+server.registerTool("yamvideo_apply_library", {
+  title: "Change the owner's ideas",
+  description: [
+    "Apply 1–100 Library commands as one undo step on the Ideas page, against the Library revision you read (not the project's). Use the owner's own words, reuse existing topics, and ask before deleting. YamVideo never posts to any platform, and neither should you.",
+    "addIdea {title, ideaID?, notes?, topic?, links?, paths? (images to copy in)} · updateIdea {ideaID, title?, notes?, topic? (\"\" clears), links? (the whole list)} · removeIdea {ideaID}",
+    "addIdeaImages {ideaID, paths} · removeIdeaImage {ideaID, image (a name from images[].name)} · linkProject {ideaID, path? (a .yamvideo; left out: the saved project open in Studio)} · unlinkProject {ideaID}",
+  ].join("\n"),
+  inputSchema: {
+    expectedRevision: z.number().int().nonnegative().describe("library.revision as you read it. If the Library changed since, the request is refused with revision_conflict: read it again."),
+    commands: z.array(z.object({ type: z.string() }).passthrough()).min(1).max(100).describe("The Library commands, in order."),
+    label: z.string().max(80).optional().describe("What the Undo menu should call this step, e.g. \"Sharpen the Claude idea\"."),
+    dryRun: z.boolean().optional(),
+    requestID,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+}, async (args) => result(await request("libraryApply", args)));
+
+for (const [name, method, verb] of [["yamvideo_library_undo", "libraryUndo", "Undo"], ["yamvideo_library_redo", "libraryRedo", "Redo"]]) {
+  server.registerTool(name, {
+    title: `${verb} a Library step`,
+    description: `${verb} the Library step named by transactionID (from yamvideo_apply_library or library.history). Refused with history_conflict if another Library change is now on top.`,
+    inputSchema: {
+      expectedRevision: z.number().int().nonnegative().describe("library.revision as you read it."),
+      transactionID: id, requestID,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, async (args) => result(await request(method, args)));
+}
+
 server.registerTool("yamvideo_reveal", {
   title: "Show something to the owner",
-  description: "Move the owner's view to a recording, section, zoom, blur effect, marker or time, selecting it. Edits never move their view; use this only when it helps them see what you mean.",
+  description: "Move the owner's view to a recording, section, zoom, blur effect, marker or time, selecting it, or to an idea on the Ideas page. Edits never move their view; use this only when it helps them see what you mean.",
   inputSchema: {
     clip: id.optional(), section: id.optional(), zoom: id.optional(), effect: id.optional(), marker: id.optional(),
     graphic: id.optional(), short: id.optional().describe("A Short: shows it in the owner's Short viewer; time is then seconds into it."),
+    idea: id.optional().describe("An idea from yamvideo_get_library: shows it on the Ideas page."),
     time: z.number().nonnegative().optional(), timeSpace: z.enum(["recording", "movie"]).optional(),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },

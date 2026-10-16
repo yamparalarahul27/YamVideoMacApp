@@ -57,12 +57,21 @@ try {
   const undo = await client.callTool({ name: "yamvideo_undo", arguments: {
     sessionID: state.sessionID, projectID: state.projectID, expectedRevision: receipt.revision, transactionID: receipt.transactionID } });
   steps.undo = !undo.isError;
+
+  // The Library: add an idea, then undo it, so the owner's ideas are as they were.
+  const library = parse(await client.callTool({ name: "yamvideo_get_library", arguments: {} })).result;
+  const added = parse(await client.callTool({ name: "yamvideo_apply_library", arguments: {
+    expectedRevision: library.revision, commands: [{ type: "addIdea", title: "Smoke test idea" }], label: "Smoke test idea" } }));
+  steps.library = added.ok && added.result.createdIDs.length === 1 && added.result.revision === library.revision + 1;
+  const undoIdea = await client.callTool({ name: "yamvideo_library_undo", arguments: {
+    expectedRevision: added.result.revision, transactionID: added.result.transactionID } });
+  steps.libraryUndo = !undoIdea.isError;
 } catch (error) {
   steps.error = error.message;
 } finally {
   await client.close().catch(() => {});
 }
 
-const ok = !steps.error && ["sessions", "dryRun", "apply", "conflict", "preview", "undo"].every((name) => steps[name] === true);
+const ok = !steps.error && ["sessions", "dryRun", "apply", "conflict", "preview", "undo", "library", "libraryUndo"].every((name) => steps[name] === true);
 console.log(JSON.stringify({ ok, steps }));
 process.exit(ok ? 0 : 1);

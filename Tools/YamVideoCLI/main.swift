@@ -21,6 +21,7 @@ Reading
   yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
   yamvideoctl transcript --clip ID                words with source and edited times, captions, stumbles
   yamvideoctl job JOB [--wait]
+  yamvideoctl library                            the owner's ideas: titles, notes, topics, links, images, linked projects
 
 Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl apply --file EDITS.json [--dry-run] [--label TEXT]
@@ -35,11 +36,18 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
                                                  transcribe if needed, cut, set captions and loudness
   yamvideoctl cancel JOB
-  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--short ID] [--layout ID] [--time SECONDS] [--movie]
+  yamvideoctl reveal [--clip ID] [--section ID] [--zoom ID] [--effect ID] [--marker ID] [--graphic ID] [--short ID] [--layout ID] [--idea ID] [--time SECONDS] [--movie]
   yamvideoctl request --file REQUEST.json        send a raw protocol request
+
+Ideas (the Library: its own revision, from `yamvideoctl library`, and its own undo)
+  yamvideoctl library apply --file EDITS.json --revision N [--dry-run] [--label TEXT]
+  yamvideoctl library undo --transaction ID --revision N
+  yamvideoctl library redo --transaction ID --revision N
+  yamvideoctl reveal --idea ID                   show an idea on the Ideas page
 
 EDITS.json is a list of commands, or an object with "commands" and optionally
 "sessionID", "projectID", "expectedRevision" and "label". Use "-" to read stdin.
+For `library apply` the commands are Library commands (catalog: libraryCommands).
 
 Options
   --session ID --project ID --revision N   what the edit was planned against
@@ -318,8 +326,40 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let graphic = arguments.values["graphic"] { request["graphic"] = graphic }
         if let short = arguments.values["short"] { request["short"] = short }
         if let layout = arguments.values["layout"] { request["layout"] = layout }
+        if let idea = arguments.values["idea"] { request["idea"] = idea }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }
+    case "library":
+        func libraryRevision() throws {
+            guard request["expectedRevision"] != nil else {
+                throw Failure.usage("library \(arguments.positional.first ?? "") changes the Library, so it needs --revision: the Library's revision from `yamvideoctl library`.")
+            }
+        }
+        switch arguments.positional.first {
+        case nil:
+            request["method"] = "library"
+        case "apply":
+            request["method"] = "libraryApply"
+            let file = try readJSON(try value("file"))
+            if let commands = file as? [Any] {
+                request["commands"] = commands
+            } else if let object = file as? [String: Any] {
+                for key in ["commands", "expectedRevision", "label", "dryRun"] where request[key] == nil {
+                    if let found = object[key] { request[key] = found }
+                }
+            } else {
+                throw Failure.usage("The edits file must be a list of Library commands or an object with \"commands\".")
+            }
+            if let label = arguments.values["label"] { request["label"] = label }
+            if arguments.flags.contains("dry-run") { request["dryRun"] = true }
+            try libraryRevision()
+        case "undo", "redo":
+            request["method"] = arguments.positional.first == "undo" ? "libraryUndo" : "libraryRedo"
+            request["transactionID"] = try value("transaction")
+            try libraryRevision()
+        case let other?:
+            throw Failure.usage("Unknown library command \"\(other)\". Use library, library apply, library undo or library redo.")
+        }
     case "request":
         guard let raw = try readJSON(try value("file")) as? [String: Any], raw["method"] is String else {
             throw Failure.usage("The request file must be an object with a \"method\".")
@@ -328,7 +368,8 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
     default:
         throw Failure.usage("Unknown command \"\(arguments.command)\". Run yamvideoctl --help.")
     }
-    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit"]
+    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit",
+                              "libraryApply", "libraryUndo", "libraryRedo"]
     if edits.contains(request["method"] as? String ?? ""), request["requestID"] == nil {
         request["requestID"] = arguments.values["request-id"] ?? UUID().uuidString
     }

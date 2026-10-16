@@ -135,6 +135,24 @@ final class AppModel: ObservableObject {
     var savedProject: VideoProject?
     /// The open document's persistent identity; see `VideoProject.projectID`.
     var projectID = UUID()
+    /// The part of the window showing; see `AppModule`. Remembered between launches, and
+    /// restored only by the app at launch (`restoreModule`), so a test or snapshot model
+    /// always starts in Studio.
+    @Published var module = AppModule.studio {
+        didSet { UserDefaults.standard.set(module.rawValue, forKey: Self.moduleKey) }
+    }
+    static let moduleKey = "module"
+    /// The owner's ideas, and later their posts; see Library.swift and LibraryEditing.swift.
+    @Published var library = Library()
+    @Published var libraryUndoEntries: [LibraryHistory] = []
+    @Published var libraryRedoEntries: [LibraryHistory] = []
+    /// Where the Library is read and written; nil until `loadLibrary`, so nothing is written before.
+    var libraryFolderURL: URL?
+    @Published var selectedIdeaID: UUID?
+    /// Asks the idea editor to put the cursor in the title, after New Idea.
+    @Published var focusIdeaTitle = false
+    /// What an agent just changed in the Library, shown briefly on the Ideas page.
+    @Published var libraryHighlight: LibraryHighlight?
 
     private var previewTask: Task<Void, Never>?
     var conversionTask: Task<Void, Never>?
@@ -714,6 +732,7 @@ final class AppModel: ObservableObject {
         panel.message = "Choose the videos you want to crop and convert."
         panel.prompt = "Add"
         if panel.runModal() == .OK {
+            showModule(.studio)
             addDropped(panel.urls)
         }
     }
