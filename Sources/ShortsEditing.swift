@@ -311,10 +311,11 @@ enum ShortExport {
 
     /// The Short's burned-in captions as an ASS file, laid out with its graphics, or nil.
     static func burnedCaptions(_ item: VideoItem, short: Short, settings: ExportSettings) -> URL? {
-        guard settings.captionUse(hasFile: item.subtitles != nil).burns else { return nil }
+        guard settings.shortCaptionUse(hasFile: item.subtitles != nil).burns else { return nil }
         let captions = item.shortCaptions(short, settings: settings)
         guard !captions.isEmpty else { return nil }
-        let placed = ShortCaptionLayout.layout(captions, graphics: item.graphics?.forShort(short), option: short.captions, size: settings.subtitleSize)
+        let placed = ShortCaptionLayout.layout(captions, graphics: item.graphics?.forShort(short), option: short.captions, size: settings.subtitleSize,
+                                               bottom: item.shortCaptionBottom(short))
         return ShortCaptionLayout.assFile(placed, size: settings.subtitleSize)
     }
 
@@ -324,13 +325,17 @@ enum ShortExport {
                        drawGraphics: ((GraphicsRender.Job, URL, URL) async throws -> Void)? = nil,
                        onProgress: @escaping @Sendable (Double) -> Void) async throws {
         let cut = item.shortItem(short)
+        // With the screen on top, the layout stage reads the recording's whole picture and
+        // draws the 1080×1920 canvas itself, from the Short's window and the screen.
+        let stack = item.stacksScreen(short) ? short.frame(info: info, crop: item.crop) : nil
+        let crop = stack == nil ? (cut.crop ?? info.fullFrame) : (item.crop ?? info.fullFrame)
         try await FFmpeg.export(input: item.url, output: output, info: info,
-                                crop: (cut.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
+                                crop: crop.evenClamped(in: info.fullFrame),
                                 regions: cut.blurRegions.map(\.rect), zoomShots: cut.zoomShots, segments: cut.segments,
                                 settings: settings, subtitles: nil, color: item.colorStage(settings),
                                 effects: cut.blurEffects, graphics: cut.exportGraphics(settings),
                                 canvas: ShortFormat.size, captionsASS: burnedCaptions(item, short: short, settings: settings),
-                                drawGraphics: drawGraphics, onProgress: onProgress)
+                                screen: cut.screen, stack: stack, drawGraphics: drawGraphics, onProgress: onProgress)
     }
 
     /// The upload text's SHORT section.
@@ -396,7 +401,7 @@ enum ShortExport {
                     cover: (Double) async throws -> CGImage,
                     drawGraphics: ((GraphicsRender.Job, URL, URL) async throws -> Void)? = nil,
                     onProgress: @escaping @Sendable (Double) -> Void) async throws {
-        if let blocking = short.issues(graphics: item.graphics, publish: item.publish).first(where: { $0.severity == .blocking }) {
+        if let blocking = item.shortIssues(short).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }
         var videoSettings = settings
@@ -465,7 +470,7 @@ extension AppModel {
     /// Asks for a folder, then writes the selected Short's video, captions, cover and upload text there.
     func promptForShortExport(_ id: UUID? = nil) {
         guard let item = selectedItem, item.info != nil, let short = item.short(id ?? selectedShortID) else { return }
-        if let blocking = short.issues(graphics: item.graphics, publish: item.publish).first(where: { $0.severity == .blocking }) {
+        if let blocking = item.shortIssues(short).first(where: { $0.severity == .blocking }) {
             statusMessage = blocking.message
             return
         }
@@ -519,6 +524,59 @@ extension AppModel {
 }
 
 // MARK: - YouTube's furniture
+
+/// YouTube's Shorts player drawn over a 1080×1920 frame, as the viewer's overlay
+/// (`ShortFurniture`) shows it: the shading at the top and the bottom, the icons, the like
+/// and share rail, the channel and title, and the clear area dashed. For agents, so a
+/// preview shows what a viewer's phone covers.
+enum ShortFurnitureDrawing {
+    static func draw(over image: CGImage) -> CGImage? {
+        let width = image.width, height = image.height
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // Top-left coordinates in design pixels of the 1080×1920 canvas.
+        let k = Double(width) / Double(ShortFormat.size.width)
+        context.translateBy(x: 0, y: CGFloat(height)); context.scaleBy(x: k, y: -k)
+        let w = Double(ShortFormat.size.width), h = Double(ShortFormat.size.height)
+        let f = ShortFormat.furniture, clear = ShortFormat.clearArea
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        func shade(_ rect: CGRect, from: Double, to: Double) {
+            let colours = [CGColor(gray: 0, alpha: from), CGColor(gray: 0, alpha: to)] as CFArray
+            guard let gradient = CGGradient(colorsSpace: space, colors: colours, locations: [0, 1]) else { return }
+            context.saveGState(); context.clip(to: rect)
+            context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: rect.minY), end: CGPoint(x: 0, y: rect.maxY), options: [])
+            context.restoreGState()
+        }
+        shade(CGRect(x: 0, y: 0, width: w, height: f.top), from: 0.3, to: 0)
+        shade(CGRect(x: 0, y: h - f.bottom - 120, width: w, height: f.bottom + 120), from: 0, to: 0.4)
+        let ink = CGColor(gray: 1, alpha: 0.75)
+        context.setFillColor(ink); context.setStrokeColor(ink)
+        // The icons at the top right: search and more.
+        for x in [w - 60 - 58 - 48 - 58, w - 60 - 58] { context.fillEllipse(in: CGRect(x: x, y: 90, width: 58, height: 58)) }
+        // The rail down the lower right: like, dislike, comment, share, remix, and the sound's square.
+        let railX = w - f.right / 2
+        var y = h - 80 - 76
+        context.setLineWidth(5)
+        context.stroke(CGRect(x: railX - 38, y: y, width: 76, height: 76))
+        for _ in 0..<5 {
+            y -= 36 + 94
+            context.fillEllipse(in: CGRect(x: railX - 29, y: y, width: 58, height: 58))
+            context.fill(CGRect(x: railX - 34, y: y + 66, width: 68, height: 20))
+        }
+        // The channel, title and sound along the bottom left.
+        let left = f.left, base = h - 96
+        context.fill(CGRect(x: left, y: base - 38, width: 380, height: 30))
+        context.fill(CGRect(x: left, y: base - 38 - 22 - 40, width: 560, height: 34))
+        context.fillEllipse(in: CGRect(x: left, y: base - 38 - 22 - 40 - 22 - 72, width: 72, height: 72))
+        context.fill(CGRect(x: left + 90, y: base - 38 - 22 - 40 - 22 - 54, width: 260, height: 36))
+        // The clear area, dashed.
+        context.setStrokeColor(CGColor(gray: 1, alpha: 0.6)); context.setLineWidth(3); context.setLineDash(phase: 0, lengths: [12, 10])
+        context.stroke(clear)
+        return context.makeImage()
+    }
+}
 
 /// YouTube's Shorts player as a viewer sees it over the Short, faintly: the icons along the
 /// top, the like, comment and share rail down the lower right, and the channel, title and

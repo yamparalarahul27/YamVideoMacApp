@@ -63,7 +63,7 @@ struct ShortInspector: View {
             $0.kind != .endScreen && $0.start >= short.start - 0.0005 && $0.start < short.end - GraphicsTrack.minimumLength + 0.000001
         }
     }
-    private var issues: [PublishInfo.Issue] { short.issues(graphics: item.graphics, publish: item.publish) }
+    private var issues: [PublishInfo.Issue] { item.shortIssues(short) }
 
     var body: some View {
         InspectorSection("\(short.name(index: index)) · \(PublishInfo.timestamp(short.length))") {
@@ -155,6 +155,19 @@ struct ShortInspector: View {
 
     private var options: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if item.screen != nil {
+                Text("Screen").font(.caption.weight(.semibold))
+                Picker("Screen", selection: Binding(get: { short.screen }, set: { value in
+                    model.updateShort(short.id, label: "Short Screen") { $0.screen = value; if value == .top { $0.zoom = nil } }
+                })) {
+                    ForEach(ShortScreen.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                Text(short.screen == .top
+                     ? "The screen across the top and you below, where the video shows the screen; you alone where it shows only you. Captions sit between the two."
+                     : "Only you, in the Short's window.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Text("Panels").font(.caption.weight(.semibold))
             Picker("Panels", selection: Binding(get: { short.panels }, set: { value in model.updateShort(short.id, label: "Short Panels") { $0.panels = value } })) {
                 ForEach(ShortPanels.allCases) { Text($0.label).tag($0) }
@@ -171,8 +184,17 @@ struct ShortInspector: View {
                 Text("Zoomed out, they stay below a card instead, under the face.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if !model.settings.captionUse(hasFile: item.subtitles != nil).burns {
-                Text("Captions are not burned in, so this only matters once they are (Captions in the inspector or Auto Edit).")
+            Text("Captions in Shorts").font(.caption.weight(.semibold))
+            Picker("Captions in Shorts", selection: Binding(
+                get: { model.settings.shortCaptionUse(hasFile: item.subtitles != nil) },
+                set: { use in var changed = model.settings; changed.shortCaptions = use; model.updateSettings(changed); model.refreshPreview() })) {
+                ForEach(CaptionUse.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            Text("For every Short of the project, apart from the long video's setting: Shorts play without sound, so burned-in captions help.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !model.settings.shortCaptionUse(hasFile: item.subtitles != nil).burns {
+                Text("Captions are not burned into Shorts, so this only matters once they are (Captions in Shorts, above).")
                     .font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Try these while the Short plays: the viewer keeps playing as they change.")
@@ -321,7 +343,7 @@ struct ShortPublishForm: View {
     let item: VideoItem
     let short: Short
 
-    private var issues: [PublishInfo.Issue] { short.issues(graphics: item.graphics, publish: item.publish) }
+    private var issues: [PublishInfo.Issue] { item.shortIssues(short) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

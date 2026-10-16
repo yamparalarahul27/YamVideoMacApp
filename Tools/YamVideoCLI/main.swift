@@ -16,7 +16,8 @@ Reading
   yamvideoctl events [--after N] [--limit N]
   yamvideoctl preview --clip ID --time SECONDS [--composed] [--cropped] [--original] [--revision N]
   yamvideoctl preview --movie --time SECONDS
-  yamvideoctl preview --clip ID --short ID --time SECONDS   a Short as its viewer shows it, 1080×1920
+  yamvideoctl preview --clip ID --short ID --time SECONDS [--furniture]   a Short as its viewer shows it, 1080×1920
+                                                 (--furniture: YouTube's Shorts player over it, the clear area dashed)
   yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
   yamvideoctl transcript --clip ID                words with source and edited times, captions, stumbles
   yamvideoctl job JOB [--wait]
@@ -61,7 +62,7 @@ struct Arguments {
     var flags: Set<String> = []
     var positional: [String] = []
 
-    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "save", "pretty", "wait", "help"]
+    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "save", "pretty", "wait", "help", "furniture"]
 
     init(_ raw: [String]) throws {
         var index = 0
@@ -302,6 +303,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("original") { request["original"] = true }
         if arguments.flags.contains("composed") { request["composed"] = true }
         if let short = arguments.values["short"] { request["short"] = short; request["composed"] = true }
+        if arguments.flags.contains("furniture") { request["furniture"] = true }
     case "job":
         request["method"] = "job"; request["job"] = try job()
     case "cancel":

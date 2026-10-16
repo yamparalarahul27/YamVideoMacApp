@@ -5,7 +5,7 @@ import Foundation
 // state, a Short's composed preview, and exporting a Short (for YouTube or alone).
 
 extension AppModel {
-    static let shortKeys = ["id", "start", "end", "window", "title", "description", "tags", "hidden", "placements", "cover", "panels", "captions", "zoom"]
+    static let shortKeys = ["id", "start", "end", "window", "title", "description", "tags", "hidden", "placements", "cover", "panels", "captions", "zoom", "screen"]
 
     /// A Short from an agent's keys over `old` (or a new one on `clip`): only the keys
     /// given change. `speaker` is the window Vision found, for `window: "speaker"`.
@@ -129,6 +129,15 @@ extension AppModel {
                 short.zoom = zoom == 1 ? nil : zoom
             }
         }
+        if let value = patch["screen"] {
+            guard let name = value.string, let screen = ShortScreen(rawValue: name) else {
+                throw EditError.invalid("screen is one of: \(ShortScreen.allCases.map(\.rawValue).joined(separator: ", ")).")
+            }
+            if screen == .top, clip.screen == nil {
+                throw EditError.invalid("Recording \(clip.id) has no screen recording, so its Shorts cannot show one. Add one with setScreen first.")
+            }
+            short.screen = screen
+        }
         return short
     }
 
@@ -150,19 +159,20 @@ extension AppModel {
         let item = clip.item()
         return item.shorts.map { short in
             let track = item.graphics?.forShort(short)
-            let burned = settings.captionUse(hasFile: item.subtitles != nil).burns
+            let burned = settings.shortCaptionUse(hasFile: item.subtitles != nil).burns
             let captions = item.shortCaptions(short, settings: settings)
             return AgentState.ShortState(
                 id: short.id, start: short.start, end: short.end, length: short.length,
                 window: WireRect(short.frame(info: info, crop: clip.crop)), windowSet: short.window != nil,
                 title: short.title, description: short.description, tags: short.tags,
-                panels: short.panels.rawValue, captions: short.captions.rawValue, zoom: short.zoomLevel,
+                panels: short.panels.rawValue, captions: short.captions.rawValue, zoom: short.zoomLevel, screen: short.screen.rawValue,
                 picture: WireRect(short.picture(info: info, crop: clip.crop)), cover: short.cover,
                 hidden: short.hidden, placements: Dictionary(uniqueKeysWithValues: short.placements.map { ($0.key.uuidString, $0.value) }),
                 graphics: (track?.items ?? []).map { .init(id: $0.id, kind: $0.kind.rawValue, start: $0.start, end: $0.end, placed: $0.transform != nil) },
                 captionsBurned: burned && !captions.isEmpty,
-                captionCount: burned ? ShortCaptionLayout.layout(captions, graphics: track, option: short.captions, size: settings.subtitleSize).count : captions.count,
-                issues: short.issues(graphics: item.graphics, publish: item.publish))
+                captionCount: burned ? ShortCaptionLayout.layout(captions, graphics: track, option: short.captions, size: settings.subtitleSize,
+                                                                 bottom: item.shortCaptionBottom(short)).count : captions.count,
+                issues: item.shortIssues(short))
         }
     }
 
@@ -182,7 +192,8 @@ extension AppModel {
             }
             let frame = try await composedShortFrame(clip, short: short, at: time, settings: document.settings, original: request.original ?? false)
             let local = short.start + time
-            var preview = try writePreview(frame.image, clipID: clipID, local: local, source: clip.timeline.location(at: local)?.source ?? 0,
+            let image = request.furniture == true ? (ShortFurnitureDrawing.draw(over: frame.image) ?? frame.image) : frame.image
+            var preview = try writePreview(image, clipID: clipID, local: local, source: clip.timeline.location(at: local)?.source ?? 0,
                                            revision: requested, cropped: true, original: request.original ?? false, composed: true)
             preview.time = time
             preview.graphics = frame.graphics
@@ -222,7 +233,7 @@ extension AppModel {
             guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                 return .failure(.invalid("For a YouTube export, path is an existing folder; \(folder.path) is not one."))
             }
-            if let blocking = short.issues(graphics: item.graphics, publish: item.publish).first(where: { $0.severity == .blocking }) {
+            if let blocking = item.shortIssues(short).first(where: { $0.severity == .blocking }) {
                 return .failure(.invalid(blocking.message + " (state.clips[].shorts[].issues lists everything; updateShort changes it.)"))
             }
             files = ShortExport.files(in: folder, short: short, index: position, recording: item, settings: exportSettings, unique: false)

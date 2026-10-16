@@ -67,9 +67,12 @@ extension FFmpeg {
     /// The screen for one export. `input` is the screen recording's input number; `rate` and
     /// `rateExpression` are the frame rate from the geometry on; `tags` describe the
     /// speaker's frames when they reach the layout stage.
+    /// `stack` is a Short's 9:16 window (source pixels) when the Short shows the screen
+    /// on top: the stage then draws the 1080×1920 canvas.
     static func screenLayer(_ screen: ScreenTrack, info: MediaInfo, crop: CGRect, segments: [TimelineSegment]?,
-                            rate: Double, rateExpression: String, input: Int, tags: FrameTags, endScreen: Double?) -> ScreenLayer {
-        let geometry = LayoutGeometry(track: screen, crop: crop)
+                            rate: Double, rateExpression: String, input: Int, tags: FrameTags, endScreen: Double?,
+                            stack: CGRect? = nil) -> ScreenLayer {
+        let geometry = stack.map { LayoutGeometry(short: screen, crop: crop, window: $0) } ?? LayoutGeometry(track: screen, crop: crop)
         let size = streamSize(screen, place: geometry.screenPlace(.screen)?.rect.size ?? crop.size)
         let duration = segments.map { ClipTimeline(segments: $0).duration } ?? info.duration
         let first = (segments?.map(\.start).min() ?? 0) + screen.offset - 2
@@ -175,7 +178,14 @@ extension FFmpeg {
             if run.end.map({ $0 - run.first == 1 }) == true { firstSingle = firstSingle ?? run.first }
             let output = "[\(name)o\(index)]"
             guard let place = run.state.screen else {
-                parts.append("[\(name)s\(index)]\(trim)\(output)")
+                // The speaker fills the frame: as it is, or (in a Short) its window scaled up.
+                let window = run.state.window
+                var chain = "[\(name)s\(index)]\(trim)"
+                if geometry.picture != geometry.frame || window != CGRect(origin: .zero, size: geometry.picture) {
+                    chain += ",crop=\(Int(window.width)):\(Int(window.height)):\(Int(window.minX)):\(Int(window.minY))"
+                        + ",scale=\(w):\(h):\(lanczos),setsar=1"
+                }
+                parts.append(chain + output)
                 continue
             }
             let p = "\(name)\(index)_"
@@ -192,7 +202,7 @@ extension FFmpeg {
             parts.append("[\(p)f][\(p)p]overlay=x=\(Int(place.rect.minX)):y=\(Int(place.rect.minY)):format=yuv444p10:eof_action=pass[\(p)g]")
             let window = run.state.window, speaker = run.state.speaker
             var speakerChain = "[\(name)s\(index)]\(trim)"
-            if window != CGRect(origin: .zero, size: geometry.frame) {
+            if window != CGRect(origin: .zero, size: geometry.picture) {
                 speakerChain += ",crop=\(Int(window.width)):\(Int(window.height)):\(Int(window.minX)):\(Int(window.minY))"
             }
             if window.size != speaker.rect.size {

@@ -160,9 +160,18 @@ edit, and each edit becomes one undo step with your name on it.
 
 ### 4.8 Shorts
 
-- `addShort` on the best minute or two, with `window: "speaker"`. Give it its own
-  title. Check it with `preview --short` at a few times. Export it with `export --short`
-  (with `--youtube` for the upload files).
+- Pick parts of 30–60 s that make one point from start to end. Start and end them at
+  the edges of sentences (read `transcript`), and show the owner the plan with times.
+- `addShort` with `window: "speaker"`. Give it its own title, description and tags.
+- For a recording with a screen recording, set `screen: "top"`: the screen goes across
+  the top, the speaker below, and the captions between them. Where the recording's
+  layout shows only the speaker, the Short shows only the speaker.
+- Shorts have their own caption setting (`setExportSettings` with `shortCaptions`). By
+  default they burn captions in whenever the video has captions, also when the long
+  video uploads an SRT. Do not change the long video's `captions` for a Short.
+- Check each Short with `preview --short` at a few times, and show the owner frames
+  before you export. Export it with `export --short` (with `--youtube` for the upload
+  files).
 
 ### 4.9 Export for YouTube
 

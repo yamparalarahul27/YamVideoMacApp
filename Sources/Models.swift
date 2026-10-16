@@ -506,6 +506,10 @@ struct ExportSettings: Equatable, Codable {
     /// What exports do with captions: burn them in and upload them, upload only, or
     /// neither. Nil keeps the behaviour from before it could be chosen; see `captionUse`.
     var captions: CaptionUse?
+    /// What Shorts do with captions, on their own: Shorts play without sound, so they
+    /// usually burn them in while the long video uploads an SRT. Nil burns them in whenever
+    /// the video has captions; see `shortCaptionUse`.
+    var shortCaptions: CaptionUse?
 
     var drawsGraphics: Bool { graphics ?? true }
 

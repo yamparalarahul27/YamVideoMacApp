@@ -356,13 +356,20 @@ struct LayoutState: Equatable {
 /// to the real one; every place is in whole pixels with even sizes, so ffmpeg and Core
 /// Image put the same pixels in the same place.
 struct LayoutGeometry: Equatable {
-    /// The output frame: the speaker's cropped picture.
+    /// The output frame: the speaker's cropped picture, or a Short's 1080×1920 canvas.
     let frame: CGSize
+    /// The speaker's picture (the recording's crop). The same as `frame`, except in a
+    /// Short with the screen.
+    let picture: CGSize
     /// The screen's picture (its crop).
     let screen: CGSize
     /// The speaker's face, in the cropped picture's pixels.
     let face: CGPoint
     let bubble: SpeakerBubble
+    /// In a Short with the screen: the Short's 9:16 window, in the picture's pixels. Then
+    /// the screen and split layouts stack the screen above the speaker, and the speaker
+    /// layout shows this window on the whole canvas.
+    let stack: CGRect?
 
     static let screenMargin = 48.0
     static let bubbleMargin = 40.0
@@ -373,8 +380,78 @@ struct LayoutGeometry: Equatable {
     /// The bubble's window: a square this share of the picture's height, on the face.
     static let bubbleWindow = 0.6
 
-    init(frame: CGSize, screen: CGSize, face: CGPoint, bubble: SpeakerBubble) {
+    /// A Short with the screen: the screen across the top, below YouTube's top icons, a
+    /// band for the captions, and the speaker below, to the bottom.
+    static let stackTop = 240.0
+    static let stackMargin = 24.0
+    /// Room for two lines of captions at the largest size (90 px type, 1.18 line height,
+    /// the outline), above the speaker.
+    static let stackCaptionBand = 240.0
+    /// The speaker's window in the stack: this share of the picture's height, on the face.
+    static let stackWindow = 0.8
+
+    init(frame: CGSize, screen: CGSize, face: CGPoint, bubble: SpeakerBubble, picture: CGSize? = nil, stack: CGRect? = nil) {
         self.frame = frame; self.screen = screen; self.face = face; self.bubble = bubble
+        self.picture = picture ?? frame; self.stack = stack
+    }
+
+    /// A Short with the screen, on the 1080×1920 canvas, for a recording whose picture is
+    /// `crop` of its source; `window` is the Short's 9:16 window in source pixels.
+    init(short track: ScreenTrack, crop: CGRect, window: CGRect) {
+        let size = crop.size
+        let inside = window.offsetBy(dx: -crop.minX, dy: -crop.minY).intersection(CGRect(origin: .zero, size: size))
+        let face = track.bubble.face.map { CGPoint(x: min(max(0, $0.x - crop.minX), size.width), y: min(max(0, $0.y - crop.minY), size.height)) }
+        self.init(frame: ShortFormat.size, screen: track.picture.size, face: face ?? CGPoint(x: inside.midX, y: inside.midY),
+                  bubble: track.bubble, picture: size, stack: inside)
+    }
+
+    /// In the stack: the screen's place, as wide as the canvas less its margins, at the
+    /// screen's own aspect.
+    private var stackScreen: LayoutPlace {
+        let width = Self.even(Double(frame.width) - 2 * Self.stackMargin)
+        let height = Self.even(width * Double(screen.height) / Double(screen.width))
+        return LayoutPlace(rect: CGRect(x: Self.stackMargin, y: Self.stackTop, width: width, height: height), radius: Self.cornerRadius)
+    }
+
+    /// In the stack: the speaker's place, below the caption band, to the canvas's bottom.
+    private var stackSpeaker: LayoutPlace {
+        let top = Double(stackScreen.rect.maxY) + Self.stackCaptionBand
+        return LayoutPlace(rect: CGRect(x: 0, y: top, width: Double(frame.width), height: Double(frame.height) - top), radius: 0)
+    }
+
+    /// Where a Short's captions sit (their bottom) in the stack: just above the speaker.
+    var stackCaptionBottom: Double { Double(stackSpeaker.rect.minY) - 16 }
+
+    /// In the stack: where the speaker's face goes on the canvas, inside YouTube's clear
+    /// area (`ShortFormat.clearArea`): across, its middle (left of the like and share
+    /// rail); down, halfway between the speaker's place and the bottom of the clear area
+    /// (above the channel, title and sound).
+    var stackFaceTarget: CGPoint {
+        let clear = ShortFormat.clearArea
+        return CGPoint(x: clear.midX, y: ((Double(stackSpeaker.rect.minY) + Double(clear.maxY)) / 2).rounded())
+    }
+
+    /// In the stack: the speaker's window, of the place's aspect and `stackWindow` of the
+    /// picture's height, placed so the face lands on `stackFaceTarget` where the picture
+    /// allows.
+    private func stackWindow(_ place: LayoutPlace) -> CGRect {
+        let aspect = Double(place.rect.width / place.rect.height)
+        let pw = Double(picture.width), ph = Double(picture.height)
+        var h = min(Self.stackWindow * ph, ph), w = h * aspect
+        if w > pw { w = pw; h = w / aspect }
+        w = max(2, w.rounded()); h = max(2, h.rounded())
+        let k = h / Double(place.rect.height), target = stackFaceTarget
+        let x = Double(face.x) - (Double(target.x) - Double(place.rect.minX)) * k
+        let y = Double(face.y) - (Double(target.y) - Double(place.rect.minY)) * k
+        return CGRect(x: min(max(0, x), pw - w).rounded(), y: min(max(0, y), ph - h).rounded(), width: w, height: h)
+    }
+
+    /// Where the face lands on the frame in a state: its point in the picture, through the
+    /// window, into the speaker's place.
+    func facePoint(in state: LayoutState) -> CGPoint {
+        let k = Double(state.speaker.rect.height / state.window.height)
+        return CGPoint(x: Double(state.speaker.rect.minX) + (Double(face.x) - Double(state.window.minX)) * k,
+                       y: Double(state.speaker.rect.minY) + (Double(face.y) - Double(state.window.minY)) * k)
     }
 
     /// For a recording whose picture is `crop` of its source.
@@ -391,6 +468,7 @@ struct LayoutGeometry: Equatable {
     /// The screen's place in a layout; nil in Speaker, where it does not show.
     func screenPlace(_ layout: ScreenLayout) -> LayoutPlace? {
         let w = Double(frame.width), h = Double(frame.height)
+        if stack != nil { return layout == .speaker ? nil : stackScreen }
         switch layout {
         case .speaker:
             return nil
@@ -407,6 +485,7 @@ struct LayoutGeometry: Equatable {
 
     func speakerPlace(_ layout: ScreenLayout) -> LayoutPlace {
         let w = Double(frame.width), h = Double(frame.height)
+        if stack != nil, layout != .speaker { return stackSpeaker }
         switch layout {
         case .speaker:
             return LayoutPlace(rect: CGRect(x: 0, y: 0, width: w, height: h), radius: 0)
@@ -441,7 +520,7 @@ struct LayoutGeometry: Equatable {
     /// The part of the speaker's picture for a place of `aspect`: `height` tall where it
     /// fits, centred on `centre`, kept inside the picture, in whole pixels.
     func window(aspect: Double, height: Double, centre: CGPoint) -> CGRect {
-        let pw = Double(frame.width), ph = Double(frame.height)
+        let pw = Double(picture.width), ph = Double(picture.height)
         var h = min(height, ph), w = h * aspect
         if w > pw { w = pw; h = w / aspect }
         w = max(2, w.rounded()); h = max(2, h.rounded())
@@ -455,10 +534,12 @@ struct LayoutGeometry: Equatable {
         let place = speakerPlace(layout)
         let aspect = Double(place.rect.width / place.rect.height)
         let window: CGRect
-        switch layout {
-        case .speaker: window = CGRect(origin: .zero, size: frame)
-        case .screen: window = self.window(aspect: aspect, height: Self.bubbleWindow * Double(frame.height), centre: face)
-        case .split: window = self.window(aspect: aspect, height: Double(frame.height), centre: face)
+        switch (layout, stack) {
+        case (.speaker, let stack?): window = stack
+        case (.speaker, nil): window = CGRect(origin: .zero, size: picture)
+        case (_, _?): window = stackWindow(place)
+        case (.screen, nil): window = self.window(aspect: aspect, height: Self.bubbleWindow * Double(frame.height), centre: face)
+        case (.split, nil): window = self.window(aspect: aspect, height: Double(frame.height), centre: face)
         }
         return LayoutState(speaker: place, window: window, screen: screenPlace(layout))
     }
@@ -487,6 +568,27 @@ struct LayoutGeometry: Equatable {
         case (let from?, let to?): screen = LayoutPlace(rect: rect(from.rect, to.rect), radius: lerp(from.radius, to.radius))
         }
         return LayoutState(speaker: speaker, window: window, screen: screen)
+    }
+}
+
+// MARK: - In a Short
+
+extension ScreenTrack {
+    /// The screen in a Short's own time, from 0: its layouts cut to the Short and moved,
+    /// and the zooms that lie inside it. The offset stays, as the Short's sections keep
+    /// their source times.
+    func forShort(_ short: Short) -> ScreenTrack {
+        var track = self
+        track.spans = spans.compactMap { span in
+            let start = max(span.start, short.start), end = min(span.end, short.end)
+            guard end - start > 0.000001 else { return nil }
+            var moved = span; moved.start = start - short.start; moved.end = end - short.start
+            return moved
+        }
+        track.zooms = zooms.filter { $0.start >= short.start - 0.0005 && $0.end <= short.end + 0.0005 }.map {
+            var shot = $0; shot.start = max(0, shot.start - short.start); return shot
+        }
+        return track
     }
 }
 

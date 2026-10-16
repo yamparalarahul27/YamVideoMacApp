@@ -50,6 +50,8 @@ struct AgentRequest: Codable {
     /// A preview as the owner's Preview plays it: cropped, zoomed, coloured, with blur
     /// areas and whole-frame effects, at the export's frame size.
     var composed: Bool?
+    /// With short: draw YouTube's Shorts player over the frame (`ShortFurnitureDrawing`).
+    var furniture: Bool?
     var effect: UUID?
     var marker: UUID?
     var threshold: Double?
@@ -331,6 +333,8 @@ struct AgentState: Encodable {
         var panels: String, captions: String
         /// 1 fills the frame; lower is zoomed out, with `picture` (the window widened) at the top.
         var zoom: Double
+        /// "top": the screen across the top and the speaker below; "off": only the speaker.
+        var screen: String
         var picture: WireRect
         var cover: Double?
         var hidden: [UUID]
@@ -1381,6 +1385,7 @@ extension AppModel {
         every.outputFolder = URL(fileURLWithPath: "/")
         every.graphics = true
         every.captions = .upload
+        every.shortCaptions = .burnIn
         guard case .object(let fields)? = try? JSONValue.from(every) else { return [] }
         return Set(fields.keys)
     }()
