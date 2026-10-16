@@ -480,3 +480,8 @@ an ink look (handwriting over a soft haze), plus ink clips drawn on an iPad. Its
 phase is the template engine in `Resources/Graphics/` with `Tools/Graphics/assemble.mjs`.
 Graphics now show and are edited in the app (G1 part 1) and are drawn into exports
 (G1 part 2); section 6a of the plan lists the next features in order.
+
+The [distribution plan](docs/plans/distribution.md) takes the app past the export: a
+local Library of ideas, post kits for YouTube, Instagram, X and LinkedIn, a calendar with
+reminders, and results at day 1, 7 and 30, all on this Mac with no platform APIs. The
+owner publishes by hand. No phase is started yet.
