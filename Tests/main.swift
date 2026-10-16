@@ -4682,11 +4682,13 @@ var fourLines = thumbDesign; fourLines.title = "a\nb\nc\nd"
 var longTag = thumbDesign; longTag.tag = String(repeating: "t", count: 25)
 var badAccent2 = thumbDesign; badAccent2.accent = "gold"
 var bigZoom = thumbDesign; bigZoom.zoom = 2
-check([longTitle, fourLines, longTag, badAccent2, bigZoom].allSatisfy { $0.problem != nil }
-          && bigZoom.problem!.contains("1.6") && longTitle.problem!.contains("90"),
+var wideOutline = thumbDesign; wideOutline.outlineWidth = 20
+check([longTitle, fourLines, longTag, badAccent2, bigZoom, wideOutline].allSatisfy { $0.problem != nil }
+          && bigZoom.problem!.contains("1.6") && longTitle.problem!.contains("90") && wideOutline.problem!.contains("16"),
       "a design out of range is refused, saying what is allowed")
 let partialDesign = try JSONDecoder().decode(ThumbnailDesign.self, from: Data(#"{"title": "Hi", "image": "~/x.png"}"#.utf8))
-check(partialDesign.cutout && partialDesign.background == .dim && partialDesign.side == .auto && partialDesign.image?.path.hasPrefix("/") == true,
+check(partialDesign.cutout && partialDesign.background == .dim && partialDesign.side == .auto && partialDesign.place == .frame
+          && partialDesign.outlineWidth == 9 && !partialDesign.highlight && partialDesign.image?.path.hasPrefix("/") == true,
       "a partial design keeps the defaults, and an image path is a plain path")
 
 // A frame with a clear subject on the left: a head and a body on grey.
@@ -4739,6 +4741,80 @@ let leftThumb = try await ThumbnailMaker.render(leftText, sources: subjectSource
 check(brightShare(leftThumb, xs: 40..<640) > 2 * brightShare(leftThumb, xs: 700..<1240), "the title can be put on the left",
       String(format: "left %.3f, right %.3f", brightShare(leftThumb, xs: 40..<640), brightShare(leftThumb, xs: 700..<1240)))
 
+// The clear place: the speaker moves away from the title, so nothing overlaps.
+let subjectHead = subjectCut.flatMap { SpeakerCutout.headBox($0.image, box: $0.box) }
+check(subjectHead.map { $0.minX > 280 && $0.maxX < 560 && $0.minY < 80 && $0.maxY < 260 } == true,
+      "the head is the top part of the cut-out", "\(String(describing: subjectHead))")
+func redShare(_ image: CGImage, xs: Range<Int>) -> Double {
+    var red = 0, total = 0
+    for y in stride(from: 40, to: 700, by: 10) { for x in stride(from: xs.lowerBound, to: xs.upperBound, by: 10) {
+        let p = rgb(image, x, y); total += 1
+        if p.0 > 180 && p.1 < 110 && p.2 < 110 { red += 1 }
+    } }
+    return Double(red) / Double(max(1, total))
+}
+var clearLeft = leftText; clearLeft.place = .clear; clearLeft.background = .solid; clearLeft.outline = false
+let clearThumb = try await ThumbnailMaker.render(clearLeft, sources: subjectSources, accent: "#F5C42C")
+// Row by row, the title's white and accent pixels stay left of the speaker's red ones.
+func rowOverlaps(_ image: CGImage) -> (rows: Int, red: Int, text: Int) {
+    var overlaps = 0, red = 0, text = 0
+    for y in stride(from: 20, to: 710, by: 6) {
+        var textRight = -1, redLeft = Int.max
+        for x in stride(from: 0, to: 1280, by: 4) {
+            let p = rgb(image, x, y)
+            if (p.0 > 225 && p.1 > 225 && p.2 > 225) || (p.0 > 220 && p.1 > 170 && p.1 < 215 && p.2 < 90) { textRight = max(textRight, x) }
+            if p.0 > 180 && p.1 < 110 && p.2 < 110 { redLeft = min(redLeft, x) }
+        }
+        if textRight >= 0 { text += 1 }
+        if redLeft < Int.max { red += 1 }
+        if textRight >= 0 && redLeft < Int.max && redLeft <= textRight + 20 { overlaps += 1 }
+    }
+    return (overlaps, red, text)
+}
+let clearRows = rowOverlaps(clearThumb)
+check(rowOverlaps(leftThumb).rows > 3 && clearRows.rows == 0 && clearRows.red > 40 && clearRows.text > 10,
+      "with the clear place, a speaker under the title moves to the far side, clear of it",
+      "before \(rowOverlaps(leftThumb)), after \(clearRows)")
+let subjectBands = subjectCut.map { SpeakerCutout.bands($0.image, box: $0.box) } ?? []
+check(subjectBands.count >= 20 && subjectBands.first!.width < subjectBands[subjectBands.count / 2].width,
+      "the outline bands are narrow at the head and wide at the body", "\(subjectBands.map { Int($0.width) })")
+check(rgb(clearThumb, 1276, 160).0 < 120, "the speaker's head stays inside the picture", "\(rgb(clearThumb, 1276, 160))")
+var clearRight = thumbnailDesign; clearRight.place = .clear; clearRight.background = .solid
+let clearRightThumb = try await ThumbnailMaker.render(clearRight, sources: subjectSources, accent: "#F5C42C")
+check(redShare(clearRightThumb, xs: 200..<600) > 0.15 && redShare(clearRightThumb, xs: 700..<1240) == 0,
+      "a speaker already clear of the title stays on their side")
+
+// The outline's width, the white background and the highlight.
+func whiteNear(_ image: CGImage) -> Int {
+    var count = 0
+    for y in stride(from: 20, to: 710, by: 3) { for x in stride(from: 100, to: 700, by: 3) {
+        let p = rgb(image, x, y); if p.0 > 235 && p.1 > 235 && p.2 > 235 { count += 1 }
+    } }
+    return count
+}
+var thinRight = clearRight; thinRight.outlineWidth = 3
+let thinRightThumb = try await ThumbnailMaker.render(thinRight, sources: subjectSources, accent: "#F5C42C")
+check(whiteNear(thinRightThumb) > 0 && Double(whiteNear(thinRightThumb)) < 0.6 * Double(whiteNear(clearRightThumb)),
+      "a narrower outline draws less white round the speaker", "\(whiteNear(thinRightThumb)) against \(whiteNear(clearRightThumb))")
+func titleColours(_ image: CGImage) -> (dark: Int, accent: Int) {
+    var dark = 0, accent = 0
+    for y in stride(from: 60, to: 660, by: 6) { for x in stride(from: 40, to: 640, by: 4) {
+        let p = rgb(image, x, y)
+        if p.0 < 60 && p.1 < 60 && p.2 < 60 { dark += 1 }
+        if p.0 > 220 && p.1 > 170 && p.1 < 215 && p.2 < 90 { accent += 1 }
+    } }
+    return (dark, accent)
+}
+var whiteDesign = clearLeft; whiteDesign.background = .white
+let whiteThumb = try await ThumbnailMaker.render(whiteDesign, sources: subjectSources, accent: "#F5C42C")
+var markedDesign = whiteDesign; markedDesign.highlight = true
+let markedThumb = try await ThumbnailMaker.render(markedDesign, sources: subjectSources, accent: "#F5C42C")
+let whiteCorner = rgb(whiteThumb, 1270, 8)
+check(whiteCorner.0 > 245 && whiteCorner.1 > 245 && whiteCorner.2 > 245 && titleColours(whiteThumb).dark > 50,
+      "a white background, with the title in dark text", "\(whiteCorner), \(titleColours(whiteThumb))")
+check(titleColours(markedThumb).accent > titleColours(whiteThumb).accent + 100 && titleColours(markedThumb).dark > titleColours(whiteThumb).dark,
+      "with highlight, the *accent* words are dark text on a band of the accent", "\(titleColours(markedThumb)) against \(titleColours(whiteThumb))")
+
 print("\nThumbnails in projects and for agents")
 let subjectClip = scratch.appendingPathComponent("subject.mov")
 let subjectVideo = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-i", subjectFrame.path, "-t", "2",
@@ -4760,10 +4836,11 @@ check((try? designAsEight.validate()) == nil, "a version 8 file with a design is
 
 var designPatch = address(thumbnailer)
 designPatch["method"] = "apply"; designPatch["requestID"] = "design-1"; designPatch["client"] = "Claude"
-designPatch["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString, "publish": ["design": ["tag": "New", "zoom": 1.2]]]]
+designPatch["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString, "publish": ["design": ["tag": "New", "zoom": 1.2, "place": "clear"]]]]
 let designReply = await agentCall(thumbnailer, designPatch)
 check(designReply["ok"] as? Bool == true && thumbnailer.items[0].publish?.design?.tag == "New"
-          && thumbnailer.items[0].publish?.design?.title == "Big *title*" && thumbnailer.items[0].publish?.design?.zoom == 1.2,
+          && thumbnailer.items[0].publish?.design?.title == "Big *title*" && thumbnailer.items[0].publish?.design?.zoom == 1.2
+          && thumbnailer.items[0].publish?.design?.place == .clear,
       "an agent changes some of the design's keys and keeps the rest", "\(designReply)")
 var tryDesign = address(thumbnailer)
 tryDesign["method"] = "thumbnail"; tryDesign["clip"] = subjectItem.id.uuidString; tryDesign["design"] = ["background": "solid"]
@@ -4782,6 +4859,76 @@ var badDesign = address(thumbnailer)
 badDesign["method"] = "thumbnail"; badDesign["clip"] = subjectItem.id.uuidString; badDesign["design"] = ["zoom": 3]
 check(((await agentCall(thumbnailer, badDesign))["error"] as? [String: Any])?["message"] as? String ?? "" == "The speaker's size is from 1 to 1.6.",
       "a design out of range is refused before anything is drawn")
+badDesign["design"] = ["outlineWidth": 30]
+check(((await agentCall(thumbnailer, badDesign))["error"] as? [String: Any])?["message"] as? String ?? "" == "The outline's width is from 2 to 16 pixels.",
+      "an outline too wide is refused")
+
+print("\nSuggest Frames")
+func face(_ lips: [CGPoint], eyeHeight: Double = 0.05, nose: Double = 0.45) -> FaceLook? {
+    func eye(_ x: Double) -> [CGPoint] { [CGPoint(x: x - 0.075, y: 0.62), CGPoint(x: x, y: 0.62 + eyeHeight / 2), CGPoint(x: x + 0.075, y: 0.62), CGPoint(x: x, y: 0.62 - eyeHeight / 2)] }
+    return FaceLook.measure(lips: lips, leftEye: eye(0.25), rightEye: eye(0.65), nose: [CGPoint(x: nose, y: 0.45), CGPoint(x: nose, y: 0.40)],
+                            quality: 0.6, face: CGRect(x: 0, y: 0, width: 100, height: 100))
+}
+let smiling = face([CGPoint(x: 0.25, y: 0.35), CGPoint(x: 0.35, y: 0.28), CGPoint(x: 0.45, y: 0.25), CGPoint(x: 0.55, y: 0.28),
+                    CGPoint(x: 0.65, y: 0.35), CGPoint(x: 0.45, y: 0.40)])
+let talking = face([CGPoint(x: 0.35, y: 0.27), CGPoint(x: 0.42, y: 0.23), CGPoint(x: 0.5, y: 0.22), CGPoint(x: 0.58, y: 0.23),
+                    CGPoint(x: 0.65, y: 0.27), CGPoint(x: 0.5, y: 0.40)])
+let blinking = face([CGPoint(x: 0.25, y: 0.35), CGPoint(x: 0.35, y: 0.28), CGPoint(x: 0.45, y: 0.25), CGPoint(x: 0.55, y: 0.28),
+                     CGPoint(x: 0.65, y: 0.35), CGPoint(x: 0.45, y: 0.40)], eyeHeight: 0.008)
+let turned = face([CGPoint(x: 0.25, y: 0.35), CGPoint(x: 0.35, y: 0.28), CGPoint(x: 0.45, y: 0.25), CGPoint(x: 0.55, y: 0.28),
+                   CGPoint(x: 0.65, y: 0.35), CGPoint(x: 0.45, y: 0.40)], nose: 0.56)
+check(smiling.map { $0.smile > 0.8 && $0.eyes > 0.8 && $0.facing > 0.95 } == true && talking.map { $0.smile < 0.1 } == true,
+      "a wide mouth with its corners up is a smile; a narrow open mouth is not", "\(String(describing: smiling)) \(String(describing: talking))")
+check(blinking.map { $0.eyes < 0.15 && $0.score < 0.4 * smiling!.score } == true && turned.map { $0.facing < 0.1 && $0.score < smiling!.score } == true,
+      "closed eyes rule a frame out, and a face turned away scores lower")
+check(FaceLook.measure(lips: [], leftEye: [], rightEye: [], nose: [], quality: 1, face: .zero) == nil, "a face without landmarks is not measured")
+
+let framesTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 10), TimelineSegment(start: 20, end: 30)])
+check(FrameAnalyzer.edited(5, in: framesTimeline) == 5 && FrameAnalyzer.edited(25, in: framesTimeline) == 15
+          && FrameAnalyzer.edited(15, in: framesTimeline) == nil && FrameAnalyzer.edited(9.95, in: framesTimeline) == nil
+          && FrameAnalyzer.edited(20.05, in: framesTimeline) == nil,
+      "a source time maps to its edited time; cut footage and frames next to a cut are left out")
+equal(FrameAnalyzer.pick([(1, 0.9), (2, 0.95), (5, 0.5), (9, 0.8)], count: 3, spacing: 3), [1, 3, 2],
+      "the best moments are picked first, at least the spacing apart")
+
+let framesFolder = scratch.appendingPathComponent("frames-test", isDirectory: true)
+let nearFrames = try await FrameAnalyzer.frames(["-ss", "0.5", "-t", "1", "-i", subjectClip.path, "-an", "-vf", "fps=10,scale=320:-2,showinfo"],
+                                                into: framesFolder, start: 0.5)
+check(nearFrames.count >= 9 && abs((nearFrames.first?.source ?? 0) - 0.5) < 0.06 && abs(nearFrames[min(5, nearFrames.count - 1)].source - 1.0) < 0.06
+          && nearFrames.allSatisfy { FileManager.default.fileExists(atPath: $0.url.path) },
+      "frames are read with their source times", "\(nearFrames.map(\.source))")
+let keyFrames = try await FrameAnalyzer.frames(["-skip_frame", "nokey", "-i", subjectClip.path, "-an", "-vf", "showinfo", "-fps_mode", "passthrough"],
+                                               into: framesFolder.appendingPathComponent("keys"))
+check(keyFrames.first.map { abs($0.source) < 0.01 } == true, "key frames are read with their times", "\(keyFrames.map(\.source))")
+check(try await FrameAnalyzer.analyze(subjectItem).isEmpty, "a recording with no face gives no suggestions")
+
+var framesRequest = address(thumbnailer)
+framesRequest["method"] = "analyze"; framesRequest["kind"] = "thumbnailFrames"; framesRequest["clip"] = subjectItem.id.uuidString
+framesRequest["requestID"] = "frames-1"
+let framesStarted = agentResult(await agentCall(thumbnailer, framesRequest))
+let framesJob = try await waitForJob(thumbnailer, framesStarted["id"] as? String ?? "")
+let framesResult = framesJob["result"] as? [String: Any] ?? [:]
+check(framesJob["status"] as? String == "succeeded" && framesResult["kind"] as? String == "thumbnailFrames"
+          && (framesResult["suggestions"] as? [Any])?.isEmpty == true && (framesResult["note"] as? String)?.contains("no face") == true,
+      "an agent asks for thumbnail frames as a job, and hears when there is no face", "\(framesJob)")
+framesRequest["requestID"] = "frames-2"; framesRequest["limit"] = 30
+check(((await agentCall(thumbnailer, framesRequest))["error"] as? [String: Any])?["message"] as? String == "limit for thumbnailFrames is from 1 to 20.",
+      "too many frames is refused")
+
+print("\nAgents Manual")
+let manualReply = agentResult(await agentCall(thumbnailer, ["method": "manual"]))
+let manualText = manualReply["text"] as? String ?? ""
+check(manualText.hasPrefix("# YamVideo Agents Manual") && manualText.contains("thumbnailFrames") && manualText.contains("revision_conflict")
+          && FileManager.default.fileExists(atPath: manualReply["path"] as? String ?? ""),
+      "an agent reads the Agents Manual from the app", String(manualText.prefix(80)))
+let manualCatalog = AgentCatalog.current
+check(manualCatalog.methods.first?.method == "manual" && manualCatalog.workflow.first?.contains("manual") == true
+          && AppModel.agentMethods.contains("manual"),
+      "the catalog sends agents to the manual first")
+check(manualCatalog.methods.first { $0.method == "analyze" }.map { "\($0)".contains("thumbnailFrames") } == true,
+      "the catalog lists thumbnailFrames")
+check(AgentsManual.brief(ctl: "/x/yamvideoctl").contains("/x/yamvideoctl manual") && AgentsManual.brief(ctl: nil).contains("yamvideo_manual"),
+      "the brief for an agent names how to read the manual")
 
 
 // MARK: - End screen
@@ -6256,6 +6403,23 @@ check(ssState?["offset"] as? Double == 1.5 && (ssState?["layouts"] as? [[String:
       "state shows the screen, its layouts and where its footage covers the recording", "\(ssState ?? [:])")
 let ssComposed = agentResult(await agentCall(ssAgent, ["method": "preview", "clip": ssClipText, "time": 5.5, "composed": true]))
 check((ssComposed["path"] as? String).map { FileManager.default.fileExists(atPath: $0) } == true, "a composed preview draws the layout", "\(ssComposed)")
+// A thumbnail cuts the speaker out of their own picture, also where the layout shows the screen.
+func imageDifference(_ a: CGImage, _ b: CGImage) -> Double {
+    guard a.width == b.width, a.height == b.height else { return .infinity }
+    var total = 0, count = 0
+    for y in stride(from: 4, to: a.height - 4, by: max(1, a.height / 40)) { for x in stride(from: 4, to: a.width - 4, by: max(1, a.width / 60)) {
+        let p = rgb(a, x, y), q = rgb(b, x, y); total += abs(p.0 - q.0) + abs(p.1 - q.1) + abs(p.2 - q.2); count += 3
+    } }
+    return Double(total) / Double(max(1, count))
+}
+let ssThumbClip = ProjectClip(ssAgent.items[0])
+var ssThumbSpeakerClip = ssThumbClip; ssThumbSpeakerClip.screen = nil
+let ssThumbFrame = try await ssAgent.thumbnailSources(ssThumbClip, at: 5.5, cutout: false).frame
+let ssThumbSpeakerFrame = try await ssAgent.composedFrame(ssThumbSpeakerClip, at: 5.5, settings: ssAgent.settings, graphics: false).image
+let ssThumbLayoutFrame = try await ssAgent.composedFrame(ssThumbClip, at: 5.5, settings: ssAgent.settings, graphics: false).image
+check(imageDifference(ssThumbFrame, ssThumbSpeakerFrame) < 2 && imageDifference(ssThumbFrame, ssThumbLayoutFrame) > 8,
+      "a thumbnail's frame is the speaker's own picture, also in a part that shows the screen",
+      String(format: "against the speaker %.1f, against the layout %.1f", imageDifference(ssThumbFrame, ssThumbSpeakerFrame), imageDifference(ssThumbFrame, ssThumbLayoutFrame)))
 let ssRemove = await ssApply("ss-remove", [["type": "removeLayout", "clipID": ssClipText, "layoutID": ssNewID]])
 check(ssRemove["ok"] as? Bool == true && ssAgent.items[0].screen?.spans.count == 2, "removeLayout removes one layout", "\(ssRemove)")
 let ssGone = await ssApply("ss-gone", [["type": "removeScreen", "clipID": ssClipText]])

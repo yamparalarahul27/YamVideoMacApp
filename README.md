@@ -202,7 +202,7 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Move and resize graphics** | In **Preview**, click a graphic on the picture to select it, drag it to move it, or drag a corner to resize it. It snaps to the title-safe area, the centre lines, its own place, and the column or panel; hold ⌥ to place it freely. ⌥ arrow keys nudge it. The inspector has **Across**, **Down**, **Size %** and **Reset Position**. Exports draw it where you put it |
 | **Export with graphics** | Export draws a recording's graphics into the video, with the picture sliding aside under each panel exactly as **Preview** shows it. The first time, the Export sheet's **Graphics** section offers **Download HyperFrames…** (a free renderer and the browser it draws with, about 220 MB, once). Each graphic is drawn once and reused until it changes, so later exports are quicker. Untick **Draw graphics into the video** to export without them. Movies leave graphics out for now |
 | **Publish to YouTube** | **Publish…** in the toolbar keeps the title, description, tags, category, chapters and thumbnail with the recording, counts them against YouTube's limits as you type, and previews the watch page and a search result. **Suggest from Markers and Graphics** makes chapters from named markers and panel graphics; they follow their footage when you cut. **Export for YouTube…** writes the MP4, the captions as an SRT timed on the edited video, a 1280×720 thumbnail under 2 MB, and a text file with everything to paste into YouTube Studio |
-| **Make a thumbnail** | In **Publish…**, **Make Thumbnail…** takes a frame, cuts you out with Apple Vision and puts a big title (words between asterisks in the accent colour), a tag and an optional product photo beside you, with a white outline and a darker or blurred background. The live preview shows it large and at YouTube's search size; **Save Thumbnail** makes the 1280×720 PNG next to the recording and uses it for the video |
+| **Make a thumbnail** | In **Publish…**, **Make Thumbnail…** takes a frame, cuts you out with Apple Vision and puts a big title (words between asterisks in the accent colour, or on a band of it with **Highlight**), a tag and an optional picture beside you, with a white outline of the width you choose and a darker, blurred, plain or white background. **Suggest Frames** finds the moments where you smile, look at the camera and have your eyes open; click one to use it. **Place: Clear of the title** moves you to the far side so nothing overlaps. With a screen recording, the maker uses your own picture at every moment. The live preview shows it large and at YouTube's search size; **Save Thumbnail** makes the 1280×720 PNG next to the recording and uses it for the video |
 | **End screen for YouTube** | In the inspector's **Graphics** section (or **Publish…**), **End Screen** keeps the last 5–20 seconds for YouTube's end screen: you move into a half-size frame over a blurred copy of the picture, and empty, marked boxes stay where YouTube puts its Subscribe circle and one or two video cards, so nothing covers them. Drag its block on the timeline to choose where it starts; it always runs to the end. In **Publish…**, choose what goes in each box (Subscribe or another channel; Best for viewer, Most recent upload, a chosen video or a playlist). YouTube's upload cannot place these, so **Export for YouTube…** writes each element and its box into the upload text for YouTube Studio's End screen editor |
 | **Auto edit a talking head** | **Auto Edit…** in the toolbar (⇧⌘E) keeps your answers with the project: the transcript model (Large v3 Turbo, or Base for English) and language, how tight to cut, what to do with captions, and whether to normalise loudness to -14 LUFS. **Auto Edit** transcribes the recording on this Mac with whisper.cpp (`brew install whisper-cpp`; the model downloads once, when you click), cuts pauses and, with **Tight**, the “um”s, repeated words and restarts found in the transcript, and sets captions and loudness, all as one undo step. **Review each cut** lists the cuts to listen to and choose first. Agents read and follow the same answers |
 | **Captions** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector; a transcribed recording gets captions from what is said, without the words you cut. **Use** chooses **SRT for upload** (they go up beside the video with Export for YouTube), **Burn in and SRT**, or **None**. Choose where burned-in captions sit and how big they are. SRT, VTT and transcript captions follow cuts and speed changes |
@@ -373,6 +373,14 @@ Mac: the app listens only on a private socket that other users cannot reach. See
 [Tools/YamVideoCLI/README.md](Tools/YamVideoCLI/README.md), and run
 `Tools/YamVideoCLI/demo.sh` with a recording open to watch two clients edit at once.
 
+**Agents Manual.** Every agent starts with `yamvideoctl manual` (the MCP tool
+`yamvideo_manual`): the rules for work with you and a recipe for each common job, from a
+first edit to the thumbnail and Export for YouTube. Its source is
+[Resources/AgentsManual.md](Resources/AgentsManual.md), and the app serves the copy built
+into it. In the **Local agents** panel (and the Help menu), **Agents Manual** opens it and
+**Copy Brief for an Agent** copies a short brief to paste into Claude, Codex or another
+agent, so it starts the right way.
+
 Everything in the editor is open to agents: sections, crop, blur areas, zooms,
 whole-frame blur effects, markers, colour, the movie and export. An agent does not need
 to know the app in advance. `yamvideoctl catalog` (the MCP tool `yamvideo_describe`)
@@ -418,6 +426,8 @@ Sources/
   ScreenEditing.swift / ScreenAgents.swift / ScreenView.swift screen actions, agent commands, the Screen section and Layout lane
   GraphicsEditing.swift / GraphicsInspector.swift / GraphicsOverlay.swift graphics actions, inspector and preview layer
   AgentCatalog.swift every agent command described for agents, served by `catalog`
+  AgentsManual.swift the Agents Manual (Resources/AgentsManual.md), served by `manual`, and the brief for an agent
+  FrameSuggestions.swift Suggest Frames: Apple Vision smile, face and eye scores for thumbnail moments
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
   ProjectCommandDispatcher.swift revisions, gestures, shared undo, sessions, change feed
   AgentProtocol.swift wire types and socket helpers shared with yamvideoctl

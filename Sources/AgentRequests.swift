@@ -256,7 +256,8 @@ struct AgentSessionInfo: Encodable {
     var interactionInProgress: Bool
     var methods: [String]
     var commands: [String]
-    var analyzeKinds = ["silence", "zooms", "screenZooms"]
+    var analyzeKinds = AgentSessionInfo.analyzeKinds
+    static let analyzeKinds = ["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames"]
     var exportScopes = ["recording", "movie"]
     var timeSpaces = ["recording", "movie"]
 }
@@ -564,7 +565,7 @@ struct AgentSaveResult: Encodable {
 
 @MainActor
 extension AppModel {
-    static let agentMethods = ["catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
+    static let agentMethods = ["manual", "catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
                                "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit"]
 
     /// Answers one request line with one response line. Never throws: every failure is
@@ -585,6 +586,10 @@ extension AppModel {
             return agentResponse(.success(AgentSessions(sessions: [agentSessionInfo(instanceID)])), instanceID)
         case "catalog":
             return agentResponse(.success(AgentCatalog.current), instanceID)
+        case "manual":
+            return agentResponse(AgentsManual.text.map { AgentsManual.Reply(text: $0, path: AgentsManual.url?.path) }
+                .map(Result<AgentsManual.Reply, EditError>.success)
+                ?? .failure(EditError(code: .missingMedia, message: "The Agents Manual is missing from this build.")), instanceID)
         case "state":
             if let refusal = checkSession(request, required: false) { return agentResponse(Result<AgentEmpty, EditError>.failure(refusal), instanceID) }
             return agentResponse(.success(agentState()), instanceID)
@@ -1069,9 +1074,10 @@ extension AppModel {
             } catch {
                 throw EditError.invalid("publish: title, description, language and channel are text; tags is a list of text; "
                     + "category is one of \(YouTubeCategory.allCases.map(\.rawValue).joined(separator: ", ")); chapters is a list of "
-                    + "{time, title}; thumbnail is a path to an image; design has time, title, tag, accent, image, cutout, outline, "
+                    + "{time, title}; thumbnail is a path to an image; design has time, title, highlight, tag, accent, image, cutout, outline, outlineWidth, "
                     + "side (\(ThumbnailDesign.Side.allCases.map(\.rawValue).joined(separator: ", "))), background "
-                    + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))) and zoom; endScreen has circle "
+                    + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))), zoom and place "
+                    + "(\(ThumbnailDesign.Place.allCases.map(\.rawValue).joined(separator: ", "))); endScreen has circle "
                     + "(\(EndScreenElements.Circle.allCases.map(\.rawValue).joined(separator: ", "))), channel, message and videos, a list of "
                     + "{kind (\(EndScreenElements.Kind.allCases.map(\.rawValue).joined(separator: ", "))), link, title}.")
             }
@@ -1707,8 +1713,33 @@ extension AppModel {
                 }
                 return try JSONValue.from(AutoEditResult(plan, applied: false, transcribed: false, note: note))
             })
+        case "thumbnailFrames":
+            let count = request.limit ?? 8
+            guard (1...20).contains(count) else { return .failure(.invalid("limit for thumbnailFrames is from 1 to 20.")) }
+            let directory = agentArtifactsDirectory
+            return .success(startJob(kind: "analyze", clip: clipID, origin: agentOrigin(request)) {
+                let suggestions = try await FrameAnalyzer.analyze(item, count: count)
+                struct Suggestion: Encodable {
+                    var time: Double; var sourceTime: Double; var score: Double
+                    var smile: Double; var quality: Double; var eyes: Double; var facing: Double; var face: WireRect
+                }
+                struct Frames: Encodable { var kind = "thumbnailFrames"; var suggestions: [Suggestion]; var sheet: String?; var note: String? }
+                var sheet: String?
+                if let picture = FrameAnalyzer.sheet(suggestions), let png = NSBitmapImageRep(cgImage: picture).representation(using: .png, properties: [:]) {
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                    let file = directory.appendingPathComponent("frames-\(clipID.uuidString.prefix(8))-\(UUID().uuidString.prefix(6)).png")
+                    try png.write(to: file, options: .atomic)
+                    sheet = file.path
+                }
+                func round(_ value: Double) -> Double { (value * 1000).rounded() / 1000 }
+                return try JSONValue.from(Frames(suggestions: suggestions.map {
+                    Suggestion(time: round($0.time), sourceTime: round($0.source), score: round($0.look.score), smile: round($0.look.smile),
+                               quality: round($0.look.quality), eyes: round($0.look.eyes), facing: round($0.look.facing), face: WireRect($0.look.face))
+                }, sheet: suggestions.isEmpty ? nil : sheet,
+                   note: suggestions.isEmpty ? "Apple Vision found no face in the kept footage." : nil))
+            })
         default:
-            return .failure(.invalid("kind must be \"silence\", \"zooms\" or \"autoEdit\"."))
+            return .failure(.invalid("kind must be one of: \(AgentSessionInfo.analyzeKinds.joined(separator: ", "))."))
         }
     }
 

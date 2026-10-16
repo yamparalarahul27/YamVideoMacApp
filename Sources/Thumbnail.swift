@@ -15,8 +15,15 @@ struct ThumbnailDesign: Codable, Equatable {
         var id: String { rawValue }
         var label: String { self == .auto ? "Away from the speaker" : rawValue.capitalized }
     }
+    /// Where the cut-out speaker goes: where the frame has them, or moved (and made smaller
+    /// when it must) to the far side, clear of the title, the tag and the picture.
+    enum Place: String, Codable, CaseIterable, Identifiable {
+        case frame, clear
+        var id: String { rawValue }
+        var label: String { self == .frame ? "As recorded" : "Clear of the title" }
+    }
     enum Background: String, Codable, CaseIterable, Identifiable {
-        case frame, dim, blur, solid
+        case frame, dim, blur, solid, white
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -24,14 +31,17 @@ struct ThumbnailDesign: Codable, Equatable {
             case .dim: return "Darker"
             case .blur: return "Blurred"
             case .solid: return "Plain"
+            case .white: return "White"
             }
         }
     }
 
     /// The frame, in edited-recording seconds.
     var time: Double = 0
-    /// One to three lines; words between asterisks (*like this*) take the accent colour.
+    /// One to three lines; words between asterisks (*like this*) take the accent colour,
+    /// or with `highlight` sit on a band of it in dark text.
     var title = ""
+    var highlight = false
     /// A short label in the accent colour above the title.
     var tag = ""
     /// A colour like #F5C42C; nil uses the recording's graphics accent.
@@ -40,22 +50,26 @@ struct ThumbnailDesign: Codable, Equatable {
     var image: URL?
     /// Cut the speaker out with Apple Vision, so the background can change behind them.
     var cutout = true
-    /// A white outline round the cut-out.
+    /// A white outline round the cut-out, and its width in pixels of a 1920×1080 frame.
     var outline = true
+    var outlineWidth = 9.0
     /// Where the title goes.
     var side = Side.auto
     var background = Background.dim
-    /// How big the speaker is, growing up from the bottom of the frame: 1 to 1.6.
+    /// How big the speaker is, growing up from the bottom of the frame: 1 to 1.6. With
+    /// `place` clear, the speaker can be smaller, so that nothing overlaps.
     var zoom = 1.0
+    var place = Place.frame
 
     static let zooms = 1.0...1.6
+    static let outlineWidths = 2.0...16.0
     static let titleLimit = 90
     static let tagLimit = 24
 
     init(time: Double = 0, title: String = "") { self.time = time; self.title = title }
 
     private enum CodingKeys: String, CodingKey {
-        case time, title, tag, accent, image, cutout, outline, side, background, zoom
+        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight
     }
 
     /// Missing keys keep their defaults; `image` is a plain path, as for the thumbnail.
@@ -75,6 +89,9 @@ struct ThumbnailDesign: Codable, Equatable {
         side = try c.decodeIfPresent(Side.self, forKey: .side) ?? defaults.side
         background = try c.decodeIfPresent(Background.self, forKey: .background) ?? defaults.background
         zoom = try c.decodeIfPresent(Double.self, forKey: .zoom) ?? defaults.zoom
+        place = try c.decodeIfPresent(Place.self, forKey: .place) ?? defaults.place
+        outlineWidth = try c.decodeIfPresent(Double.self, forKey: .outlineWidth) ?? defaults.outlineWidth
+        highlight = try c.decodeIfPresent(Bool.self, forKey: .highlight) ?? defaults.highlight
     }
 
     func encode(to encoder: Encoder) throws {
@@ -89,6 +106,9 @@ struct ThumbnailDesign: Codable, Equatable {
         try c.encode(side, forKey: .side)
         try c.encode(background, forKey: .background)
         try c.encode(zoom, forKey: .zoom)
+        try c.encode(place, forKey: .place)
+        try c.encode(outlineWidth, forKey: .outlineWidth)
+        try c.encode(highlight, forKey: .highlight)
     }
 
     /// The first thing that cannot be stored, saying what is allowed; nil when all is well.
@@ -104,6 +124,7 @@ struct ThumbnailDesign: Codable, Equatable {
             return "The thumbnail accent is a colour like #F5C42C."
         }
         guard zoom.isFinite, Self.zooms.contains(zoom) else { return "The speaker's size is from 1 to 1.6." }
+        guard outlineWidth.isFinite, Self.outlineWidths.contains(outlineWidth) else { return "The outline's width is from 2 to 16 pixels." }
         if let image, !image.isFileURL { return "The thumbnail's image must be a local file." }
         return nil
     }
@@ -144,6 +165,29 @@ enum SpeakerCutout {
         guard maxX >= minX, maxY >= minY else { return nil }
         return CGRect(x: minX, y: minY, width: maxX - minX + 2, height: maxY - minY + 2)
     }
+
+    /// The head: the opaque part of the top 30 % of the speaker's box (top-left origin).
+    /// A clear place keeps it inside the thumbnail.
+    static func headBox(_ image: CGImage, box: CGRect) -> CGRect? {
+        let band = CGRect(x: box.minX, y: box.minY, width: box.width, height: max(2, box.height * 0.3)).integral
+            .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !band.isEmpty, let part = image.cropping(to: band), let found = opaqueBox(part) else { return nil }
+        return found.offsetBy(dx: band.minX, dy: band.minY)
+    }
+
+    /// The speaker's outline as boxes, one for each of `count` bands of rows of the box
+    /// (bands with nothing in them are left out). A clear place keeps each band clear of
+    /// the title by its own width, so wide shoulders below the title do not push the head away.
+    static func bands(_ image: CGImage, box: CGRect, count: Int = 24) -> [CGRect] {
+        let picture = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        let step = box.height / Double(count)
+        return (0..<count).compactMap { index in
+            let band = CGRect(x: box.minX, y: box.minY + Double(index) * step, width: box.width, height: step).integral
+                .intersection(picture)
+            guard !band.isEmpty, let part = image.cropping(to: band), let found = opaqueBox(part) else { return nil }
+            return found.offsetBy(dx: band.minX, dy: band.minY)
+        }
+    }
 }
 
 // MARK: - Drawing
@@ -162,8 +206,10 @@ enum ThumbnailMaker {
     struct Media {
         var frame: String
         var cutout: String?
-        /// The speaker's box in the frame's pixels, and the frame's width.
+        /// The speaker's box, head and outline bands in the frame's pixels, and the frame's width.
         var box: CGRect?
+        var head: CGRect?
+        var bands: [CGRect] = []
         var width: Double
     }
 
@@ -180,7 +226,9 @@ enum ThumbnailMaker {
             return "media/" + file
         }
         return Media(frame: try write(sources.frame, "frame"), cutout: try sources.cutout.map { try write($0.image, "speaker") },
-                     box: sources.cutout?.box, width: Double(sources.frame.width))
+                     box: sources.cutout?.box, head: sources.cutout.flatMap { SpeakerCutout.headBox($0.image, box: $0.box) },
+                     bands: sources.cutout.map { SpeakerCutout.bands($0.image, box: $0.box) } ?? [],
+                     width: Double(sources.frame.width))
     }
 
     /// The engine's data for a design. The side is decided here: away from the speaker
@@ -188,11 +236,18 @@ enum ThumbnailMaker {
     static func pageData(_ design: ThumbnailDesign, media: Media, accent: String, folder: URL) throws -> Data {
         let scale = 1920 / media.width
         var speaker: JSONValue = .null
+        var head: JSONValue = .null
+        var bands: JSONValue = .array([])
         var cutout: JSONValue = .null
+        func rect(_ box: CGRect) -> JSONValue {
+            .object(["x": .number(box.minX * scale), "y": .number(box.minY * scale),
+                     "w": .number(box.width * scale), "h": .number(box.height * scale)])
+        }
         if design.cutout, let file = media.cutout, let box = media.box {
             cutout = .string(file)
-            speaker = .object(["x": .number(box.minX * scale), "y": .number(box.minY * scale),
-                               "w": .number(box.width * scale), "h": .number(box.height * scale)])
+            speaker = rect(box)
+            if let box = media.head { head = rect(box) }
+            bands = .array(media.bands.map(rect))
         }
         var side = design.side
         if side == .auto {
@@ -209,9 +264,10 @@ enum ThumbnailMaker {
             image = .string("media/" + name)
         }
         let root: JSONValue = .object([
-            "frame": .string(media.frame), "cutout": cutout, "speaker": speaker,
+            "frame": .string(media.frame), "cutout": cutout, "speaker": speaker, "head": head, "bands": bands, "place": .string(design.place.rawValue),
             "title": .string(design.title), "tag": .string(design.tag), "accent": .string(design.accent ?? accent),
-            "image": image, "outline": .bool(design.outline), "side": .string(side.rawValue),
+            "image": image, "outline": .bool(design.outline), "outlineWidth": .number(design.outlineWidth),
+            "highlight": .bool(design.highlight), "side": .string(side.rawValue),
             "background": .string(design.background.rawValue), "zoom": .number(design.zoom),
         ])
         let encoder = JSONEncoder()
@@ -244,8 +300,12 @@ enum ThumbnailMaker {
 extension AppModel {
     /// The frame at `time` as Preview shows it, without the graphics, and the speaker cut
     /// out of it. Cut-outs are kept by the frame's content, so the same frame is cut once.
+    /// With a screen recording, the frame is the speaker's own picture (as in the Speaker
+    /// layout) at every moment, so a smile in a part that shows the screen can be used.
     func thumbnailSources(_ clip: ProjectClip, at time: Double, cutout: Bool) async throws -> ThumbnailMaker.Sources {
-        let frame = try await composedFrame(clip, at: time, settings: settings, graphics: false).image
+        var speaker = clip
+        speaker.screen = nil
+        let frame = try await composedFrame(speaker, at: time, settings: settings, graphics: false).image
         guard cutout else { return ThumbnailMaker.Sources(frame: frame) }
         guard let pixels = frame.dataProvider?.data as Data? else { return ThumbnailMaker.Sources(frame: frame) }
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
