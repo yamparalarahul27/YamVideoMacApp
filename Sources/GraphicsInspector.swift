@@ -137,6 +137,7 @@ struct GraphicsSection: View {
                 .disabled(count == 0)
             }
             .controlSize(.small)
+            BrandFinderView(item: item)
             if count > 0 {
                 Picker("Look", selection: styleBinding(\.look)) {
                     ForEach(GraphicsLook.allCases) { Text($0.label).tag($0) }
@@ -348,7 +349,7 @@ private struct ImageField: View {
             Spacer(minLength: 4)
             Button("Choose…") {
                 let panel = NSOpenPanel()
-                panel.allowedContentTypes = [.png, .jpeg, .webP, .heic]
+                panel.allowedContentTypes = [.png, .jpeg, .webP, .heic, .svg]
                 panel.directoryURL = URL(fileURLWithPath: path).deletingLastPathComponent()
                 if panel.runModal() == .OK, let url = panel.url { onChoose(url.path) }
             }

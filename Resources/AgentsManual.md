@@ -176,14 +176,53 @@ edit, and each edit becomes one undo step with your name on it.
   before you export. Export it with `export --short` (with `--youtube` for the upload
   files).
 
-### 4.9 Export for YouTube
+### 4.9 Brand logos
+
+When the speaker names a brand (Figma, Claude, an app), a logo badge can show the brand's
+logo next to the speaker for about 2 seconds. The app finds the names and places the
+badges; you choose with the owner.
+
+1. Fix brand names in the transcript first (section 4.3), so the app can find them.
+2. Run `yamvideoctl analyze --kind logos --clip ID` (then `job ID --wait`). The result
+   gives:
+   - `mentions`: each name, its words and times. `source` is `library` (the owner has a
+     logo), `known` (a brand of the app's list) or `guess` (a word shaped like a name,
+     such as a capital inside a sentence). A guess can be a person or a common word:
+     check it.
+   - `missing`: the names without a logo yet.
+   - `suggestions`: a `logoBadge` graphic for each name with a logo, ready for
+     `addGraphic`. Names said within 1.2 s share one badge. A logo said again within
+     60 s gets no new badge (`--minimum SECONDS` changes this). A badge ends before a
+     layout change, so it does not float after the speaker moves.
+3. For each missing name, ask the owner for the logo, or draw a clear, simple one that
+   you are sure of (a transparent PNG or an SVG). An app's own icon on the Mac
+   (`/Applications/NAME.app`) is a good source. Do not invent a logo: tell the owner which
+   brands you could not draw and ask for those files. Keep each logo with
+   `yamvideoctl setlogo --name BRAND --path FILE [--words "a, b"]`, and show the owner
+   each logo you keep. The library is kept for every project, so the next video uses it
+   again. `yamvideoctl logos` lists it.
+4. Run the analysis again. Show the owner the plan (each brand, its time, where the badge
+   sits) and frames from `preview --composed` and `preview --short`.
+5. After a yes, apply the badges in one `apply` with a clear label (for example "Logo
+   badges"), then save.
+
+Where a badge sits: the app works it out from the layout at that moment. When the speaker
+fills the frame, it goes beside the face; beside the bubble in the Screen layout; at the
+foot of the speaker's panel side by side. In a Short it goes beside the face, inside
+YouTube's clear area, with the logos only (the captions say the names). Badges in a Short's
+part of the video show in the Short too. Do not set `props.spot`: the app writes it. Use
+`transform` only to nudge a badge.
+
+The owner can do the same in the app: Graphics section → Find Brands.
+
+### 4.10 Export for YouTube
 
 - Ask the owner first. Then `export --youtube --path FOLDER --clip ID`. It writes the
   MP4, the captions as an SRT, a 1280×720 thumbnail, the upload text and a JSON.
 - YouTube's upload API cannot set end screen elements. The export says which element
   goes in which box, for YouTube Studio.
 
-### 4.10 Ideas
+### 4.11 Ideas
 
 The Library keeps the owner's ideas, apart from any project. Each idea has a title,
 notes, a topic, links and images. A project made from an idea is linked to it, and the

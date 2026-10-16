@@ -268,7 +268,7 @@ Commands: `addIdea`, `updateIdea`, `removeIdea`, `addIdeaImages`, `removeIdeaIma
 nothing. A retry is matched on the whole request with sorted keys, so a new yamvideoctl
 process retrying is still recognised. `yamvideoctl library [apply|undo|redo]`, MCP tools
 `yamvideo_get_library`, `yamvideo_apply_library`, `yamvideo_library_undo` and `_redo`,
-and recipe 4.10 in the Agents Manual (plus rule 10: never post).
+and recipe 4.11 in the Agents Manual (plus rule 10: never post).
 
 **Checks.** `./test.sh library` (61 checks; the whole suite is 1477). `Tools/Snapshot` renders the Ideas pages with
 `YAMVIDEO_SNAPSHOT_ONLY=ideas` (16a–16e); the toolbar does not show in snapshots, as

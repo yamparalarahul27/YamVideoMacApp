@@ -157,6 +157,7 @@ server.registerTool("yamvideo_render_preview", {
     cropped: z.boolean().optional(),
     short: id.optional().describe("One of the recording's Shorts (state.clips[].shorts[].id): draws it 1080×1920 as its viewer shows it, graphics and captions laid out for 9:16, with each graphic's box. time is then seconds into the Short."),
     furniture: z.boolean().optional().describe("With short: draw YouTube's Shorts player over the frame (top icons, like and share rail, channel and title) and dash the clear area, to see what a phone covers."),
+    draft: z.array(z.record(z.any())).optional().describe("Graphics to draw in this preview only, never stored ({kind, start, end, props}, as in addGraphic; with composed or short). Use it to show the owner a plan before you apply it."),
     original: z.boolean().optional().describe("Leave the recording's colour correction out."),
     expectedRevision: z.number().int().nonnegative().optional().describe("Refuse if the project is no longer at this revision."),
     attachImage: z.boolean().optional().describe("Include the PNG in the result (default true)."),
@@ -177,18 +178,44 @@ server.registerTool("yamvideo_render_preview", {
 
 server.registerTool("yamvideo_analyze", {
   title: "Analyze a recording",
-  description: "Start a background job: \"silence\" proposes cuts (and the resulting sections) from audio levels; \"autoEdit\" proposes the cuts the owner's cut style makes, pauses and stumbles from the transcript, each with its reasons; \"zooms\" proposes zooms from local visual activity, \"screenZooms\" the same on the screen recording; \"thumbnailFrames\" finds the best moments for the thumbnail (a smile, eyes open, facing the camera) with a contact sheet PNG to look at. Nothing is applied — apply chosen results with yamvideo_apply_edits. Poll with yamvideo_get_job.",
+  description: "Start a background job: \"silence\" proposes cuts (and the resulting sections) from audio levels; \"autoEdit\" proposes the cuts the owner's cut style makes, pauses and stumbles from the transcript, each with its reasons; \"zooms\" proposes zooms from local visual activity, \"screenZooms\" the same on the screen recording; \"thumbnailFrames\" finds the best moments for the thumbnail (a smile, eyes open, facing the camera) with a contact sheet PNG to look at; \"logos\" finds the brand and company names said in the transcript, lists those without a logo yet (ask the owner for a file, then yamvideo_set_logo), and suggests a logoBadge graphic next to the speaker for each name with a logo. Nothing is applied — apply chosen results with yamvideo_apply_edits. Poll with yamvideo_get_job.",
   inputSchema: {
-    sessionID: address.sessionID, projectID: address.projectID, clip: id, kind: z.enum(["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames"]),
+    sessionID: address.sessionID, projectID: address.projectID, clip: id, kind: z.enum(["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames", "logos"]),
     limit: z.number().int().min(1).max(20).optional().describe("For thumbnailFrames: how many moments (default 8)."),
     style: z.enum(["tight", "natural", "review"]).optional().describe("For autoEdit: a cut style other than the owner's."),
     threshold: z.number().optional().describe("Silence threshold in dB (default -40)."),
-    minimum: z.number().positive().optional().describe("Shortest pause to cut, seconds (default 0.8)."),
+    minimum: z.number().nonnegative().optional().describe("Silence: shortest pause to cut, seconds (default 0.8). Logos: seconds between two badges of one logo (default 60)."),
     padding: z.number().nonnegative().optional().describe("Audio kept either side of a cut, seconds (default 0.15)."),
     requestID,
   },
   annotations: { readOnlyHint: true, openWorldHint: false },
 }, async (args) => result(await request("analyze", args)));
+
+server.registerTool("yamvideo_logos", {
+  title: "List the owner's logos",
+  description: "The owner's logo library, kept for every project: each brand's name, the words that say it, and its image's path. analyze with kind logos uses it.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async () => result(await request("logos", {})));
+
+server.registerTool("yamvideo_set_logo", {
+  title: "Keep a logo in the library",
+  description: "Add a brand's logo to the owner's library, or replace the one of the same name: the app keeps a copy of the file. Use only a logo the owner gave, or a clear, simple one you are sure of (never invent one), and show the owner each logo you keep.",
+  inputSchema: {
+    name: z.string().min(1).max(40).describe("The brand, as the badge's label shows it: Next.js, Apple Watch."),
+    path: z.string().describe("A local PNG (transparent), JPEG, SVG, WebP or HEIC file."),
+    words: z.array(z.string().min(1).max(40)).min(1).max(8).optional().describe("What the speaker says for it, matched without case. Default: the name."),
+    requestID,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+}, async (args) => result(await request("setLogo", args)));
+
+server.registerTool("yamvideo_remove_logo", {
+  title: "Remove a logo from the library",
+  description: "Remove a brand's logo from the owner's library. A badge that uses it cannot draw until the logo is set again.",
+  inputSchema: { name: z.string().min(1).max(40), requestID },
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+}, async (args) => result(await request("removeLogo", args)));
 
 server.registerTool("yamvideo_transcribe", {
   title: "Transcribe a recording",

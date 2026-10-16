@@ -39,9 +39,11 @@ xcrun swiftc \
 	"$ROOT/Sources/ScreenEditing.swift" \
 	"$ROOT/Sources/ScreenAgents.swift" \
 	"$ROOT/Sources/Graphics.swift" \
+	"$ROOT/Sources/Logos.swift" \
 	"$ROOT/Sources/Shorts.swift" \
 	"$ROOT/Sources/ShortsEditing.swift" \
 	"$ROOT/Sources/ShortsAgents.swift" \
+	"$ROOT/Sources/LogoAgents.swift" \
 	"$ROOT/Sources/EndScreen.swift" \
 	"$ROOT/Sources/GraphicsRender.swift" \
 	"$ROOT/Sources/Publish.swift" \

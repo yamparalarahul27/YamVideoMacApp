@@ -21,6 +21,7 @@
     route: "column", link: "column", endCard: "column",
     panelTitle: "panel", rule: "panel", checklist: "panel",
     endScreen: "screen",
+    logoBadge: "speaker",
   };
   const STAGE = { left: 0, top: 0, width: 1920, height: 1080 };
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
@@ -419,6 +420,47 @@
       { left: layout.frame.x, top: layout.frame.y, width: layout.frame.w, height: layout.frame.h, opacity: 1, duration: PANEL_SLIDE, ease: smooth }, c.at(0));
     c.pop([circle].concat(cards), PANEL_SLIDE + 0.1, 0.12);
     c.up([k.node, title], PANEL_SLIDE + 0.35, 0.12);
+  };
+
+  /**
+   * Where a logo badge goes: `spot` {x, y, alignX, alignY, compact}, the point its alignX
+   * and alignY edges (start, middle or end) go to. The app works it out from where the
+   * layout puts the speaker (LogoSpot in Sources/Logos.swift). Without one: the top right.
+   */
+  const EDGE_SHIFT = { start: 0, middle: -50, end: -100 };
+  function logoSpot(p, short) {
+    const s = (p && p.spot) || {};
+    const edge = (value, fallback) => (EDGE_SHIFT[value] !== undefined ? value : fallback);
+    if (typeof s.x === "number" && isFinite(s.x) && typeof s.y === "number" && isFinite(s.y)) {
+      return { x: s.x, y: s.y, alignX: edge(s.alignX, "start"), alignY: edge(s.alignY, "start"), compact: !!s.compact, vertical: !!s.vertical };
+    }
+    return short ? { x: 888, y: 240, alignX: "end", alignY: "start", compact: true }
+      : { x: 1824, y: 54, alignX: "end", alignY: "start", compact: false };
+  }
+
+  /** A brand's logo next to the speaker: a row of chips, each a logo and its name, each
+   * popping in at its own `at`; one above the other when `spot.vertical`. A Short's compact
+   * chips show the logo alone. */
+  KINDS.logoBadge = function (inner, p, c) {
+    const spot = logoSpot(p, c.short);
+    const row = h("div", { class: "yg-lb-row" + (spot.compact ? " yg-lb-compact" : "") + (p.tone === "dark" ? " yg-lb-dark" : "")
+        + (spot.vertical ? " yg-lb-column yg-lb-x-" + spot.alignX : ""),
+      style: "transform:translate(" + EDGE_SHIFT[spot.alignX] + "%," + EDGE_SHIFT[spot.alignY] + "%);" });
+    const chips = (p.logos || []).slice(0, 3).map((logo) => {
+      const label = !spot.compact && logo.label ? h("span", { text: logo.label }) : null;
+      return { at: Math.max(0, num(logo.at, 0)),
+        node: h("div", { class: "yg-lb-chip" + (label ? "" : " yg-lb-bare") }, h("img", { src: logo.image, alt: "" }), label) };
+    });
+    append(row, chips.map((x) => x.node));
+    append(inner, row);
+    const tl = c.tl;
+    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.01 }, c.at(0));
+    chips.forEach((x) => tl.fromTo(x.node, { opacity: 0, scale: 0.6, y: 14 }, { opacity: 1, scale: 1, y: 0, duration: 0.45, ease: "back.out(1.8)" }, c.at(x.at)));
+    // Out: the chips shrink a little as the badge fades. The row keeps its own transform
+    // (its alignment), so the timeline never touches it.
+    const out = c.at(Math.max(0, c.length - 0.3));
+    if (chips.length) tl.to(chips.map((x) => x.node), { scale: 0.9, duration: 0.3, ease: "power2.in" }, out);
+    tl.to(c.host, { opacity: 0, duration: 0.3, ease: "power2.in" }, out);
   };
 
   KINDS.panelTitle = function (inner, p, c) {
@@ -878,12 +920,12 @@
 
   // ───────────────────────── Timeline ─────────────────────────
 
-  function context(tl, toTime, graphic, host, delayIn, mode) {
+  function context(tl, toTime, graphic, host, delayIn, mode, short) {
     const length = graphic.end - graphic.start;
     const at = (rel) => toTime(graphic.start + rel);
     const end = (rel) => toTime(graphic.end + rel);
     return {
-      tl, host, length, at, mode, ink: pen(seeded(String(graphic.id))),
+      tl, host, length, at, mode, short: !!short, ink: pen(seeded(String(graphic.id))),
       enterColumn() { tl.fromTo(host, { opacity: 0, x: 56 }, { opacity: 1, x: 0, duration: 0.6, ease: "power3.out" }, at(0)); },
       exitColumn() { tl.to(host, { opacity: 0, x: 36, duration: 0.4, ease: "power2.in" }, end(-0.4)); },
       enterPanel() { tl.fromTo(host, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power2.out" }, at(delayIn)); },
@@ -1033,7 +1075,11 @@
       if (short && zone === "screen") continue;   // Shorts have no end screen
       let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
       let scaled = null;
-      if (short) {
+      if (zone === "speaker") {
+        // A point on the canvas, the Short's as well: the badge's own size comes from its chips.
+        const spot = logoSpot(graphic.props, short);
+        rect = { left: spot.x, top: spot.y, width: 0, height: 0 };
+      } else if (short) {
         // The template's zone, scaled into the Short's own zone for it.
         const z = zone === "column" ? short.column : short.panel;
         const size = zone === "column" ? COLUMN : PANEL_MOVE;
@@ -1058,7 +1104,7 @@
       append(container, place);
       places[graphic.id] = { place, host, rect, graphic };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
-      (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode));
+      (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
     }
 
     current = { tl, node: container, plan: p, places, shift, stage };

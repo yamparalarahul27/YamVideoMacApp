@@ -625,9 +625,10 @@ enum GraphicsRender {
 // MARK: - The graphics over an export
 
 extension VideoItem {
-    /// The graphics an export draws under `settings`: none when they are switched off.
+    /// The graphics an export draws under `settings`, logo badges placed next to the
+    /// speaker: none when they are switched off.
     func exportGraphics(_ settings: ExportSettings) -> GraphicsTrack? {
-        settings.drawsGraphics ? graphics : nil
+        settings.drawsGraphics ? placedGraphics : nil
     }
 }
 

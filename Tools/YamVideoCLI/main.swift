@@ -18,8 +18,11 @@ Reading
   yamvideoctl preview --movie --time SECONDS
   yamvideoctl preview --clip ID --short ID --time SECONDS [--furniture]   a Short as its viewer shows it, 1080×1920
                                                  (--furniture: YouTube's Shorts player over it, the clear area dashed)
+  yamvideoctl preview --clip ID --time SECONDS --draft GRAPHICS.json [--short ID]
+                                                 also draw graphics that are not stored, to show the owner a plan
   yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
   yamvideoctl transcript --clip ID                words with source and edited times, captions, stumbles
+  yamvideoctl logos                              the owner's logo library: each brand, its words and its image
   yamvideoctl job JOB [--wait]
   yamvideoctl library                            the owner's ideas: titles, notes, topics, links, images, linked projects
 
@@ -31,7 +34,11 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl export --youtube --path FOLDER --clip ID [--overwrite]   video, captions, thumbnail and upload text
   yamvideoctl export [--youtube] --path OUT.mp4|FOLDER --clip ID --short ID [--overwrite]   a Short, 1080×1920
-  yamvideoctl analyze --kind silence|zooms|screenZooms|autoEdit|thumbnailFrames --clip ID [--style tight|natural|review] [--limit N]
+  yamvideoctl analyze --kind silence|zooms|screenZooms|autoEdit|thumbnailFrames|logos --clip ID [--style tight|natural|review] [--limit N]
+                                                 (logos: the brands said and a logo badge for each; --minimum SECONDS between
+                                                 two badges of one logo, default 60)
+  yamvideoctl setlogo --name BRAND --path FILE [--words "next.js, next js"]   keep a copy of a logo in the library
+  yamvideoctl removelogo --name BRAND
   yamvideoctl transcribe --clip ID [--model large-v3-turbo-q5_0|base.en] [--language CODE]
   yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
                                                  transcribe if needed, cut, set captions and loudness
@@ -296,6 +303,18 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
     case "transcript":
         request["method"] = "transcript"
         request["clip"] = try value("clip")
+    case "logos":
+        request["method"] = "logos"
+    case "setlogo", "setLogo":
+        request["method"] = "setLogo"
+        request["name"] = try value("name")
+        request["path"] = try value("path")
+        if let words = arguments.values["words"] {
+            request["words"] = words.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+    case "removelogo", "removeLogo":
+        request["method"] = "removeLogo"
+        request["name"] = try value("name")
     case "autoedit", "autoEdit":
         request["method"] = "autoEdit"
         request["clip"] = try value("clip")
@@ -312,6 +331,11 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("composed") { request["composed"] = true }
         if let short = arguments.values["short"] { request["short"] = short; request["composed"] = true }
         if arguments.flags.contains("furniture") { request["furniture"] = true }
+        if let draft = arguments.values["draft"] {
+            guard let graphics = try readJSON(draft) as? [Any] else { throw Failure.usage("The draft file must be a list of graphics, as in addGraphic.") }
+            request["draft"] = graphics
+            request["composed"] = true
+        }
     case "job":
         request["method"] = "job"; request["job"] = try job()
     case "cancel":
@@ -368,7 +392,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
     default:
         throw Failure.usage("Unknown command \"\(arguments.command)\". Run yamvideoctl --help.")
     }
-    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit",
+    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo",
                               "libraryApply", "libraryUndo", "libraryRedo"]
     if edits.contains(request["method"] as? String ?? ""), request["requestID"] == nil {
         request["requestID"] = arguments.values["request-id"] ?? UUID().uuidString

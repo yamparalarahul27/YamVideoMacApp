@@ -68,6 +68,12 @@ struct AgentRequest: Codable {
     var layout: UUID?
     /// reveal: an idea in the Library; shows it on the Ideas page.
     var idea: UUID?
+    /// setLogo and removeLogo: the brand; setLogo: what the speaker says for it.
+    var name: String?
+    var words: [String]?
+    /// preview: graphics drawn in this preview only, never stored ({kind, start, end,
+    /// props, look?, transform?, id?}, as in addGraphic), to show the owner a plan.
+    var draft: [JSONValue]?
 }
 
 struct WireRect: Codable, Equatable {
@@ -261,7 +267,7 @@ struct AgentSessionInfo: Encodable {
     var methods: [String]
     var commands: [String]
     var analyzeKinds = AgentSessionInfo.analyzeKinds
-    static let analyzeKinds = ["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames"]
+    static let analyzeKinds = ["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames", "logos"]
     var exportScopes = ["recording", "movie"]
     var timeSpaces = ["recording", "movie"]
 }
@@ -578,7 +584,7 @@ struct AgentSaveResult: Encodable {
 @MainActor
 extension AppModel {
     static let agentMethods = ["manual", "catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
-                               "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit",
+                               "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit", "logos", "setLogo", "removeLogo",
                                "library", "libraryApply", "libraryUndo", "libraryRedo"]
 
     /// Answers one request line with one response line. Never throws: every failure is
@@ -612,6 +618,7 @@ extension AppModel {
         case "job": return agentResponse(agentJob(request), instanceID)
         case "reveal": return agentResponse(agentReveal(request), instanceID)
         case "transcript": return agentResponse(agentTranscript(request), instanceID)
+        case "logos": return agentResponse(Result<AgentLogos, EditError>.success(Self.agentLogos()), instanceID)
         case "library": return agentResponse(Result<AgentLibrary, EditError>.success(agentLibrary()), instanceID)
         case "libraryApply", "libraryUndo", "libraryRedo":
             // Library commands carry fields project commands do not, so a retry is matched
@@ -623,7 +630,7 @@ extension AppModel {
                 default: return self.agentResponse(self.agentLibraryHistory(request, redo: request.method == "libraryRedo"), instanceID)
                 }
             }
-        case "apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit":
+        case "apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo":
             return await idempotent(request, instanceID: instanceID) {
                 switch request.method {
                 case "apply": return self.agentResponse(await self.agentApply(request), instanceID)
@@ -633,6 +640,8 @@ extension AppModel {
                 case "analyze": return self.agentResponse(self.agentAnalyze(request), instanceID)
                 case "transcribe": return self.agentResponse(self.agentTranscribe(request), instanceID)
                 case "autoEdit": return self.agentResponse(self.agentAutoEdit(request), instanceID)
+                case "setLogo": return self.agentResponse(self.agentSetLogo(request), instanceID)
+                case "removeLogo": return self.agentResponse(self.agentRemoveLogo(request), instanceID)
                 default: return self.agentResponse(self.agentCancel(request), instanceID)
                 }
             }
@@ -1571,8 +1580,13 @@ extension AppModel {
             return .failure(EditError(code: .revisionConflict, message:
                 "The project is at revision \(revision), not \(expected). Read state and ask again."))
         }
-        let document = committedProject
+        var document = committedProject
         let requestedRevision = revision
+        if let draft = request.draft {
+            do { document = try Self.drafting(draft, clip: request.clip, in: document) }
+            catch let error as EditError { return .failure(error) }
+            catch { return .failure(.invalid("The draft graphics could not be read: \(error.localizedDescription)")) }
+        }
         if let short = request.short { return await agentShortPreview(request, short: short, document: document, revision: requestedRevision) }
         do {
             let time = try require(request.time, "time")
@@ -1617,6 +1631,30 @@ extension AppModel {
         catch { return .failure(.invalid("The frame could not be rendered: \(error.localizedDescription)")) }
     }
 
+    /// `document` with draft graphics added to recording `clip`, checked as the recording's
+    /// graphics are, for one preview.
+    static func drafting(_ draft: [JSONValue], clip: UUID?, in document: VideoProject) throws -> VideoProject {
+        guard let clip, let index = document.clips.firstIndex(where: { $0.id == clip }) else {
+            throw EditError.invalid("A preview with draft graphics needs the recording in clip.")
+        }
+        var copy = document
+        var track = copy.clips[index].graphics ?? GraphicsTrack()
+        for value in draft {
+            guard let item = value.object, let name = item["kind"]?.string, let kind = GraphicKind(rawValue: name),
+                  let start = item["start"]?.number, let end = item["end"]?.number else {
+                throw EditError.invalid("Each draft graphic needs a known kind, a start and an end, as in addGraphic.")
+            }
+            let id = item["id"]?.string.flatMap(UUID.init(uuidString:)) ?? UUID()
+            let look = item["look"]?.string.flatMap(GraphicsLook.init(rawValue:))
+            let transform = item["transform"]?.object.map { GraphicTransform(x: $0["x"]?.number ?? 0, y: $0["y"]?.number ?? 0, scale: $0["scale"]?.number ?? 1) }
+            track.items.removeAll { $0.id == id }
+            track.items.append(Graphic(id: id, kind: kind, start: start, end: end, props: item["props"]?.object ?? [:], look: look, transform: transform))
+        }
+        if let problem = track.problem(duration: copy.clips[index].timeline.duration) { throw EditError.invalid("Draft graphics: \(problem)") }
+        copy.clips[index].graphics = track
+        return copy
+    }
+
     /// The picture at an edited time as the owner's Preview shows it: the native renderer
     /// (zooms, colour, effects, the move aside), then the graphics, drawn by the same engine
     /// page the Preview lays over the picture, with where each one landed.
@@ -1631,7 +1669,7 @@ extension AppModel {
         var image = try await generator.image(at: CMTime(seconds: min(local, max(0, timeline.duration - 1 / max(1, info.fps))),
                                                          preferredTimescale: 600_000)).image
         var drawn: [PreviewGraphic]?
-        if graphics, let track = clip.graphics, !track.items.isEmpty,
+        if graphics, let track = clip.item().placedGraphics, !track.items.isEmpty,
            abs(Double(image.width) / Double(max(1, image.height)) - 16.0 / 9.0) < 0.02 {
             // As the Preview shows them: the end screen's boxes say what goes in each.
             let snapshot = try await GraphicsSnapshot.draw(guides ? track.labellingEndScreen(clip.publish?.endScreen) : track, duration: timeline.duration,
@@ -1775,6 +1813,16 @@ extension AppModel {
                                quality: round($0.look.quality), eyes: round($0.look.eyes), facing: round($0.look.facing), face: WireRect($0.look.face))
                 }, sheet: suggestions.isEmpty ? nil : sheet,
                    note: suggestions.isEmpty ? "Apple Vision found no face in the kept footage." : nil))
+            })
+        case "logos":
+            let gap = request.minimum ?? 60
+            guard gap.isFinite, gap >= 0 else { return .failure(.invalid("minimum for logos is the seconds between two badges of one logo, 0 or more.")) }
+            guard item.transcript != nil else {
+                return .failure(.notFound("\(item.name) has no transcript yet. Run transcribe, or importTranscript, first."))
+            }
+            return .success(startJob(kind: "analyze", clip: clipID, origin: agentOrigin(request)) { [weak self] in
+                guard let self, let result = self.brandAnalysis(item, gap: gap) else { throw CancellationError() }
+                return try JSONValue.from(result)
             })
         default:
             return .failure(.invalid("kind must be one of: \(AgentSessionInfo.analyzeKinds.joined(separator: ", "))."))
