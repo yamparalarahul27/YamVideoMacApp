@@ -9,7 +9,7 @@ extension AgentState {
     /// `covered` is where the screen file has footage (outside it, its first or last frame
     /// holds), `picture` the part of the screen recording shown.
     struct ScreenState: Encodable {
-        struct Bubble: Encodable { var corner: String; var size: Double; var face: WirePoint? }
+        struct Bubble: Encodable { var corner: String; var size: Double; var face: WirePoint?; var shape: String; var corners: Double }
         struct Span: Encodable { var id: UUID; var start: Double; var end: Double; var duration: Double; var layout: String }
         var path: String
         var name: String
@@ -37,7 +37,8 @@ extension AppModel {
                          fpsExpression: info.fpsExpression, hasAudio: info.hasAudio, hdr: info.hdrLabel),
             offset: screen.offset, crop: screen.crop.map(WireRect.init), picture: WireRect(screen.picture),
             layout: screen.layout.rawValue,
-            bubble: .init(corner: screen.bubble.corner.rawValue, size: screen.bubble.size, face: screen.bubble.face.map(WirePoint.init)),
+            bubble: .init(corner: screen.bubble.corner.rawValue, size: screen.bubble.size, face: screen.bubble.face.map(WirePoint.init),
+                          shape: screen.bubble.shape.rawValue, corners: screen.bubble.corners),
             layouts: screen.spans.map { .init(id: $0.id, start: $0.start, end: $0.end, duration: $0.duration, layout: $0.layout.rawValue) },
             zooms: screen.zooms.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end, target: WirePoint($0.target)) },
             covered: screen.covered(on: clip.timeline).map { [$0.lowerBound, $0.upperBound] },
@@ -210,10 +211,22 @@ extension AppModel {
             result.layout = layout
         }
         if let value = patch["bubble"] {
-            guard let bubble = value.object else { throw EditError.invalid("bubble is {corner, size, face}.") }
-            let keys: Set<String> = ["corner", "size", "face"]
+            guard let bubble = value.object else { throw EditError.invalid("bubble is {corner, size, face, shape, corners}.") }
+            let keys: Set<String> = ["corner", "size", "face", "shape", "corners"]
             if let unknown = bubble.keys.sorted().first(where: { !keys.contains($0) }) {
-                throw EditError.invalid("Unknown bubble key \"\(unknown)\". Keys: corner, size, face.")
+                throw EditError.invalid("Unknown bubble key \"\(unknown)\". Keys: corner, size, face, shape, corners.")
+            }
+            if let value = bubble["shape"] {
+                guard let name = value.string, let shape = SpeakerBubble.Shape(rawValue: name) else {
+                    throw EditError.invalid("shape is one of: \(SpeakerBubble.Shape.allCases.map(\.rawValue).joined(separator: ", ")).")
+                }
+                result.bubble.shape = shape
+            }
+            if let value = bubble["corners"] {
+                guard let corners = value.number else {
+                    throw EditError.invalid("corners is a number: a rounded square's corner radius as a share of its side.")
+                }
+                result.bubble.corners = corners
             }
             if let value = bubble["corner"] {
                 guard let name = value.string, let corner = SpeakerBubble.Corner(rawValue: name) else {

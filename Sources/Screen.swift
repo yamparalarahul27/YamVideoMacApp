@@ -10,7 +10,8 @@ import Foundation
 enum ScreenLayout: String, Codable, CaseIterable, Identifiable {
     /// The speaker fills the frame.
     case speaker
-    /// The screen fills the frame, and the speaker is in a round bubble in a corner.
+    /// The screen fills the frame, and the speaker is in a bubble in a corner: a circle or
+    /// a square with soft corners.
     case screen
     /// The speaker in a tall panel on the left, the screen on the right.
     case split
@@ -66,8 +67,21 @@ struct LayoutSpan: Identifiable, Codable, Equatable {
     }
 }
 
-/// The speaker's round picture in the Screen layout.
+/// The speaker's picture in the Screen layout: a circle, or a square with soft corners.
 struct SpeakerBubble: Codable, Equatable {
+    enum Shape: String, Codable, CaseIterable, Identifiable {
+        case circle
+        /// A square with soft corners, `corners` of its side round.
+        case rounded
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .circle: return "Circle"
+            case .rounded: return "Rounded square"
+            }
+        }
+    }
+
     enum Corner: String, Codable, CaseIterable, Identifiable {
         case topLeft, topRight, bottomLeft, bottomRight
         var id: String { rawValue }
@@ -87,20 +101,33 @@ struct SpeakerBubble: Codable, Equatable {
     /// The speaker's face in the recording's source pixels. Nil puts the bubble on the
     /// middle of the picture, a little above the centre.
     var face: CGPoint?
+    var shape = Shape.circle
+    /// A rounded square's corner radius as a fraction of its side. A circle ignores it.
+    var corners = SpeakerBubble.defaultCorners
 
     static let defaultSize = 0.3
     static let sizeRange = 0.15...0.5
+    static let defaultCorners = 0.2
+    static let cornersRange = 0.05...0.45
 
-    init(corner: Corner = .bottomRight, size: Double = SpeakerBubble.defaultSize, face: CGPoint? = nil) {
-        self.corner = corner; self.size = size; self.face = face
+    init(corner: Corner = .bottomRight, size: Double = SpeakerBubble.defaultSize, face: CGPoint? = nil,
+         shape: Shape = .circle, corners: Double = SpeakerBubble.defaultCorners) {
+        self.corner = corner; self.size = size; self.face = face; self.shape = shape; self.corners = corners
     }
 
-    enum CodingKeys: String, CodingKey { case corner, size, face }
+    enum CodingKeys: String, CodingKey { case corner, size, face, shape, corners }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         corner = try values.decodeIfPresent(Corner.self, forKey: .corner) ?? .bottomRight
         size = try values.decodeIfPresent(Double.self, forKey: .size) ?? Self.defaultSize
         face = try values.decodeIfPresent(CGPoint.self, forKey: .face)
+        shape = try values.decodeIfPresent(Shape.self, forKey: .shape) ?? .circle
+        corners = try values.decodeIfPresent(Double.self, forKey: .corners) ?? Self.defaultCorners
+    }
+
+    /// The corner radius of a bubble `side` pixels wide.
+    func radius(side: Double) -> Double {
+        shape == .circle ? side / 2 : side * corners
     }
 }
 
@@ -191,6 +218,9 @@ struct ScreenTrack: Codable, Equatable {
         }
         guard bubble.size.isFinite, SpeakerBubble.sizeRange.contains(bubble.size) else {
             return "The bubble's size must be from \(SpeakerBubble.sizeRange.lowerBound) to \(SpeakerBubble.sizeRange.upperBound) of the frame's height."
+        }
+        guard bubble.corners.isFinite, SpeakerBubble.cornersRange.contains(bubble.corners) else {
+            return "The bubble's corners must be from \(SpeakerBubble.cornersRange.lowerBound) to \(SpeakerBubble.cornersRange.upperBound) of its side."
         }
         if let face = bubble.face {
             guard face.x.isFinite, face.y.isFinite, (0...CGFloat(speaker.width)).contains(face.x), (0...CGFloat(speaker.height)).contains(face.y) else {
@@ -385,7 +415,7 @@ struct LayoutGeometry: Equatable {
             let left = bubble.corner == .topLeft || bubble.corner == .bottomLeft
             let top = bubble.corner == .topLeft || bubble.corner == .topRight
             return LayoutPlace(rect: CGRect(x: left ? margin : w - margin - side, y: top ? margin : h - margin - side, width: side, height: side),
-                               radius: side / 2)
+                               radius: bubble.radius(side: side))
         case .split:
             return split.speaker
         }

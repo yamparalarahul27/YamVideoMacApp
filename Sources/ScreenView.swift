@@ -91,6 +91,23 @@ struct ScreenSection: View {
             Text("\(Int((screen.bubble.size * 100).rounded()))%").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .trailing)
         }
+        Picker("Shape", selection: Binding(get: { screen.bubble.shape }, set: { shape in model.updateScreen(label: "Bubble Shape") { $0.bubble.shape = shape } })) {
+            ForEach(SpeakerBubble.Shape.allCases) { shape in Text(shape.label).tag(shape) }
+        }
+        .pickerStyle(.segmented)
+        .help("The speaker's bubble in the Screen layout: a circle, or a square with soft corners")
+        if screen.bubble.shape == .rounded {
+            HStack(spacing: 6) {
+                Text("Corners").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
+                Slider(value: Binding(get: { screen.bubble.corners }, set: { corners in
+                    model.updateScreen(live: true, label: "Bubble Corners") { $0.bubble.corners = corners }
+                }), in: SpeakerBubble.cornersRange, onEditingChanged: { editing in if !editing { model.endGesture() } })
+                    .accessibilityLabel("Bubble corner roundness")
+                Text("\(Int((screen.bubble.corners * 100).rounded()))%").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    .frame(width: 40, alignment: .trailing)
+            }
+            .help("How round the corners are, as a share of the bubble's side")
+        }
         screenZooms(screen)
         HStack {
             Button("Find Speaker") { model.findSpeaker() }

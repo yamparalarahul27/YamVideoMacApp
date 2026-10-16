@@ -29,7 +29,8 @@ recording is 12:29, and screen time = headshot time + 142.5 s.
    owner or an agent sets it. A frame of the screen outside its file holds the nearest
    frame (the first or the last).
 3. **Three layouts.** *Speaker* (the speaker fills the frame), *Screen* (the screen fills
-   the frame, the speaker in a round bubble in a corner) and *Side by side* (the speaker
+   the frame, the speaker in a bubble in a corner: a circle, or a square with soft corners)
+   and *Side by side* (the speaker
    in a tall panel on the left, the screen on the right). A **base layout** applies
    everywhere. **Layout spans** (start, end, layout) in edited-recording seconds change it
    for a part of the video, like whole-frame blur effects. A change of layout eases over
@@ -69,7 +70,7 @@ struct ScreenTrack: Codable, Equatable {
     var crop: CGRect?             // the part of the screen recording to show, nil = all
     var layout: ScreenLayout      // the base layout, default .screen
     var spans: [LayoutSpan]       // sorted, half-open, may touch, may not overlap
-    var bubble: SpeakerBubble     // corner, size (fraction of the frame height), face
+    var bubble: SpeakerBubble     // corner, size (fraction of the frame height), face, shape, corners
 }
 enum ScreenLayout: String { case speaker, screen, split }
 struct LayoutSpan: Identifiable { var id; var start: Double; var end: Double; var layout: ScreenLayout }
@@ -86,7 +87,7 @@ In design pixels of a 1920×1080 frame, scaled to the real frame:
 | Layout | Speaker | Screen |
 | --- | --- | --- |
 | Speaker | the whole frame, radius 0 | as in the layout it comes from or goes to |
-| Screen | a circle, diameter 30 % of the frame height, 40 px from the corner | fitted inside the frame with a 48 px margin, radius 16 |
+| Screen | a square 30 % of the frame height, 40 px from the corner: a circle, or a rounded square with corners 20 % of its side (5–45 %) | fitted inside the frame with a 48 px margin, radius 16 |
 | Side by side | a panel 29 % of the width at the left, as tall as the screen, radius 16 | fitted in the rest, 40 px margin, 32 px gap, radius 16 |
 
 The bubble's window is a square 60 % of the speaker picture's height, centred on the face.
