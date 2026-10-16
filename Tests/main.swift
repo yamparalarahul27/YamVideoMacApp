@@ -6284,6 +6284,18 @@ let ssExport = scratch.appendingPathComponent("ss-layout.mp4")
 var ssSettings = ExportSettings(); ssSettings.quality = 100; ssSettings.preset = "ultrafast"
 try await FFmpeg.export(input: ssSpeakerURL, output: ssExport, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: ssLive) { _ in }
 equal(try await frameCount(ssExport), try await frameCount(ssSpeakerURL), "the export with a screen keeps every frame of the speaker")
+let ssStage = FFmpeg.layoutStage(ssLive, geometry: LayoutGeometry(track: ssLive, crop: ssSpeakerMedia.fullFrame), duration: 9, rate: 30,
+                                 rateExpression: "30", sourceRate: 30, tags: .rec709, endScreen: nil)
+let ssStageGraph = ssStage.parts.joined(separator: ";")
+var ssOpenScalers = 0
+_ = FFmpeg.rewritingScalers(ssStage.parts.dropFirst(2).joined(separator: ";")) { filter in
+    if !filter.contains("threads=") { ssOpenScalers += 1 }
+    return filter
+}
+check(ssStage.parts[0].contains("format=yuv444p10le,split=") && ssStageGraph.components(separatedBy: "yuv420p10le").count == 2
+          && ssStageGraph.hasSuffix("format=yuv420p10le[lyout]") && ssOpenScalers == 0 && ssStageGraph.contains("threads=1"),
+      "the layout runs work in one format, converted once before them and once after, and each run's scaler has one thread",
+      "\(ssOpenScalers) scalers without threads")
 let ssGeo = LayoutGeometry(track: ssLive, crop: ssSpeakerMedia.fullFrame)
 var ssWorst = (whole: 0.0, speaker: 0.0, screen: 0.0)
 for frame in [15, 45, 61, 66, 90, 110, 136, 170] {
@@ -6468,6 +6480,33 @@ let ssShortGraph = try FFmpeg.spilledGraph(["-filter_complex", "[0:v]null[v]"])
 check(ssSpilled[2] == "-/filter_complex" && (try? String(contentsOfFile: ssSpilled[3], encoding: .utf8)) == ssLong[3]
           && ssShortGraph == ["-filter_complex", "[0:v]null[v]"],
       "a very long filter graph goes to a file; a short one stays in the command")
+
+print("\nScalers on one thread, and exports that stop early")
+let stGraph = "[0:v]scale=640:360:flags=lanczos,format=yuv444p,scale='min(1280,iw)':-2:flags=bilinear,zscale=t=linear[a];[a]scale[b];[b]scale=320:180:threads=4,scale2ref[c]"
+let stLimited = FFmpeg.oneThreadScalers(stGraph)
+equal(stLimited, "[0:v]scale=640:360:flags=lanczos:threads=1,format=yuv444p,scale='min(1280,iw)':-2:flags=bilinear:threads=1,"
+          + "zscale=t=linear[a];[a]scale=threads=1[b];[b]scale=320:180:threads=4,scale2ref[c]",
+      "every scaler gets one thread; quoted commas, zscale, scale2ref and a scaler with threads stay as they are")
+equal(FFmpeg.oneThreadScalers(stLimited), stLimited, "the rewrite is done once")
+let stFew = ["-filter_complex", (0..<10).map { "scale=\(100 + 2 * $0):100" }.joined(separator: ",")]
+let stMany = ["-filter_complex", (0..<60).map { "scale=\(100 + 2 * $0):100" }.joined(separator: ",")]
+let stBounded = FFmpeg.boundedScalerThreads(stMany)[1]
+check(FFmpeg.boundedScalerThreads(stFew) == stFew && stBounded.components(separatedBy: ":threads=1").count - 1 == 44
+          && stBounded.hasPrefix("scale=100:100,") && stBounded.hasSuffix("scale=218:100:threads=1"),
+      "a graph with many scalers keeps threads for its first 16 only; a small graph is left alone")
+let stRun = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1",
+    "-filter_complex", FFmpeg.oneThreadScalers("[0:v]scale=160:90,format=yuv444p10le,scale,format=yuv420p[o]"), "-map", "[o]", "-f", "null", "-"])
+check(stRun.status == 0, "ffmpeg runs a graph with one-thread scalers", stRun.stderrText)
+let stShort = scratch.appendingPathComponent("short-video.mp4")
+let stMade = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=1",
+    "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", stShort.path])
+check(stMade.status == 0, "made a file whose video stops before its audio", stMade.stderrText)
+let stSeconds = await FFmpeg.videoDuration(stShort)
+check(stSeconds.map { abs($0 - 1) < 0.1 } == true, "the video's own length is read, not the file's", "\(String(describing: stSeconds))")
+check(FFmpeg.lengthProblem(video: stSeconds, expected: 3)?.contains("stopped early") == true && FFmpeg.lengthProblem(video: 2.99, expected: 3) == nil
+          && FFmpeg.lengthProblem(video: nil, expected: 3) == nil,
+      "an export whose video is shorter than the edit is a failure; a frame of rounding is not")
+
 
 print("\nScreen zooms")
 var zsTrack = ScreenTrack(url: URL(fileURLWithPath: "/tmp/screen.mov"), info: ssScreenInfo, offset: 0)
