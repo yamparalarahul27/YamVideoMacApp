@@ -41,21 +41,24 @@ extension JSONValue {
 
 // MARK: - Graphics
 
-/// Where a kind sits: the right-hand column over the video, the side panel, or the whole
-/// screen (the end screen, which moves the picture into a frame of its own).
-enum GraphicZone: String, Codable { case column, panel, screen }
+/// Where a kind sits: the right-hand column over the video, the side panel, the whole
+/// screen (the end screen, which moves the picture into a frame of its own), or next to
+/// the speaker, wherever the layout puts them (`LogoSpot`).
+enum GraphicZone: String, Codable { case column, panel, screen, speaker }
 
 /// The template kinds of graphics engine version 1. See docs/plans/graphics-track.md.
 enum GraphicKind: String, Codable, CaseIterable, Identifiable {
     case namePlate, featureList, titleCard, phoneScreens, route, link, endCard
     case panelTitle, rule, checklist
     case endScreen
+    case logoBadge
 
     var id: String { rawValue }
     var zone: GraphicZone {
         switch self {
         case .panelTitle, .rule, .checklist: return .panel
         case .endScreen: return .screen
+        case .logoBadge: return .speaker
         default: return .column
         }
     }
@@ -77,6 +80,7 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
         case .rule: return "Rule"
         case .checklist: return "Checklist"
         case .endScreen: return "End screen"
+        case .logoBadge: return "Logo badge"
         }
     }
 }
@@ -282,6 +286,7 @@ struct GraphicsTrack: Codable, Equatable {
                 }
                 if let problem = EndScreenLayout.problem(props: graphic.props) { return problem }
             }
+            if graphic.kind == .logoBadge, let problem = LogoBadge.problem(props: graphic.props, length: graphic.length) { return problem }
             let props = JSONValue.object(graphic.props)
             if let data = try? JSONEncoder().encode(props), data.count > Self.maximumPropsBytes {
                 return "The \(name) has too much text or data."
@@ -303,7 +308,7 @@ struct GraphicsTrack: Codable, Equatable {
             }
             if let issue { return issue }
         }
-        for zone in [GraphicZone.column, .panel] {
+        for zone in [GraphicZone.column, .panel, .speaker] {
             let ordered = items.filter { $0.kind.zone == zone }.sorted { $0.start < $1.start }
             for (a, b) in zip(ordered, ordered.dropFirst()) where b.start < a.end - 0.001 {
                 return "The \(a.kind.label.lowercased()) and the \(b.kind.label.lowercased()) overlap in the same place."

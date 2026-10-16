@@ -117,7 +117,7 @@ extension AppModel {
             captions = item.shortCaptionOverlay(short, settings: settings)
             shortCaptionCache = (key, captions)
         }
-        let track = item.graphics?.forShort(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels, zoom: short.zoomLevel))
+        let track = item.shortGraphics(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels, zoom: short.zoomLevel))
         return GraphicsOverlayInput(clip: item.id, track: track, duration: item.editedDuration, fps: info.fpsExpression,
                                     frame: short.frame(info: info, crop: item.crop).size, time: previewTime, captions: captions)
     }
@@ -456,7 +456,7 @@ extension AppModel {
         context.interpolationQuality = .high
         context.draw(frame, in: CGRect(origin: .zero, size: size))
         guard let picture = context.makeImage() else { throw FFmpegError(message: "The Short's frame could not be drawn.") }
-        let track = item.graphics?.forShort(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels, zoom: short.zoomLevel))
+        let track = item.shortGraphics(short, recordingTime: true) ?? GraphicsTrack(canvas: .short(short.panels, zoom: short.zoomLevel))
         let overlay = captions ? item.shortCaptionOverlay(short, settings: settings) : nil
         guard !track.items.isEmpty || overlay != nil else { return (picture, []) }
         let snapshot = try await GraphicsSnapshot.draw(track, duration: clip.timeline.duration, fps: info.fpsExpression, time: time,

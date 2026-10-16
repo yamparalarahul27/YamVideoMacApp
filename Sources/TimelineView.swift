@@ -677,13 +677,15 @@ private struct GraphicBlock: View {
         case .panel: return .orange
         case .screen: return .teal
         case .column: return .purple
+        case .speaker: return .pink
         }
     }
     /// The end screen ends where the video ends: dragging it moves only its start.
     private var pinned: Bool { graphic.kind == .endScreen }
     private var title: String {
         let props = graphic.props
-        let text = props["title"]?.string ?? props["kicker"]?.string ?? props["url"]?.string ?? graphic.kind.label
+        let labels = LogoBadge.logos(props).compactMap(\.label).joined(separator: " + ")
+        let text = props["title"]?.string ?? props["kicker"]?.string ?? props["url"]?.string ?? (labels.isEmpty ? graphic.kind.label : labels)
         return (props["number"]?.string.map { $0 + " " } ?? "") + text
     }
 
