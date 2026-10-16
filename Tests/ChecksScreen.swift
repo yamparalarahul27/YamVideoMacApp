@@ -159,6 +159,112 @@ import Foundation
     print(String(format: "       screen layout parity: whole frame %.2f, speaker %.2f, screen %.2f of 255", ssWorst.whole, ssWorst.speaker, ssWorst.screen))
     check(ssWorst.whole < 3 && ssWorst.speaker < 3 && ssWorst.screen < 3,
           "the export draws each layout, held and while it changes, as the preview does")
+
+    print("\nShorts with the screen on top")
+    let skWindow = ShortFormat.defaultWindow(in: ssSpeakerMedia.fullFrame, info: ssSpeakerMedia)
+    let skGeo = LayoutGeometry(short: ssLive, crop: ssSpeakerMedia.fullFrame, window: skWindow)
+    let skScreen = skGeo.screenPlace(.screen)!, skSpeaker = skGeo.speakerPlace(.screen)
+    check(skGeo.frame == ShortFormat.size && skScreen.rect.minY == 240 && skScreen.rect.width == 1032
+              && abs(Double(skScreen.rect.height / skScreen.rect.width) - Double(ssLive.picture.height / ssLive.picture.width)) < 0.01
+              && skSpeaker.rect.minY == skScreen.rect.maxY + LayoutGeometry.stackCaptionBand && skSpeaker.rect.maxY == 1920 && skSpeaker.rect.width == 1080
+              && skGeo.screenPlace(.split) == skScreen && skGeo.speakerPlace(.split) == skSpeaker && skGeo.screenPlace(.speaker) == nil,
+          "in a Short the screen sits across the top and the speaker below it, in the screen and side by side layouts", "\(skScreen) \(skSpeaker)")
+    let skHeldSpeaker = skGeo.held(.speaker), skHeldStack = skGeo.held(.screen)
+    check(skHeldSpeaker.window == skWindow && skHeldSpeaker.speaker.rect == CGRect(origin: .zero, size: ShortFormat.size)
+              && abs(Double(skHeldStack.window.width / skHeldStack.window.height) - Double(skSpeaker.rect.width / skSpeaker.rect.height)) < 0.01
+              && ssSpeakerMedia.fullFrame.contains(skHeldStack.window) && skGeo.stackCaptionBottom == Double(skSpeaker.rect.minY) - 16,
+          "the speaker layout shows the Short's own window; below the screen the window keeps its place's aspect; captions sit just above the speaker",
+          "\(skHeldSpeaker.window) \(skHeldStack.window)")
+    var skTimed = ssLive
+    skTimed.zooms = [ZoomShot(start: 2.2, hold: 0.5, level: 2, target: CGPoint(x: 400, y: 300)),
+                     ZoomShot(start: 0.1, hold: 0.2, level: 2, target: CGPoint(x: 400, y: 300))]
+    let skPart = skTimed.forShort(Short(start: 1, end: 4))
+    check(skPart.spans.count == 1 && abs(skPart.spans[0].start - 1) < 0.0001 && abs(skPart.spans[0].end - 2.5) < 0.0001
+              && skPart.zooms.count == 1 && abs(skPart.zooms[0].start - 1.2) < 0.0001 && skPart.offset == ssLive.offset,
+          "in a Short's own time the screen's layouts are cut and moved, and only its zooms inside the Short stay")
+    var skShort = Short(start: 0, end: 6); skShort.screen = .top
+    let skCoded = try JSONDecoder().decode(Short.self, from: JSONEncoder().encode(skShort))
+    let skPlain = try JSONDecoder().decode(Short.self, from: Data(#"{"start": 0, "end": 2}"#.utf8))
+    var skZoomed = skShort; skZoomed.zoom = 0.75
+    let skOldText = String(decoding: try JSONEncoder().encode(Short(start: 0, end: 2)), as: UTF8.self)
+    check(skCoded.screen == .top && skPlain.screen == .off && !skOldText.contains("screen")
+              && skZoomed.problem(duration: 6, info: ssSpeakerMedia)?.contains("zoom") == true && skShort.problem(duration: 6, info: ssSpeakerMedia) == nil,
+          "a Short keeps its screen setting; an older Short reads as off; with the screen on top it does not zoom out")
+    var skItem = ssItem; skItem.shorts = [skShort]
+    var skOff = skShort; skOff.screen = .off
+    check(skItem.shortItem(skShort).screen?.spans == ssLive.spans && skItem.shortItem(skOff).screen == nil
+              && skItem.shortCaptionBottom(skShort) == skGeo.stackCaptionBottom && skItem.shortCaptionBottom(skOff) == nil,
+          "a Short with the screen on top carries the screen and its caption line; one without leaves both out")
+
+    let skOut = scratch.appendingPathComponent("short-stack.mp4")
+    try await ShortExport.export(skItem, info: ssSpeakerMedia, short: skShort, settings: ssSettings, output: skOut) { _ in }
+    let skMedia = try await FFmpeg.probe(url: skOut)
+    let skFrames = try await frameCount(skOut)
+    check(skMedia.width == 1080 && skMedia.height == 1920 && skFrames == 180,
+          "a Short with the screen exports at 1080×1920 with every frame", "\(skMedia.width)×\(skMedia.height)")
+    var skWorst = 0.0
+    for frame in [15, 75, 141, 165] {
+        let native = try await nativePicture(skItem, frame: frame, short: skShort)
+        let exported = try await ffmpegPicture(skOut, graph: nil, frame: frame, width: 1080, height: 1920)
+        check(native.width == 1080 && native.height == 1920, "the preview draws the Short at 1080×1920", "\(native.width)×\(native.height)")
+        skWorst = max(skWorst, meanDifference(native, exported, xs: 4..<1076))
+    }
+    print(String(format: "       Short with the screen parity: %.2f of 255", skWorst))
+    check(skWorst < 3, "the export draws the Short with the screen as the preview does: stacked, alone and while it changes")
+
+    let skAgent = AppModel(recoveryURL: nil)
+    var skAgentItem = ssItem; skAgentItem.shorts = []
+    skAgent.restore(VideoProject(clips: [ProjectClip(skAgentItem)], settings: ExportSettings(), selection: skAgentItem.id))
+    var skAdd = address(skAgent)
+    skAdd["method"] = "apply"; skAdd["requestID"] = "st-add"; skAdd["client"] = "Claude"
+    skAdd["commands"] = [["type": "addShort", "clipID": skAgentItem.id.uuidString, "short": ["start": 0, "end": 6, "screen": "top"]]]
+    let skAdded = await agentCall(skAgent, skAdd)
+    let skState = ((agentResult(await agentCall(skAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["shorts"] as? [[String: Any]])?.first
+    check(skAdded["ok"] as? Bool == true && skAgent.items[0].shorts.first?.screen == .top && skState?["screen"] as? String == "top",
+          "an agent adds a Short with the screen on top, and state shows it", "\(skAdded)")
+    let skBare = AppModel(recoveryURL: nil)
+    var skBareItem = ssItem; skBareItem.screen = nil; skBareItem.shorts = []
+    skBare.restore(VideoProject(clips: [ProjectClip(skBareItem)], settings: ExportSettings(), selection: skBareItem.id))
+    var skBareAdd = address(skBare)
+    skBareAdd["method"] = "apply"; skBareAdd["requestID"] = "st-bare"; skBareAdd["client"] = "Claude"
+    skBareAdd["commands"] = [["type": "addShort", "clipID": skBareItem.id.uuidString, "short": ["start": 0, "end": 6, "screen": "top"]]]
+    let skRefused = await agentCall(skBare, skBareAdd)
+    check(agentError(skRefused) == "invalid_command" && ((skRefused["error"] as? [String: Any])?["message"] as? String ?? "").contains("setScreen"),
+          "a Short cannot show a screen the recording does not have", "\(skRefused)")
+
+    print("\nStacked Shorts in YouTube's clear area")
+    var skFaced = ssLive; skFaced.bubble.face = CGPoint(x: 640, y: 240)
+    let skFacedGeo = LayoutGeometry(short: skFaced, crop: ssSpeakerMedia.fullFrame, window: skWindow)
+    let skTarget = skFacedGeo.stackFaceTarget, skLanded = skFacedGeo.facePoint(in: skFacedGeo.held(.screen))
+    check(ShortFormat.clearArea.contains(skTarget) && abs(skLanded.x - skTarget.x) <= 2 && abs(skLanded.y - skTarget.y) <= 2
+              && Double(skTarget.y) > Double(skFacedGeo.speakerPlace(.screen).rect.minY),
+          "below the screen the face lands inside the clear area, left of the rail and above the title", "\(skLanded) for \(skTarget)")
+    var skGood = skItem; skGood.screen = skFaced
+    var skCorner = skFaced; skCorner.bubble.face = CGPoint(x: 1270, y: 715)
+    var skBad = skItem; skBad.screen = skCorner
+    check(!skGood.shortIssues(skShort).contains { $0.field == "safeArea" }
+              && skBad.shortIssues(skShort).contains { $0.field == "safeArea" && $0.severity == .warning },
+          "a Short whose face cannot reach the clear area is a warning; one that does is not")
+    let skWhite: CGImage = {
+        let context = CGContext(data: nil, width: 1080, height: 1920, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(gray: 0.5, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 1080, height: 1920))
+        return context.makeImage()!
+    }()
+    let skDrawn = ShortFurnitureDrawing.draw(over: skWhite)!
+    let skGrey = rgb(skWhite, 600, 900).0
+    check(rgb(skDrawn, 300, 20).0 < skGrey - 20 && rgb(skDrawn, 300, 1890).0 < skGrey - 20 && rgb(skDrawn, 600, 900).0 == skGrey
+              && (880..<920).contains { rgb(skDrawn, 48, $0).0 > skGrey + 20 },
+          "YouTube's player is drawn over the frame: shaded at the top and the bottom, the clear area dashed, the middle untouched",
+          "\(rgb(skDrawn, 300, 20)) \(rgb(skDrawn, 300, 1890)) \(rgb(skDrawn, 600, 900))")
+    let skShortID = skAgent.items[0].shorts.first?.id.uuidString ?? ""
+    let skPlainPreview = agentResult(await agentCall(skAgent, ["method": "preview", "clip": skAgentItem.id.uuidString, "short": skShortID, "time": 1, "composed": true]))
+    let skFurnished = agentResult(await agentCall(skAgent, ["method": "preview", "clip": skAgentItem.id.uuidString, "short": skShortID, "time": 1,
+                                                            "composed": true, "furniture": true]))
+    let skPlainImage = (skPlainPreview["path"] as? String).flatMap { NSImage(contentsOfFile: $0)?.cgImage(forProposedRect: nil, context: nil, hints: nil) }
+    let skFurnishedImage = (skFurnished["path"] as? String).flatMap { NSImage(contentsOfFile: $0)?.cgImage(forProposedRect: nil, context: nil, hints: nil) }
+    check(skPlainImage.flatMap { plain in skFurnishedImage.map { rgb($0, 300, 1890).0 < rgb(plain, 300, 1890).0 } } == true,
+          "an agent's preview of a Short can show YouTube's player over it")
     let ssBubbleFrame = try await nativePicture(ssItem, frame: 30)
     let ssPlainItem: VideoItem = { var plain = ssItem; plain.screen = nil; return plain }()
     let ssPlainFrame = try await nativePicture(ssPlainItem, frame: 30)

@@ -36,7 +36,7 @@ private struct PublishContent: View {
 
     private var short: Short? { item.short(target) }
     private var issues: [PublishInfo.Issue] {
-        short.map { $0.issues(graphics: item.graphics, publish: item.publish) } ?? publish.issues(duration: item.editedDuration, graphics: item.graphics)
+        short.map { item.shortIssues($0) } ?? publish.issues(duration: item.editedDuration, graphics: item.graphics)
     }
 
     var body: some View {

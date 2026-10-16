@@ -34,6 +34,18 @@ enum ShortPanels: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Whether a Short of a recording with a screen recording shows the screen.
+enum ShortScreen: String, Codable, CaseIterable, Identifiable {
+    /// Only the speaker, in the Short's 9:16 window.
+    case off
+    /// The screen across the top and the speaker below, where the recording's layout shows
+    /// the screen; the speaker alone where it shows only the speaker.
+    case top
+
+    var id: String { rawValue }
+    var label: String { self == .off ? "Off" : "On top" }
+}
+
 /// What burned-in captions do while a card or panel covers the lower half of a Short.
 enum ShortCaptions: String, Codable, CaseIterable, Identifiable {
     case stepUp, over, hide
@@ -80,6 +92,8 @@ struct Short: Codable, Equatable, Identifiable {
     /// the picture around the window, at the top, with its bottom edge fading into a
     /// blurred copy below, down to `ShortFormat.zooms.lowerBound`, a square.
     var zoom: Double?
+    /// For a recording with a screen recording: whether the Short shows the screen.
+    var screen = ShortScreen.off
 
     init(id: UUID = UUID(), start: Double, end: Double, window: CGRect? = nil) {
         self.id = id; self.start = start; self.end = end; self.window = window
@@ -89,7 +103,7 @@ struct Short: Codable, Equatable, Identifiable {
     var zoomLevel: Double { zoom ?? 1 }
 
     private enum CodingKeys: String, CodingKey {
-        case id, start, end, window, title, description, tags, hidden, placements, cover, panels, captions, zoom
+        case id, start, end, window, title, description, tags, hidden, placements, cover, panels, captions, zoom, screen
     }
 
     /// Missing keys keep their defaults, so a partial object is complete.
@@ -115,6 +129,7 @@ struct Short: Codable, Equatable, Identifiable {
         panels = try c.decodeIfPresent(ShortPanels.self, forKey: .panels) ?? .sheet
         captions = try c.decodeIfPresent(ShortCaptions.self, forKey: .captions) ?? .stepUp
         zoom = try c.decodeIfPresent(Double.self, forKey: .zoom)
+        screen = try c.decodeIfPresent(ShortScreen.self, forKey: .screen) ?? .off
     }
 
     func encode(to encoder: Encoder) throws {
@@ -132,6 +147,7 @@ struct Short: Codable, Equatable, Identifiable {
         try c.encode(panels, forKey: .panels)
         try c.encode(captions, forKey: .captions)
         try c.encodeIfPresent(zoom, forKey: .zoom)
+        if screen != .off { try c.encode(screen, forKey: .screen) }
     }
 
     /// The window the Short shows: its own, or the full height of `crop`, centred.
@@ -181,6 +197,9 @@ struct Short: Codable, Equatable, Identifiable {
         if let zoom {
             guard zoom.isFinite, ShortFormat.zooms.contains(zoom) else {
                 return "A Short's zoom is from \(ShortFormat.zooms.lowerBound.formatted()) (zoomed out to a square at the top) to 1 (fills the frame)."
+            }
+            if screen == .top, zoom < 1 - 0.000001 {
+                return "A Short with the screen on top fills its canvas, so it does not zoom out: set zoom to 1."
             }
         }
         guard title.count <= 1000, description.count <= 20_000, tags.count <= 200 else {
@@ -498,6 +517,7 @@ extension VideoItem {
         }
         let track = graphics?.forShort(short)
         item.graphics = track?.items.isEmpty == false ? track : nil
+        item.screen = short.screen == .top ? screen.map { $0.forShort(short) } : nil
         item.publish = nil
         item.shorts = []
         return item
@@ -506,8 +526,41 @@ extension VideoItem {
     /// The Short's captions on its own timeline from 0, unsplit: its caption file moved
     /// through the edit, or its transcript in groups sized for a phone. Empty when captions
     /// are off or there are none.
+    /// Whether the Short shows the screen: it asks to, and the recording has one.
+    func stacksScreen(_ short: Short) -> Bool { short.screen == .top && screen != nil }
+
+    /// The Short's issues: its own (`Short.issues`), and with the screen on top a warning
+    /// for each layout in it that puts the speaker's face outside YouTube's clear area.
+    func shortIssues(_ short: Short) -> [PublishInfo.Issue] {
+        var issues = short.issues(graphics: graphics, publish: publish)
+        guard stacksScreen(short), let screen, let info else { return issues }
+        let crop = (self.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        let geometry = LayoutGeometry(short: screen, crop: crop, window: short.frame(info: info, crop: self.crop))
+        let track = screen.forShort(short)
+        let shown = Set(stride(from: 0.0, to: max(0.001, short.length), by: 0.25).map { track.layout(at: $0, endScreen: nil) })
+        // Room for a face round its middle: about 200×300 design pixels.
+        let room = ShortFormat.clearArea.insetBy(dx: 100, dy: 150)
+        for layout in ScreenLayout.allCases where shown.contains(layout) {
+            let point = geometry.facePoint(in: geometry.held(layout))
+            guard !room.contains(point) else { continue }
+            let part = layout == .speaker ? "Where it shows only the speaker" : "Below the screen"
+            issues.append(PublishInfo.Issue(field: "safeArea", severity: .warning, message:
+                "\(part), the face lands at \(Int(point.x)), \(Int(point.y)), outside YouTube's clear area (48–888 across, 240–1520 down), "
+                + "so the like rail or the title can cover it. Move the Short's window or the speaker's face (Screen section)."))
+        }
+        return issues
+    }
+
+    /// The Short's caption line, when its layout puts it somewhere other than the
+    /// safe-area spot: with the screen on top, just above the speaker.
+    func shortCaptionBottom(_ short: Short) -> Double? {
+        guard stacksScreen(short), let screen, let info else { return nil }
+        let crop = (self.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        return LayoutGeometry(short: screen, crop: crop, window: short.frame(info: info, crop: self.crop)).stackCaptionBottom
+    }
+
     func shortCaptions(_ short: Short, settings: ExportSettings) -> [Caption] {
-        guard settings.captionUse(hasFile: subtitles != nil).uploads else { return [] }
+        guard settings.shortCaptionUse(hasFile: subtitles != nil).uploads else { return [] }
         let timeline = self.timeline.cut(from: short.start, to: short.end)
         if let subtitles {
             guard Captions.retimable.contains(subtitles.pathExtension.lowercased()),
@@ -515,7 +568,7 @@ extension VideoItem {
                   let captions = try? Captions.parse(text) else { return [] }
             return Captions.edited(captions, timeline: timeline)
         }
-        guard let transcript, settings.captions != nil else { return [] }
+        guard let transcript, settings.captions != nil || settings.shortCaptions != nil else { return [] }
         return Captions.edited(transcript.captions(timeline: timeline, characters: ShortCaptionLayout.groupCharacters), timeline: timeline)
     }
 }
@@ -598,7 +651,9 @@ enum ShortCaptionLayout {
     /// Where each caption sits in a Short: at the safe-area spot, except while a card or
     /// panel covers the lower half, when the Short's option steps it up above the graphic,
     /// leaves it over it, or hides it. `graphics` are the Short's own (`forShort`).
-    static func layout(_ captions: [Caption], graphics: GraphicsTrack?, option: ShortCaptions, size: SubtitleSize) -> [ShortCaption] {
+    /// `bottom` is the caption line when the Short's layout has its own (the screen on top).
+    static func layout(_ captions: [Caption], graphics: GraphicsTrack?, option: ShortCaptions, size: SubtitleSize,
+                       bottom line: Double? = nil) -> [ShortCaption] {
         let layout: ShortLayout? = { if case .short(let panels, let zoom)? = graphics?.canvas { return ShortLayout(panels: panels, zoom: zoom) }; return nil }()
         // The times a graphic covers the lower half, and the line captions step up to then.
         var covers: [(start: Double, end: Double, line: Double?)] = []
@@ -623,7 +678,7 @@ enum ShortCaptionLayout {
             for (from, to) in zip(edges, edges.dropFirst()) where to - from >= shortest - 0.000001 {
                 let middle = (from + to) / 2
                 let over = covers.filter { middle >= $0.start && middle < $0.end }
-                var bottom = layout?.captionSpot ?? ShortLayout.captionBottom
+                var bottom = line ?? layout?.captionSpot ?? ShortLayout.captionBottom
                 if !over.isEmpty {
                     switch option {
                     case .hide: continue
@@ -714,6 +769,7 @@ struct ShortCaptionKey: Equatable {
     var transcriptWords: Int
     var transcriptModel: String?
     var captions: CaptionUse?
+    var shortCaptions: CaptionUse?
     var size: SubtitleSize
 }
 
@@ -721,10 +777,11 @@ extension VideoItem {
     /// The Short's burned-in captions as its Preview shows them, in recording time (the
     /// Preview plays the recording), or nil when none are burned in.
     func shortCaptionOverlay(_ short: Short, settings: ExportSettings) -> CaptionOverlay? {
-        guard settings.captionUse(hasFile: subtitles != nil).burns else { return nil }
+        guard settings.shortCaptionUse(hasFile: subtitles != nil).burns else { return nil }
         let captions = shortCaptions(short, settings: settings)
         guard !captions.isEmpty else { return nil }
-        let placed = ShortCaptionLayout.layout(captions, graphics: graphics?.forShort(short), option: short.captions, size: settings.subtitleSize)
+        let placed = ShortCaptionLayout.layout(captions, graphics: graphics?.forShort(short), option: short.captions, size: settings.subtitleSize,
+                                               bottom: shortCaptionBottom(short))
         return CaptionOverlay(placed.map { var caption = $0; caption.start += short.start; caption.end += short.start; return caption },
                               size: settings.subtitleSize)
     }
@@ -733,6 +790,6 @@ extension VideoItem {
         ShortCaptionKey(clip: id, segments: timeline.segments, short: short, graphics: graphics, subtitles: subtitles,
                         subtitlesDate: subtitles.flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate },
                         transcriptWords: transcript?.words.count ?? 0, transcriptModel: transcript?.model,
-                        captions: settings.captions, size: settings.subtitleSize)
+                        captions: settings.captions, shortCaptions: settings.shortCaptions, size: settings.subtitleSize)
     }
 }

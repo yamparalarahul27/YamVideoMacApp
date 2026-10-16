@@ -197,6 +197,29 @@ import Foundation
     check(panelLine(.sheet) == ShortLayout.sheetTop - 24 && panelLine(.shade) == ShortLayout.captionBottom && panelLine(.split) == ShortLayout.splitFrame.maxY - 16,
           "over a bottom sheet they step above it; a full shade leaves them be; in a split they sit at the frame's foot",
           "\(panelLine(.sheet)) \(panelLine(.shade)) \(panelLine(.split))")
+    print("\nCaptions in Shorts, on their own")
+    var scNone = ExportSettings(), scUpload = ExportSettings(), scOff = ExportSettings(), scShortUpload = ExportSettings(), scShortOff = ExportSettings()
+    scUpload.captions = .upload; scOff.captions = .off
+    scShortUpload.captions = .upload; scShortUpload.shortCaptions = .upload
+    scShortOff.captions = .burnIn; scShortOff.shortCaptions = .off
+    check(scNone.shortCaptionUse(hasFile: false) == .off && scNone.shortCaptionUse(hasFile: true) == .burnIn
+              && scUpload.shortCaptionUse(hasFile: false) == .burnIn && scOff.shortCaptionUse(hasFile: true) == .off
+              && scShortUpload.shortCaptionUse(hasFile: false) == .upload && scShortOff.shortCaptionUse(hasFile: true) == .off,
+          "Shorts burn captions in whenever the video has captions, unless their own setting says otherwise")
+    var scItem = VideoItem(url: landscape); scItem.info = info; scItem.crop = info.fullFrame
+    scItem.transcript = Transcript(model: "t", language: "en", words: spokenWords([("Hello", 0.2), ("there", 0.6), ("viewer", 1.0)], end: 1.6))
+    let scShort = Short(start: 0, end: 2)
+    check(scItem.burnedCaptions(scUpload) == nil && scItem.shortCaptionOverlay(scShort, settings: scUpload) != nil
+              && !scItem.shortCaptions(scShort, settings: scUpload).isEmpty,
+          "a video that uploads its SRT has Shorts with burned-in captions, and their SRT too")
+    check(scItem.shortCaptionOverlay(scShort, settings: scShortUpload) == nil && !scItem.shortCaptions(scShort, settings: scShortUpload).isEmpty
+              && scItem.shortCaptions(scShort, settings: scShortOff).isEmpty && scItem.shortCaptionOverlay(scShort, settings: scShortOff) == nil,
+          "Shorts set to upload keep only the SRT; Shorts set to none have no captions")
+    let scCoded = try JSONDecoder().decode(ExportSettings.self, from: JSONEncoder().encode(scShortUpload))
+    let scOld = try JSONDecoder().decode(ExportSettings.self, from: JSONEncoder().encode(ExportSettings()))
+    check(scCoded.shortCaptions == .upload && scOld.shortCaptions == nil && AppModel.exportSettingKeys.contains("shortCaptions"),
+          "the Shorts' caption setting is saved, an older project reads as unset, and agents can set it")
+
     print("\nZooming a Short out")
     let zoomedLayout = ShortLayout(panels: .sheet, zoom: 0.75)
     check(ShortLayout(panels: .sheet).drop == 0 && zoomedLayout.drop == 100 && ShortLayout(panels: .sheet, zoom: 0.5625).drop == 175
@@ -499,8 +522,12 @@ import Foundation
           "its overlay draws on the 9:16 canvas, with the caption file's captions laid out for it in recording time")
     var uploadOnly = greySettings; uploadOnly.captions = .upload
     viewerModel.updateSettings(uploadOnly)
+    check(viewerModel.shortOverlay(viewerModel.items[0], info: greyInfo, short: coverShort).captions != nil,
+          "with the long video's captions uploaded only, the Short viewer still shows the Short's burned-in captions")
+    uploadOnly.shortCaptions = .upload
+    viewerModel.updateSettings(uploadOnly)
     check(viewerModel.shortOverlay(viewerModel.items[0], info: greyInfo, short: coverShort).captions == nil,
-          "with captions uploaded only, the Short viewer shows none, as the export burns none")
+          "with Shorts' captions uploaded only, the Short viewer shows none, as the export burns none")
     viewerModel.updateShort(coverShort.id, label: "Short Captions") { $0.captions = .hide }
     check(viewerModel.showPlayback && viewerModel.showsShort && viewerModel.selectedItem?.shorts.first?.captions == .hide,
           "changing a Short's option keeps the Short viewer up, so it can be tried while it plays")

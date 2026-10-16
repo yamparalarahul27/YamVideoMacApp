@@ -160,7 +160,14 @@ where the screen file has footage.
 
 1. ~~Zooms on the screen, and Suggest Zooms on the screen recording.~~ Done: section 12.
 2. Sync from sound when the screen recording has the microphone.
-3. Movie and Shorts with the screen (a Short could show the screen above the speaker).
+3. ~~Shorts with the screen~~ (2026-10-16): `Short.screen` (`off`, `top`). With `top`,
+   `LayoutGeometry(short:crop:window:)` draws the 1080×1920 canvas: the screen across the
+   top (from 240 px, below YouTube's icons, 24 px margins, the screen's own aspect), a
+   240 px band for two lines of captions, and the speaker below it to the bottom, in a window on
+   the face 80 % of the picture's height. The speaker layout shows the Short's own 9:16
+   window on the whole canvas. Preview and export use the same geometry (parity 2.4/255);
+   the Short's sections, layouts and zooms are in its own time (`ScreenTrack.forShort`).
+   A movie with the screen is still open.
 4. Layout suggestions from the transcript ("you can see my screen", "let's go one by one").
 5. A ring or a shadow round the bubble.
 6. A crop box for the screen on the picture (agents can set any crop now; the app has

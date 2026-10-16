@@ -242,7 +242,7 @@ final class PlaybackController: ObservableObject {
                 }
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
         }
-        if let screen = clip.screen, short == nil {
+        if let screen = clip.screen, short.map(clip.stacksScreen) ?? true {
             try await insertScreen(screen, segments: clip.timeline.segments, into: composition)
         }
         let item = AVPlayerItem(asset: composition)
@@ -263,8 +263,8 @@ final class PlaybackController: ObservableObject {
     /// picture is its 9:16 window, with its graphics' motion.
     static func videoComposition(for asset: AVAsset, clip: VideoItem, info: MediaInfo,
                                  settings: ExportSettings, original: Bool, short: Short? = nil) -> AVVideoComposition {
-        if let screen = clip.screen, short == nil, let composition = asset as? AVComposition,
-           let layout = screenComposition(for: composition, clip: clip, screen: screen, info: info, settings: settings, original: original) {
+        if let screen = clip.screen, short.map(clip.stacksScreen) ?? true, let composition = asset as? AVComposition,
+           let layout = screenComposition(for: composition, clip: clip, screen: screen, info: info, settings: settings, original: original, short: short) {
             return layout
         }
         let picture = picture(clip, info: info, short: short)

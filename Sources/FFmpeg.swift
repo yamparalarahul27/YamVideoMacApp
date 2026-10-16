@@ -642,7 +642,8 @@ enum FFmpeg {
         subtitles: URL? = nil,
         segments: [TimelineSegment]? = nil,
         canvas: CGSize? = nil,
-        captionsASS: URL? = nil
+        captionsASS: URL? = nil,
+        stacked: Bool = false
     ) -> (geometry: [String], delivery: [String], captions: [String], rate: Double, rateExpression: String) {
         var tail: [String] = []
 
@@ -665,7 +666,8 @@ enum FFmpeg {
         if let canvas {
             // A Short is always delivered at its canvas size, whatever the size limit says.
             // Square pixels: a window a pixel off 9:16 would otherwise carry its own aspect.
-            if cropRect.size != canvas { delivery.append("scale=\(Int(canvas.width)):\(Int(canvas.height)):flags=lanczos,setsar=1") }
+            // With the screen on top, the layout stage draws the canvas itself.
+            if !stacked, cropRect.size != canvas { delivery.append("scale=\(Int(canvas.width)):\(Int(canvas.height)):flags=lanczos,setsar=1") }
         } else if let scaled = scaledSize(for: cropRect.size, limit: settings.sizeLimit) {
             delivery.append("scale=\(Int(scaled.width)):\(Int(scaled.height)):flags=lanczos")
         }
@@ -931,21 +933,24 @@ enum FFmpeg {
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
-        screen: ScreenTrack? = nil
+        screen: ScreenTrack? = nil,
+        stack: CGRect? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
+        let stacked = canvas != nil && stack != nil && screen != nil
         let stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
-                                 settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS)
+                                 settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS,
+                                 stacked: stacked)
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
         // The screen recording comes after the palette, so the palette stays input 1.
         let screenInput = palette == nil ? 1 : 2
-        let layer = canvas != nil ? nil : screen.map {
+        let layer = canvas != nil && !stacked ? nil : screen.map {
             screenLayer($0, info: info, crop: cropRect, segments: segments, rate: stages.rate, rateExpression: stages.rateExpression,
                         input: screenInput, tags: FrameTags(info: info, converted: !head.isEmpty || effectStage != nil),
-                        endScreen: graphics?.endScreen?.start)
+                        endScreen: graphics?.endScreen?.start, stack: stacked ? stack : nil)
         }
-        let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
+        let drawn = graphicsPlan(graphics, info: info, crop: stacked ? CGRect(origin: .zero, size: canvas!) : cropRect, segments: segments, settings: settings,
                                  converted: !head.isEmpty || effectStage != nil || layer != nil, canvas: canvas)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
@@ -1084,24 +1089,27 @@ enum FFmpeg {
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
-        screen: ScreenTrack? = nil
+        screen: ScreenTrack? = nil,
+        stack: CGRect? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
         let head = videoHead(info: info, settings: settings, color: color)
+        let stacked = canvas != nil && stack != nil && screen != nil
         // Both GIF passes must see exactly the same frames, captions, effects and graphics
         // included, or the palette is built for a picture the encode never renders.
         var stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
-                                 settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS)
+                                 settings: settings, subtitles: subtitles, segments: segments, canvas: canvas, captionsASS: captionsASS,
+                                 stacked: stacked)
         // stats_mode=diff weights the palette towards whatever moves — the part anyone
         // actually looks at. A still background can afford to band a little.
         stages.captions.append("palettegen=max_colors=\(settings.gifColors.rawValue):stats_mode=diff")
         let effectStage = effectStage(effects, info: info, crop: cropRect, converted: !head.isEmpty, fps: stages.rate)
-        let layer = canvas != nil ? nil : screen.map {
+        let layer = canvas != nil && !stacked ? nil : screen.map {
             screenLayer($0, info: info, crop: cropRect, segments: segments, rate: stages.rate, rateExpression: stages.rateExpression,
                         input: 1, tags: FrameTags(info: info, converted: !head.isEmpty || effectStage != nil),
-                        endScreen: graphics?.endScreen?.start)
+                        endScreen: graphics?.endScreen?.start, stack: stacked ? stack : nil)
         }
-        let drawn = graphicsPlan(graphics, info: info, crop: cropRect, segments: segments, settings: settings,
+        let drawn = graphicsPlan(graphics, info: info, crop: stacked ? CGRect(origin: .zero, size: canvas!) : cropRect, segments: segments, settings: settings,
                                  converted: !head.isEmpty || effectStage != nil || layer != nil, canvas: canvas)
 
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
@@ -1206,7 +1214,8 @@ enum FFmpeg {
         graphics: GraphicsTrack? = nil,
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
-        screen: ScreenTrack? = nil
+        screen: ScreenTrack? = nil,
+        stack: CGRect? = nil
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
@@ -1218,13 +1227,13 @@ enum FFmpeg {
                                              crop: crop, regions: regions,
                                              zoomShots: zoomShots, segments: segments,
                                              settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                             graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen))
+                                             graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack))
         }
         commands.append(exportArguments(input: input, output: output, info: info, crop: crop,
                                         regions: regions, zoomShots: zoomShots,
                                         segments: segments, settings: settings,
                                         subtitles: subtitles, palette: palette, color: color, effects: effects,
-                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen))
+                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack))
         return commands
     }
 
@@ -1370,6 +1379,7 @@ enum FFmpeg {
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
         screen: ScreenTrack? = nil,
+        stack: CGRect? = nil,
         drawGraphics: ((GraphicsRender.Job, _ page: URL, _ frames: URL) async throws -> Void)? = nil,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -1380,7 +1390,7 @@ enum FFmpeg {
         if let problem = color.problem { throw FFmpegError(message: problem) }
         if let problem = effectProblem(effects, info: info, settings: settings) { throw FFmpegError(message: problem) }
         if let problem = graphicsProblem(graphics, info: info, settings: settings) { throw FFmpegError(message: problem) }
-        if canvas == nil, let problem = screenProblem(screen, info: info, settings: settings) { throw FFmpegError(message: problem) }
+        if canvas == nil || stack != nil, let problem = screenProblem(screen, info: info, settings: settings) { throw FFmpegError(message: problem) }
         let color = try ColorPipeline.ffmpegFilters(color, info: info, toneMapped: info.isHDR && settings.toneMapHDR)
         // Fail with something actionable instead of ffmpeg's "Unknown encoder 'libwebp'"
         // four passes into the error log.
@@ -1460,7 +1470,7 @@ enum FFmpeg {
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, segments: segments,
                                       settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen)
+                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack)
         let measuring = needsLoudnessPass(info: info, settings: settings)
         // Progress is reported against what the export actually writes, which is the
         // edited timeline rather than the whole source.
@@ -1492,7 +1502,7 @@ enum FFmpeg {
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
                     loudness: measurement, color: color, effects: effects, graphics: graphics,
-                    canvas: canvas, captionsASS: captionsASS, screen: screen
+                    canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack
                 )
             }
 

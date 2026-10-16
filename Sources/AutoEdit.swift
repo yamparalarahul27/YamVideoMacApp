@@ -156,6 +156,13 @@ extension ExportSettings {
     /// never chose keep the old behaviour: a chosen file is burned in and uploaded, and a
     /// transcript is not used for captions until captions are turned on.
     func captionUse(hasFile: Bool) -> CaptionUse { captions ?? (hasFile ? .burnIn : .off) }
+
+    /// What a Short does with captions: its own setting, or burned in (and uploaded)
+    /// whenever the video has captions at all.
+    func shortCaptionUse(hasFile: Bool) -> CaptionUse {
+        if let shortCaptions { return shortCaptions }
+        return captionUse(hasFile: hasFile) == .off ? .off : .burnIn
+    }
 }
 
 extension VideoItem {

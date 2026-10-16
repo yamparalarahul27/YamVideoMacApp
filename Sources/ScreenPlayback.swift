@@ -107,17 +107,20 @@ extension PlaybackController {
     }
 
     /// The video composition for a recording with a screen: the speaker drawn as the
-    /// one-track preview draws it, the layout put together, then the move aside.
+    /// one-track preview draws it, the layout put together, then the move aside. With a
+    /// Short that shows the screen, the layout draws the Short's 1080×1920 canvas.
     static func screenComposition(for composition: AVComposition, clip: VideoItem, screen: ScreenTrack, info: MediaInfo,
-                                  settings: ExportSettings, original: Bool) -> AVVideoComposition? {
+                                  settings: ExportSettings, original: Bool, short: Short? = nil) -> AVVideoComposition? {
         let tracks = composition.tracks.filter { $0.mediaType == .video }
         guard tracks.count >= 2 else { return nil }
         let key = Self.picture(clip, info: info, short: nil)
-        let crop = key.crop, motion = key.motion
+        let crop = key.crop, motion = short == nil ? key.motion : nil
         let shots = clip.zoomShots, regions = clip.blurRegions, effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name, toneMapHDR: settings.toneMapHDR, original: original).render
-        let geometry = LayoutGeometry(track: screen, crop: crop)
-        let endScreen = clip.graphics?.endScreen?.start
+        let geometry = short.map { LayoutGeometry(short: screen, crop: crop, window: $0.frame(info: info, crop: clip.crop)) }
+            ?? LayoutGeometry(track: screen, crop: crop)
+        let frameSize = geometry.frame
+        let endScreen = short == nil ? clip.graphics?.endScreen?.start : nil
         let end = tracks.map { $0.timeRange.end }.max() ?? .zero
         let instruction = ScreenCompositionInstruction(
             timeRange: CMTimeRange(start: .zero, end: end), speakerTrack: tracks[0].trackID, screenTrack: tracks[1].trackID
@@ -125,14 +128,15 @@ extension PlaybackController {
             let face = renderFrame(speaker, info: info, crop: crop, regions: regions, shots: shots, settings: settings,
                                    time: time, color: color, effects: effects)
             let state = screen.state(at: time, geometry: geometry, endScreen: endScreen)
-            let frame = composeLayout(speaker: face, screen: screenFrame, track: screen, state: state, frame: crop.size, time: time)
+            let frame = composeLayout(speaker: face, screen: screenFrame, track: screen, state: state, frame: frameSize,
+                                      picture: crop.size, time: time)
             guard let motion else { return frame }
             return moveAside(frame, size: crop.size, motion: motion, time: time)
         }
         let result = AVMutableVideoComposition()
         result.customVideoCompositorClass = ScreenCompositor.self
         result.instructions = [instruction]
-        result.renderSize = crop.size
+        result.renderSize = frameSize
         result.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
         result.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
         result.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
@@ -151,11 +155,23 @@ extension PlaybackController {
 /// values, as ffmpeg does: the screen zoomed at `time` as its zooms say, the fill from it,
 /// the screen with rounded corners over that, then the speaker's window, scaled with
 /// Lanczos into its place and masked. The export draws the same (`FFmpeg.layoutStage`).
-func composeLayout(speaker: CIImage, screen: CIImage?, track: ScreenTrack, state: LayoutState, frame: CGSize, time: Double = 0) -> CIImage {
-    guard let screenPlace = state.screen else { return speaker }
+func composeLayout(speaker: CIImage, screen: CIImage?, track: ScreenTrack, state: LayoutState, frame: CGSize,
+                   picture: CGSize? = nil, time: Double = 0) -> CIImage {
+    // The speaker's picture: the frame, or in a Short with the screen the recording's crop.
+    let size = picture ?? frame
+    let whole = state.window == CGRect(origin: .zero, size: size)
+    if state.screen == nil, size == frame, whole { return speaker }
     let bounds = CGRect(origin: .zero, size: frame)
     let space = ColorPipeline.videoSpace
-    guard let face = speaker.cropped(to: bounds).matchedFromWorkingSpace(to: space) else { return speaker }
+    guard let face = speaker.cropped(to: CGRect(origin: .zero, size: size)).matchedFromWorkingSpace(to: space) else { return speaker }
+    let window = state.window
+    let area = CGRect(x: window.minX, y: size.height - window.maxY, width: window.width, height: window.height)
+    let cut = face.cropped(to: area).transformed(by: CGAffineTransform(translationX: -area.minX, y: -area.minY))
+    guard let screenPlace = state.screen else {
+        // The speaker alone, its window filling the frame (a Short's speaker layout).
+        let alone = placed(cut, size: window.size, in: state.speaker, frame: frame)
+        return (alone.matchedToWorkingSpace(from: space) ?? alone).cropped(to: bounds)
+    }
     let crop = track.picture
     var picture: CIImage
     if let screen {
@@ -182,9 +198,6 @@ func composeLayout(speaker: CIImage, screen: CIImage?, track: ScreenTrack, state
         .cropped(to: bounds)
     var result = movedPictureFill(covered, frame: bounds, amount: 1)
     result = placed(picture, size: crop.size, in: screenPlace, frame: frame).composited(over: result)
-    let window = state.window
-    let area = CGRect(x: window.minX, y: frame.height - window.maxY, width: window.width, height: window.height)
-    let cut = face.cropped(to: area).transformed(by: CGAffineTransform(translationX: -area.minX, y: -area.minY))
     result = placed(cut, size: window.size, in: state.speaker, frame: frame).composited(over: result)
     return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: bounds)
 }
