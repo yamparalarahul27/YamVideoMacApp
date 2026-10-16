@@ -442,7 +442,7 @@ struct CropEditorPane: View {
     /// Graphics are drawn at the 1920×1080 design size on a 16:9 picture. Other shapes wait
     /// for the vertical layouts of a later phase.
     private var graphicsOverlay: GraphicsOverlayInput? {
-        guard let track = item.graphics, !track.items.isEmpty else { return nil }
+        guard let track = item.placedGraphics, !track.items.isEmpty else { return nil }
         let frame = crop.size
         guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
         return GraphicsOverlayInput(clip: item.id, track: track.labellingEndScreen(item.publish?.endScreen), duration: item.editedDuration,

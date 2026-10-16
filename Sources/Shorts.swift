@@ -383,7 +383,8 @@ struct ShortLayout: Equatable {
             case .shade: return nil
             case .split: return Self.splitFrame.maxY - 16
             }
-        case .screen: return nil
+        // A logo badge sits next to the face, clear of the captions.
+        case .screen, .speaker: return nil
         }
     }
 
@@ -515,7 +516,7 @@ extension VideoItem {
         item.markers = markers.filter { $0.time >= short.start && $0.time <= short.end }.map {
             var marker = $0; marker.time -= short.start; return marker
         }
-        let track = graphics?.forShort(short)
+        let track = shortGraphics(short)
         item.graphics = track?.items.isEmpty == false ? track : nil
         item.screen = short.screen == .top ? screen.map { $0.forShort(short) } : nil
         item.publish = nil
