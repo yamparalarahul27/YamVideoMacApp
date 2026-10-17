@@ -94,10 +94,11 @@
     const videos = p.videos === 1 ? 1 : 2;
     const side = p.side === "right" ? "right" : "left";
     const card = (y) => ({ x: 1209, y, w: 615, h: 346 });
-    let frame = { x: 96, y: 102, w: 960, h: 540 };
-    let circle = { x: 96, y: 682, w: 296, h: 296 };
-    let text = { x: 432, y: 682, w: 624, h: 296 };
-    let cards = videos === 2 ? [card(170), card(564)] : [card(199)];
+    // The circle ends inside YouTube's element area (bottom 917), so the frame sits high.
+    let frame = { x: 96, y: 56, w: 960, h: 540 };
+    let circle = { x: 96, y: 612, w: 296, h: 296 };
+    let text = { x: 432, y: 612, w: 624, h: 296 };
+    let cards = videos === 2 ? [card(162), card(556)] : [card(153)];
     if (side === "right") {
       const flip = (r) => ({ x: 1920 - r.x - r.w, y: r.y, w: r.w, h: r.h });
       frame = flip(frame); circle = flip(circle); text = flip(text); cards = cards.map(flip);

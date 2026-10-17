@@ -5,12 +5,12 @@
 - **Project:** AgentUX-System-Design.yamvideo
 - **Idea:** System design for designers: how I built my own Mobbin (Part 1)
 - **Style:** Style.md, changed 17 Oct
-- **Updated:** 17 Oct at 7:27 PM
+- **Updated:** 17 Oct at 8:34 PM
 
 ## AgentUX-camera-joined.mov
 - Length: 17:50 → **11:54** after cuts (250 sections)
 - Captions uploaded as a file · 3 zooms · with a screen recording
-- Graphics (mix, accent #F5C42C): Yamparala Rahul (0:00) · System design for designers (0:11) · AI builds the interface (6:12) · UI yes, flow not yet (6:44) · System design, part 2 (11:30) · More from Yamparala Media (11:39)
+- Graphics (mix, accent #F5C42C): Yamparala Rahul (0:00) · System design for designers (0:11) · AI builds the interface (6:12) · UI yes, flow not yet (6:44) · System design, part 2 (11:30) · More from Yamparala Rahul (11:39)
 - Long video: "System design for designers: how I built my own Mobbin (Part 1)" · exported 17 Oct
 
 ### Shorts
@@ -97,3 +97,7 @@
 - 17 Oct at 7:11 PM · yamvideoctl · Exported Why I moved from Supabase to Cloudflare for YouTube
 - 17 Oct at 7:14 PM · yamvideoctl · Exported Think before you build a feature for YouTube
 - 17 Oct at 7:15 PM · yamvideoctl · MCP Short: no card over the face (again)
+- 17 Oct at 8:13 PM · You · Remove Video
+- 17 Oct at 8:13 PM · You · Add Videos
+- 17 Oct at 8:33 PM · yamvideoctl · End screen: More from Yamparala Rahul
+- 17 Oct at 8:34 PM · yamvideoctl · Name plate without Yamparala Media

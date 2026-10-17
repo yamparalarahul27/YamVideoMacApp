@@ -551,9 +551,12 @@ from docs/plans/graphics-track.md".
   (`endScreen`: circle subscribe or channel, and per video box best for viewer, most
   recent upload, a chosen video or a playlist, with its link and title).
 - **Layout** (`EndScreenLayout`, and `endLayout` in the engine with the same numbers): the
-  speaker's frame at half size (960×540 at 96, 102), the circle below it, the kicker and
+  speaker's frame at half size (960×540 at 96, 56), the circle below it, the kicker and
   title beside the circle, and the video cards in the other column (two stacked, or one),
-  mirrored when the speaker sits on the right.
+  mirrored when the speaker sits on the right. Every element box stays inside the area
+  where YouTube Studio lets elements go (`EndScreen.elementArea`, x 41–1879, y 139–917,
+  measured in the End screen editor on 17 Oct 2026); Studio pushes an element past it
+  back inside, off its box.
 - **The move is native**, like the move aside: over 0.8 s (smoothstep) the picture shrinks
   about its top-left corner into the frame, over the move aside's blurred, darker fill, and
   stays there to the end. Core Image scales with Lanczos; the export cuts the end screen's

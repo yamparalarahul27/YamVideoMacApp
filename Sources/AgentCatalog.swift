@@ -185,7 +185,7 @@ extension AgentCatalog {
         let styleObject = field("graphicsStyle", "object", styleKeys)
         add("addGraphic", "graphics", "Add a timed motion graphic over the recording. Two graphics in the same place (column, panel or next to the speaker) may not overlap; a graphic shows for at least 0.5 s and ends inside the recording. An endScreen needs only its kind.",
             [clip, graphicObject, timeSpace],
-            #"{"type": "addGraphic", "clipID": "CLIP-ID", "graphic": {"kind": "namePlate", "start": 0.3, "end": 4.3, "props": {"kicker": "Yamparala Media", "title": "Yamparala Rahul", "detail": "UX Design Engineer"}}}"#)
+            #"{"type": "addGraphic", "clipID": "CLIP-ID", "graphic": {"kind": "namePlate", "start": 0.3, "end": 4.3, "props": {"title": "Yamparala Rahul", "detail": "UX Design Engineer"}}}"#)
         add("updateGraphic", "graphics", "Change a graphic. Give only the fields to change; moving start keeps the length (an endScreen keeps its end at the video's end instead); props, when given, replaces all props; look \"\" goes back to the style's choice.",
             [clip, graphicID, field("graphic", "object", "{kind?, start?, end?, props?, look?, transform?}; in transform only the keys given change.")],
             #"{"type": "updateGraphic", "clipID": "CLIP-ID", "graphicID": "GRAPHIC-ID", "graphic": {"start": 12.0, "transform": {"y": 120, "scale": 1.2}}}"#)
