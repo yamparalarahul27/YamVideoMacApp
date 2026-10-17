@@ -150,7 +150,7 @@ struct ThumbnailMakerSheet: View {
                 }
                 .disabled(!design.cutout)
                 if design.place == .clear {
-                    Text("The speaker moves to the far side, and gets smaller if necessary, so the title and the picture do not overlap them. Use Plain or White behind, because the frame shows the speaker in the old place.")
+                    Text("The speaker moves to the far side, and gets smaller if necessary, so the title and the picture do not overlap them. Use Plain, White or White frost behind: the other backgrounds show the speaker in the old place.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Picker("Behind", selection: $design.background) {
@@ -167,8 +167,14 @@ struct ThumbnailMakerSheet: View {
                     Button("Choose…") { chooseImage() }.controlSize(.small)
                     if design.image != nil { Button("Clear") { design.image = nil }.controlSize(.small) }
                 }
-                Text("A product photo or an icon; a transparent PNG looks best.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                HStack {
+                    Text("Size").font(.caption).foregroundStyle(.secondary)
+                    Slider(value: $design.imageSize, in: ThumbnailDesign.imageSizes, step: 0.05).disabled(design.image == nil)
+                        .accessibilityLabel("Picture size")
+                    Text("\(Int((design.imageSize * 100).rounded())) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Text("A product photo or an icon; a transparent PNG looks best. A larger picture makes the title smaller.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let issue = design.problem {
                 Label(issue, systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)

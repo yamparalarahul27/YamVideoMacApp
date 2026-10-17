@@ -23,7 +23,9 @@ struct ThumbnailDesign: Codable, Equatable {
         var label: String { self == .frame ? "As recorded" : "Clear of the title" }
     }
     enum Background: String, Codable, CaseIterable, Identifiable {
-        case frame, dim, blur, solid, white
+        /// frost: the frame as recorded, moved with the speaker, under a white blurred shade
+        /// on the title side that fades out before the speaker, as the Ink layout's shade does.
+        case frame, dim, blur, solid, white, frost
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -32,6 +34,7 @@ struct ThumbnailDesign: Codable, Equatable {
             case .blur: return "Blurred"
             case .solid: return "Plain"
             case .white: return "White"
+            case .frost: return "White frost"
             }
         }
     }
@@ -60,16 +63,20 @@ struct ThumbnailDesign: Codable, Equatable {
     /// `place` clear, the speaker can be smaller, so that nothing overlaps.
     var zoom = 1.0
     var place = Place.frame
+    /// How big the picture beside the title is: 1 to 1.6 times its usual size (at most
+    /// 520×340 pixels of a 1920×1080 frame). The title gets smaller to make room.
+    var imageSize = 1.0
 
     static let zooms = 1.0...1.6
     static let outlineWidths = 2.0...16.0
+    static let imageSizes = 1.0...1.6
     static let titleLimit = 90
     static let tagLimit = 24
 
     init(time: Double = 0, title: String = "") { self.time = time; self.title = title }
 
     private enum CodingKeys: String, CodingKey {
-        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight
+        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight, imageSize
     }
 
     /// Missing keys keep their defaults; `image` is a plain path, as for the thumbnail.
@@ -92,6 +99,7 @@ struct ThumbnailDesign: Codable, Equatable {
         place = try c.decodeIfPresent(Place.self, forKey: .place) ?? defaults.place
         outlineWidth = try c.decodeIfPresent(Double.self, forKey: .outlineWidth) ?? defaults.outlineWidth
         highlight = try c.decodeIfPresent(Bool.self, forKey: .highlight) ?? defaults.highlight
+        imageSize = try c.decodeIfPresent(Double.self, forKey: .imageSize) ?? defaults.imageSize
     }
 
     func encode(to encoder: Encoder) throws {
@@ -109,6 +117,7 @@ struct ThumbnailDesign: Codable, Equatable {
         try c.encode(place, forKey: .place)
         try c.encode(outlineWidth, forKey: .outlineWidth)
         try c.encode(highlight, forKey: .highlight)
+        if imageSize != 1 { try c.encode(imageSize, forKey: .imageSize) }
     }
 
     /// The first thing that cannot be stored, saying what is allowed; nil when all is well.
@@ -125,6 +134,7 @@ struct ThumbnailDesign: Codable, Equatable {
         }
         guard zoom.isFinite, Self.zooms.contains(zoom) else { return "The speaker's size is from 1 to 1.6." }
         guard outlineWidth.isFinite, Self.outlineWidths.contains(outlineWidth) else { return "The outline's width is from 2 to 16 pixels." }
+        guard imageSize.isFinite, Self.imageSizes.contains(imageSize) else { return "The picture's size is from 1 to 1.6." }
         if let image, !image.isFileURL { return "The thumbnail's image must be a local file." }
         return nil
     }
@@ -269,6 +279,7 @@ enum ThumbnailMaker {
             "image": image, "outline": .bool(design.outline), "outlineWidth": .number(design.outlineWidth),
             "highlight": .bool(design.highlight), "side": .string(side.rawValue),
             "background": .string(design.background.rawValue), "zoom": .number(design.zoom),
+            "imageSize": .number(design.imageSize),
         ])
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -302,9 +313,12 @@ extension AppModel {
     /// out of it. Cut-outs are kept by the frame's content, so the same frame is cut once.
     /// With a screen recording, the frame is the speaker's own picture (as in the Speaker
     /// layout) at every moment, so a smile in a part that shows the screen can be used.
+    /// The graphics' move aside is left out too, so a frame under the end screen or a
+    /// panel shows the speaker at full size.
     func thumbnailSources(_ clip: ProjectClip, at time: Double, cutout: Bool) async throws -> ThumbnailMaker.Sources {
         var speaker = clip
         speaker.screen = nil
+        speaker.graphics = nil
         let frame = try await composedFrame(speaker, at: time, settings: settings, graphics: false).image
         guard cutout else { return ThumbnailMaker.Sources(frame: frame) }
         guard let pixels = frame.dataProvider?.data as Data? else { return ThumbnailMaker.Sources(frame: frame) }
