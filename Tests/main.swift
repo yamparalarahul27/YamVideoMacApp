@@ -13,7 +13,7 @@ let features: [(name: String, run: @MainActor () async throws -> Void)] = [
     ("core", coreTests), ("editing", editingTests), ("agents", agentsTests), ("playback", playbackTests),
     ("colour", colourTests), ("effects", effectsTests), ("graphics", graphicsTests), ("publish", publishTests),
     ("thumbnail", thumbnailTests), ("endscreen", endscreenTests), ("autoedit", autoeditTests), ("shorts", shortsTests),
-    ("screen", screenTests), ("logos", logosTests), ("library", libraryTests), ("pastvideos", pastVideosTests), ("style", styleTests),
+    ("screen", screenTests), ("logos", logosTests), ("covers", coversTests), ("library", libraryTests), ("pastvideos", pastVideosTests), ("style", styleTests),
 ]
 /// Features that start from what another feature makes: its checks run first.
 let prerequisites: [String: [String]] = ["agents": ["editing"], "playback": ["editing"], "style": ["editing"]]

@@ -383,8 +383,8 @@ struct ShortLayout: Equatable {
             case .shade: return nil
             case .split: return Self.splitFrame.maxY - 16
             }
-        // A logo badge sits next to the face, clear of the captions.
-        case .screen, .speaker: return nil
+        // A logo badge sits next to the face, clear of the captions. A cover hides them.
+        case .screen, .speaker, .cover: return nil
         }
     }
 
@@ -669,6 +669,9 @@ enum ShortCaptionLayout {
                 covers.append((span.start, span.end + GraphicsTrack.slide, layout.captionLine(for: .panel)))
             }
         }
+        // Kinetic text and section cards fill the picture with their own big words, so the
+        // captions pause under them whatever the option.
+        let silent = (graphics?.items ?? []).filter { $0.kind.zone == .cover }.map { (start: $0.start, end: $0.end) }
         var placed: [ShortCaption] = []
         for caption in fit(captions, size: size) {
             let lines = caption.text.components(separatedBy: "\n")
@@ -677,9 +680,13 @@ enum ShortCaptionLayout {
             for cover in covers {
                 for edge in [cover.start, cover.end] where edge > caption.start && edge < caption.end { edges.append(edge) }
             }
+            for quiet in silent {
+                for edge in [quiet.start, quiet.end] where edge > caption.start && edge < caption.end { edges.append(edge) }
+            }
             edges = Array(Set(edges)).sorted()
             for (from, to) in zip(edges, edges.dropFirst()) where to - from >= shortest - 0.000001 {
                 let middle = (from + to) / 2
+                if silent.contains(where: { middle >= $0.start && middle < $0.end }) { continue }
                 let over = covers.filter { middle >= $0.start && middle < $0.end }
                 var bottom = line ?? layout?.captionSpot ?? ShortLayout.captionBottom
                 if !over.isEmpty {

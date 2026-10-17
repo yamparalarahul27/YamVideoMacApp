@@ -22,6 +22,7 @@
     panelTitle: "panel", rule: "panel", checklist: "panel",
     endScreen: "screen",
     logoBadge: "speaker",
+    kineticText: "cover", sectionCard: "cover",
   };
   const STAGE = { left: 0, top: 0, width: 1920, height: 1080 };
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
@@ -435,6 +436,90 @@
       { left: layout.frame.x, top: layout.frame.y, width: layout.frame.w, height: layout.frame.h, opacity: 1, duration: PANEL_SLIDE, ease: smooth }, c.at(0));
     c.pop([circle].concat(cards), PANEL_SLIDE + 0.1, 0.12);
     c.up([k.node, title], PANEL_SLIDE + 0.35, 0.12);
+  };
+
+  /**
+   * Covers fill the whole picture with their own background: near black (solid) or the
+   * picture darkened (dim). In a Short they fill its 1080×1920 canvas.
+   */
+  function coverBackground(inner, p) {
+    append(inner, h("div", { class: "yg-cv-bg " + (p.background === "dim" ? "dim" : "solid") }));
+  }
+
+  /** A kinetic text's words: `words` [{text, at}], or `text` spread evenly near the start. */
+  function kineticWords(p, length) {
+    if (Array.isArray(p.words) && p.words.length) {
+      return p.words.map((w) => ({ text: String((w && w.text) || ""), at: Math.max(0, num(w && w.at, 0)) }))
+        .filter((w) => w.text.trim());
+    }
+    const parts = String(p.text || "").split(/\s+/).filter(Boolean);
+    const span = Math.min(Math.max(0.3 * parts.length, 0.6), Math.max(0.3, length * 0.6));
+    return parts.map((text, i) => ({ text, at: parts.length > 1 ? (span * i) / (parts.length - 1) : 0 }));
+  }
+
+  /**
+   * Kinetic text: big words, each shown on the time it is spoken (`at`, seconds after the
+   * start), over a cover. `layout` line (one centred line that wraps) or stack (one word
+   * on each line). Words between asterisks take the accent colour. Fewer words, bigger type.
+   */
+  KINDS.kineticText = function (inner, p, c) {
+    coverBackground(inner, p);
+    const stack = p.layout === "stack";
+    const words = kineticWords(p, c.length);
+    const n = words.length;
+    const size = stack ? 170 : n <= 4 ? 150 : n <= 8 ? 128 : n <= 14 ? 108 : 92;
+    const box = h("div", { class: "yg-kt" + (stack ? " yg-kt-stack" : "") + (c.short ? " yg-kt-short" : ""),
+      style: "font-size:" + Math.round(size * (c.short ? 0.85 : 1)) + "px;" });
+    const spans = words.map((w) => {
+      const node = h("span", { class: "yg-kt-w" });
+      accented(node, w.text);
+      append(box, node);
+      return { node, at: Math.min(w.at, Math.max(0, c.length - 0.5)) };
+    });
+    append(inner, box);
+    const tl = c.tl;
+    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" }, c.at(0));
+    spans.forEach((s) => tl.fromTo(s.node, { opacity: 0, y: 28, scale: 0.94 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.22, ease: "back.out(2)" }, c.at(s.at)));
+    tl.to(c.host, { opacity: 0, duration: 0.3, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.3)));
+  };
+
+  /**
+   * A section card: the section's title (and a kicker) over a seek bar split at every
+   * section card (`marks`), its fill moving up to where this one starts (`progress`). The
+   * app writes both, from 0 to 1, so they follow the edit.
+   */
+  const SECTION_BAR = { width: 1400, shortWidth: 860, gap: 10 };
+  KINDS.sectionCard = function (inner, p, c) {
+    coverBackground(inner, p);
+    const width = c.short ? SECTION_BAR.shortWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
+    const progress = Math.max(0, Math.min(1, num(p.progress, 0)));
+    const marks = (Array.isArray(p.marks) ? p.marks : []).map((m) => Math.max(0, Math.min(1, num(m, 0))))
+      .filter((m) => m > 0.001 && m < 0.999).sort((a, b) => a - b)
+      .filter((m, i, list) => i === 0 || m - list[i - 1] > 0.002);
+    const edges = [0].concat(marks, [1]);
+    const last = edges.length - 2;
+    const segments = (cls) => edges.slice(0, -1).map((edge, i) => {
+      const left = edge * width + (i > 0 ? gap / 2 : 0);
+      const right = edges[i + 1] * width - (i < last ? gap / 2 : 0);
+      return h("div", { class: cls, style: "left:" + left.toFixed(1) + "px;width:" + Math.max(2, right - left).toFixed(1) + "px;" });
+    });
+    const before = marks.filter((m) => m < progress - 0.001);
+    const from = before.length ? before[before.length - 1] : 0;
+    const fill = h("div", { class: "yg-sc-fill" }, h("div", { class: "yg-sc-fill-in", style: "width:" + width + "px;" }, segments("yg-sc-seg yg-sc-on")));
+    const knob = h("div", { class: "yg-sc-knob" });
+    const bar = h("div", { class: "yg-sc-track", style: "width:" + width + "px;" }, segments("yg-sc-seg"), fill, knob);
+    const k = p.kicker ? h("div", { class: "yg-sc-kicker", text: p.kicker }) : null;
+    const title = h("div", { class: "yg-sc-title", text: p.title });
+    append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") }, k, title, bar));
+    const tl = c.tl;
+    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power2.out" }, c.at(0));
+    c.up([k, title].filter(Boolean), 0.1, 0.08);
+    tl.fromTo(bar, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, c.at(0.2));
+    const move = Math.min(0.9, Math.max(0.3, c.length - 1));
+    tl.fromTo(fill, { width: from * width }, { width: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
+    tl.fromTo(knob, { left: from * width }, { left: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
+    tl.to(c.host, { opacity: 0, duration: 0.35, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.35)));
   };
 
   /**
@@ -1090,13 +1175,14 @@
     for (const graphic of items) {
       const zone = zoneOf(graphic.kind);
       if (short && zone === "screen") continue;   // Shorts have no end screen
-      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
+      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : zone === "cover" ? (short ? SHORT_STAGE : STAGE)
+        : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
       let scaled = null;
       if (zone === "speaker") {
         // A point on the canvas, the Short's as well: the badge's own size comes from its chips.
         const spot = logoSpot(graphic.props, short);
         rect = { left: spot.x, top: spot.y, width: 0, height: 0 };
-      } else if (short) {
+      } else if (short && zone !== "cover") {
         // The template's zone, scaled into the Short's own zone for it.
         const z = zone === "column" ? short.column : short.panel;
         const size = zone === "column" ? COLUMN : PANEL_MOVE;

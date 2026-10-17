@@ -349,3 +349,27 @@ body.yg-full { background: #000; }
 .yg-lb-compact .yg-lb-chip img { width: 96px; height: 96px; }
 .yg-lb-dark .yg-lb-chip { background: var(--yg-panel); color: var(--yg-text); border: 1px solid var(--yg-line);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4); }
+
+/* Covers: kinetic text and section cards, over the whole picture (or the Short's canvas). */
+.yg-cv-bg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.yg-cv-bg.solid { background: #0b0c0f; }
+.yg-cv-bg.dim { background: rgba(6, 7, 9, 0.8); }
+.yg-kt { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 1560px; display: flex; flex-wrap: wrap;
+  justify-content: center; align-items: baseline; column-gap: 0.28em; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em;
+  text-align: center; color: var(--yg-text); }
+.yg-kt.yg-kt-stack { width: auto; max-width: 1560px; flex-direction: column; align-items: flex-start; line-height: 1.02; text-align: left; }
+.yg-kt.yg-kt-short { width: 940px; }
+.yg-kt-w { display: inline-block; opacity: 0; }
+.yg-kt-w em { font-style: normal; color: var(--yg-accent); }
+.yg-sc { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
+.yg-sc-kicker { font-size: 40px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--yg-accent); margin-bottom: 20px; }
+.yg-sc-title { font-size: 150px; font-weight: 700; line-height: 1.04; letter-spacing: -0.02em; text-align: center; max-width: 1600px;
+  margin-bottom: 72px; color: var(--yg-text); }
+.yg-sc-short .yg-sc-title { font-size: 120px; max-width: 960px; }
+.yg-sc-track { position: relative; height: 18px; }
+.yg-sc-seg { position: absolute; top: 0; height: 18px; border-radius: 9px; background: rgba(255, 255, 255, 0.22); }
+.yg-sc-seg.yg-sc-on { background: var(--yg-accent); }
+.yg-sc-fill { position: absolute; left: 0; top: 0; height: 18px; overflow: hidden; }
+.yg-sc-fill-in { position: relative; height: 18px; }
+.yg-sc-knob { position: absolute; top: 9px; width: 42px; height: 42px; margin: -21px 0 0 -21px; border-radius: 50%; background: var(--yg-accent);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.92), 0 8px 22px rgba(0, 0, 0, 0.5); }
