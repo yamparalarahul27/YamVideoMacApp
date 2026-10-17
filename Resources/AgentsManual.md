@@ -18,8 +18,10 @@ edit, and each edit becomes one undo step with your name on it.
   1. Read this manual: `yamvideoctl manual` or `yamvideo_manual`.
   2. Read the project: `yamvideoctl state`. Keep its `sessionID`, `projectID` and
      `revision`.
-  3. Read the owner's choices in `state.autoEdit.options` and the recording's
-     `publish` details.
+  3. Read the channel's rules: `yamvideoctl style` (`yamvideo_get_style`). Follow them
+     unless the owner says otherwise.
+  4. Read the owner's choices in `state.autoEdit.options` and the recording's
+     `publish` details, and the project's Why notes in `state.notes.why`.
 
 ## 2. Rules
 
@@ -257,6 +259,20 @@ copied.
    in to or read the platform to find a link yourself.
 4. A video's export (`videos[].exports[].json`) has the title, description and tags it
    went up with. Read them when you write for a new post, to keep the owner's voice.
+
+### 4.12 Style.md, project notes and Video.md
+
+- **Style.md** holds the channel's taste as rules, by kind of video. When the owner
+  gives feedback about taste ("text is coming over my face"), propose a rule in one line
+  and where it came from. After a yes, add it: `addStyleRule {section, rule, source}`
+  with `yamvideoctl library apply`. Never add a rule the owner did not approve.
+- **Project notes** say why this video is edited the way it is. After each choice the
+  owner approves, add one line with `addProjectNote {note}` (with `yamvideoctl apply`):
+  the decision and its reason.
+- **Video.md** is written next to the saved project at every save and export: what the
+  video is, the edit, each Short, the Why notes and the history of changes
+  (`state.notes.videoNotes` is its path). Read past Video.md files to match how the
+  owner's earlier videos were made. Do not edit Video.md; it is rewritten.
 
 ## 5. Problems
 

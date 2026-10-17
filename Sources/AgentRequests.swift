@@ -205,6 +205,10 @@ struct WireCommand: Codable, Equatable {
     var layoutID: UUID?
     var layout: WireLayout?
     var layouts: [WireLayout]?
+    /// setProjectNotes: the whole Why notes ("" clears them).
+    var notes: String?
+    /// addProjectNote: one line added to the Why notes, with who and when.
+    var note: String?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -219,6 +223,7 @@ struct WireCommand: Codable, Equatable {
         "addShort", "updateShort", "removeShort",
         "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
         "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
+        "setProjectNotes", "addProjectNote",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -405,6 +410,9 @@ struct AgentState: Encodable {
         var module: String
         var idea: UUID?
     }
+    /// The project's Why notes, Video.md beside it once saved, and how many steps its
+    /// history holds.
+    struct Notes: Encodable { var why: String?; var videoNotes: String?; var changes: Int; var recent: [ChangeLogEntry] }
     /// The Library idea the open project was made from (method library has the rest).
     struct Idea: Encodable { var id: UUID; var title: String; var topic: String? }
     struct Busy: Encodable {
@@ -425,6 +433,7 @@ struct AgentState: Encodable {
     var history: History
     var selection: Selection
     var idea: Idea?
+    var notes: Notes
     var settings: JSONValue
     var graphicsRenderer: GraphicsRenderer
     var autoEdit: AutoEdit
@@ -585,7 +594,7 @@ struct AgentSaveResult: Encodable {
 extension AppModel {
     static let agentMethods = ["manual", "catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
                                "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit", "logos", "setLogo", "removeLogo",
-                               "library", "libraryApply", "libraryUndo", "libraryRedo", "scanFolder"]
+                               "library", "libraryApply", "libraryUndo", "libraryRedo", "scanFolder", "style"]
 
     /// Answers one request line with one response line. Never throws: every failure is
     /// a structured error response.
@@ -621,6 +630,7 @@ extension AppModel {
         case "logos": return agentResponse(Result<AgentLogos, EditError>.success(Self.agentLogos()), instanceID)
         case "library": return agentResponse(Result<AgentLibrary, EditError>.success(agentLibrary()), instanceID)
         case "scanFolder": return agentResponse(agentScanFolder(request), instanceID)
+        case "style": refreshStyleFromDisk(); return agentResponse(Result<AgentStyle, EditError>.success(agentStyle()), instanceID)
         case "libraryApply", "libraryUndo", "libraryRedo":
             // Library commands carry fields project commands do not, so a retry is matched
             // on the whole request, with its keys in a fixed order.
@@ -836,6 +846,7 @@ extension AppModel {
                              playhead: previewTime, movieMode: isMovieMode, movieTime: movieTime,
                              module: module.rawValue, idea: selectedIdeaID),
             idea: openProjectIdea.map { .init(id: $0.id, title: $0.title, topic: $0.topic) },
+            notes: .init(why: projectNotes, videoNotes: videoNotesFile?.path, changes: changeLog.count, recent: Array(changeLog.suffix(10))),
             settings: (try? JSONValue.from(document.settings)) ?? .null,
             graphicsRenderer: graphicsRendererState,
             autoEdit: .init(options: document.autoEdit ?? AutoEditOptions(), saved: document.autoEdit != nil,
@@ -960,7 +971,7 @@ extension AppModel {
             }
             let commands = try wire.enumerated().map { index, command in
                 try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index], face: faces[index],
-                            border: borders[index])
+                            border: borders[index], origin: agentOrigin(request))
             }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
@@ -978,7 +989,7 @@ extension AppModel {
     /// One wire command as an `EditCommand`, against the committed document.
     private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
                          tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil, face: CGPoint? = nil,
-                         border: CGRect? = nil) throws -> EditCommand {
+                         border: CGRect? = nil, origin: EditOrigin = .human) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -1309,6 +1320,13 @@ extension AppModel {
             let clipID = try field(wire.clipID, "clipID")
             return .setPublishInfo(clip: clipID, info: try mergedPublish(try field(wire.publish, "publish"),
                                                                         onto: try record(clipID).publish ?? PublishInfo()))
+        case "setProjectNotes":
+            return .setNotes(try field(wire.notes, "notes"))
+        case "addProjectNote":
+            let note = try field(wire.note, "note").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !note.isEmpty else { throw EditError.invalid("A note says something; send note with words in it.") }
+            let bare = note.hasPrefix("- ") ? String(note.dropFirst(2)) : note
+            return .addNote("- \(bare) *(\(origin.label), \(Date().formatted(.dateTime.day().month(.abbreviated))))*")
         case "setAutoEditOptions":
             return .setAutoEditOptions(try Self.mergedAutoEdit(try field(wire.autoEdit, "autoEdit"), onto: document.autoEdit ?? AutoEditOptions()))
         case "importTranscript":
@@ -1474,6 +1492,7 @@ extension AppModel {
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             scheduleAutosave()
             noteProjectLocation()
+            writeVideoNotes()
             statusMessage = "\(agentOrigin(request).label) saved \(destination.lastPathComponent)."
             return .success(AgentSaveResult(path: destination.path, projectID: projectID, revision: revision, copy: false))
         } catch {
@@ -2112,7 +2131,7 @@ extension AppModel {
             }
             if let self {
                 if let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .done(files.video) }
-                self.noteExport(files.json, origin: origin)
+                self.finishedExport(files.json, title: files.video.deletingPathExtension().lastPathComponent, origin: origin)
                 self.statusMessage = "\(origin.label) exported \(files.video.lastPathComponent) for YouTube."
             }
             var result: [String: JSONValue] = ["path": .string(files.video.path), "format": .string("mp4"),

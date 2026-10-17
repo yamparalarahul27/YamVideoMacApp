@@ -155,6 +155,17 @@ final class AppModel: ObservableObject {
     @Published var libraryHighlight: LibraryHighlight?
     /// The Scan a Folder sheet, while it is up.
     @Published var libraryScan: LibraryScanState?
+    /// The project's Why notes and its history of changes (project version 15). The history
+    /// stays out of undo: undoing a step adds "Undid …" rather than forgetting the step.
+    @Published var projectNotes: String?
+    var changeLog: [ChangeLogEntry] = []
+    @Published var showingProjectNotes = false
+    /// The Style sheet (Style.md), while it is up.
+    @Published var showingStyle = false
+    /// Style.md as last read or written, and the file's date then, to notice the owner
+    /// editing it in another app.
+    var styleOnDisk: String?
+    var styleFileDate: Date?
     /// Project files and exports the Library page has read, by path, with the file's date.
     var projectSummaries: [String: (date: Date, summary: ProjectSummary)] = [:]
     var exportDetails: [String: (date: Date, export: FoundExport)] = [:]

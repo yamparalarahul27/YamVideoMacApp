@@ -160,6 +160,19 @@ struct ProjectClip: Codable, Equatable {
     }
 }
 
+/// One step in a project's history: when, who, and what the Undo menu called it.
+struct ChangeLogEntry: Codable, Equatable {
+    enum Kind: String, Codable { case edit, undo, redo, export }
+    var date: Date
+    /// "You", or the agent's name.
+    var by: String
+    var label: String
+    var kind: Kind
+
+    static let limit = 2000
+    static let notesLimit = 50_000
+}
+
 struct VideoProject: Codable, Equatable {
     /// 1: crop, blur and zoom. 2: adds section speed. 3: adds a stable project identity
     /// and the per-recording subtitle file. 4: adds per-recording colour. 5: adds
@@ -169,10 +182,11 @@ struct VideoProject: Codable, Equatable {
     /// YouTube element for each of its boxes. 11: adds the auto edit options, each recording's
     /// transcript and the captions choice. 12: adds each recording's Shorts. 13: adds a
     /// Short's zoom (zoomed out, at the top over a blurred copy). 14: adds a recording's
-    /// screen recording and its layouts. Every edited
+    /// screen recording and its layouts. 15: adds the project's Why notes and its history
+    /// of changes. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 14
+    static let currentVersion = 15
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -186,6 +200,12 @@ struct VideoProject: Codable, Equatable {
     var movieSettings: MovieSettings?
     /// Version 11 onwards. Nil until the owner or an agent answers them.
     var autoEdit: AutoEditOptions? = nil
+    /// Version 15 onwards: why the video is edited the way it is, as Markdown, written by
+    /// the owner and agents. Video.md shows it.
+    var notes: String? = nil
+    /// Version 15 onwards: every step that changed the project, oldest first, kept apart
+    /// from undo so undoing never forgets that a step happened.
+    var log: [ChangeLogEntry]? = nil
 
     /// Reads, validates and upgrades a project file in one step. A pre-identity file gets
     /// an identity derived from its own bytes, so opening the same unsaved legacy file
@@ -254,6 +274,11 @@ struct VideoProject: Codable, Equatable {
         if version < 14, clips.contains(where: { $0.screen != nil }) {
             try reject("The project claims an older format but contains a screen recording."); return
         }
+        if version < 15, notes != nil || log != nil {
+            try reject("The project claims an older format but contains notes or a history of changes."); return
+        }
+        if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
+        if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
         guard Set(clips.map(\.id)).count == clips.count else {
             try reject("The project contains duplicate clip IDs."); return

@@ -26,8 +26,17 @@ struct LibraryWireCommand: Codable, Equatable {
     /// removePost: the post to remove; left out, all of them.
     var link: String?
 
+    /// setStyle: Style.md's whole text.
+    var text: String?
+    /// addStyleRule: the heading the rule goes under (made when it is not there yet).
+    var section: String?
+    /// addStyleRule and removeStyleRule: the rule, one line.
+    var rule: String?
+    /// addStyleRule: where the rule came from, like "feedback on AppStore, 17 Oct".
+    var source: String?
+
     static let types = ["addIdea", "updateIdea", "removeIdea", "addIdeaImages", "removeIdeaImage", "linkProject", "unlinkProject",
-                        "importVideos", "addPost", "removePost"]
+                        "importVideos", "addPost", "removePost", "setStyle", "addStyleRule", "removeStyleRule"]
 }
 
 /// The parts of a request only Library methods read, decoded from the same line.
@@ -97,6 +106,16 @@ struct AgentLibrary: Encodable {
     var openProject: OpenProject
     var history: History
     var ideas: [Idea]
+}
+
+/// What `style` returns: Style.md, whole and by section.
+struct AgentStyle: Encodable {
+    struct Section: Encodable { var name: String; var rules: [String] }
+    var path: String?
+    var text: String
+    var sections: [Section]
+    /// The Library's revision: style commands go through libraryApply.
+    var revision: Int
 }
 
 /// What `scanFolder` found.
@@ -284,6 +303,17 @@ extension AppModel {
             let found = LibraryScan.candidates(roots: roots, library: library)
             guard !found.isEmpty else { throw EditError.notFound("No YamVideo projects or Export for YouTube files at those paths.") }
             return LibraryScan.commands(found).map { ($0, []) }
+        case "setStyle":
+            guard let text = wire.text else { throw EditError(code: .invalidRequest, message: "setStyle needs text: all of Style.md.") }
+            return [(.setStyle(text), [])]
+        case "addStyleRule":
+            guard let section = wire.section, let rule = wire.rule else {
+                throw EditError(code: .invalidRequest, message: "addStyleRule needs section (a heading like Shorts) and rule (one line).")
+            }
+            return [(.addStyleRule(section: section, rule: rule, source: wire.source), [])]
+        case "removeStyleRule":
+            guard let rule = wire.rule else { throw EditError(code: .invalidRequest, message: "removeStyleRule needs rule: its words, as in style.sections[].rules.") }
+            return [(.removeStyleRule(rule), [])]
         case "addPost", "removePost":
             let id = try idea()
             guard let item = library.item(id) else { throw EditError.notFound("No idea \(id). Read the Library again.") }
@@ -294,6 +324,11 @@ extension AppModel {
         default:
             throw EditError(code: .invalidRequest, message: "Unknown Library command \"\(wire.type)\". Commands: \(LibraryWireCommand.types.joined(separator: ", ")).")
         }
+    }
+
+    func agentStyle() -> AgentStyle {
+        AgentStyle(path: styleFile?.path, text: library.style,
+                   sections: StyleDoc.sections(library.style).map { .init(name: $0.name, rules: $0.rules) }, revision: library.revision)
     }
 
     /// `scanFolder`: what Add Past Videos would find under `path`, changing nothing.

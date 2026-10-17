@@ -307,3 +307,114 @@ private struct CandidateRow: View {
         return parts.joined(separator: " · ")
     }
 }
+
+// MARK: - Style.md
+
+/// The channel's Style.md: its rules by section, and the text to edit.
+struct StyleSheet: View {
+    @EnvironmentObject var model: AppModel
+    @State private var text = ""
+    @State private var commit: Task<Void, Never>?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Style").font(.title3.weight(.semibold))
+                    Text("Your channel's editing rules. Every agent reads them before it edits, and adds one only after you say yes.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(18)
+            Divider()
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(StyleDoc.sections(text).enumerated()), id: \.offset) { _, section in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(section.name).font(.callout.weight(.semibold))
+                                Text(section.rules.isEmpty ? "No rules yet" : section.rules.count == 1 ? "1 rule" : "\(section.rules.count) rules")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(width: 180)
+                Divider()
+                TextEditor(text: $text)
+                    .font(.system(.body, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .accessibilityLabel("Style.md")
+            }
+            Divider()
+            HStack {
+                Button("Open in Text Editor") { if let file = model.styleFile { NSWorkspace.shared.open(file) } }
+                    .help("Edit Style.md in your text editor; YamVideo picks up your changes")
+                Button("Show in Finder") { if let file = model.styleFile { NSWorkspace.shared.activateFileViewerSelecting([file]) } }
+                Spacer()
+                Text("Rules are lines starting with - under a ## heading.").font(.caption).foregroundStyle(.secondary)
+                Button("Done") { save(); model.showingStyle = false }.keyboardShortcut(.defaultAction)
+            }
+            .padding(14)
+        }
+        .frame(width: 820, height: 600)
+        .onAppear { model.refreshStyleFromDisk(); text = model.library.style }
+        .onChange(of: model.library.style) { _, value in if value != text { text = value } }
+        .onChange(of: text) { _, _ in
+            commit?.cancel()
+            commit = Task { try? await Task.sleep(nanoseconds: 700_000_000); if !Task.isCancelled { save() } }
+        }
+        .onDisappear { commit?.cancel(); save() }
+    }
+
+    private func save() {
+        guard text != model.library.style else { return }
+        if case .failure(let error) = model.performLibrary([.setStyle(text)], coalesce: "style") { model.statusMessage = error.message }
+    }
+}
+
+// MARK: - Project notes
+
+/// The open project's Why notes, saved as one undo step on Done.
+struct ProjectNotesSheet: View {
+    @EnvironmentObject var model: AppModel
+    @State private var text = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Project Notes").font(.title3.weight(.semibold))
+                Text("Why this video is edited the way it is: the choices, the feedback, what to keep next time. Video.md shows them, and agents read them.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(18)
+            Divider()
+            TextEditor(text: $text)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor))
+                .accessibilityLabel("Project notes")
+            Divider()
+            HStack {
+                if let file = model.videoNotesFile, FileManager.default.fileExists(atPath: file.path) {
+                    Button("Open Video.md") { NSWorkspace.shared.open(file) }
+                        .help("Video.md is written next to the project at every save and export")
+                } else {
+                    Text("Video.md is written next to the project once it is saved.").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { model.showingProjectNotes = false }.keyboardShortcut(.cancelAction)
+                Button("Done") { model.setProjectNotes(text); model.showingProjectNotes = false }.keyboardShortcut(.defaultAction)
+            }
+            .padding(14)
+        }
+        .frame(width: 620, height: 460)
+        .onAppear { text = model.projectNotes ?? "" }
+    }
+}

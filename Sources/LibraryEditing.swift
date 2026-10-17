@@ -33,6 +33,7 @@ struct LibraryHistory {
     let transactionID: UUID
     let origin: EditOrigin
     let items: [ContentItem]
+    var style = ""
     /// Typing in one field of one idea is one step while it goes on: the field's key,
     /// and when it last changed.
     var coalesce: String?
@@ -68,6 +69,7 @@ extension AppModel {
     }
 
     var libraryFile: URL? { libraryFolderURL?.appendingPathComponent("Library.json") }
+    var styleFile: URL? { libraryFolderURL?.appendingPathComponent("Style.md") }
     var libraryImagesFolder: URL? { libraryFolderURL?.appendingPathComponent("Images", isDirectory: true) }
 
     func libraryImageURL(_ name: String) -> URL? { libraryImagesFolder?.appendingPathComponent(name) }
@@ -104,8 +106,56 @@ extension AppModel {
                 try? FileManager.default.removeItem(at: images.appendingPathComponent(name))
             }
         }
+        // Style.md: read it, or start one with the headings.
+        styleOnDisk = nil; styleFileDate = nil
+        if let style = styleFile, let text = try? String(contentsOf: style, encoding: .utf8) {
+            library.style = text
+            styleOnDisk = text
+            styleFileDate = fileDate(style)
+        } else {
+            library.style = StyleDoc.starter
+            writeStyle()
+        }
         if selectedIdeaID == nil || library.item(selectedIdeaID) == nil { selectedIdeaID = library.items.first?.id }
         noteProjectLocation()
+    }
+
+    private func fileDate(_ url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    /// Writes Style.md when its text is not what the file already holds.
+    private func writeStyle() {
+        guard let file = styleFile, library.style != styleOnDisk else { return }
+        do {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(library.style.utf8).write(to: file, options: .atomic)
+            styleOnDisk = library.style
+            styleFileDate = fileDate(file)
+        } catch {
+            statusMessage = "Could not save Style.md: \(error.localizedDescription)"
+        }
+    }
+
+    /// Takes in Style.md as the owner left it in another app. Their text wins: the undo
+    /// history keeps it too, so no Undo can bring back what they replaced.
+    func refreshStyleFromDisk() {
+        guard let file = styleFile, let date = fileDate(file), date != styleFileDate,
+              let text = try? String(contentsOf: file, encoding: .utf8) else { return }
+        styleFileDate = date
+        styleOnDisk = text
+        guard text != library.style else { return }
+        library.style = text
+        func keep(_ entries: inout [LibraryHistory]) {
+            entries = entries.map { entry in
+                LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin,
+                               items: entry.items, style: text, coalesce: entry.coalesce, date: entry.date)
+            }
+        }
+        keep(&libraryUndoEntries); keep(&libraryRedoEntries)
+        library.revision += 1
+        writeLibrary()
+        appendEvent(.library, origin: .human, label: "Style.md changed in another app", revision: library.revision)
     }
 
     /// Writes the whole Library atomically. Nothing is written before it was loaded.
@@ -117,6 +167,7 @@ extension AppModel {
         } catch {
             statusMessage = "Could not save the Library: \(error.localizedDescription)"
         }
+        writeStyle()
     }
 
     // MARK: Transactions
@@ -128,12 +179,15 @@ extension AppModel {
     func performLibrary(_ commands: [LibraryCommand], label: String? = nil, origin: EditOrigin = .human,
                         expectedRevision: Int? = nil, dryRun: Bool = false, coalesce: String? = nil) -> Result<LibraryReceipt, EditError> {
         let label = label ?? commands.first?.defaultLabel ?? "Edit Ideas"
+        // An edit made in another app comes first, and moves the revision on.
+        if commands.contains(where: { if case .setStyle = $0 { return false }; return true }) || origin.isHuman == false { refreshStyleFromDisk() }
         if let refusal = admitLibrary(origin, expectedRevision: expectedRevision) { return .failure(refusal) }
         let outcome: LibraryOutcome
         do { outcome = try LibraryReducer.apply(commands, to: library) }
         catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid(error.localizedDescription)) }
-        var receipt = LibraryReceipt(revision: library.revision, transactionID: nil, changed: outcome.library.items != library.items,
+        var receipt = LibraryReceipt(revision: library.revision, transactionID: nil,
+                                     changed: outcome.library.items != library.items || outcome.library.style != library.style,
                                      createdIDs: outcome.createdIDs, changedIDs: outcome.changedIDs)
         guard !dryRun, receipt.changed else { return .success(receipt) }
 
@@ -145,12 +199,13 @@ extension AppModel {
         } else {
             transaction = UUID()
             libraryUndoEntries.append(LibraryHistory(name: label, transactionID: transaction, origin: origin,
-                                                     items: library.items, coalesce: coalesce))
+                                                     items: library.items, style: library.style, coalesce: coalesce))
             if libraryUndoEntries.count > 100 { libraryUndoEntries.removeFirst() }
             libraryRedoEntries.removeAll()
         }
         let before = library.items
         library.items = outcome.library.items
+        library.style = outcome.library.style
         receipt.transactionID = transaction
         receipt.revision = commitLibrary(origin: origin, label: label, transaction: transaction, before: before)
         return .success(receipt)
@@ -215,11 +270,12 @@ extension AppModel {
             return .failure(EditError(code: .historyConflict,
                 message: "The most recent Library step is now \"\(entry.name)\" by \(entry.origin.label). Read the Library and decide again."))
         }
-        let opposite = LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin, items: library.items)
+        let opposite = LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin, items: library.items, style: library.style)
         if redo { libraryRedoEntries.removeLast(); libraryUndoEntries.append(opposite) }
         else { libraryUndoEntries.removeLast(); libraryRedoEntries.append(opposite) }
         let before = library.items
         library.items = entry.items
+        library.style = entry.style
         let changed = Set(entry.items.map(\.id)).symmetricDifference(before.map(\.id))
             .union(entry.items.filter { item in before.first { $0.id == item.id } != item }.map(\.id))
         if origin.isHuman, let first = changed.first(where: { library.item($0) != nil }) { selectedIdeaID = first }
@@ -484,7 +540,7 @@ extension AppModel {
                     return item
                 }
                 return LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin,
-                                      items: items, coalesce: entry.coalesce, date: entry.date)
+                                      items: items, style: entry.style, coalesce: entry.coalesce, date: entry.date)
             }
         }
         follow(&libraryUndoEntries); follow(&libraryRedoEntries)

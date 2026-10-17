@@ -81,7 +81,7 @@ import Foundation
           "graphics survive a project round trip")
     var olderClaim = savedGraphics; olderClaim.version = 5
     check((try? olderClaim.validate()) == nil, "a version 5 file with graphics is refused")
-    var olderPlain = savedGraphics; olderPlain.version = 5; olderPlain.clips[0].graphics = nil
+    var olderPlain = savedGraphics.withoutLog; olderPlain.version = 5; olderPlain.clips[0].graphics = nil
     check((try? olderPlain.validate()) != nil, "a version 5 file without graphics still opens")
 
     // Cuts carry graphics the way they carry zooms.
@@ -526,7 +526,7 @@ import Foundation
     check(placedSaved == placing.project && placedSaved.version == VideoProject.currentVersion, "placements survive a project round trip")
     var placedAsSix = placedSaved; placedAsSix.version = 6
     check((try? placedAsSix.validate()) == nil, "a version 6 file with placements is refused, so an older build never drops them")
-    var unplacedSix = placedSaved; unplacedSix.version = 6; unplacedSix.clips[0].graphics?.items[0].transform = nil
+    var unplacedSix = placedSaved.withoutLog; unplacedSix.version = 6; unplacedSix.clips[0].graphics?.items[0].transform = nil
     check((try? unplacedSix.validate()) != nil, "a version 6 file without placements still opens")
     let placedFile = scratch.appendingPathComponent("placed.json")
     try placedData.write(to: placedFile, atomically: true, encoding: .utf8)

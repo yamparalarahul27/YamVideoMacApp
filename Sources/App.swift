@@ -137,6 +137,8 @@ struct YamVideoApp: App {
                 Button("Open Project…") { model.promptForProject() }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.isConverting)
                 Button("Save Project") { model.saveProject() }.keyboardShortcut("s")
                 Button("Save Project As…") { model.saveProject(asCopy: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Project Notes…") { model.showModule(.studio); model.showingProjectNotes = true }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .undoRedo) {
                 Button(model.menuUndoTitle) { model.undoEdit() }
@@ -147,6 +149,8 @@ struct YamVideoApp: App {
             CommandMenu("Go") {
                 Button("Library") { model.showModule(.library) }.keyboardShortcut("1")
                 Button("Studio") { model.showModule(.studio) }.keyboardShortcut("2")
+                Divider()
+                Button("Style…") { model.showingStyle = true }.keyboardShortcut("3")
             }
             CommandMenu("Timeline") {
                 Group {

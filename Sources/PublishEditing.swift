@@ -246,7 +246,7 @@ extension AppModel {
                     }
                 }
                 if let i = items.firstIndex(where: { $0.id == id }) { items[i].status = .done(files.video) }
-                noteExport(files.json, origin: .human)
+                finishedExport(files.json, title: files.video.deletingPathExtension().lastPathComponent, origin: .human)
                 statusMessage = "Exported for YouTube: \(files.video.lastPathComponent) and its upload files."
             } catch is CancellationError {
                 if let i = items.firstIndex(where: { $0.id == id }) { items[i].status = .ready }

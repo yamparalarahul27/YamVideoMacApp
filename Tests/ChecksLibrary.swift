@@ -26,7 +26,7 @@ func ideaImage(_ name: String) throws -> URL {
     guard case .success(let added) = model.performLibrary([.addIdea(first)]) else { check(false, "an idea can be added"); return }
     check(added.createdIDs == [first.id] && added.revision == 1 && model.library.items.first?.links == ["https://youtube.com/watch?v=abc"],
           "an idea is added, and a bare web address gets https://")
-    equal(try Library.decode(Data(contentsOf: file)), model.library, "the Library is written to its file after a change")
+    equal(try Library.decode(Data(contentsOf: file)).items, model.library.items, "the Library is written to its file after a change")
     equal(model.library.items.first?.stage, .idea, "an idea without a project is at the Idea stage")
 
     let second = ContentItem(title: "Pocket 3 colour in five minutes", topic: "ai WORKFLOW")

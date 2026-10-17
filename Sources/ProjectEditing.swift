@@ -39,7 +39,8 @@ struct SessionRecovery: Codable {
 extension AppModel {
     var project: VideoProject {
         VideoProject(projectID: projectID, clips: items.map(ProjectClip.init), settings: settings,
-                     selection: selection, movieSettings: movieSettings, autoEdit: autoEdit)
+                     selection: selection, movieSettings: movieSettings, autoEdit: autoEdit,
+                     notes: projectNotes, log: changeLog.isEmpty ? nil : changeLog)
     }
 
     nonisolated static var recoveryURL: URL {
@@ -163,7 +164,7 @@ extension AppModel {
             // give it the recovered one, or the two could never compare equal again.
             savedProject = session?.savedProject.map { $0.migrated(identity: recovered.projectID ?? UUID()) }
             savedFingerprint = session?.savedFingerprint
-            hasUnsavedChanges = recovered != savedProject && !items.isEmpty
+            hasUnsavedChanges = recovered.withoutLog != savedProject?.withoutLog && !items.isEmpty
             if !items.isEmpty { statusMessage = "Restored your last editing session." }
         } catch { statusMessage = "Could not restore the last session: \(error.localizedDescription)" }
     }
@@ -171,6 +172,10 @@ extension AppModel {
     func restore(_ snapshot: VideoProject) {
         playback.clear(); showPlayback = false
         showsShort = false; playback.shortID = nil; selectedShortID = nil
+        // The history belongs to the document: a different one brings its own, while undo
+        // within the same one keeps every step it has seen.
+        if snapshot.projectID != projectID { changeLog = snapshot.log ?? [] }
+        projectNotes = snapshot.notes
         projectID = snapshot.projectID ?? UUID()
         // A different document is a different session from the moment it appears, not
         // from its next edit — otherwise that edit would end the session it was sent in.
@@ -252,6 +257,7 @@ extension AppModel {
             projectURL = destination; savedProject = project; hasUnsavedChanges = false
             if projectID != previousID { rotateSession() }
             noteProjectLocation()
+            writeVideoNotes()
             scheduleAutosave()
             let missing = Self.tableHashes(project).filter { !LUTStore.has($0) }
             statusMessage = missing.isEmpty ? "Saved \(destination.lastPathComponent)."

@@ -88,6 +88,14 @@ or opened at its post, and its title, description and tags copied. Nothing is co
 the Library remembers where the files are, and new exports of a linked project appear by
 themselves.
 
+**Style and notes.** **Style** (⌘3) is your channel's editing rules, `Style.md` in the
+Library folder: rules by kind of video, each with where it came from. Every agent reads it
+before it edits and adds a rule only after you say yes; edit it in the app or any text
+editor. **Project Notes…** (⇧⌘N) says why a video is edited the way it is, and projects
+now keep a history of every change and who made it. At every save and export YamVideo
+writes `<project> Video.md` beside the project: the edit, each Short, the notes and the
+history, for you and any agent to read.
+
 Everything stays on this Mac, in `~/Library/Application Support/YamVideo/Library`
 (`YAMVIDEO_LIBRARY_PATH` moves it, for a test instance). YamVideo never posts to or reads
 from YouTube, Instagram, X or LinkedIn: you publish by hand. Agents read and change ideas
@@ -433,14 +441,16 @@ Sources/
   Library.swift     the Library: ideas, their rules, stages and links to projects, the Library commands and reducer
   LibraryEditing.swift / LibraryView.swift loading and saving the Library, its undo, the owner's actions, the sidebar and the Library page
   LibraryAgents.swift the Library for agents: library, libraryApply, libraryUndo, libraryRedo and scanFolder
-  LibraryScan.swift / LibraryVideos.swift / LibraryVideosView.swift past videos: finding projects and exports, an item's videos and their actions, the Add Past Videos sheet
+  LibraryScan.swift / LibraryVideos.swift / LibraryVideosView.swift past videos: finding projects and exports, an item's videos and their actions, the Add Past Videos, Style and Project Notes sheets
+  Style.swift       Style.md: rules by heading, adding and removing them, the starter
+  ProjectNotes.swift a project's Why notes and history of changes, and Video.md
   InspectorView.swift selection-following inspector: section, zoom, blur area, effect, marker, recording
   ExportSheet.swift scope, format, quality, audio and destination for one Export button
   AgentActivityView.swift Local agents status, pause switch, activity and setup commands
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v14)
+  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v15)
   ColorLUT.swift    .cube parser and trilinear sampling
   ColorAdjustments.swift colour settings, the four adjustments and Auto's inference
   ColorPipeline.swift table store and the colour stage shared by ffmpeg and Core Image

@@ -13,10 +13,10 @@ let features: [(name: String, run: @MainActor () async throws -> Void)] = [
     ("core", coreTests), ("editing", editingTests), ("agents", agentsTests), ("playback", playbackTests),
     ("colour", colourTests), ("effects", effectsTests), ("graphics", graphicsTests), ("publish", publishTests),
     ("thumbnail", thumbnailTests), ("endscreen", endscreenTests), ("autoedit", autoeditTests), ("shorts", shortsTests),
-    ("screen", screenTests), ("logos", logosTests), ("library", libraryTests), ("pastvideos", pastVideosTests),
+    ("screen", screenTests), ("logos", logosTests), ("library", libraryTests), ("pastvideos", pastVideosTests), ("style", styleTests),
 ]
 /// Features that start from what another feature makes: its checks run first.
-let prerequisites: [String: [String]] = ["agents": ["editing"], "playback": ["editing"]]
+let prerequisites: [String: [String]] = ["agents": ["editing"], "playback": ["editing"], "style": ["editing"]]
 let asked = Array(CommandLine.arguments.dropFirst())
 if asked.contains("--list") { print(features.map(\.name).joined(separator: "\n")); exit(0) }
 if let unknown = asked.first(where: { name in !features.contains { $0.name == name } }) {
