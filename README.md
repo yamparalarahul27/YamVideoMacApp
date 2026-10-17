@@ -128,8 +128,11 @@ pictures, and each cut cuts the screen at the same moment.
    moment of a click you name). Use **−1 fr** and **+1 fr** to make it exact.
 2. Choose the base **Layout**: **Speaker** (you fill the frame), **Screen** (the screen
    fills the frame, you in a bubble: a **Circle** or a **Rounded square** with soft corners
-   you can set) or **Side by side** (you in a tall panel on the
-   left, the screen on the right).
+   you can set), **Side by side** (you in a tall panel on the
+   left, the screen on the right) or **Ink** (you on the right at full size, and on the
+   left, over a dark shade, only the bright lines of a drawing recorded on a dark canvas,
+   such as YamDraw: its background is keyed out by brightness). For Ink, crop the screen
+   to the part of the canvas where you draw, so the lines show large.
 3. Use **Add Layout** to give part of the video another layout. Layouts show on the
    Layout lane; drag them, or drag an edge. A change of layout eases over 0.4 s.
 
@@ -513,7 +516,7 @@ local socket and `yamvideoctl`) are implemented; the remaining phases describe p
 work, not features available in this build.
 
 The [screen + speaker plan](docs/plans/screen-speaker.md) puts a screen recording with
-the speaker's recording, synced by one offset, in Speaker, Screen or Side by side layouts.
+the speaker's recording, synced by one offset, in Speaker, Screen, Side by side or Ink layouts.
 Part 1 is implemented; section 10 lists part 2.
 
 The [graphics track plan](docs/plans/graphics-track.md) is the layer design that the

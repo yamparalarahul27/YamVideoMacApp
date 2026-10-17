@@ -112,6 +112,11 @@ edit, and each edit becomes one undo step with your name on it.
    outro, `split` (side by side) where the speaker explains without the screen, and
    the base `screen` layout where the screen shows the point. Apply with
    `replaceLayouts`.
+   - `ink` is for a drawing recorded on a dark canvas (for example YamDraw on an iPad):
+     the speaker moves to the right at full size, and only the drawing's bright lines
+     show on the left, over a dark shade. Set the screen's `crop` to the part of the
+     canvas where the lines are, so they show large. Check a frame with
+     `preview --composed`: the lines must be clear, and the face must not be under them.
 5. Screen zooms: `analyze --kind screenZooms`, keep the ones where the text on the
    screen matters, aim others by hand at that text, and apply with
    `replaceScreenZooms`. A level of 1.4 to 2 makes browser text sharp.

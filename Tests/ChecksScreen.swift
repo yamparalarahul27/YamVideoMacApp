@@ -160,6 +160,55 @@ import Foundation
     check(ssWorst.whole < 3 && ssWorst.speaker < 3 && ssWorst.screen < 3,
           "the export draws each layout, held and while it changes, as the preview does")
 
+    print("\nInk layout")
+    let ikHeld = ssGeometry.held(.ink), ikLines = ssGeometry.screenPlace(.ink)!.rect
+    let ikFace = ssGeometry.facePoint(in: ikHeld)
+    check(ikHeld.ink == 1 && ikHeld.speaker.rect.maxX == 1920 && ikHeld.speaker.rect.minY == 0 && ikHeld.speaker.rect.height == 1080
+              && ikHeld.window.size == ikHeld.speaker.rect.size && abs(Double(ikFace.x) - LayoutGeometry.inkFace * 1920) <= 2 && ikHeld.speaker.radius == 0,
+          "Ink moves the speaker right at full size, the face at \(Int(LayoutGeometry.inkFace * 100)) % of the width", "\(ikHeld.speaker.rect) face \(ikFace)")
+    check(ikLines.minX == 40 && ikLines.maxX <= LayoutGeometry.inkWidth * 1920 + 2 && ikLines.minY >= 40 && ikLines.maxY <= 1040 && ssGeometry.screenPlace(.ink)!.radius == 0
+              && abs(Double(ikLines.width / ikLines.height) - 3248.0 / 2008) < 0.01,
+          "Ink puts the whole screen, as large as fits, left of the speaker, with square corners", "\(ikLines)")
+    check(abs(LayoutGeometry.inkShade(at: 10, width: 1920) - 0.91) < 0.0001 && LayoutGeometry.inkShade(at: LayoutGeometry.inkShadeEnd * 1920, width: 1920) == 0
+              && LayoutGeometry.inkShade(at: 1100, width: 1920) > 0 && LayoutGeometry.inkShade(at: 1100, width: 1920) < 0.91
+              && LayoutGeometry.inkShadeEnd * 1920 < Double(ikFace.x) - 40,
+          "the shade is strong on the left and gone before the face")
+    var ikMoves = ssTrack; ikMoves.spans = [LayoutSpan(start: 10, end: 20, layout: .ink)]
+    let ikMid = ikMoves.state(at: 10.2, geometry: ssGeometry, endScreen: nil)
+    check(ikMid.ink > 0.2 && ikMid.ink < 0.8 && ikMoves.state(at: 10.5, geometry: ssGeometry, endScreen: nil).ink == 1
+              && ikMoves.state(at: 20.5, geometry: ssGeometry, endScreen: nil).ink == 0 && ikMoves.usesInk && !ssTrack.usesInk,
+          "a change into Ink eases its look in over 0.4 s, and out again after", "\(ikMid.ink)")
+    let ikShort = LayoutGeometry(short: ssTrack, crop: ssSpeakerInfo.fullFrame, window: ShortFormat.defaultWindow(in: ssSpeakerInfo.fullFrame, info: ssSpeakerInfo))
+    check(ikShort.held(.ink) == ikShort.held(.screen), "in a Short, Ink shows as the Screen layout does: the screen on top")
+
+    // A dark canvas with white lines and a grey box (partly keyed), and a speaker.
+    let ikCanvasURL = try await ssClip("ik-canvas.mov", "color=c=0x1c1c1c:s=960x600:r=30,drawgrid=w=96:h=96:t=4:c=white,"
+                                       + "drawbox=x=120:y=110:w=220:h=150:c=0x9a9a9a:t=fill,drawbox=x=500:y=300:w=180:h=120:c=0x484848:t=fill",
+                                       seconds: 9, audio: false)
+    let ikCanvas = try await FFmpeg.probe(url: ikCanvasURL)
+    var ikLive = ScreenTrack(url: ikCanvasURL, info: ikCanvas, offset: 1)
+    ikLive.spans = [LayoutSpan(start: 1, end: 3, layout: .ink), LayoutSpan(start: 4.5, end: 6, layout: .speaker)]
+    var ikItem = ssItem; ikItem.screen = ikLive
+    let ikExport = scratch.appendingPathComponent("ik-layout.mp4")
+    try await FFmpeg.export(input: ssSpeakerURL, output: ikExport, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: ikLive) { _ in }
+    equal(try await frameCount(ikExport), try await frameCount(ssSpeakerURL), "the export with Ink keeps every frame of the speaker")
+    let ikGeo = LayoutGeometry(track: ikLive, crop: ssSpeakerMedia.fullFrame)
+    var ikWorst = 0.0
+    for frame in [15, 34, 45, 70, 94, 120] {
+        let native = try await nativePicture(ikItem, frame: frame)
+        let exported = try await ffmpegPicture(ikExport, graph: nil, frame: frame, width: 1280, height: 720)
+        ikWorst = max(ikWorst, meanDifference(native, exported, xs: 4..<1276))
+    }
+    print(String(format: "       ink layout parity: whole frame %.2f of 255", ikWorst))
+    check(ikWorst < 3, "the export draws Ink, held and while it changes, as the preview does")
+    let ikFrame = try await nativePicture(ikItem, frame: 70)
+    let ikPlace = ikGeo.screenPlace(.ink)!.rect, ikScale = Double(ikPlace.width) / 960
+    func ikAt(_ x: Double, _ y: Double) -> Double { ikFrame.at(Int(Double(ikPlace.minX) + x * ikScale), Int(Double(ikPlace.minY) + y * ikScale), 1) }
+    let ikCanvasAt = ikAt(48, 48), ikLineAt = ikAt(1, 48), ikDarkBox = ikAt(590, 360), ikGreyBox = ikAt(230, 185)
+    check(ikCanvasAt < 30 && ikDarkBox < 30 && ikLineAt > 180 && ikGreyBox > ikCanvasAt + 25 && ikGreyBox < ikLineAt - 40,
+          "Ink keys out the dark canvas and dark shapes, keeps the white lines, and lets mid greys through in part",
+          String(format: "canvas %.0f, dark box %.0f, line %.0f, grey box %.0f", ikCanvasAt, ikDarkBox, ikLineAt, ikGreyBox))
+
     print("\nShorts with the screen on top")
     let skWindow = ShortFormat.defaultWindow(in: ssSpeakerMedia.fullFrame, info: ssSpeakerMedia)
     let skGeo = LayoutGeometry(short: ssLive, crop: ssSpeakerMedia.fullFrame, window: skWindow)
