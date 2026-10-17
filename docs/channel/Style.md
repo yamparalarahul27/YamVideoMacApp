@@ -11,6 +11,7 @@ A rule is added only after the owner says yes. Each rule says where it came from
 ## Screen walkthrough
 
 ## Graphics
+- On screen the channel is Yamparala Rahul: the end screen says "More from Yamparala Rahul", and the name plate has no Yamparala Media line. Yamparala Media is the production name; do not show it. *(owner, AgentUX Part 1 end screen test, 17 Oct 2026)*
 
 ## Shorts
 

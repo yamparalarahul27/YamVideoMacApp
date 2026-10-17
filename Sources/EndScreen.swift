@@ -22,6 +22,10 @@ enum EndScreen {
     static let circle = 296.0
     /// The drawn boxes reach this far past each footprint.
     static let margin = 10.0
+    /// Where YouTube Studio lets end screen elements go on a 1920×1080 frame: the outline
+    /// its End screen editor draws, measured on 17 Oct 2026. Studio pushes an element that
+    /// reaches past it back inside, off its marked box.
+    static let elementArea = CGRect(x: 41, y: 139, width: 1838, height: 778)
     static let studioStep = "YouTube Studio → Content → this video → Editor → End screen"
     static let apiNote = "YouTube's upload API cannot set end screen elements. After uploading, open "
         + studioStep + ", add these elements and drag each onto its marked box."
@@ -60,12 +64,13 @@ struct EndScreenLayout: Equatable {
         self.videos = min(2, max(1, videos))
         self.side = side
         let card = EndScreen.card, circle = EndScreen.circle
-        var frame = CGRect(x: 96, y: 102, width: 960, height: 540)
-        var round = CGRect(x: 96, y: 682, width: circle, height: circle)
-        var text = CGRect(x: 432, y: 682, width: 624, height: circle)
+        // The circle ends inside YouTube's element area (bottom 917), so the frame sits high.
+        var frame = CGRect(x: 96, y: 56, width: 960, height: 540)
+        var round = CGRect(x: 96, y: 612, width: circle, height: circle)
+        var text = CGRect(x: 432, y: 612, width: 624, height: circle)
         var cards = self.videos == 2
-            ? [CGRect(x: 1209, y: 170, width: card.width, height: card.height), CGRect(x: 1209, y: 564, width: card.width, height: card.height)]
-            : [CGRect(x: 1209, y: 199, width: card.width, height: card.height)]
+            ? [CGRect(x: 1209, y: 162, width: card.width, height: card.height), CGRect(x: 1209, y: 556, width: card.width, height: card.height)]
+            : [CGRect(x: 1209, y: 153, width: card.width, height: card.height)]
         if side == .right {
             func flip(_ rect: CGRect) -> CGRect { CGRect(x: 1920 - rect.maxX, y: rect.minY, width: rect.width, height: rect.height) }
             frame = flip(frame); round = flip(round); text = flip(text); cards = cards.map(flip)
