@@ -775,10 +775,12 @@
     let y = inkHeading(k, c, p, x, 110, 0.2);
     if (p.subtitle) { write(c, k.text(p.subtitle, x, y - 6, "yg-sub"), num(p.subtitleAt, 0.7)); y += 60; }
     const demo = p.demo && INK_DEMOS[p.demo.type] ? p.demo : null;
-    const layout = demo ? INK_DEMOS[demo.type](k, demo, c, x, Math.max(y + 20, 290)) : { points: { x, y: Math.max(y + 30, 300), width: 760 } };
+    // Without a demo the points have the panel to themselves, so they are large enough to
+    // read on a phone (yg-ink-point); beside a demo they keep the demo's narrow column.
+    const layout = demo ? INK_DEMOS[demo.type](k, demo, c, x, Math.max(y + 20, 290)) : { points: { x, y: Math.max(y + 30, 300), width: 760, gap: 140 } };
     if (layout && layout.points) {
       (p.points || []).forEach((pt, i) => {
-        const node = k.text("→ " + pt.text, layout.points.x, layout.points.y + i * (layout.points.gap || 130), "yg-p", layout.points.width);
+        const node = k.text("→ " + pt.text, layout.points.x, layout.points.y + i * (layout.points.gap || 130), demo ? "yg-p" : "yg-p yg-ink-point", layout.points.width);
         write(c, node, num(pt.at, 1), 0.9);
       });
     }
