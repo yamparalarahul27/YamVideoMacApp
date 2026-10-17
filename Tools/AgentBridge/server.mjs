@@ -127,6 +127,7 @@ server.registerTool("yamvideo_apply_edits", {
     "Markers: addMarker {clipID, time, label?, color? red|orange|yellow|green|blue|purple, markerID?} · updateMarker {clipID, markerID, time?, label?, color?} · removeMarker {clipID, markerID}",
     "Graphics (state.clips[].graphics; times are edited-recording seconds; beat times inside props such as at or …At are seconds after the graphic's start; image values are absolute file paths): addGraphic {clipID, graphic: {kind, start, end, props, look?: glass|ink, id?}} · updateGraphic {clipID, graphicID, graphic: {only the fields to change; props replaces all props}} · removeGraphic {clipID, graphicID} · replaceGraphics {clipID, graphics:[…], graphicsStyle?} · setGraphicsStyle {clipID, graphicsStyle: {accent?, panel?: shade|solid, moveVideo?, edge? 0–400, look?: glass|ink|mix}} · importGraphics {clipID, path to a graphics.json as Tools/Graphics uses}. Kinds: namePlate, featureList, titleCard, phoneScreens, route, link, endCard (right column) and panelTitle, rule, checklist (side panel).",
     "Shorts (state.clips[].shorts; vertical 1080×1920, up to 3:00, the same edit, graphics and captions laid out for a phone): addShort {clipID, short?: {start?, end?, window?: {x, y, width, height} 9:16 source pixels | \"speaker\" | \"centre\", title?, description?, tags?, hidden?: [graphicID], placements?: {graphicID: {x, y, scale}}, cover?, panels?: sheet|shade|split, captions?: stepUp|over|hide, zoom?: 0.5625–1 (lower zooms out: the picture at the top over a blurred copy, text under the face), screen?: off|top (with a screen recording: the screen across the top, the speaker below, the face kept in YouTube's clear area), id?}} · updateShort {clipID, shortID, short: only the keys to change} · removeShort {clipID, shortID}",
+    "Project notes (Video.md shows them): setProjectNotes {notes} · addProjectNote {note: one line, signed with your name and the date}",
     "splitSection, zoom and effect starts, marker times and a new graphic's start accept timeSpace \"movie\" to give a movie time instead. yamvideo_describe has every field's range, default and an example.",
   ].join("\n"),
   inputSchema: {
@@ -312,6 +313,7 @@ server.registerTool("yamvideo_apply_library", {
     "Apply 1–100 Library commands as one undo step on the Library page, against the Library revision you read (not the project's). Use the owner's own words, reuse existing topics, and ask before deleting. YamVideo never posts to any platform, and neither should you.",
     "addIdea {title, ideaID?, notes?, topic?, links?, paths? (images to copy in)} · updateIdea {ideaID, title?, notes?, topic? (\"\" clears), links? (the whole list)} · removeIdea {ideaID}",
     "addIdeaImages {ideaID, paths} · removeIdeaImage {ideaID, image (a name from images[].name)} · linkProject {ideaID, path? (a .yamvideo; left out: the saved project open in Studio)} · unlinkProject {ideaID}",
+    "Style.md (after the owner says yes): addStyleRule {section, rule, source?} · removeStyleRule {rule} · setStyle {text (all of it)}",
     "Past videos (ask the owner first; yamvideo_scan_folder shows what would be added): importVideos {paths: folders, .yamvideo projects or .youtube.json exports; nothing is copied} · addPost {ideaID, videoID (from ideas[].videos[].id), link? (from the owner; left out: marked posted)} · removePost {ideaID, videoID, link? (left out: all)}",
   ].join("\n"),
   inputSchema: {
@@ -323,6 +325,13 @@ server.registerTool("yamvideo_apply_library", {
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 }, async (args) => result(await request("libraryApply", args)));
+
+server.registerTool("yamvideo_get_style", {
+  title: "Read the channel's Style.md",
+  description: "The owner's editing rules for this channel, by section (Every video, Talking head, Graphics, Shorts, Thumbnails…). Read it before you edit and follow it. Add a rule with yamvideo_apply_library (addStyleRule) only after the owner says yes.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async () => result(await request("style")));
 
 server.registerTool("yamvideo_scan_folder", {
   title: "Find past videos in a folder",

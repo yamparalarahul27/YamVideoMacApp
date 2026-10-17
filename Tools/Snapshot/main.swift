@@ -465,6 +465,17 @@ func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async 
     model.showModule(.library)
     await pump(1.5)
     await render(window(), size: size, to: output.appendingPathComponent("16g-past-video.png"))
+
+    // Style.md and the project's notes.
+    for (section, rule, source) in [("Every video", "Plain English: short sentences, one word for one thing.", "from the start"),
+                                    ("Shorts", "Zoom out to 3:4 with the blurred bottom, so text sits under the face.", "feedback, 15 Oct"),
+                                    ("Shorts", "Captions in YouTube's clear area, never over the face.", "15 Oct"),
+                                    ("Graphics", "Glass look, accent yellow #F5C42C, shade panel.", "AppStore, 15 Oct")] {
+        model.performLibrary([.addStyleRule(section: section, rule: rule, source: source)])
+    }
+    await render(StyleSheet().environmentObject(model), size: CGSize(width: 820, height: 600), to: output.appendingPathComponent("16h-style.png"))
+    model.projectNotes = "- Kept the Nokia story whole: it is why the app exists. *(Claude, 15 Oct)*\n- Zoomed the Shorts out to 3:4 because the captions covered the face. *(You, 15 Oct)*"
+    await render(ProjectNotesSheet().environmentObject(model), size: CGSize(width: 620, height: 460), to: output.appendingPathComponent("16i-project-notes.png"))
     try? FileManager.default.removeItem(at: folder)
 }
 

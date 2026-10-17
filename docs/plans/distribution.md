@@ -1,8 +1,9 @@
 # Distribution — implementation plan
 
 **Updated:** 2026-10-17. **Status:** phase 1 (the Library, the sidebar and Ideas) is
-merged (PR #33, section 11). Phase 1b, past videos, is implemented on the `past-videos`
-branch (section 12). Next: Style.md and Video.md (section 13), then phases 2 to 5.
+merged (PR #33, section 11), and so is phase 1b, past videos (PR #34, section 12). Phase 1c,
+Style.md and Video.md, is implemented on the `style-notes` branch (section 13). Next:
+phases 2 to 5.
 
 ## 1. Goal
 
@@ -227,8 +228,8 @@ by `yamvideoctl`.
 | Phase | What | Status |
 |---|---|---|
 | 1 | Library, sidebar, Ideas | Merged (PR #33) |
-| 1b | Past videos: scan a folder, the videos of an item, posts | Implemented (`past-videos`) |
-| 1c | Style.md and Video.md for agents | Not started (section 13) |
+| 1b | Past videos: scan a folder, the videos of an item, posts | Merged (PR #34) |
+| 1c | Style.md, project notes and Video.md | Implemented (`style-notes`) |
 | 2 | Platforms and post kits | Not started |
 | 3 | Calendar | Not started |
 | 4 | Results | Not started |
@@ -333,7 +334,7 @@ YouTube post and revealed the item; nothing was written into the folder.
 lived only in the recovery file); they saved it as `DJIFootage/AppStore.yamvideo` on
 2026-10-17.
 
-## 13. Next: Style.md and Video.md (proposed 2026-10-17)
+## 13. Phase 1c: Style.md, project notes and Video.md (2026-10-17)
 
 The owner asked for a CLAUDE.md-like file so agents learn how videos are edited. Two
 files, so the facts are not copied:
@@ -345,3 +346,40 @@ files, so the facts are not copied:
 - **Video.md**, one per video, written at export next to its files: what the video is,
   the idea it came from, what was done and why, each Short with its times, and what the
   owner asked to change. The app writes the facts it knows; the agent adds the reasons.
+
+**The owner's answers.** Build both. Agents propose a rule and add it only after the
+owner's yes; the owner can also edit Style.md in the app or any text editor. One
+Video.md per project, next to the project file, rewritten at every save and export.
+Style.md starts from the draft made from the owner's AppStore project and feedback.
+
+**As built.**
+- `Sources/Style.swift`: rules under `## ` headings, one `- ` line each with its source
+  in `*(…)*`; adding (to an existing or new heading), removing by the rule's words, a
+  starter with the headings. Style.md lives beside Library.json and is `Library.style`
+  in memory, so it changes, undoes and moves the revision with the Library. Commands
+  `setStyle`, `addStyleRule`, `removeStyleRule`. An edit made in another app is taken in
+  before the next change and kept in the undo history, so no Undo brings back what it
+  replaced.
+- The Style sheet (Library toolbar, ⌘3): sections with their rule counts, the text to
+  edit, Open in Text Editor and Show in Finder.
+- Project version 15 (`VideoProject.notes`, `VideoProject.log`). The Why notes are
+  Markdown; `setNotes` / `addNote` edit them (File → Project Notes…, ⇧⌘N). The history
+  (`ChangeLogEntry`: date, by, label, kind) gets every committed step, undo and redo
+  ("Undid …") and export. It is kept out of undo snapshots (a different document brings
+  its own; undo within one keeps it), the owner's identical steps within two minutes are
+  one line, and the history alone never marks a project unsaved.
+- `Sources/ProjectNotes.swift`: Video.md (`<project> Video.md`): project, idea, Style.md
+  date, each recording's length after cuts, captions, graphics with times, the long
+  video's title and exports/posts, a Shorts table (times, look, exported, posted), the Why
+  notes and the last 60 changes. Written after every save (owner or agent) and every
+  YouTube export.
+- Agents: method `style`; Library commands for Style.md; project commands
+  `setProjectNotes`, `addProjectNote` (signed with the agent's name and the date);
+  `state.notes` (`why`, `videoNotes`, `changes`, `recent`); `yamvideoctl style`, MCP
+  `yamvideo_get_style`; the manual's session start reads Style.md, and recipe 4.12.
+
+**Checks.** `./test.sh style` (37 checks; the whole suite is 1592). Snapshots 16h (Style) and 16i (Project
+Notes). Real use: an isolated instance with a copy of AppStore.yamvideo and the drafted
+Style.md read the style, took two notes, saved (writing a real `AppStore Video.md` with
+the 5 Shorts and the 9 graphics), and added a rule to Style.md; nothing was written into
+DJIFootage.

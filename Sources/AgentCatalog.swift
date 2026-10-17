@@ -252,6 +252,12 @@ extension AgentCatalog {
             #"{"type": "clearSubtitles", "clipID": "CLIP-ID"}"#)
 
         // Auto edit
+        add("setProjectNotes", "project", "Replace the project's Why notes (Markdown): why the video is edited the way it is. Video.md shows them. \"\" clears them.",
+            [field("notes", "string", "All of the notes, up to \(ChangeLogEntry.notesLimit) characters.")],
+            #"{"type": "setProjectNotes", "notes": "- Kept the Nokia story whole: it is why the app exists."}"#)
+        add("addProjectNote", "project", "Add one line to the project's Why notes, signed with your name and the date: a decision and its reason, or the owner's feedback. Use it after each choice of taste the owner approves.",
+            [field("note", "string", "One line, up to 1000 characters.")],
+            #"{"type": "addProjectNote", "note": "Zoomed the Shorts out to 3:4 because the captions covered the face."}"#)
         add("setAutoEditOptions", "auto edit", "Change the project's auto edit answers; only the keys given change. state.autoEdit shows them. autoEdit (the method) and the owner's Auto Edit button follow them.",
             [field("autoEdit", "object", "Keys to change: model (whisper model: " + TranscriptModel.allCases.map(\.rawValue).joined(separator: " or ")
                    + "; base.en is English only), language (a whisper language code such as en, hi, te, or auto), cutStyle (tight: pauses of 0.42 s or more become about 0.22 s and stumbles from the transcript go; natural: pauses of 0.8 s or more become 0.3 s; review: the tight cuts, chosen by the owner), captions (upload: an SRT goes up with Export for YouTube; burnIn: also drawn into the picture; off), normaliseAudio (true: exports at -14 LUFS).",
@@ -366,6 +372,16 @@ extension AgentCatalog {
                 [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id."),
                  field("link", "string", "The post's web link. Left out: marked posted without a link.", required: false)],
                 #"{"type": "addPost", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003", "link": "https://youtube.com/shorts/abc123"}"#)
+        library("setStyle", "Replace all of Style.md. Prefer addStyleRule and removeStyleRule; use this only when the owner asked for the whole text to change.",
+                [field("text", "string", "All of Style.md, up to \(StyleDoc.textLimit) characters.")],
+                ##"{"type": "setStyle", "text": "# Style\n\n## Shorts\n- One point per Short.\n"}"##)
+        library("addStyleRule", "Add a rule to Style.md under a heading (made when missing), after the owner said yes to it. Say where it came from.",
+                [field("section", "string", "The heading, like Every video, Talking head, Graphics, Shorts or Thumbnails."),
+                 field("rule", "string", "The rule, one line, up to \(StyleDoc.ruleLimit) characters."),
+                 field("source", "string", "Where it came from, like \"feedback on AppStore, 17 Oct\".", required: false)],
+                #"{"type": "addStyleRule", "section": "Shorts", "rule": "Captions never over the face.", "source": "feedback on AppStore, 15 Oct"}"#)
+        library("removeStyleRule", "Take a rule out of Style.md, when the owner asks.", [field("rule", "string", "The rule's words, as in style.sections[].rules (the source in *(…)* may be left out).")],
+                #"{"type": "removeStyleRule", "rule": "Captions never over the face."}"#)
         library("removePost", "Take a post off a video.", [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id."),
                  field("link", "string", "The post to remove. Left out: all of them.", required: false)],
                 #"{"type": "removePost", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003"}"#)
@@ -451,6 +467,7 @@ extension AgentCatalog {
                 field("requestID", "string", "Retrying the same id returns the first answer instead of applying twice.", required: false)]),
             Method(method: "libraryUndo", summary: "Undo a Library step you made, by its transactionID; refused if another Library change is now on top.", fields: [
                 field("transactionID", "uuid", "From libraryApply's result."), field("expectedRevision", "integer", "The Library revision you read.")]),
+            Method(method: "style", summary: "Style.md, the channel's editing rules: the whole text and each section's rules. Read it before you edit, and follow it unless the owner says otherwise. Change it with libraryApply (addStyleRule after the owner says yes).", fields: []),
             Method(method: "scanFolder", summary: "What Add Past Videos would find under a folder: each YamVideo project with the Export for YouTube files made from it (matched by project, Short or title), exports whose project is not there, and whether the Library already holds each. Changes nothing; importVideos adds them.", fields: [
                 field("path", "string", "A folder, a .yamvideo project or a .youtube.json export.")]),
             Method(method: "libraryRedo", summary: "Redo it.", fields: [
@@ -471,6 +488,7 @@ extension AgentCatalog {
             ],
             workflow: [
                 "Read the manual (method manual) once per session: it has the rules and a recipe for each common job.",
+                "Read the channel's Style.md (method style) before you edit, and follow it.",
                 "Read state.",
                 "For a first edit of a talking-head recording, follow the owner's answers in state.autoEdit.options: run autoEdit (it transcribes, cuts and sets captions and loudness), then read transcript to place graphics and chapters on what is said.",
                 "Plan, then apply with dryRun to check the batch.",

@@ -179,6 +179,11 @@ struct Library: Codable, Equatable {
     /// agent's plan from before a relaunch can never match by accident.
     var revision = 0
     var items: [ContentItem] = []
+    /// Style.md's text. It has its own file beside Library.json, so it is not encoded
+    /// here, but it changes and undoes with the rest of the Library.
+    var style = ""
+
+    private enum CodingKeys: String, CodingKey { case version, revision, items }
 
     func item(_ id: UUID?) -> ContentItem? { id.flatMap { id in items.first { $0.id == id } } }
 
@@ -364,6 +369,10 @@ enum LibraryCommand: Equatable {
     /// Replaces one video as given, or adds it.
     case putVideo(id: UUID, video: VideoPiece)
     case removeVideo(id: UUID, video: UUID)
+    /// Style.md: the whole text, or one rule added under a heading or taken away.
+    case setStyle(String)
+    case addStyleRule(section: String, rule: String, source: String?)
+    case removeStyleRule(String)
 
     var defaultLabel: String {
         switch self {
@@ -381,6 +390,9 @@ enum LibraryCommand: Equatable {
         case .addVideos(_, let videos): return videos.count == 1 ? "Add Video" : "Add Videos"
         case .putVideo(_, let video): return video.posts.isEmpty ? "Edit Video" : "Mark Posted"
         case .removeVideo: return "Remove Video"
+        case .setStyle: return "Edit Style"
+        case .addStyleRule: return "Add Style Rule"
+        case .removeStyleRule: return "Remove Style Rule"
         }
     }
 }
@@ -480,6 +492,13 @@ enum LibraryReducer {
                 outcome.library.items[i].videos.remove(at: at)
                 outcome.library.items[i].updated = now
                 touched(id)
+            case .setStyle(let text):
+                if let problem = StyleDoc.problem(text) { throw EditError.invalid(problem) }
+                outcome.library.style = text
+            case .addStyleRule(let section, let rule, let source):
+                outcome.library.style = try StyleDoc.adding(rule, to: section, source: source, in: outcome.library.style)
+            case .removeStyleRule(let rule):
+                outcome.library.style = try StyleDoc.removing(rule, in: outcome.library.style)
             }
         }
         for id in outcome.changedIDs {

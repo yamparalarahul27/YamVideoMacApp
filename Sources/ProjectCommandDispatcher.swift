@@ -166,7 +166,14 @@ extension AppModel {
     /// Bookkeeping shared by every committed change. Returns the new revision.
     private func finishCommit(_ kind: EditEvent.Kind, origin: EditOrigin, label: String,
                               transaction: UUID?, clips: [UUID]) -> Int {
-        hasUnsavedChanges = project != savedProject
+        switch kind {
+        case .edit: logChange(.edit, origin: origin, label: label)
+        case .undo: logChange(.undo, origin: origin, label: "Undid " + label)
+        case .redo: logChange(.redo, origin: origin, label: "Redid " + label)
+        default: break
+        }
+        // The history alone does not make the project unsaved.
+        hasUnsavedChanges = project.withoutLog != savedProject?.withoutLog
         let wasPlaying = playback.isPlaying
         playback.pause()
         if showPlayback {
@@ -441,6 +448,7 @@ extension AppModel {
         settings = document.settings
         movieSettings = document.movieSettings ?? MovieSettings()
         autoEdit = document.autoEdit
+        projectNotes = document.notes
 
         if previousOrder.contains(where: { id in !items.contains { $0.id == id } }) { playback.clear() }
         if let current = selection, !items.contains(where: { $0.id == current }) {

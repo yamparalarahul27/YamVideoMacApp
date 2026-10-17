@@ -99,6 +99,10 @@ enum EditCommand: Equatable {
     /// The project's auto edit answers: transcript model and language, cut style,
     /// captions and loudness.
     case setAutoEditOptions(AutoEditOptions)
+    /// The project's Why notes: replaced, or (nil) cleared.
+    case setNotes(String?)
+    /// One more line at the end of the Why notes.
+    case addNote(String)
     /// What was said in the recording, word by word in source seconds, or nil to forget it.
     case setTranscript(clip: UUID, transcript: Transcript?)
     /// Vertical versions of parts of the recording, for YouTube Shorts.
@@ -170,6 +174,8 @@ enum EditCommand: Equatable {
         case .setGraphicsStyle: return "Graphics Style"
         case .setPublishInfo: return "Publish Details"
         case .setAutoEditOptions: return "Auto Edit Options"
+        case .setNotes: return "Edit Project Notes"
+        case .addNote: return "Add a Note"
         case .setTranscript(_, let transcript): return transcript == nil ? "Remove Transcript" : "Transcribe"
         case .addShort: return "Add Short"
         case .updateShort: return "Edit Short"
@@ -610,6 +616,25 @@ enum ProjectReducer {
         case .setAutoEditOptions(let options):
             if let problem = options.problem { throw EditError.invalid(problem) }
             outcome.project.autoEdit = options
+
+        case .setNotes(let notes):
+            let trimmed = notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard trimmed.count <= ChangeLogEntry.notesLimit else {
+                throw EditError.invalid("Project notes are at most \(ChangeLogEntry.notesLimit) characters.")
+            }
+            outcome.project.notes = trimmed.isEmpty ? nil : notes
+
+        case .addNote(let line):
+            let clean = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty, !clean.contains(where: \.isNewline), clean.count <= 1000 else {
+                throw EditError.invalid("A note is one line of up to 1000 characters.")
+            }
+            let before = outcome.project.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let notes = (before.isEmpty ? "" : before + "\n") + (clean.hasPrefix("- ") ? clean : "- " + clean)
+            guard notes.count <= ChangeLogEntry.notesLimit else {
+                throw EditError.invalid("Project notes are at most \(ChangeLogEntry.notesLimit) characters.")
+            }
+            outcome.project.notes = notes
 
         case .setTranscript(let clip, let transcript):
             try editClip(clip, in: &outcome) { record, info in

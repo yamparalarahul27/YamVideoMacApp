@@ -25,6 +25,7 @@ Reading
   yamvideoctl logos                              the owner's logo library: each brand, its words and its image
   yamvideoctl job JOB [--wait]
   yamvideoctl library                            the owner's ideas: titles, notes, topics, links, images, linked projects
+  yamvideoctl style                              Style.md: the channel's editing rules (read it before you edit)
 
 Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl apply --file EDITS.json [--dry-run] [--label TEXT]
@@ -354,6 +355,8 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let idea = arguments.values["idea"] { request["idea"] = idea }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }
+    case "style":
+        request["method"] = "style"
     case "scan":
         request["method"] = "scanFolder"
         request["path"] = try value("path")

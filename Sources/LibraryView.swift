@@ -469,6 +469,10 @@ private struct IdeaEditor: View {
                     }
                     Button("Unlink") { model.unlinkProject(item.id) }
                         .help("The idea goes back to being only an idea; the project file is untouched")
+                    if link.exists, FileManager.default.fileExists(atPath: VideoNotes.file(forProject: link.url).path) {
+                        Button("Video.md") { NSWorkspace.shared.open(VideoNotes.file(forProject: link.url)) }
+                            .help("What the video is, how it was edited and why; written at every save and export")
+                    }
                 }
                 .controlSize(.small)
             }

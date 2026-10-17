@@ -294,7 +294,8 @@ extension AppModel {
             }
             if let self {
                 if let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .done(output) }
-                if youtube { self.noteExport(files.json, origin: origin) }
+                if youtube { self.finishedExport(files.json, title: files.video.deletingPathExtension().lastPathComponent, origin: origin) }
+                else { self.logChange(.export, origin: origin, label: "Exported the Short \(output.lastPathComponent)") }
                 self.statusMessage = "\(origin.label) exported the Short \(output.lastPathComponent)."
             }
             var result: [String: JSONValue] = ["path": .string(output.path), "format": .string("mp4"), "short": .string(id.uuidString),

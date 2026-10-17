@@ -37,6 +37,8 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { model.libraryScan != nil }, set: { if !$0 { model.libraryScan = nil } })) {
             PastVideosSheet().environmentObject(model)
         }
+        .sheet(isPresented: $model.showingStyle) { StyleSheet().environmentObject(model) }
+        .sheet(isPresented: $model.showingProjectNotes) { ProjectNotesSheet().environmentObject(model) }
         .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
             loadDroppedURLs(providers) { urls in model.receiveDropped(urls) }
             return true
@@ -85,6 +87,8 @@ struct ContentView: View {
         ToolbarItemGroup {
             Button { model.newIdea() } label: { Label("New Idea", systemImage: "plus") }
                 .help("New idea (⌥⌘N)")
+            Button { model.showingStyle = true } label: { Label("Style", systemImage: "text.book.closed") }
+                .help("Your channel's editing rules (Style.md), which every agent reads (⌘3)")
             Button { model.promptForPastVideos() } label: { Label("Scan a Folder…", systemImage: "folder.badge.gearshape") }
                 .help("Add videos you already made: YamVideo projects and Export for YouTube folders. Nothing is copied.")
             Button { model.libraryUndo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
