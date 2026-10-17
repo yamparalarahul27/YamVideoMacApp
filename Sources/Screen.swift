@@ -15,6 +15,10 @@ enum ScreenLayout: String, Codable, CaseIterable, Identifiable {
     case screen
     /// The speaker in a tall panel on the left, the screen on the right.
     case split
+    /// The speaker on the right at full size; on the left, over a shade, only the screen's
+    /// bright lines, its dark background keyed out: hand-drawn ink from a drawing app,
+    /// written beside the speaker.
+    case ink
 
     var id: String { rawValue }
 
@@ -23,6 +27,7 @@ enum ScreenLayout: String, Codable, CaseIterable, Identifiable {
         case .speaker: return "Speaker"
         case .screen: return "Screen"
         case .split: return "Side by side"
+        case .ink: return "Ink"
         }
     }
 
@@ -31,6 +36,7 @@ enum ScreenLayout: String, Codable, CaseIterable, Identifiable {
         case .speaker: return "person.crop.rectangle"
         case .screen: return "macwindow"
         case .split: return "rectangle.split.2x1"
+        case .ink: return "scribble.variable"
         }
     }
 }
@@ -172,6 +178,9 @@ struct ScreenTrack: Codable, Equatable {
     }
 
     var name: String { url.lastPathComponent }
+
+    /// Whether any part of the recording uses the Ink layout.
+    var usesInk: Bool { layout == .ink || spans.contains { $0.layout == .ink } }
 
     /// The part of the screen recording shown, in whole, even pixels.
     var picture: CGRect { (crop ?? info.fullFrame).evenClamped(in: info.fullFrame) }
@@ -350,6 +359,10 @@ struct LayoutState: Equatable {
     var window: CGRect
     /// Nil while the speaker covers the frame and the screen does not show.
     var screen: LayoutPlace?
+    /// How far the Ink look is in: 0 draws the screen as a picture under the speaker, 1
+    /// draws only its bright lines, over a shade, above the speaker. Between, while a
+    /// change eases, the two dissolve.
+    var ink = 0.0
 }
 
 /// The layouts' places on one frame. Sizes are design pixels of a 1920×1080 frame, scaled
@@ -389,6 +402,41 @@ struct LayoutGeometry: Equatable {
     static let stackCaptionBand = 240.0
     /// The speaker's window in the stack: this share of the picture's height, on the face.
     static let stackWindow = 0.8
+
+    /// Ink: the lines' area runs from this margin to this share of the frame's width, and
+    /// the speaker moves right (up to `inkMaximumMove` of the width) until the face is at
+    /// `inkFace` of the width.
+    static let inkMargin = 40.0
+    static let inkWidth = 0.62
+    static let inkFace = 0.77
+    static let inkMaximumMove = 0.4
+    /// Ink: the moved picture's left edge fades in over this share of the width, so it
+    /// meets the fill behind it without a line.
+    static let inkFeather = 0.1
+    /// Ink: the shade's opacity, full to `inkShadeFull` of the width and gone at
+    /// `inkShadeEnd` on an S-curve, so the whole face stays clear and no band shows.
+    static let inkShade = 0.91
+    static let inkShadeFull = 0.42
+    static let inkShadeEnd = 0.68
+    /// Ink: the lines are the screen's pixels brighter than `inkKeyLow` (Rec.709 luma of
+    /// the encoded values, 0–1), solid from `inkKeyHigh`. A dark canvas and its dot grid
+    /// stay below the low one.
+    static let inkKeyLow = 90.0 / 255
+    static let inkKeyHigh = 200.0 / 255
+
+    /// Ink: the shade's opacity at `x`, a pixel's centre in pixels from the frame's left
+    /// edge, on a frame `width` pixels wide.
+    static func inkShade(at x: Double, width: Double) -> Double {
+        let full = inkShadeFull * width, end = inkShadeEnd * width
+        let t = min(1, max(0, (end - x) / (end - full)))
+        return inkShade * t * t * (3 - 2 * t)
+    }
+
+    /// Ink: the moved picture's opacity at `x` pixels (a pixel's centre) from its left
+    /// edge, on a frame `width` pixels wide.
+    static func inkEdge(at x: Double, width: Double) -> Double {
+        min(1, max(0, x / (inkFeather * width)))
+    }
 
     init(frame: CGSize, screen: CGSize, face: CGPoint, bubble: SpeakerBubble, picture: CGSize? = nil, stack: CGRect? = nil) {
         self.frame = frame; self.screen = screen; self.face = face; self.bubble = bubble
@@ -480,7 +528,26 @@ struct LayoutGeometry: Equatable {
                                radius: Self.cornerRadius * unit)
         case .split:
             return split.screen
+        case .ink:
+            // The whole screen, as large as fits the area left of the speaker, centred down.
+            let margin = Self.inkMargin * unit
+            let scale = min((Self.inkWidth * w - margin) / Double(screen.width), (h - 2 * margin) / Double(screen.height))
+            let width = Self.even(Double(screen.width) * scale), height = Self.even(Double(screen.height) * scale)
+            return LayoutPlace(rect: CGRect(x: margin.rounded(), y: ((h - height) / 2).rounded(), width: width, height: height), radius: 0)
         }
+    }
+
+    /// The largest place the screen takes in `layouts`, so its stream keeps that much detail.
+    func largestScreenPlace(_ layouts: [ScreenLayout]) -> CGSize? {
+        layouts.compactMap { screenPlace($0)?.rect.size }.max { $0.width * $0.height < $1.width * $1.height }
+    }
+
+    /// Ink: how far right the speaker moves, in even pixels, so the face lands at
+    /// `inkFace` of the width.
+    private var inkMove: Double {
+        let w = Double(frame.width)
+        let move = min(max(0, Self.inkFace * w - Double(face.x)), Self.inkMaximumMove * w)
+        return move < 1 ? 0 : Self.even(move)
     }
 
     func speakerPlace(_ layout: ScreenLayout) -> LayoutPlace {
@@ -497,6 +564,10 @@ struct LayoutGeometry: Equatable {
                                radius: bubble.radius(side: side))
         case .split:
             return split.speaker
+        case .ink:
+            // The picture at full size, moved right; its right part goes past the frame.
+            let move = inkMove
+            return LayoutPlace(rect: CGRect(x: move, y: 0, width: w - move, height: h), radius: 0)
         }
     }
 
@@ -540,8 +611,10 @@ struct LayoutGeometry: Equatable {
         case (_, _?): window = stackWindow(place)
         case (.screen, nil): window = self.window(aspect: aspect, height: Self.bubbleWindow * Double(frame.height), centre: face)
         case (.split, nil): window = self.window(aspect: aspect, height: Double(frame.height), centre: face)
+        case (.ink, nil): window = CGRect(x: 0, y: 0, width: place.rect.width, height: picture.height)
         }
-        return LayoutState(speaker: place, window: window, screen: screenPlace(layout))
+        // In a Short the screen stacks on top, so Ink shows as the Screen layout does there.
+        return LayoutState(speaker: place, window: window, screen: screenPlace(layout), ink: layout == .ink && stack == nil ? 1 : 0)
     }
 
     /// Part way from `a` to `b`. The speaker's place and corners move straight; its window
@@ -567,7 +640,7 @@ struct LayoutGeometry: Equatable {
         case (let from?, nil): screen = from
         case (let from?, let to?): screen = LayoutPlace(rect: rect(from.rect, to.rect), radius: lerp(from.radius, to.radius))
         }
-        return LayoutState(speaker: speaker, window: window, screen: screen)
+        return LayoutState(speaker: speaker, window: window, screen: screen, ink: lerp(a.ink, b.ink))
     }
 }
 
