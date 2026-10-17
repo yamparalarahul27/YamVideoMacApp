@@ -5,13 +5,24 @@
 - **Project:** AgentUX-System-Design.yamvideo
 - **Idea:** not linked to an idea in the Library
 - **Style:** Style.md, changed 17 Oct
-- **Updated:** 17 Oct at 6:13 PM
+- **Updated:** 17 Oct at 7:15 PM
 
 ## AgentUX-camera-joined.mov
 - Length: 17:50 → **11:54** after cuts (250 sections)
 - Captions uploaded as a file · 3 zooms · with a screen recording
 - Graphics (mix, accent #F5C42C): Yamparala Rahul (0:00) · System design for designers (0:11) · AI builds the interface (6:12) · UI yes, flow not yet (6:44) · System design, part 2 (11:30) · More from Yamparala Media (11:39)
 - Long video: "System design for designers: how I built my own Mobbin (Part 1)"
+
+### Shorts
+
+| Short | From – to | Length | Look | Exported | Posted |
+|---|---|---|---|---|---|
+| My team asks Claude for design references | 1:34 – 2:14 | 0:39 | full frame, panels sheet, captions stepUp | — | — |
+| Why I moved from Supabase to Cloudflare | 2:56 – 3:55 | 0:58 | full frame, panels sheet, captions stepUp, screen top | — | — |
+| Why designers should learn system design | 3:56 – 4:28 | 0:32 | full frame, panels sheet, captions stepUp, screen top | — | — |
+| Design for AI agents, not only humans | 4:39 – 5:37 | 0:58 | full frame, panels sheet, captions stepUp, screen top | — | — |
+| AI can build the UI. It can't do the flow (yet) | 6:33 – 7:15 | 0:41 | full frame, panels sheet, captions hide | — | — |
+| Think before you build a feature | 7:59 – 8:37 | 0:37 | full frame, panels sheet, captions stepUp, screen top | — | — |
 
 ## Why
 
@@ -68,3 +79,21 @@
 - 17 Oct at 6:07 PM · yamvideoctl · Design for the format step (frost comes back after)
 - 17 Oct at 6:09 PM · yamvideoctl · Thumbnail design: white frost again
 - 17 Oct at 6:13 PM · yamvideoctl · Notes: thumbnail and title
+- 17 Oct at 6:21 PM · yamvideoctl · Six Shorts
+- 17 Oct at 6:22 PM · yamvideoctl · Shorts: captions clear of the face, MCP Short without the screen
+- 17 Oct at 6:23 PM · yamvideoctl · MCP Short: no card over the face
+- 17 Oct at 6:31 PM · yamvideoctl · Exported AI can build the UI. It can't do the flow (yet) for YouTube
+- 17 Oct at 6:32 PM · yamvideoctl · Exported Why designers should learn system design for YouTube
+- 17 Oct at 6:33 PM · yamvideoctl · Exported Design for AI agents, not only humans for YouTube
+- 17 Oct at 6:35 PM · yamvideoctl · Exported Why I moved from Supabase to Cloudflare for YouTube
+- 17 Oct at 6:36 PM · yamvideoctl · Exported My team asks Claude for design references for YouTube
+- 17 Oct at 6:38 PM · yamvideoctl · Exported Think before you build a feature for YouTube
+- 17 Oct at 6:38 PM · You · Trim Section
+- 17 Oct at 6:38 PM · You · Undid Trim Section
+- 17 Oct at 6:38 PM · You · Undid MCP Short: no card over the face
+- 17 Oct at 7:07 PM · yamvideoctl · Exported AI can build the UI. It can't do the flow (yet) for YouTube
+- 17 Oct at 7:08 PM · yamvideoctl · Exported Why designers should learn system design for YouTube
+- 17 Oct at 7:10 PM · yamvideoctl · Exported Design for AI agents, not only humans for YouTube
+- 17 Oct at 7:11 PM · yamvideoctl · Exported Why I moved from Supabase to Cloudflare for YouTube
+- 17 Oct at 7:14 PM · yamvideoctl · Exported Think before you build a feature for YouTube
+- 17 Oct at 7:15 PM · yamvideoctl · MCP Short: no card over the face (again)
