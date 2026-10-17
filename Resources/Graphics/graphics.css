@@ -320,12 +320,13 @@ body.yg-full { background: #000; }
 /* Logo badge: a row of white chips next to the speaker, each a brand's logo and its name.
    The app estimates the same sizes (LogoBadge.size in Sources/Logos.swift). */
 .yg-lb-row { position: absolute; left: 0; top: 0; display: flex; gap: 20px; white-space: nowrap; }
-/* Too wide for the speaker's panel: the chips go one above the other. */
+/* Too wide for the speaker's panel or the clear area: the chips go one above the other. */
 .yg-lb-row.yg-lb-column { flex-direction: column; align-items: flex-start; }
 .yg-lb-row.yg-lb-column.yg-lb-x-middle { align-items: center; }
 .yg-lb-row.yg-lb-column.yg-lb-x-end { align-items: flex-end; }
 .yg-lb-chip { display: flex; align-items: center; gap: 20px; height: 132px; padding: 16px 36px 16px 16px; border-radius: 40px;
   background: #ffffff; color: #15171a; box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.06); }
+/* A wide logo (a wordmark) gets a wider box from the engine: spot.widths, up to 3 times the height. */
 .yg-lb-chip img { width: 100px; height: 100px; object-fit: contain; display: block; flex: none; }
 .yg-lb-chip span { font-weight: 700; font-size: 46px; line-height: 1; letter-spacing: -0.01em; }
 .yg-lb-chip.yg-lb-bare { padding: 16px; }
