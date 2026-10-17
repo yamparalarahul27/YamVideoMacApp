@@ -3,7 +3,7 @@ import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
-// The Ideas page: ideas listed by stage on the left, the selected idea's editor on the
+// The Library page: ideas listed by stage on the left, the selected idea's editor on the
 // right (the owner chose a list over columns, 2026-10-16). See LibraryEditing.swift for
 // the actions and Library.swift for the data.
 
@@ -28,7 +28,7 @@ struct ModuleSidebar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(module == .ideas ? "Your ideas, and the projects made from them" : "The editor")
+                .help(module == .library ? "Your ideas, projects and published videos" : "The editor")
                 .accessibilityLabel(module.label)
                 .accessibilityAddTraits(model.module == module ? [.isSelected, .isButton] : .isButton)
             }
@@ -43,7 +43,7 @@ struct ModuleSidebar: View {
 
 // MARK: - The page
 
-struct IdeasPage: View {
+struct LibraryPage: View {
     @EnvironmentObject var model: AppModel
     /// Nil shows every topic.
     @State private var topic: String?
@@ -70,11 +70,15 @@ struct IdeasPage: View {
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "lightbulb").font(.system(size: 38, weight: .light)).foregroundStyle(.tertiary)
-            Text(model.library.items.isEmpty ? "Start your first idea" : "Select an idea").font(.headline)
-            Text("Write down what the video is about, with links and pictures. When it is time to record, start a project from it.")
-                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
+            Text(model.library.items.isEmpty ? "Start your Library" : "Select an idea or a video").font(.headline)
+            Text("Write down what a video is about, with links and pictures, and start a project from it when it is time to record. Videos you already made come in with Scan a Folder.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 380)
             if model.library.items.isEmpty {
-                Button("New Idea") { model.newIdea() }.padding(.top, 4)
+                HStack {
+                    Button("New Idea") { model.newIdea() }
+                    Button("Scan a Folder…") { model.promptForPastVideos() }
+                }
+                .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -105,7 +109,7 @@ private struct IdeasList: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Show the ideas of one topic")
                 Spacer()
-                Text("\(shown.count) idea\(shown.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                Text("\(shown.count) item\(shown.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             Divider()
@@ -152,7 +156,18 @@ private struct IdeaRow: View {
             Text(item.title).font(.callout).lineLimit(1)
             HStack(spacing: 6) {
                 if let topic = item.topic { TopicChip(topic: topic) }
-                if let project = item.project {
+                let platforms = Platform.allCases.filter { platform in item.videos.contains { $0.posts.contains { $0.platform == platform } } }
+                if !platforms.isEmpty {
+                    ForEach(platforms) { platform in PostedLabel(text: platform.label) }
+                } else if item.stage == .posted {
+                    PostedLabel(text: "Posted")
+                } else if item.stage == .ready {
+                    let shorts = item.videos.filter { $0.short && !$0.exports.isEmpty }.count
+                    let long = item.videos.filter { !$0.short && !$0.exports.isEmpty }.count
+                    Text([long > 0 ? "long video" : nil, shorts > 0 ? "\(shorts) Short\(shorts == 1 ? "" : "s")" : nil]
+                            .compactMap { $0 }.joined(separator: " and ") + " exported")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                } else if let project = item.project {
                     // The project is usually named after the idea; then "Project" says enough.
                     Label(project.name == item.title ? "Project" : project.name,
                           systemImage: project.exists ? "film" : "exclamationmark.triangle")
@@ -207,27 +222,26 @@ private struct IdeaEditor: View {
                     .accessibilityLabel("Idea title")
 
                 InspectorSection("Topic") { topicField }
-                InspectorSection("Notes") {
-                    TextEditor(text: $notes)
-                        .font(.body)
-                        .focused($focus, equals: .notes)
-                        .frame(minHeight: 150)
-                        .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
-                        .accessibilityLabel("Notes")
-                    Text("The hook, the points to make, why it matters.").font(.caption).foregroundStyle(.secondary)
+                // Once there is a project, its videos matter most; an idea starts with its notes.
+                if item.project != nil || !item.videos.isEmpty {
+                    InspectorSection("Project") { project }
+                    ItemVideosSection(item: item)
+                    notesSection
+                    InspectorSection("Links") { links }
+                    InspectorSection("Images") { images }
+                } else {
+                    notesSection
+                    InspectorSection("Links") { links }
+                    InspectorSection("Images") { images }
+                    InspectorSection("Project") { project }
                 }
-                InspectorSection("Links") { links }
-                InspectorSection("Images") { images }
-                InspectorSection("Project") { project }
 
                 HStack {
                     Text("Created \(item.created.formatted(date: .abbreviated, time: .shortened)) · Changed \(item.updated.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Delete Idea", role: .destructive) { model.deleteIdea(item.id) }.controlSize(.small)
+                    Button(item.project == nil ? "Delete Idea" : "Remove from Library", role: .destructive) { model.deleteIdea(item.id) }.controlSize(.small)
+                        .help(item.project == nil ? "Delete this idea; Undo brings it back" : "Take it out of the Library. The project and its files stay where they are.")
                 }
             }
             .padding(22)
@@ -264,6 +278,21 @@ private struct IdeaEditor: View {
     }
 
     // MARK: Fields
+
+    private var notesSection: some View {
+        InspectorSection("Notes") {
+            TextEditor(text: $notes)
+                .font(.body)
+                .focused($focus, equals: .notes)
+                .frame(minHeight: item.project == nil ? 150 : 90)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+                .accessibilityLabel("Notes")
+            Text("The hook, the points to make, why it matters.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
 
     /// After New Idea: the cursor in the title with "New idea" selected, to type over.
     private func focusTitle() {

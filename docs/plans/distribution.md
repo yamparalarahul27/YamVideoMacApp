@@ -1,8 +1,8 @@
 # Distribution — implementation plan
 
-**Updated:** 2026-10-16. **Status:** phase 1 (the Library, the sidebar and Ideas) is
-implemented on the `distribution-ideas` branch; see section 11. Phases 2 to 5 are not
-started.
+**Updated:** 2026-10-17. **Status:** phase 1 (the Library, the sidebar and Ideas) is
+merged (PR #33, section 11). Phase 1b, past videos, is implemented on the `past-videos`
+branch (section 12). Next: Style.md and Video.md (section 13), then phases 2 to 5.
 
 ## 1. Goal
 
@@ -226,7 +226,9 @@ by `yamvideoctl`.
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | Library, sidebar, Ideas | Implemented (`distribution-ideas`) |
+| 1 | Library, sidebar, Ideas | Merged (PR #33) |
+| 1b | Past videos: scan a folder, the videos of an item, posts | Implemented (`past-videos`) |
+| 1c | Style.md and Video.md for agents | Not started (section 13) |
 | 2 | Platforms and post kits | Not started |
 | 3 | Calendar | Not started |
 | 4 | Results | Not started |
@@ -279,3 +281,67 @@ intact after a relaunch.
 
 **Left for later.** Hands-on clicks in the running app (typing, drag and drop, paste,
 the save panel); the idea chip in Studio's toolbar can only be seen in the running app.
+
+## 12. Phase 1b: past videos (2026-10-17)
+
+The owner already had videos made and published before the Library: YamVideo projects
+and Export for YouTube folders (not videos that exist only on a platform). They asked to
+see them in the app and act on them, without the app keeping copies.
+
+**Decisions.** Past videos come in by **scanning a folder** the owner picks (and by
+dropping projects, exports or folders on the Library page); the sheet lists what was
+found to tick. Nothing is copied: the Library keeps only where each file is, the post
+links, and later the numbers. The four actions are all in: open in Studio, play / show
+the files, open the post, copy the title, description and tags. The module is now called
+**Library** (the owner asked for a recommendation): it holds ideas, projects and published
+videos.
+
+**Data (Library version 2).** `ContentItem.videos: [VideoPiece]`: a long video or Short
+by the recording's or Short's own ID, its exports (paths to `.youtube.json` files) and
+its posts (`VideoPost`: a pasted link, or "posted" with no link). `Platform` is read from
+a link's address (youtube.com and youtu.be, instagram.com, x.com and twitter.com,
+linkedin.com). Stages: idea, inProduction, ready (something exported), posted (a post).
+Commands `addVideos` (merge), `putVideo`, `removeVideo`.
+
+**Scanning** (`Sources/LibraryScan.swift`). Finds `.yamvideo` and `.youtube.json` files
+under the chosen paths, skipping hidden folders. An export belongs to a project by the
+project it names (exports from now on write `projectID` and `recordingID`), else by its
+Short's ID, else by the recording's ID or YouTube title. Exports whose project is not there
+become items of their own. Candidates say what the Library already holds, so a second
+scan offers only new exports.
+
+**The page** (`Sources/LibraryVideos.swift`, `Sources/LibraryVideosView.swift`). An item
+with a project shows Project and Videos first: every recording and Short of the project
+(read from the project file when shown, not stored), plus anything else it was exported
+or posted as, with the cover, length, export date and posts. The row plays the latest
+export that still has its video. Find Exports Near the Project scans the project's folder.
+A new Export for YouTube or Export Short for YouTube of a linked project adds itself to
+its item as an undo step ("Exported …").
+
+**Agents.** Method `scanFolder`; Library commands `importVideos {paths}`, `addPost
+{ideaID, videoID, link?}`, `removePost {ideaID, videoID, link?}`; `library` lists each
+item's `videos` with exports, posts and files; `yamvideoctl scan --path`; MCP tool
+`yamvideo_scan_folder`; the Agents Manual's Ideas recipe gained past videos.
+
+**Checks.** `./test.sh pastvideos` (28 checks). Snapshots 16f (the Add Past Videos sheet)
+and 16g (a posted item with its Shorts). Real use: an isolated instance scanned the
+owner's `~/Desktop/DJIFootage` and found `AppStore.yamvideo` with 5 Shorts, matched the 5
+exports from 15 Oct by Short ID (covers and videos found), imported them, recorded a
+YouTube post and revealed the item; nothing was written into the folder.
+
+**Found on the way.** The owner's App Store edit had never been saved as a project (it
+lived only in the recovery file); they saved it as `DJIFootage/AppStore.yamvideo` on
+2026-10-17.
+
+## 13. Next: Style.md and Video.md (proposed 2026-10-17)
+
+The owner asked for a CLAUDE.md-like file so agents learn how videos are edited. Two
+files, so the facts are not copied:
+
+- **Style.md**, one for the channel, in the Library folder: the owner's taste as rules per
+  kind of video (talking head, screen walkthrough, Short, thumbnail). Agents read it
+  before editing (served by the bridge like the manual) and propose a rule after the
+  owner's feedback; a rule is added only after the owner says yes.
+- **Video.md**, one per video, written at export next to its files: what the video is,
+  the idea it came from, what was done and why, each Short with its times, and what the
+  owner asked to change. The app writes the facts it knows; the agent adds the reasons.

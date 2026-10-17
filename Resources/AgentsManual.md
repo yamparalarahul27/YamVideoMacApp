@@ -242,7 +242,21 @@ idea then shows as *In production*.
 6. `state.idea` says which idea the open project was made from. Read its notes before
    you write the title, description and chapters (4.6), so they say what the owner
    planned.
-7. `reveal --idea ID` shows an idea on the Ideas page.
+7. `reveal --idea ID` shows an idea on the Library page.
+
+**Past videos.** Videos the owner already made come in from their files; nothing is
+copied.
+
+1. `yamvideoctl scan --path FOLDER` (`yamvideo_scan_folder`) lists the projects and
+   Export for YouTube files there, and what the Library already holds. Show the owner
+   the list and ask which to add.
+2. Add them with `importVideos {paths}`. Each project becomes an item (stage *Ready*
+   when something was exported) with its long video and Shorts in `videos`.
+3. When the owner tells you where a video is published, record it with
+   `addPost {ideaID, videoID, link}`. The item then shows as *Posted*. Never open, sign
+   in to or read the platform to find a link yourself.
+4. A video's export (`videos[].exports[].json`) has the title, description and tags it
+   went up with. Read them when you write for a new post, to keep the owner's voice.
 
 ## 5. Problems
 

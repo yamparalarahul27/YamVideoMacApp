@@ -125,7 +125,7 @@ func run() async throws {
 
     let size = CGSize(width: 1360, height: 880)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
-    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Ideas pages.
+    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages.
     if ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"] == "ideas" {
         try await ideas(model, output: output, size: size, minimum: CGSize(width: 1140, height: 800))
         return
@@ -363,18 +363,18 @@ func run() async throws {
     try await ideas(model, output: output, size: size, minimum: minimum)
 }
 
-/// The Ideas page (distribution plan, phase 1): empty, with ideas by stage, and Studio
+/// The Library page (distribution plan, phase 1): empty, with ideas by stage, and Studio
 /// showing the idea its project was made from. Its own Library, never the owner's.
 @MainActor
 func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("yamvideo-snapshot-library-\(UUID().uuidString)")
     model.loadLibrary(from: folder)
-    model.showModule(.ideas)
+    model.showModule(.library)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
     await pump(1)
     await render(window(), size: size, to: output.appendingPathComponent("16a-ideas-empty.png"))
 
-    let claude = ContentItem(title: "How I edit with Claude", notes: "Hook: one recording, and Claude cuts it while I watch.\n\nShow the bridge, Auto Edit and the Shorts it makes. End on the Ideas page.",
+    let claude = ContentItem(title: "How I edit with Claude", notes: "Hook: one recording, and Claude cuts it while I watch.\n\nShow the bridge, Auto Edit and the Shorts it makes. End on the Library page.",
                              topic: "AI workflow", links: ["https://www.youtube.com/watch?v=example", "https://claude.com/claude-code"])
     let items = [
         ContentItem(title: "YamDrive design system walkthrough", notes: "Screen + speaker. Tokens, components, the docs site.", topic: "Design systems"),
@@ -405,7 +405,7 @@ func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async 
     model.performLibrary([.updateIdea(id: items[2].id, title: nil, notes: "Before and after on the same frame.", topic: nil, links: nil)],
                          label: "Sharpen the Pocket 3 idea", origin: .agent("Claude"), expectedRevision: model.library.revision)
     model.selectedIdeaID = claude.id
-    model.showModule(.ideas)
+    model.showModule(.library)
     await pump(1.5)
     await render(window(), size: size, to: output.appendingPathComponent("16b-ideas.png"))
     await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
@@ -416,6 +416,55 @@ func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async 
     model.showModule(.studio)
     await pump(1.5)
     await render(window(), size: size, to: output.appendingPathComponent("16e-studio-with-idea.png"))
+
+    // Past videos: a saved project with three Shorts, two exported before, one posted.
+    let past = folder.appendingPathComponent("DJIFootage", isDirectory: true)
+    let shortsFolder = past.appendingPathComponent("Shorts", isDirectory: true)
+    try FileManager.default.createDirectory(at: shortsFolder, withIntermediateDirectories: true)
+    var project = model.project
+    project.projectID = UUID()
+    let titles = ["App Store tip: use only assets you own", "The one thing AI won't do for your app: accessibility", "3 things to check before you publish"]
+    let shorts = titles.enumerated().map { index, title -> Short in
+        var short = Short(start: Double(index) * 3, end: Double(index) * 3 + 2.5); short.title = title; return short
+    }
+    project.clips[0].shorts = shorts
+    try JSONEncoder().encode(project).write(to: past.appendingPathComponent("AppStore.yamvideo"))
+    for (index, short) in shorts.prefix(2).enumerated() {
+        let stem = PublishInfo.fileStem(short.title, fallback: "Short")
+        let cover = NSImage(size: NSSize(width: 270, height: 480), flipped: false) { rect in
+            NSColor(hue: [0.58, 0.95][index], saturation: 0.5, brightness: 0.8, alpha: 1).setFill(); rect.fill()
+            NSColor.white.withAlphaComponent(0.85).setFill()
+            NSBezierPath(ovalIn: NSRect(x: 85, y: 260, width: 100, height: 100)).fill()
+            return true
+        }
+        if let tiff = cover.tiffRepresentation, let jpeg = NSBitmapImageRep(data: tiff)?.representation(using: .jpeg, properties: [:]) {
+            try jpeg.write(to: shortsFolder.appendingPathComponent(stem + " cover.jpg"))
+        }
+        try Data().write(to: shortsFolder.appendingPathComponent(stem + ".mp4"))
+        let json: [String: Any] = ["short": true, "shortID": short.id.uuidString, "title": short.title, "description": "From the App Store video.",
+                                   "tags": ["App Store", "iOS app"], "length": short.length,
+                                   "files": ["video": stem + ".mp4", "cover": stem + " cover.jpg"]]
+        try JSONSerialization.data(withJSONObject: json).write(to: shortsFolder.appendingPathComponent(stem + ".youtube.json"))
+    }
+    let candidates = LibraryScan.candidates(roots: [past], library: model.library)
+    model.libraryScan = LibraryScanState(roots: [past], scanning: false, candidates: candidates,
+                                         chosen: Set(candidates.filter { !$0.alreadyAdded }.map(\.path)))
+    await render(PastVideosSheet().environmentObject(model), size: CGSize(width: 600, height: 480),
+                 to: output.appendingPathComponent("16f-add-past-videos.png"))
+    model.addChosenPastVideos()
+    if let item = model.library.item(forProject: project.projectID!) {
+        let rows = model.videoRows(item)
+        if let posted = rows.first(where: { $0.id == shorts[1].id }) {
+            model.addPost(item.id, posted, link: "https://youtube.com/shorts/example")
+            if let again = model.videoRows(model.library.item(item.id)!).first(where: { $0.id == shorts[1].id }) {
+                model.addPost(item.id, again, link: "https://www.instagram.com/reel/example/")
+            }
+        }
+        model.selectedIdeaID = item.id
+    }
+    model.showModule(.library)
+    await pump(1.5)
+    await render(window(), size: size, to: output.appendingPathComponent("16g-past-video.png"))
     try? FileManager.default.removeItem(at: folder)
 }
 

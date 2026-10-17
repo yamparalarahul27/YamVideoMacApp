@@ -335,7 +335,7 @@ extension AgentCatalog {
                                            example: example(json.replacingOccurrences(of: "IDEA-ID", with: "00000000-0000-4000-8000-000000000001"))))
         }
         let idea = field("ideaID", "uuid", "An idea's id from library.ideas[].id.")
-        library("addIdea", "Add an idea at the top of the Ideas list. Use the owner's own words; ask when unsure. Its id is in createdIDs, or choose it with ideaID to refer to it in the same request.",
+        library("addIdea", "Add an idea at the top of the Library list. Use the owner's own words; ask when unsure. Its id is in createdIDs, or choose it with ideaID to refer to it in the same request.",
                 [field("title", "string", "One line, up to \(ContentItem.titleLimit) characters."),
                  field("ideaID", "uuid", "Your choice of id for the new idea.", required: false),
                  field("notes", "string", "Free text, up to \(ContentItem.notesLimit) characters: the hook, the points, why it matters.", required: false, default: .string("")),
@@ -359,6 +359,16 @@ extension AgentCatalog {
                 #"{"type": "linkProject", "ideaID": "IDEA-ID", "path": "~/Movies/How I edit with Claude.yamvideo"}"#)
         library("unlinkProject", "Make it only an idea again. The project file is untouched.", [idea],
                 #"{"type": "unlinkProject", "ideaID": "IDEA-ID"}"#)
+        library("importVideos", "Add videos the owner already made: each project found becomes an item with its exports (an item that already holds the project gets only the new exports); an export whose project is not found becomes an item of its own. Nothing is copied. Ask the owner first; scanFolder shows what would be added.",
+                [field("paths", "string[]", "Folders, .yamvideo projects or .youtube.json exports. Folders are searched inside, skipping hidden folders.")],
+                #"{"type": "importVideos", "paths": ["~/Desktop/DJIFootage"]}"#)
+        library("addPost", "Record where a video is published, from a link the owner gives you (the platform is read from the address), or with no link that it went up. Never open, sign in to or read the platform yourself.",
+                [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id."),
+                 field("link", "string", "The post's web link. Left out: marked posted without a link.", required: false)],
+                #"{"type": "addPost", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003", "link": "https://youtube.com/shorts/abc123"}"#)
+        library("removePost", "Take a post off a video.", [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id."),
+                 field("link", "string", "The post to remove. Left out: all of them.", required: false)],
+                #"{"type": "removePost", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003"}"#)
 
         let session = [field("sessionID", "uuid", "From sessions or state.", required: false),
                        field("projectID", "uuid", "From sessions or state.", required: false)]
@@ -430,17 +440,19 @@ extension AgentCatalog {
                 field("marker", "uuid", "A marker.", required: false), field("graphic", "uuid", "A graphic.", required: false),
                 field("short", "uuid", "A Short: selects it and shows it in the Short viewer; time is then seconds into it.", required: false),
                 field("layout", "uuid", "A screen layout: selects it and moves the playhead to it.", required: false),
-                field("idea", "uuid", "An idea: shows it on the Ideas page.", required: false),
+                field("idea", "uuid", "An idea: shows it on the Library page.", required: false),
                 field("time", "number", "A time.", required: false, unit: editedSeconds), timeSpace]),
-            Method(method: "library", summary: "The Library: the owner's ideas (title, notes, topic, links, images with their paths to look at, stage, the linked project and whether it is open), the topics in use, the Library's revision and its top undo and redo steps. The Library spans every project; state.idea says which idea the open project was made from.", fields: []),
+            Method(method: "library", summary: "The Library: the owner's ideas and videos (title, notes, topic, links, images with their paths to look at, stage idea, inProduction, ready or posted, the linked project and whether it is open, and videos: each long video and Short of the project with its exports, posts and the exported files' paths), the topics in use, the Library's revision and its top undo and redo steps. The Library spans every project; state.idea says which idea the open project was made from.", fields: []),
             Method(method: "libraryApply", summary: "1–100 Library commands (libraryCommands) as one undo step in the Library's own history, all or nothing.", fields: [
                 field("expectedRevision", "integer", "The Library revision you read (library.revision), not the project's."),
                 field("commands", "array", "The Library commands, in order."),
-                field("label", "string", "What the Undo menu on the Ideas page should call the step, at most 80 characters.", required: false),
+                field("label", "string", "What the Undo menu on the Library page should call the step, at most 80 characters.", required: false),
                 field("dryRun", "boolean", "Check everything and report what would happen, changing and copying nothing.", required: false, default: .bool(false)),
                 field("requestID", "string", "Retrying the same id returns the first answer instead of applying twice.", required: false)]),
             Method(method: "libraryUndo", summary: "Undo a Library step you made, by its transactionID; refused if another Library change is now on top.", fields: [
                 field("transactionID", "uuid", "From libraryApply's result."), field("expectedRevision", "integer", "The Library revision you read.")]),
+            Method(method: "scanFolder", summary: "What Add Past Videos would find under a folder: each YamVideo project with the Export for YouTube files made from it (matched by project, Short or title), exports whose project is not there, and whether the Library already holds each. Changes nothing; importVideos adds them.", fields: [
+                field("path", "string", "A folder, a .yamvideo project or a .youtube.json export.")]),
             Method(method: "libraryRedo", summary: "Redo it.", fields: [
                 field("transactionID", "uuid", "From libraryUndo's result."), field("expectedRevision", "integer", "The Library revision you read.")]),
         ]

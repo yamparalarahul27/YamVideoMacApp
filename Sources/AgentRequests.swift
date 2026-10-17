@@ -66,7 +66,7 @@ struct AgentRequest: Codable {
     var short: UUID?
     /// reveal: one of the recording's screen layouts.
     var layout: UUID?
-    /// reveal: an idea in the Library; shows it on the Ideas page.
+    /// reveal: an idea in the Library; shows it on the Library page.
     var idea: UUID?
     /// setLogo and removeLogo: the brand; setLogo: what the speaker says for it.
     var name: String?
@@ -401,7 +401,7 @@ struct AgentState: Encodable {
         /// frame (the edit frame), preview (the 16:9 edit playing) or short (the selected Short, 9:16).
         var viewer: String
         var playhead: Double, movieMode: Bool, movieTime: Double
-        /// The part of the window showing: ideas or studio. `idea` is the idea selected on the Ideas page.
+        /// The part of the window showing: library or studio. `idea` is the idea selected on the Library page.
         var module: String
         var idea: UUID?
     }
@@ -585,7 +585,7 @@ struct AgentSaveResult: Encodable {
 extension AppModel {
     static let agentMethods = ["manual", "catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
                                "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit", "logos", "setLogo", "removeLogo",
-                               "library", "libraryApply", "libraryUndo", "libraryRedo"]
+                               "library", "libraryApply", "libraryUndo", "libraryRedo", "scanFolder"]
 
     /// Answers one request line with one response line. Never throws: every failure is
     /// a structured error response.
@@ -620,6 +620,7 @@ extension AppModel {
         case "transcript": return agentResponse(agentTranscript(request), instanceID)
         case "logos": return agentResponse(Result<AgentLogos, EditError>.success(Self.agentLogos()), instanceID)
         case "library": return agentResponse(Result<AgentLibrary, EditError>.success(agentLibrary()), instanceID)
+        case "scanFolder": return agentResponse(agentScanFolder(request), instanceID)
         case "libraryApply", "libraryUndo", "libraryRedo":
             // Library commands carry fields project commands do not, so a retry is matched
             // on the whole request, with its keys in a fixed order.
@@ -2088,6 +2089,7 @@ extension AppModel {
             return .failure(.invalid("\(existing.lastPathComponent) already exists. Pass overwrite: true to replace it."))
         }
         let exportSettings = settings
+        let project = projectID
         playback.pause()
         isConverting = true
         if let index = items.firstIndex(where: { $0.id == clipID }) { items[index].status = .converting(0) }
@@ -2096,7 +2098,7 @@ extension AppModel {
         let job = startJob(id: jobID, kind: "export", clip: clipID, origin: origin) { [weak self] in
             defer { self?.isConverting = false }
             do {
-                try await YouTubeExport.run(item, info: info, publish: publish, settings: exportSettings, files: files) { value in
+                try await YouTubeExport.run(item, info: info, publish: publish, settings: exportSettings, files: files, project: project) { value in
                     Task { @MainActor in
                         guard let self else { return }
                         self.agentJobs[jobID]?.progress = value
@@ -2110,6 +2112,7 @@ extension AppModel {
             }
             if let self {
                 if let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .done(files.video) }
+                self.noteExport(files.json, origin: origin)
                 self.statusMessage = "\(origin.label) exported \(files.video.lastPathComponent) for YouTube."
             }
             var result: [String: JSONValue] = ["path": .string(files.video.path), "format": .string("mp4"),

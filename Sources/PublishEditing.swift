@@ -77,7 +77,9 @@ enum YouTubeExport {
     }
 
     /// The structured version of the text file, for an agent filling in YouTube Studio.
-    static func json(_ publish: PublishInfo, files: Files, endScreen plan: EndScreenPlan? = nil) throws -> Data {
+    /// `project` and `recording` say what it was made from, so the Library can find it.
+    static func json(_ publish: PublishInfo, files: Files, endScreen plan: EndScreenPlan? = nil,
+                     project: UUID? = nil, recording: UUID? = nil) throws -> Data {
         let chapters: [JSONValue] = publish.chapters.sorted { $0.time < $1.time }.map {
             .object(["time": .number($0.time), "timestamp": .string(PublishInfo.timestamp($0.time)), "title": .string($0.title)])
         }
@@ -92,6 +94,8 @@ enum YouTubeExport {
             "language": .string(publish.language), "chapters": .array(chapters), "files": .object(fileNames),
         ]
         if let plan { root["endScreen"] = plan.json }
+        if let project { root["projectID"] = .string(project.uuidString) }
+        if let recording { root["recordingID"] = .string(recording.uuidString) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(JSONValue.object(root))
@@ -102,7 +106,7 @@ enum YouTubeExport {
     /// The video is written under a temporary name and moved into place only when done,
     /// so a cancelled export leaves no half-written video.
     static func run(_ item: VideoItem, info: MediaInfo, publish: PublishInfo, settings: ExportSettings, files: Files,
-                    onProgress: @escaping @Sendable (Double) -> Void) async throws {
+                    project: UUID? = nil, onProgress: @escaping @Sendable (Double) -> Void) async throws {
         if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }
@@ -129,7 +133,7 @@ enum YouTubeExport {
         let names = files.all.filter { $0 != files.text && ($0 == files.json || manager.fileExists(atPath: $0.path)) }.map(\.lastPathComponent)
         let plan = EndScreenPlan(graphics: item.graphics, publish: publish, duration: item.editedDuration)
         try Data(publish.uploadText(files: names, endScreen: plan).utf8).write(to: files.text, options: .atomic)
-        try json(publish, files: files, endScreen: plan).write(to: files.json, options: .atomic)
+        try json(publish, files: files, endScreen: plan, project: project, recording: item.id).write(to: files.json, options: .atomic)
     }
 }
 
@@ -227,6 +231,7 @@ extension AppModel {
                                         captions: item.uploadsCaptions(settings),
                                         unique: true)
         let exportSettings = settings
+        let project = projectID
         let id = item.id
         playback.pause()
         isConverting = true
@@ -234,13 +239,14 @@ extension AppModel {
         items[index].status = .converting(0)
         conversionTask = Task {
             do {
-                try await YouTubeExport.run(item, info: info, publish: publish, settings: exportSettings, files: files) { [weak self] fraction in
+                try await YouTubeExport.run(item, info: info, publish: publish, settings: exportSettings, files: files, project: project) { [weak self] fraction in
                     Task { @MainActor [weak self] in
                         guard let self, let i = self.items.firstIndex(where: { $0.id == id }) else { return }
                         if case .converting = self.items[i].status { self.items[i].status = .converting(fraction) }
                     }
                 }
                 if let i = items.firstIndex(where: { $0.id == id }) { items[i].status = .done(files.video) }
+                noteExport(files.json, origin: .human)
                 statusMessage = "Exported for YouTube: \(files.video.lastPathComponent) and its upload files."
             } catch is CancellationError {
                 if let i = items.firstIndex(where: { $0.id == id }) { items[i].status = .ready }

@@ -15,7 +15,7 @@ struct ContentView: View {
                 ModuleSidebar()
                 Divider()
                 switch model.module {
-                case .ideas: IdeasPage()
+                case .library: LibraryPage()
                 case .studio: studio
                 }
             }
@@ -26,7 +26,7 @@ struct ContentView: View {
         .frame(minWidth: 1140, minHeight: 800)
         .toolbar {
             switch model.module {
-            case .ideas: ideasToolbar
+            case .library: libraryToolbar
             case .studio: studioToolbar
             }
         }
@@ -34,6 +34,9 @@ struct ContentView: View {
         .sheet(isPresented: $publishing) { PublishSheet().environmentObject(model) }
         .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
         .sheet(isPresented: $model.showingAutoEdit) { AutoEditSheet().environmentObject(model) }
+        .sheet(isPresented: Binding(get: { model.libraryScan != nil }, set: { if !$0 { model.libraryScan = nil } })) {
+            PastVideosSheet().environmentObject(model)
+        }
         .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
             loadDroppedURLs(providers) { urls in model.receiveDropped(urls) }
             return true
@@ -78,10 +81,12 @@ struct ContentView: View {
         }
     }
 
-    @ToolbarContentBuilder private var ideasToolbar: some ToolbarContent {
+    @ToolbarContentBuilder private var libraryToolbar: some ToolbarContent {
         ToolbarItemGroup {
             Button { model.newIdea() } label: { Label("New Idea", systemImage: "plus") }
                 .help("New idea (⌥⌘N)")
+            Button { model.promptForPastVideos() } label: { Label("Scan a Folder…", systemImage: "folder.badge.gearshape") }
+                .help("Add videos you already made: YamVideo projects and Export for YouTube folders. Nothing is copied.")
             Button { model.libraryUndo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                 .help(model.libraryUndoTitle + " (⌘Z)")
                 .disabled(model.libraryUndoEntries.isEmpty)
@@ -112,7 +117,7 @@ struct ContentView: View {
                 }
                 .controlSize(.small)
                 .frame(maxWidth: 220)
-                .help("This project was made from the idea \"\(idea.title)\". Open it on the Ideas page.")
+                .help("This project was made from the idea \"\(idea.title)\". Open it on the Library page.")
             }
             Button { model.undoEdit() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                 .help(model.undoTitle + " (⌘Z)")
