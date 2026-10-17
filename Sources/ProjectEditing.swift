@@ -194,23 +194,23 @@ extension AppModel {
         for item in items where item.info == nil { retry(item.id) }
     }
 
-    /// Undo in a text field undoes its typing first. On the Ideas page, Undo is the
+    /// Undo in a text field undoes its typing first. On the Library page, Undo is the
     /// Library's, and a field with nothing left to undo hands over to it.
     func undoEdit() {
         if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable,
-           module != .ideas || text.undoManager?.canUndo == true {
+           module != .library || text.undoManager?.canUndo == true {
             text.undoManager?.undo(); return
         }
-        if module == .ideas { libraryUndo(); return }
+        if module == .library { libraryUndo(); return }
         undo()
     }
 
     func redoEdit() {
         if let text = NSApp?.keyWindow?.firstResponder as? NSTextView, text.isEditable,
-           module != .ideas || text.undoManager?.canRedo == true {
+           module != .library || text.undoManager?.canRedo == true {
             text.undoManager?.redo(); return
         }
-        if module == .ideas { libraryRedo(); return }
+        if module == .library { libraryRedo(); return }
         redo()
     }
 

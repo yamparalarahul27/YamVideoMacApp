@@ -142,9 +142,10 @@ section's ID and reports the new right one in `createdIDs`.
 | `save [--path FILE]` | Saves without a dialog: in place, to a first location, or — to a different path — as a copy with its own identity. |
 | `reveal --clip/--section/--zoom/--effect/--marker/--graphic/--time` | Moves your view, only when asked; edits never do. |
 | `library` | The Library, apart from any project: every idea with its title, notes, topic, links, images (with paths), stage (`idea`, `inProduction`) and linked project; the topics in use; the Library's own `revision` and top undo and redo steps. |
-| `library apply --file EDITS.json --revision N [--dry-run] [--label TEXT]` | Library commands (`catalog`'s `libraryCommands`) as one undo step on the Ideas page, against the Library's revision: `addIdea {title, ideaID?, notes?, topic?, links?, paths?}`, `updateIdea {ideaID, title?, notes?, topic? ("" clears), links?}`, `removeIdea`, `addIdeaImages {ideaID, paths}`, `removeIdeaImage {ideaID, image}`, `linkProject {ideaID, path?}` (left out: the saved project open in Studio), `unlinkProject`. |
+| `library apply --file EDITS.json --revision N [--dry-run] [--label TEXT]` | Library commands (`catalog`'s `libraryCommands`) as one undo step on the Library page, against the Library's revision: `addIdea {title, ideaID?, notes?, topic?, links?, paths?}`, `updateIdea {ideaID, title?, notes?, topic? ("" clears), links?}`, `removeIdea`, `addIdeaImages {ideaID, paths}`, `removeIdeaImage {ideaID, image}`, `linkProject {ideaID, path?}` (left out: the saved project open in Studio), `unlinkProject`. |
 | `library undo` / `library redo --transaction ID --revision N` | Undo or redo your own Library step. |
-| `reveal --idea ID` | Shows an idea on the Ideas page. |
+| `reveal --idea ID` | Shows an idea on the Library page. |
+| `scan --path FOLDER` | What Add Past Videos would find there: YamVideo projects with the Export for YouTube files made from them, exports whose project is missing, and what the Library already holds. Changes nothing; `importVideos {paths}` adds them, `addPost {ideaID, videoID, link?}` records where a video is published. |
 
 ## Errors
 

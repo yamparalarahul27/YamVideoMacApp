@@ -309,9 +309,10 @@ server.registerTool("yamvideo_get_library", {
 server.registerTool("yamvideo_apply_library", {
   title: "Change the owner's ideas",
   description: [
-    "Apply 1–100 Library commands as one undo step on the Ideas page, against the Library revision you read (not the project's). Use the owner's own words, reuse existing topics, and ask before deleting. YamVideo never posts to any platform, and neither should you.",
+    "Apply 1–100 Library commands as one undo step on the Library page, against the Library revision you read (not the project's). Use the owner's own words, reuse existing topics, and ask before deleting. YamVideo never posts to any platform, and neither should you.",
     "addIdea {title, ideaID?, notes?, topic?, links?, paths? (images to copy in)} · updateIdea {ideaID, title?, notes?, topic? (\"\" clears), links? (the whole list)} · removeIdea {ideaID}",
     "addIdeaImages {ideaID, paths} · removeIdeaImage {ideaID, image (a name from images[].name)} · linkProject {ideaID, path? (a .yamvideo; left out: the saved project open in Studio)} · unlinkProject {ideaID}",
+    "Past videos (ask the owner first; yamvideo_scan_folder shows what would be added): importVideos {paths: folders, .yamvideo projects or .youtube.json exports; nothing is copied} · addPost {ideaID, videoID (from ideas[].videos[].id), link? (from the owner; left out: marked posted)} · removePost {ideaID, videoID, link? (left out: all)}",
   ].join("\n"),
   inputSchema: {
     expectedRevision: z.number().int().nonnegative().describe("library.revision as you read it. If the Library changed since, the request is refused with revision_conflict: read it again."),
@@ -322,6 +323,13 @@ server.registerTool("yamvideo_apply_library", {
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 }, async (args) => result(await request("libraryApply", args)));
+
+server.registerTool("yamvideo_scan_folder", {
+  title: "Find past videos in a folder",
+  description: "What Add Past Videos would find under a folder: YamVideo projects with the Export for YouTube files made from them, exports whose project is not there, and whether the Library already holds each. Changes nothing; add them with importVideos.",
+  inputSchema: { path: z.string().describe("A folder, a .yamvideo project or a .youtube.json export.") },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+}, async (args) => result(await request("scanFolder", args)));
 
 for (const [name, method, verb] of [["yamvideo_library_undo", "libraryUndo", "Undo"], ["yamvideo_library_redo", "libraryRedo", "Redo"]]) {
   server.registerTool(name, {
@@ -337,11 +345,11 @@ for (const [name, method, verb] of [["yamvideo_library_undo", "libraryUndo", "Un
 
 server.registerTool("yamvideo_reveal", {
   title: "Show something to the owner",
-  description: "Move the owner's view to a recording, section, zoom, blur effect, marker or time, selecting it, or to an idea on the Ideas page. Edits never move their view; use this only when it helps them see what you mean.",
+  description: "Move the owner's view to a recording, section, zoom, blur effect, marker or time, selecting it, or to an idea on the Library page. Edits never move their view; use this only when it helps them see what you mean.",
   inputSchema: {
     clip: id.optional(), section: id.optional(), zoom: id.optional(), effect: id.optional(), marker: id.optional(),
     graphic: id.optional(), short: id.optional().describe("A Short: shows it in the owner's Short viewer; time is then seconds into it."),
-    idea: id.optional().describe("An idea from yamvideo_get_library: shows it on the Ideas page."),
+    idea: id.optional().describe("An idea from yamvideo_get_library: shows it on the Library page."),
     time: z.number().nonnegative().optional(), timeSpace: z.enum(["recording", "movie"]).optional(),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },

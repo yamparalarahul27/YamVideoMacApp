@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-// The Library and the Ideas page (docs/plans/distribution.md, phase 1): ideas, their rules
+// The Library and the Library page (docs/plans/distribution.md, phase 1): ideas, their rules
 // and file, undo, images, the link to a project, and the same for agents.
 
 /// A small PNG to add to ideas.
@@ -65,8 +65,8 @@ func ideaImage(_ name: String) throws -> URL {
     check(model.library.item(second.id) == nil && model.selectedIdeaID == first.id, "deleting an idea selects the next one")
     model.libraryUndo()
     check(model.library.item(second.id) != nil, "and undo brings it back")
-    model.module = .ideas
-    equal(model.menuUndoTitle, model.libraryUndoTitle, "on the Ideas page, the Edit menu undoes the Library")
+    model.module = .library
+    equal(model.menuUndoTitle, model.libraryUndoTitle, "on the Library page, the Edit menu undoes the Library")
     model.module = .studio
     equal(model.menuUndoTitle, model.undoTitle, "in Studio, it undoes the project")
 
@@ -192,8 +192,8 @@ func ideaImage(_ name: String) throws -> URL {
     model.agentsPaused = false
     model.module = .studio
     let revealed = agentResult(await agentCall(model, ["method": "reveal", "idea": second.id.uuidString]))
-    check(model.module == .ideas && model.selectedIdeaID == second.id && revealed["idea"] as? String == second.id.uuidString,
-          "reveal shows an idea on the Ideas page")
+    check(model.module == .library && model.selectedIdeaID == second.id && revealed["idea"] as? String == second.id.uuidString,
+          "reveal shows an idea on the Library page")
     equal(agentError(await agentCall(model, ["method": "reveal", "idea": UUID().uuidString])), "not_found", "and says when there is no such idea")
 
     let catalog = AgentCatalog.current
@@ -207,4 +207,164 @@ func ideaImage(_ name: String) throws -> URL {
         return wire.type != command.type
     }.map(\.type)
     check(badExamples.isEmpty, "every Library example is a well-formed command of its own type", badExamples.joined(separator: ", "))
+}
+
+/// Writes `object` as a `.youtube.json` and returns its URL.
+func exportFile(_ folder: URL, _ name: String, _ object: [String: Any]) throws -> URL {
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let url = folder.appendingPathComponent(name + ".youtube.json")
+    try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]).write(to: url)
+    return url
+}
+
+@MainActor func pastVideosTests() async throws {
+    print("Past videos: finding projects and their exports")
+    let root = scratch.appendingPathComponent("past", isDirectory: true)
+    let shorts = root.appendingPathComponent("Shorts", isDirectory: true)
+    try FileManager.default.createDirectory(at: shorts, withIntermediateDirectories: true)
+    // A saved project: one recording with a YouTube title and two Shorts.
+    let projectID = UUID(), shortOne = UUID(), shortTwo = UUID()
+    var recording = VideoItem(url: landscape)
+    recording.info = info; recording.crop = info.fullFrame
+    var long = PublishInfo(); long.title = "Five App Store tips"
+    recording.publish = long
+    var first = Short(id: shortOne, start: 0.2, end: 1.5); first.title = "Tip one"
+    var second = Short(id: shortTwo, start: 1.6, end: 2.9); second.title = "Tip two"
+    recording.shorts = [first, second]
+    let projectFile = root.appendingPathComponent("AppStore.yamvideo")
+    let project = VideoProject(projectID: projectID, clips: [ProjectClip(recording)], settings: ExportSettings(), selection: nil,
+                               movieSettings: nil, autoEdit: nil)
+    try JSONEncoder().encode(project).write(to: projectFile)
+    // A Short exported before exports said their project (as on 15 Oct): matched by the Short.
+    try Data().write(to: shorts.appendingPathComponent("Tip one.mp4"))
+    _ = try ideaImage("past/Shorts/Tip one cover.jpg")
+    let oldShort = try exportFile(shorts, "Tip one", ["short": true, "shortID": shortOne.uuidString, "title": "Tip one",
+                                                      "description": "The first tip.", "tags": ["App Store", "iOS app"], "length": 1.3,
+                                                      "files": ["video": "Tip one.mp4", "cover": "Tip one cover.jpg", "text": "Tip one YouTube.txt"]])
+    // The long video exported now: it names its project and recording.
+    let longFiles = YouTubeExport.files(in: root, publish: long, fallback: "AppStore", captions: false, unique: false)
+    try YouTubeExport.json(long, files: longFiles, project: projectID, recording: recording.id).write(to: longFiles.json)
+    // An export whose project is somewhere else, and a project in a hidden folder.
+    let stray = try exportFile(root.appendingPathComponent("Older", isDirectory: true), "Old intro", ["title": "Old intro", "short": false])
+    let hidden = root.appendingPathComponent(".cache", isDirectory: true)
+    try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: true)
+    try JSONEncoder().encode(project).write(to: hidden.appendingPathComponent("Copy.yamvideo"))
+
+    let (projects, exports) = LibraryScan.files(in: [root])
+    check(projects.map(\.lastPathComponent) == ["AppStore.yamvideo"] && exports.count == 3,
+          "a scan finds the projects and exports in a folder, and skips hidden folders",
+          "\(projects.map(\.lastPathComponent)) \(exports.map(\.lastPathComponent))")
+    let longJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: longFiles.json)) as? [String: Any]
+    check(longJSON?["projectID"] as? String == projectID.uuidString && longJSON?["recordingID"] as? String == recording.id.uuidString,
+          "Export for YouTube now writes the project and recording it was made from")
+    let shortJSON = try JSONSerialization.jsonObject(with: ShortExport.json(second, publish: second.publishInfo(recording: long), recording: recording,
+                                                                             files: longFiles, coverWritten: false, project: projectID)) as? [String: Any]
+    check(shortJSON?["projectID"] as? String == projectID.uuidString && shortJSON?["shortID"] as? String == shortTwo.uuidString,
+          "and so does Export Short for YouTube")
+
+    let model = AppModel(recoveryURL: nil)
+    model.loadLibrary(from: scratch.appendingPathComponent("past-library", isDirectory: true))
+    let found = LibraryScan.candidates(roots: [root], library: model.library)
+    let projectCandidate = found.first { $0.project != nil }
+    check(found.count == 2 && projectCandidate?.exports.count == 2 && projectCandidate?.title == "Five App Store tips"
+              && found.contains { $0.project == nil && $0.path == stray.path },
+          "an export is matched to its project by the Short it is of, or by the project it names; one without its project stands alone")
+
+    model.scanPastVideos([root])
+    for _ in 0..<100 where model.libraryScan?.scanning != false { try await Task.sleep(nanoseconds: 50_000_000) }
+    check(model.libraryScan?.chosen.count == 2 && model.module == .library, "Scan a Folder ticks everything new and shows the Library")
+    model.addChosenPastVideos()
+    guard let item = model.library.item(forProject: projectID) else { check(false, "the project becomes an item"); return }
+    check(model.libraryScan == nil && item.stage == .ready && item.project?.path == projectFile.path && item.videos.count == 2
+              && Set(item.videos.map(\.id)) == [shortOne, recording.id] && model.library.items.count == 2,
+          "the project becomes a Ready item with its exported long video and Short; nothing is copied")
+    equal(model.libraryUndoTitle, "Undo Add Past Videos", "adding them is one undo step")
+    let rows = model.videoRows(item)
+    check(rows.map(\.id) == [recording.id, shortOne, shortTwo] && rows[0].title == "Five App Store tips" && rows[2].stored == nil,
+          "the item shows every video of its project, long ones first, exported or not")
+    check(rows[1].export?.video?.hasSuffix("Tip one.mp4") == true && rows[1].export?.cover?.hasSuffix("Tip one cover.jpg") == true
+              && rows[1].export?.everything.contains("App Store, iOS app") == true,
+          "a video's export gives its files and the title, description and tags to copy")
+    check(LibraryScan.candidates(roots: [root], library: model.library).allSatisfy(\.alreadyAdded),
+          "scanning again finds nothing new")
+
+    print("\nNew exports and posts")
+    func row(_ id: UUID) -> VideoRow { model.videoRows(model.library.item(item.id)!).first { $0.id == id }! }
+    let laterFiles = YouTubeExport.files(in: shorts, publish: second.publishInfo(recording: long), fallback: "Tip two", captions: false, unique: false)
+    try ShortExport.json(second, publish: second.publishInfo(recording: long), recording: recording, files: laterFiles, coverWritten: false,
+                         project: projectID).write(to: laterFiles.json)
+    model.noteExport(laterFiles.json, origin: .human)
+    check(model.library.item(item.id)?.video(shortTwo)?.exports.count == 1 && model.libraryUndoTitle == "Undo Exported Tip two",
+          "an export from a linked project lands in the Library without a scan")
+    let again = try exportFile(shorts, "Tip one again", ["short": true, "shortID": shortOne.uuidString, "title": "Tip one"])
+    let refound = LibraryScan.candidates(roots: [root], library: model.library).first { $0.project != nil }
+    check(refound?.alreadyAdded == false && refound?.newExports == 1, "a scan offers only the exports the Library does not have")
+    model.scanPastVideos([root])
+    for _ in 0..<100 where model.libraryScan?.scanning != false { try await Task.sleep(nanoseconds: 50_000_000) }
+    model.addChosenPastVideos()
+    check(Set(model.library.item(item.id)?.video(shortOne)?.exports.map(\.json) ?? []) == [oldShort.path, again.path],
+          "and adds them to the video they are of")
+    check(row(shortOne).export?.video?.hasSuffix("Tip one.mp4") == true, "the row plays the latest export that still has its video")
+
+    if case .failure(let error) = model.addPost(item.id, row(shortOne), link: "youtube.com/shorts/abc123") { check(false, "a post link is kept", error.message) }
+    check(row(shortOne).posts.first?.link == "https://youtube.com/shorts/abc123" && row(shortOne).posts.first?.platform == .youtube
+              && model.library.item(item.id)?.stage == .posted,
+          "a pasted post link is kept, its platform read from the address, and the item is Posted")
+    check(model.addPost(item.id, row(shortOne), link: "https://youtube.com/shorts/abc123").isFailureCase
+              && model.addPost(item.id, row(shortOne), link: "not a link").isFailureCase,
+          "the same link twice, or something that is not a link, is refused")
+    model.addPost(item.id, row(shortTwo), link: nil)
+    check(row(shortTwo).posts.count == 1 && row(shortTwo).posts[0].link == nil, "a video can be marked posted without a link")
+    model.addPost(item.id, row(shortTwo), link: "https://www.instagram.com/reel/xyz/")
+    check(row(shortTwo).posts.map(\.platform) == [.instagram], "and a link given later takes the place of the plain mark")
+    check(Platform.of("https://x.com/me/status/1") == .x && Platform.of("https://www.linkedin.com/posts/me") == .linkedin
+              && Platform.of("https://youtu.be/abc") == .youtube && Platform.of("https://example.com") == nil,
+          "the four platforms are recognised from their addresses")
+    model.removePost(item.id, row(shortTwo), link: nil)
+    check(row(shortTwo).posts.isEmpty, "posts come off again")
+
+    model.openVideoInStudio(item.id, row(shortOne))
+    check(model.module == .studio && model.projectID == projectID && model.selection == recording.id && model.selectedShortID == shortOne,
+          "Open in Studio opens the project with the recording and the Short selected")
+
+    print("\nOlder Libraries and agents")
+    var older = model.library
+    older.version = 1
+    for index in older.items.indices { older.items[index].videos = [] }
+    let reread = try Library.decode(older.encoded())
+    check(reread.version == Library.currentVersion && reread.items.count == older.items.count, "a version 1 Library reads as version 2")
+
+    let agentModel = AppModel(recoveryURL: nil)
+    agentModel.loadLibrary(from: scratch.appendingPathComponent("past-agent-library", isDirectory: true))
+    let scanned = agentResult(await agentCall(agentModel, ["method": "scanFolder", "path": root.path]))
+    let candidates = scanned["candidates"] as? [[String: Any]] ?? []
+    check(candidates.count == 2 && candidates.contains { $0["projectID"] as? String == projectID.uuidString && ($0["exports"] as? [Any])?.count == 4 },
+          "an agent sees what a scan would add, and nothing changes", "\(candidates.map { $0["title"] ?? "" })")
+    check(agentModel.library.items.isEmpty, "scanFolder adds nothing")
+    let imported = agentResult(await agentCall(agentModel, ["method": "libraryApply", "client": "Claude", "requestID": UUID().uuidString,
+                                                            "expectedRevision": agentModel.library.revision,
+                                                            "commands": [["type": "importVideos", "paths": [root.path]]]]))
+    check((imported["createdIDs"] as? [Any])?.count == 2 && agentModel.library.item(forProject: projectID)?.stage == .ready,
+          "importVideos adds the project and the stray export")
+    let agentItem = agentModel.library.item(forProject: projectID)!
+    let posted = agentResult(await agentCall(agentModel, ["method": "libraryApply", "client": "Claude", "requestID": UUID().uuidString,
+                                                          "expectedRevision": agentModel.library.revision,
+                                                          "commands": [["type": "addPost", "ideaID": agentItem.id.uuidString,
+                                                                        "videoID": shortTwo.uuidString, "link": "https://youtube.com/shorts/two"]]]))
+    check(posted["changed"] as? Bool == true && agentModel.library.item(agentItem.id)?.video(shortTwo)?.posts.first?.platform == .youtube,
+          "addPost records a post on a Short that was in the project but not yet in the Library")
+    let state = agentResult(await agentCall(agentModel, ["method": "library"]))
+    let ideas = state["ideas"] as? [[String: Any]] ?? []
+    let videos = ideas.first { $0["id"] as? String == agentItem.id.uuidString }?["videos"] as? [[String: Any]] ?? []
+    check(videos.count == 3 && videos.contains { ($0["posts"] as? [[String: Any]])?.first?["platform"] as? String == "youtube" }
+              && videos.contains { ($0["exports"] as? [Any])?.count == 2 && ($0["video"] as? String)?.hasSuffix(".mp4") == true },
+          "the Library's state lists each video with its exports, posts and files")
+    let missingVideo = await agentCall(agentModel, ["method": "libraryApply", "client": "Claude", "requestID": UUID().uuidString,
+                                                    "expectedRevision": agentModel.library.revision,
+                                                    "commands": [["type": "addPost", "ideaID": agentItem.id.uuidString, "videoID": UUID().uuidString]]])
+    equal(agentError(missingVideo), "not_found", "addPost names a video the idea has")
+}
+
+extension Result {
+    var isFailureCase: Bool { if case .failure = self { return true }; return false }
 }

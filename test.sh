@@ -58,6 +58,8 @@ xcrun swiftc \
 	"$ROOT/Sources/Library.swift" \
 	"$ROOT/Sources/LibraryEditing.swift" \
 	"$ROOT/Sources/LibraryAgents.swift" \
+	"$ROOT/Sources/LibraryScan.swift" \
+	"$ROOT/Sources/LibraryVideos.swift" \
 	"$ROOT/Sources/AppModel.swift" \
 	"$ROOT/Sources/ProjectEditing.swift" \
 	"$ROOT/Sources/EditCommands.swift" \

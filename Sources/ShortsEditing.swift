@@ -352,7 +352,8 @@ enum ShortExport {
         return lines
     }
 
-    static func json(_ short: Short, publish: PublishInfo, recording: VideoItem, files: YouTubeExport.Files, coverWritten: Bool) throws -> Data {
+    static func json(_ short: Short, publish: PublishInfo, recording: VideoItem, files: YouTubeExport.Files, coverWritten: Bool,
+                     project: UUID? = nil) throws -> Data {
         var fileNames: [String: JSONValue] = ["video": .string(files.video.lastPathComponent), "text": .string(files.text.lastPathComponent)]
         if let captions = files.captions, FileManager.default.fileExists(atPath: captions.path) { fileNames["captions"] = .string(captions.lastPathComponent) }
         if coverWritten, let cover = files.thumbnail { fileNames["cover"] = .string(cover.lastPathComponent) }
@@ -369,6 +370,9 @@ enum ShortExport {
                                      "longVideoTitle": .string(recording.publish?.title ?? "")]),
         ]
         if let cover = short.cover { root["cover"] = .object(["time": .number(cover), "timestamp": .string(PublishInfo.timestamp(cover))]) }
+        // What it was made from, so the Library can find it.
+        if let project { root["projectID"] = .string(project.uuidString) }
+        root["recordingID"] = .string(recording.id.uuidString)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(JSONValue.object(root))
@@ -400,6 +404,7 @@ enum ShortExport {
     static func run(_ item: VideoItem, info: MediaInfo, short: Short, settings: ExportSettings, files: YouTubeExport.Files,
                     cover: (Double) async throws -> CGImage,
                     drawGraphics: ((GraphicsRender.Job, URL, URL) async throws -> Void)? = nil,
+                    project: UUID? = nil,
                     onProgress: @escaping @Sendable (Double) -> Void) async throws {
         if let blocking = item.shortIssues(short).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
@@ -429,7 +434,7 @@ enum ShortExport {
         text += "\n" + shortLines(short, recording: item, cover: coverWritten ? files.thumbnail?.lastPathComponent : nil).joined(separator: "\n") + "\n"
         text += "\nFILES\n" + names.joined(separator: "\n") + "\n"
         try Data(text.utf8).write(to: files.text, options: .atomic)
-        try json(short, publish: publish, recording: item, files: files, coverWritten: coverWritten).write(to: files.json, options: .atomic)
+        try json(short, publish: publish, recording: item, files: files, coverWritten: coverWritten, project: project).write(to: files.json, options: .atomic)
     }
 }
 
@@ -491,6 +496,7 @@ extension AppModel {
         let item = items[index]
         let files = ShortExport.files(in: folder, short: short, index: position, recording: item, settings: settings, unique: true)
         let exportSettings = settings
+        let project = projectID
         let clipID = item.id
         let clip = ProjectClip(item)
         playback.pause()
@@ -503,13 +509,14 @@ extension AppModel {
                                           cover: { [weak self] time in
                                               guard let self else { throw CancellationError() }
                                               return try await self.composedShortFrame(clip, short: short, at: time, settings: exportSettings).image
-                                          }) { [weak self] fraction in
+                                          }, project: project) { [weak self] fraction in
                     Task { @MainActor [weak self] in
                         guard let self, let i = self.items.firstIndex(where: { $0.id == clipID }) else { return }
                         if case .converting = self.items[i].status { self.items[i].status = .converting(fraction) }
                     }
                 }
                 if let i = items.firstIndex(where: { $0.id == clipID }) { items[i].status = .done(files.video) }
+                noteExport(files.json, origin: .human)
                 statusMessage = "Exported the Short for YouTube: \(files.video.lastPathComponent) and its upload files."
             } catch is CancellationError {
                 if let i = items.firstIndex(where: { $0.id == clipID }) { items[i].status = .ready }

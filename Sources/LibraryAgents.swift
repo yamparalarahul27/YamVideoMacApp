@@ -20,8 +20,14 @@ struct LibraryWireCommand: Codable, Equatable {
     var image: String?
     /// linkProject: a .yamvideo file; left out, the project open in Studio.
     var path: String?
+    /// addPost and removePost: a video from the item's videos[].id.
+    var videoID: UUID?
+    /// addPost: where the video is published; left out, it is only marked posted.
+    /// removePost: the post to remove; left out, all of them.
+    var link: String?
 
-    static let types = ["addIdea", "updateIdea", "removeIdea", "addIdeaImages", "removeIdeaImage", "linkProject", "unlinkProject"]
+    static let types = ["addIdea", "updateIdea", "removeIdea", "addIdeaImages", "removeIdeaImage", "linkProject", "unlinkProject",
+                        "importVideos", "addPost", "removePost"]
 }
 
 /// The parts of a request only Library methods read, decoded from the same line.
@@ -40,6 +46,23 @@ struct AgentLibrary: Encodable {
         /// Whether it is the project open in Studio now.
         var open: Bool
     }
+    /// A video of an item: from its project, from the Library, or both.
+    struct Video: Encodable {
+        struct Export: Encodable { var json: String; var exported: Date; var exists: Bool }
+        struct Post: Encodable { var link: String?; var platform: String?; var posted: Date }
+        var id: UUID
+        var short: Bool
+        var title: String
+        var length: Double?
+        var recording: UUID?
+        /// Still in the linked project, so it opens in Studio.
+        var inProject: Bool
+        var exports: [Export]
+        var posts: [Post]
+        /// The latest export's files that are still there.
+        var video: String?
+        var cover: String?
+    }
     struct Idea: Encodable {
         var id: UUID
         var title: String
@@ -52,6 +75,8 @@ struct AgentLibrary: Encodable {
         var created: Date
         var updated: Date
         var project: Project?
+        /// Its long videos and Shorts, with where they were exported and published.
+        var videos: [Video]
     }
     struct OpenProject: Encodable {
         var projectID: UUID
@@ -66,12 +91,31 @@ struct AgentLibrary: Encodable {
     var folder: String?
     var stages: [String]
     var topics: [String]
-    /// The idea the owner has selected on the Ideas page, and the module showing.
+    /// The idea the owner has selected on the Library page, and the module showing.
     var selectedIdea: UUID?
     var module: String
     var openProject: OpenProject
     var history: History
     var ideas: [Idea]
+}
+
+/// What `scanFolder` found.
+struct AgentScan: Encodable {
+    struct Export: Encodable { var json: String; var title: String; var short: Bool }
+    struct Candidate: Encodable {
+        var path: String
+        var title: String
+        /// Nil for an export whose project was not found.
+        var projectID: UUID?
+        var recordings: Int?
+        var shorts: Int?
+        var exports: [Export]
+        /// The idea that already holds it.
+        var existing: UUID?
+        var newExports: Int
+        var alreadyAdded: Bool
+    }
+    var candidates: [Candidate]
 }
 
 struct AgentLibraryReceipt: Encodable {
@@ -95,7 +139,13 @@ extension AppModel {
                 images: item.images.map { .init(name: $0, path: libraryImageURL($0)?.path ?? $0) },
                 stage: item.stage.rawValue, created: item.created, updated: item.updated,
                 project: item.project.map { .init(projectID: $0.projectID, path: $0.path, name: $0.name, exists: $0.exists,
-                                                  open: $0.projectID == projectID) })
+                                                  open: $0.projectID == projectID) },
+                videos: videoRows(item).map { row in
+                    .init(id: row.id, short: row.short, title: row.title, length: row.length, recording: row.recording, inProject: row.inProject,
+                          exports: row.exports.map { .init(json: $0.json, exported: $0.exported, exists: $0.exists) },
+                          posts: row.posts.map { .init(link: $0.link, platform: $0.platform?.rawValue, posted: $0.posted) },
+                          video: row.export?.video, cover: row.export?.cover)
+                })
         }
         return AgentLibrary(revision: library.revision, folder: libraryFolderURL?.path,
                             stages: ContentStage.allCases.map(\.rawValue), topics: library.topics,
@@ -126,7 +176,7 @@ extension AppModel {
         var planned: [(command: LibraryCommand, images: [URL])] = []
         do {
             for (index, wire) in wires.enumerated() {
-                do { planned.append(try resolveLibrary(wire)) }
+                do { planned += try resolveLibrary(wire) }
                 catch let error as EditError { throw EditError(code: error.code, message: "Command \(index + 1) (\(wire.type)): \(error.message)") }
             }
         } catch let error as EditError { return .failure(error) }
@@ -172,8 +222,8 @@ extension AppModel {
         }
     }
 
-    /// One wire command as a Library command, with the image files it would add.
-    private func resolveLibrary(_ wire: LibraryWireCommand) throws -> (command: LibraryCommand, images: [URL]) {
+    /// One wire command as Library commands, each with the image files it would add.
+    private func resolveLibrary(_ wire: LibraryWireCommand) throws -> [(command: LibraryCommand, images: [URL])] {
         func idea() throws -> UUID {
             guard let id = wire.ideaID else { throw EditError(code: .invalidRequest, message: "This command needs ideaID from the Library's ideas[].id.") }
             return id
@@ -188,7 +238,7 @@ extension AppModel {
             guard let title = wire.title else { throw EditError(code: .invalidRequest, message: "addIdea needs a title.") }
             let item = ContentItem(id: wire.ideaID ?? UUID(), title: title, notes: wire.notes ?? "", topic: wire.topic,
                                    links: wire.links ?? [])
-            return (.addIdea(item), try images())
+            return [(.addIdea(item), try images())]
         case "updateIdea":
             // A topic of "" clears it: .some(nil). Left out, it stays: nil.
             var topic: String?? = nil
@@ -196,17 +246,17 @@ extension AppModel {
             guard wire.title != nil || wire.notes != nil || topic != nil || wire.links != nil else {
                 throw EditError(code: .invalidRequest, message: "updateIdea needs at least one of title, notes, topic (\"\" clears it) or links.")
             }
-            return (.updateIdea(id: try idea(), title: wire.title, notes: wire.notes, topic: topic, links: wire.links), [])
+            return [(.updateIdea(id: try idea(), title: wire.title, notes: wire.notes, topic: topic, links: wire.links), [])]
         case "removeIdea":
-            return (.removeIdea(id: try idea()), [])
+            return [(.removeIdea(id: try idea()), [])]
         case "addIdeaImages":
             let id = try idea()
             let urls = try images()
             guard !urls.isEmpty else { throw EditError(code: .invalidRequest, message: "addIdeaImages needs paths: local image files.") }
-            return (.addImages(id: id, names: []), urls)
+            return [(.addImages(id: id, names: []), urls)]
         case "removeIdeaImage":
             guard let image = wire.image else { throw EditError(code: .invalidRequest, message: "removeIdeaImage needs image: a name from the idea's images[].name.") }
-            return (.removeImage(id: try idea(), name: image), [])
+            return [(.removeImage(id: try idea(), name: image), [])]
         case "linkProject":
             let id = try idea()
             if let path = wire.path {
@@ -215,17 +265,49 @@ extension AppModel {
                 guard let found = try? VideoProject.decodeMigrating(from: data), let projectID = found.projectID else {
                     throw EditError.invalid("\(url.lastPathComponent) is not a YamVideo project this version can read.")
                 }
-                return (.linkProject(id: id, link: ProjectLink(projectID: projectID, path: url.path)), [])
+                return [(.linkProject(id: id, link: ProjectLink(projectID: projectID, path: url.path)), [])]
             }
             guard let url = projectURL else {
                 throw EditError.invalid("The project open in Studio has not been saved yet. Save it first (method save with a path), or give path.")
             }
-            return (.linkProject(id: id, link: ProjectLink(projectID: projectID, path: url.path)), [])
+            return [(.linkProject(id: id, link: ProjectLink(projectID: projectID, path: url.path)), [])]
         case "unlinkProject":
-            return (.linkProject(id: try idea(), link: nil), [])
+            return [(.linkProject(id: try idea(), link: nil), [])]
+        case "importVideos":
+            guard let paths = wire.paths, !paths.isEmpty else {
+                throw EditError(code: .invalidRequest, message: "importVideos needs paths: folders, .yamvideo projects or .youtube.json exports.")
+            }
+            let roots = paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+            if let missing = roots.first(where: { !FileManager.default.fileExists(atPath: $0.path) }) {
+                throw EditError.notFound("There is nothing at \(missing.path).")
+            }
+            let found = LibraryScan.candidates(roots: roots, library: library)
+            guard !found.isEmpty else { throw EditError.notFound("No YamVideo projects or Export for YouTube files at those paths.") }
+            return LibraryScan.commands(found).map { ($0, []) }
+        case "addPost", "removePost":
+            let id = try idea()
+            guard let item = library.item(id) else { throw EditError.notFound("No idea \(id). Read the Library again.") }
+            guard let videoID = wire.videoID else { throw EditError(code: .invalidRequest, message: "\(wire.type) needs videoID from the idea's videos[].id.") }
+            guard let row = videoRows(item).first(where: { $0.id == videoID }) else { throw EditError.notFound("The idea has no video \(videoID).") }
+            let piece = wire.type == "addPost" ? try Self.posting(row, link: wire.link) : try Self.unposting(row, link: wire.link)
+            return [(.putVideo(id: id, video: piece), [])]
         default:
             throw EditError(code: .invalidRequest, message: "Unknown Library command \"\(wire.type)\". Commands: \(LibraryWireCommand.types.joined(separator: ", ")).")
         }
+    }
+
+    /// `scanFolder`: what Add Past Videos would find under `path`, changing nothing.
+    func agentScanFolder(_ request: AgentRequest) -> Result<AgentScan, EditError> {
+        guard let path = request.path else { return .failure(EditError(code: .invalidRequest, message: "scanFolder needs path: a folder, project or export.")) }
+        let root = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        guard FileManager.default.fileExists(atPath: root.path) else { return .failure(.notFound("There is nothing at \(root.path).")) }
+        let found = LibraryScan.candidates(roots: [root], library: library)
+        return .success(AgentScan(candidates: found.map { candidate in
+            .init(path: candidate.path, title: candidate.title, projectID: candidate.project?.projectID,
+                  recordings: candidate.project?.recordings.count, shorts: candidate.project?.shorts.count,
+                  exports: candidate.exports.map { .init(json: $0.json, title: $0.title, short: $0.short) },
+                  existing: candidate.existing, newExports: candidate.newExports, alreadyAdded: candidate.alreadyAdded)
+        }))
     }
 
     func agentLibraryHistory(_ request: AgentRequest, redo: Bool) -> Result<AgentLibraryReceipt, EditError> {

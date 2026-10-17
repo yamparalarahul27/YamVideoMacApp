@@ -7,16 +7,98 @@ import UniformTypeIdentifiers
 // from it is linked by its identity, so moving the file never breaks the link.
 
 /// Where an item is on its way from an idea to a posted video. Worked out from the item,
-/// never stored. Later phases add ready, scheduled and posted.
+/// never stored: a project makes it in production, an export ready, a post posted. A
+/// later phase adds scheduled.
 enum ContentStage: String, Codable, CaseIterable, Identifiable {
-    case idea, inProduction
+    case idea, inProduction, ready, posted
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .idea: return "Idea"
         case .inProduction: return "In production"
+        case .ready: return "Ready"
+        case .posted: return "Posted"
         }
+    }
+}
+
+/// Where the owner publishes. YamVideo never talks to them; a post is a link the owner
+/// pasted, and the platform is read from its address.
+enum Platform: String, Codable, CaseIterable, Identifiable {
+    case youtube, instagram, x, linkedin
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .youtube: return "YouTube"
+        case .instagram: return "Instagram"
+        case .x: return "X"
+        case .linkedin: return "LinkedIn"
+        }
+    }
+
+    /// The platform a post's link belongs to, or nil for another site.
+    static func of(_ link: String) -> Platform? {
+        guard let host = URL(string: link)?.host?.lowercased() else { return nil }
+        func on(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+        if on("youtube.com") || on("youtu.be") { return .youtube }
+        if on("instagram.com") { return .instagram }
+        if on("x.com") || on("twitter.com") { return .x }
+        if on("linkedin.com") || on("lnkd.in") { return .linkedin }
+        return nil
+    }
+}
+
+/// One place a video is published: the link the owner pasted, or just that it went up.
+struct VideoPost: Codable, Equatable {
+    /// Nil when the owner marked it posted without a link.
+    var link: String?
+    var posted: Date
+
+    init(link: String?, posted: Date = Date()) { self.link = link; self.posted = ContentItem.stamp(posted) }
+
+    var platform: Platform? { link.flatMap(Platform.of) }
+}
+
+/// An Export for YouTube of a video: where its `.youtube.json` is. The title,
+/// description, tags and files are read from there when needed, never copied.
+struct VideoExport: Codable, Equatable {
+    var json: String
+    var exported: Date
+
+    init(json: String, exported: Date) { self.json = json; self.exported = ContentItem.stamp(exported) }
+
+    var folder: URL { URL(fileURLWithPath: json).deletingLastPathComponent() }
+    var exists: Bool { FileManager.default.fileExists(atPath: json) }
+}
+
+/// A video made from an item's project: the long video of a recording, or one of its
+/// Shorts. Its ID is the recording's or the Short's own, so it matches the project. It
+/// keeps only what the files do not: where it was exported and where it is published.
+struct VideoPiece: Codable, Equatable, Identifiable {
+    var id: UUID
+    var short: Bool
+    /// The project's recording, when known.
+    var recording: UUID?
+    /// The title it was exported with, shown while the files cannot be read.
+    var title: String
+    var exports: [VideoExport] = []
+    var posts: [VideoPost] = []
+
+    init(id: UUID, short: Bool, recording: UUID? = nil, title: String, exports: [VideoExport] = [], posts: [VideoPost] = []) {
+        self.id = id; self.short = short; self.recording = recording; self.title = title; self.exports = exports; self.posts = posts
+    }
+
+    /// The same video with `other`'s exports and posts added, each once.
+    func merged(with other: VideoPiece) -> VideoPiece {
+        var result = self
+        if !other.title.isEmpty { result.title = other.title }
+        result.recording = result.recording ?? other.recording
+        for export in other.exports where !result.exports.contains(where: { $0.json == export.json }) { result.exports.append(export) }
+        result.exports.sort { $0.exported < $1.exported }
+        for post in other.posts where !result.posts.contains(where: { $0.link == post.link }) { result.posts.append(post) }
+        return result
     }
 }
 
@@ -47,19 +129,28 @@ struct ContentItem: Codable, Equatable, Identifiable {
     var updated: Date
     /// Nil while it is only an idea.
     var project: ProjectLink?
+    /// Videos exported or published from it (version 2).
+    var videos: [VideoPiece] = []
 
     init(id: UUID = UUID(), title: String, notes: String = "", topic: String? = nil, links: [String] = [],
-         images: [String] = [], created: Date = Date(), project: ProjectLink? = nil) {
+         images: [String] = [], created: Date = Date(), project: ProjectLink? = nil, videos: [VideoPiece] = []) {
         self.id = id; self.title = title; self.notes = notes; self.topic = topic; self.links = links
         self.images = images; self.created = Self.stamp(created); self.updated = self.created; self.project = project
+        self.videos = videos
     }
 
     /// Times to the whole second, as the file writes them, so an idea reads back equal.
     static func stamp(_ date: Date) -> Date { Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down)) }
 
-    var stage: ContentStage { project == nil ? .idea : .inProduction }
+    var stage: ContentStage {
+        if videos.contains(where: { !$0.posts.isEmpty }) { return .posted }
+        if videos.contains(where: { !$0.exports.isEmpty }) { return .ready }
+        return project == nil ? .idea : .inProduction
+    }
 
-    private enum CodingKeys: String, CodingKey { case id, title, notes, topic, links, images, created, updated, project }
+    func video(_ id: UUID?) -> VideoPiece? { id.flatMap { id in videos.first { $0.id == id } } }
+
+    private enum CodingKeys: String, CodingKey { case id, title, notes, topic, links, images, created, updated, project, videos }
 
     /// Missing keys keep their defaults, so a partial item is complete.
     init(from decoder: Decoder) throws {
@@ -73,13 +164,15 @@ struct ContentItem: Codable, Equatable, Identifiable {
         created = try c.decode(Date.self, forKey: .created)
         updated = try c.decodeIfPresent(Date.self, forKey: .updated) ?? created
         project = try c.decodeIfPresent(ProjectLink.self, forKey: .project)
+        videos = try c.decodeIfPresent([VideoPiece].self, forKey: .videos) ?? []
     }
 }
 
 /// Everything in the Library, as `Library.json` stores it.
 struct Library: Codable, Equatable {
-    /// 1: ideas with notes, links, images, a topic and a linked project.
-    static let currentVersion = 1
+    /// 1: ideas with notes, links, images, a topic and a linked project. 2: adds each
+    /// item's videos: where they were exported and where they are published.
+    static let currentVersion = 2
 
     var version = Library.currentVersion
     /// Counts every committed change, undo and redo, and is saved with the file, so an
@@ -112,11 +205,13 @@ struct Library: Codable, Equatable {
     static func decode(_ data: Data) throws -> Library {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let library = try decoder.decode(Library.self, from: data)
+        var library = try decoder.decode(Library.self, from: data)
         guard library.version <= currentVersion else {
             throw EditError.invalid("This Library was saved by a newer version of YamVideo.")
         }
         if let problem = library.problem { throw EditError.invalid(problem) }
+        // An older file has nothing a newer version lacks; it is written back as current.
+        library.version = currentVersion
         return library
     }
 
@@ -137,6 +232,8 @@ extension ContentItem {
     static let linkLimit = 2048
     static let linkCount = 50
     static let imageCount = 50
+    static let videoCount = 200
+    static let postCount = 20
 
     /// The first thing an idea may not hold, or nil.
     var problem: String? {
@@ -157,6 +254,20 @@ extension ContentItem {
         for image in images where !Self.isImageName(image) { return "\(image) is not one of the Library's image files." }
         if let project, project.path.isEmpty || !project.path.hasPrefix("/") {
             return "A linked project's path is an absolute path to its .yamvideo file."
+        }
+        if videos.count > Self.videoCount { return "An item holds at most \(Self.videoCount) videos." }
+        guard Set(videos.map(\.id)).count == videos.count else { return "A video is listed twice." }
+        for video in videos {
+            if video.title.count > Self.titleLimit || video.title.contains(where: \.isNewline) {
+                return "A video's title is one line of at most \(Self.titleLimit) characters."
+            }
+            if video.posts.count > Self.postCount { return "A video holds at most \(Self.postCount) posts." }
+            for post in video.posts { if let link = post.link, let problem = Self.linkProblem(link) { return problem } }
+            let links = video.posts.compactMap(\.link)
+            guard Set(links).count == links.count else { return "\"\(video.title)\" has the same post link twice." }
+            for export in video.exports where !export.json.hasPrefix("/") || !export.json.hasSuffix(".youtube.json") {
+                return "An export is the absolute path to its .youtube.json file."
+            }
         }
         return nil
     }
@@ -247,6 +358,12 @@ enum LibraryCommand: Equatable {
     case removeImage(id: UUID, name: String)
     /// Nil unlinks.
     case linkProject(id: UUID, link: ProjectLink?)
+    /// Adds videos to an item, merging each with the one of the same ID: exports and
+    /// posts are added, never removed.
+    case addVideos(id: UUID, videos: [VideoPiece])
+    /// Replaces one video as given, or adds it.
+    case putVideo(id: UUID, video: VideoPiece)
+    case removeVideo(id: UUID, video: UUID)
 
     var defaultLabel: String {
         switch self {
@@ -261,6 +378,9 @@ enum LibraryCommand: Equatable {
         case .addImages(_, let names): return names.count == 1 ? "Add Image" : "Add Images"
         case .removeImage: return "Remove Image"
         case .linkProject(_, let link): return link == nil ? "Unlink Project" : "Link Project"
+        case .addVideos(_, let videos): return videos.count == 1 ? "Add Video" : "Add Videos"
+        case .putVideo(_, let video): return video.posts.isEmpty ? "Edit Video" : "Mark Posted"
+        case .removeVideo: return "Remove Video"
         }
     }
 }
@@ -329,6 +449,35 @@ enum LibraryReducer {
                 }
                 guard outcome.library.items[i].project != link else { continue }
                 outcome.library.items[i].project = link
+                outcome.library.items[i].updated = now
+                touched(id)
+            case .addVideos(let id, let videos):
+                let i = try index(id)
+                let before = outcome.library.items[i].videos
+                for video in videos {
+                    if let at = outcome.library.items[i].videos.firstIndex(where: { $0.id == video.id }) {
+                        outcome.library.items[i].videos[at] = outcome.library.items[i].videos[at].merged(with: video)
+                    } else {
+                        outcome.library.items[i].videos.append(video)
+                    }
+                }
+                if outcome.library.items[i].videos != before { outcome.library.items[i].updated = now; touched(id) }
+            case .putVideo(let id, let video):
+                let i = try index(id)
+                if let at = outcome.library.items[i].videos.firstIndex(where: { $0.id == video.id }) {
+                    guard outcome.library.items[i].videos[at] != video else { continue }
+                    outcome.library.items[i].videos[at] = video
+                } else {
+                    outcome.library.items[i].videos.append(video)
+                }
+                outcome.library.items[i].updated = now
+                touched(id)
+            case .removeVideo(let id, let video):
+                let i = try index(id)
+                guard let at = outcome.library.items[i].videos.firstIndex(where: { $0.id == video }) else {
+                    throw EditError.notFound("The item has no video \(video).")
+                }
+                outcome.library.items[i].videos.remove(at: at)
                 outcome.library.items[i].updated = now
                 touched(id)
             }

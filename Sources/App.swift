@@ -133,6 +133,7 @@ struct YamVideoApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Project") { model.showModule(.studio); model.newProject() }.keyboardShortcut("n").disabled(model.isConverting)
                 Button("New Idea") { model.newIdea() }.keyboardShortcut("n", modifiers: [.command, .option])
+                Button("Add Past Videos…") { model.promptForPastVideos() }
                 Button("Open Project…") { model.promptForProject() }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.isConverting)
                 Button("Save Project") { model.saveProject() }.keyboardShortcut("s")
                 Button("Save Project As…") { model.saveProject(asCopy: true) }.keyboardShortcut("s", modifiers: [.command, .shift])
@@ -144,7 +145,7 @@ struct YamVideoApp: App {
                     .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.canRedoInModule)
             }
             CommandMenu("Go") {
-                Button("Ideas") { model.showModule(.ideas) }.keyboardShortcut("1")
+                Button("Library") { model.showModule(.library) }.keyboardShortcut("1")
                 Button("Studio") { model.showModule(.studio) }.keyboardShortcut("2")
             }
             CommandMenu("Timeline") {

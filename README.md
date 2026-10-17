@@ -66,17 +66,27 @@ project round trips, autosave recovery, and export failure/cancellation cleanup.
 checks cover mixed dimensions, frame rates, rotated footage, silent recordings, GIF
 palettes, preview/export parity, and preserving existing exports on cancellation.
 
-## Ideas
+## Library: ideas and past videos
 
-The sidebar on the left switches between **Ideas** and **Studio** (⌘1, ⌘2). Studio is
-the editor. Ideas keeps what you plan to make, apart from any project: each idea has a
+The sidebar on the left switches between **Library** and **Studio** (⌘1, ⌘2). Studio is
+the editor. The Library keeps what you plan to make and what you made, apart from any project: each idea has a
 title, notes, a topic, links and images (dropped, pasted or chosen; they are copied in).
-The list groups ideas by stage, *Idea* or *In production*, and filters them by topic.
+The list groups items by stage (*Idea*, *In production*, *Ready*, *Posted*) and filters
+them by topic.
 
 **Start a Project from This Idea…** saves a new project named after the idea, links it,
 and opens Studio to add the recordings. **Link the Open Project** links one you already
 have. Studio's toolbar then shows the idea, and a click goes back to it; the link follows
-the project file when you move it. Ideas have their own Undo (⌘Z on the Ideas page).
+the project file when you move it. The Library has its own Undo (⌘Z on the Library page).
+
+**Past videos.** **Scan a Folder…** (or drop a project, an export or a folder on the
+Library page) finds your YamVideo projects and Export for YouTube folders and lists them
+to tick. Each project becomes an item showing its long video and Shorts, with what was
+exported and where it is published: paste a post's link (YouTube, Instagram, X or
+LinkedIn) or mark it posted. Each video can be opened in Studio, played, shown in Finder
+or opened at its post, and its title, description and tags copied. Nothing is copied:
+the Library remembers where the files are, and new exports of a linked project appear by
+themselves.
 
 Everything stays on this Mac, in `~/Library/Application Support/YamVideo/Library`
 (`YAMVIDEO_LIBRARY_PATH` moves it, for a test instance). YamVideo never posts to or reads
@@ -421,8 +431,9 @@ Sources/
   AppModel.swift    queue, selection, preview, conversion driver
   ContentView.swift window layout: the module sidebar; in Studio, media list, picture and inspector over a full-width timeline
   Library.swift     the Library: ideas, their rules, stages and links to projects, the Library commands and reducer
-  LibraryEditing.swift / IdeasView.swift loading and saving the Library, its undo, the owner's actions, the sidebar and the Ideas page
-  LibraryAgents.swift the Library for agents: library, libraryApply, libraryUndo and libraryRedo
+  LibraryEditing.swift / LibraryView.swift loading and saving the Library, its undo, the owner's actions, the sidebar and the Library page
+  LibraryAgents.swift the Library for agents: library, libraryApply, libraryUndo, libraryRedo and scanFolder
+  LibraryScan.swift / LibraryVideos.swift / LibraryVideosView.swift past videos: finding projects and exports, an item's videos and their actions, the Add Past Videos sheet
   InspectorView.swift selection-following inspector: section, zoom, blur area, effect, marker, recording
   ExportSheet.swift scope, format, quality, audio and destination for one Export button
   AgentActivityView.swift Local agents status, pause switch, activity and setup commands
@@ -505,4 +516,5 @@ Graphics now show and are edited in the app (G1 part 1) and are drawn into expor
 The [distribution plan](docs/plans/distribution.md) takes the app past the export: a
 local Library of ideas, post kits for YouTube, Instagram, X and LinkedIn, a calendar with
 reminders, and results at day 1, 7 and 30, all on this Mac with no platform APIs. The
-owner publishes by hand. Phase 1 (the Library, the sidebar and Ideas) is implemented.
+owner publishes by hand. Phase 1 (the Library, the sidebar and Ideas) and past videos are
+implemented.

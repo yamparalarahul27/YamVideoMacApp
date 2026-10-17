@@ -151,8 +151,13 @@ final class AppModel: ObservableObject {
     @Published var selectedIdeaID: UUID?
     /// Asks the idea editor to put the cursor in the title, after New Idea.
     @Published var focusIdeaTitle = false
-    /// What an agent just changed in the Library, shown briefly on the Ideas page.
+    /// What an agent just changed in the Library, shown briefly on the Library page.
     @Published var libraryHighlight: LibraryHighlight?
+    /// The Scan a Folder sheet, while it is up.
+    @Published var libraryScan: LibraryScanState?
+    /// Project files and exports the Library page has read, by path, with the file's date.
+    var projectSummaries: [String: (date: Date, summary: ProjectSummary)] = [:]
+    var exportDetails: [String: (date: Date, export: FoundExport)] = [:]
 
     private var previewTask: Task<Void, Never>?
     var conversionTask: Task<Void, Never>?

@@ -50,7 +50,8 @@ Ideas (the Library: its own revision, from `yamvideoctl library`, and its own un
   yamvideoctl library apply --file EDITS.json --revision N [--dry-run] [--label TEXT]
   yamvideoctl library undo --transaction ID --revision N
   yamvideoctl library redo --transaction ID --revision N
-  yamvideoctl reveal --idea ID                   show an idea on the Ideas page
+  yamvideoctl reveal --idea ID                   show an idea on the Library page
+  yamvideoctl scan --path FOLDER                 what Add Past Videos would find there (projects and exports); changes nothing
 
 EDITS.json is a list of commands, or an object with "commands" and optionally
 "sessionID", "projectID", "expectedRevision" and "label". Use "-" to read stdin.
@@ -353,6 +354,9 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if let idea = arguments.values["idea"] { request["idea"] = idea }
         if let time = try arguments.double("time") { request["time"] = time }
         if arguments.flags.contains("movie") { request["timeSpace"] = "movie" }
+    case "scan":
+        request["method"] = "scanFolder"
+        request["path"] = try value("path")
     case "library":
         func libraryRevision() throws {
             guard request["expectedRevision"] != nil else {

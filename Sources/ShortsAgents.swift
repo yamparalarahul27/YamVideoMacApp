@@ -214,6 +214,7 @@ extension AppModel {
         guard let short = item.short(id), let position = item.shorts.firstIndex(where: { $0.id == id }) else {
             return .failure(.notFound("No Short \(id) on recording \(clipID). state.clips[].shorts lists them."))
         }
+        let project = projectID
         let exportSettings = settings
         // Graphics that still need drawing need HyperFrames, which only the owner can download.
         let cut = item.shortItem(short)
@@ -275,7 +276,7 @@ extension AppModel {
                                               cover: { [weak self] time in
                                                   guard let self else { throw CancellationError() }
                                                   return try await self.composedShortFrame(clip, short: short, at: time, settings: exportSettings).image
-                                              }, onProgress: progress)
+                                              }, project: project, onProgress: progress)
                 } else {
                     var videoSettings = exportSettings
                     videoSettings.format = .mp4
@@ -293,6 +294,7 @@ extension AppModel {
             }
             if let self {
                 if let index = self.items.firstIndex(where: { $0.id == clipID }) { self.items[index].status = .done(output) }
+                if youtube { self.noteExport(files.json, origin: origin) }
                 self.statusMessage = "\(origin.label) exported the Short \(output.lastPathComponent)."
             }
             var result: [String: JSONValue] = ["path": .string(output.path), "format": .string("mp4"), "short": .string(id.uuidString),

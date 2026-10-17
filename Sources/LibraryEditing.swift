@@ -3,24 +3,25 @@ import Foundation
 import UniformTypeIdentifiers
 
 // The Library in the running app: loading and saving it, its own undo history and
-// revision, the owner's actions on the Ideas page, and the links between an idea and the
+// revision, the owner's actions on the Library page, and the links between an idea and the
 // project made from it. See Library.swift for the data and its rules.
 
-/// The parts of the window, in the sidebar. Studio is the editor; later phases add
-/// Calendar, Results and Platforms.
+/// The parts of the window, in the sidebar. The Library holds ideas, projects and
+/// published videos; Studio is the editor. Later phases add Calendar, Results and
+/// Platforms.
 enum AppModule: String, CaseIterable, Identifiable {
-    case ideas, studio
+    case library, studio
 
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .ideas: return "Ideas"
+        case .library: return "Library"
         case .studio: return "Studio"
         }
     }
     var systemImage: String {
         switch self {
-        case .ideas: return "lightbulb"
+        case .library: return "books.vertical"
         case .studio: return "film"
         }
     }
@@ -232,10 +233,10 @@ extension AppModel {
 
     // MARK: The Edit menu, whichever module is showing
 
-    var menuUndoTitle: String { module == .ideas ? libraryUndoTitle : undoTitle }
-    var menuRedoTitle: String { module == .ideas ? libraryRedoTitle : redoTitle }
-    var canUndoInModule: Bool { module == .ideas ? !libraryUndoEntries.isEmpty : !undoEntries.isEmpty && !isConverting }
-    var canRedoInModule: Bool { module == .ideas ? !libraryRedoEntries.isEmpty : !redoEntries.isEmpty && !isConverting }
+    var menuUndoTitle: String { module == .library ? libraryUndoTitle : undoTitle }
+    var menuRedoTitle: String { module == .library ? libraryRedoTitle : redoTitle }
+    var canUndoInModule: Bool { module == .library ? !libraryUndoEntries.isEmpty : !undoEntries.isEmpty && !isConverting }
+    var canRedoInModule: Bool { module == .library ? !libraryRedoEntries.isEmpty : !redoEntries.isEmpty && !isConverting }
 
     // MARK: The owner's actions
 
@@ -253,18 +254,18 @@ extension AppModel {
         self.module = module
     }
 
-    /// Goes to an idea on the Ideas page.
+    /// Goes to an idea on the Library page.
     func showIdea(_ id: UUID) {
         guard library.item(id) != nil else { return }
         selectedIdeaID = id
-        showModule(.ideas)
+        showModule(.library)
     }
 
     func newIdea() {
         let item = ContentItem(title: "New idea", topic: library.item(selectedIdeaID)?.topic)
         if case .success = performLibrary([.addIdea(item)]) {
             selectedIdeaID = item.id
-            showModule(.ideas)
+            showModule(.library)
             focusIdeaTitle = true
         }
     }
@@ -354,13 +355,22 @@ extension AppModel {
         } catch { statusMessage = "Could not paste the image: \(error.localizedDescription)" }
     }
 
-    /// Files dropped on the window. On the Ideas page images go to the selected idea;
-    /// recordings always go to Studio.
+    /// Files dropped on the window. On the Library page images go to the selected idea,
+    /// and projects, exports and folders are scanned as past videos; recordings always go
+    /// to Studio.
     func receiveDropped(_ urls: [URL]) {
-        let images = urls.filter { LibraryImages.extensions.contains($0.pathExtension.lowercased()) }
-        let rest = urls.filter { !images.contains($0) }
-        if module == .ideas, !images.isEmpty, let id = selectedIdeaID {
-            if case .failure(let error) = addIdeaImages(images, to: id) { statusMessage = error.message }
+        var rest = urls
+        if module == .library {
+            let images = urls.filter { LibraryImages.extensions.contains($0.pathExtension.lowercased()) }
+            if !images.isEmpty, let id = selectedIdeaID {
+                if case .failure(let error) = addIdeaImages(images, to: id) { statusMessage = error.message }
+            }
+            let past = urls.filter { url in
+                url.pathExtension.lowercased() == "yamvideo" || url.lastPathComponent.hasSuffix(".youtube.json") || url.hasDirectoryPath
+                    || (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }
+            if !past.isEmpty { scanPastVideos(past) }
+            rest = urls.filter { !images.contains($0) && !past.contains($0) }
         }
         guard !rest.isEmpty else { return }
         showModule(.studio)
