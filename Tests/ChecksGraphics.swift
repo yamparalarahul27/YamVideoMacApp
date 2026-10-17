@@ -590,4 +590,67 @@ import Foundation
               "the export draws the graphic where it was placed, not where the template puts it", "\(placedPixel) vs \(sourcePixel)")
     }
 
+    print("\nGraphics size for phones")
+    var phoneStyle = GraphicsStyle(); phoneStyle.size = 1.3
+    var hugeStyle = GraphicsStyle(); hugeStyle.size = 1.8
+    check(GraphicsTrack(style: phoneStyle).problem(duration: 3) == nil && GraphicsTrack().problem(duration: 3) == nil
+              && GraphicsTrack(style: hugeStyle).problem(duration: 3)?.contains("size") == true,
+          "a graphics size from 1 to 1.5 is kept, a larger one is refused")
+    let plainStyleText = String(decoding: try JSONEncoder().encode(GraphicsStyle()), as: UTF8.self)
+    let plainEngine = String(decoding: try GraphicsTrack().engineData(duration: 3, fps: "30"), as: UTF8.self)
+    let sizedEngine = String(decoding: try GraphicsTrack(style: phoneStyle).engineData(duration: 3, fps: "30"), as: UTF8.self)
+    check(!plainStyleText.contains("size") && !plainEngine.contains("size") && sizedEngine.contains(#""size":1.3"#),
+          "a style without a size stores and sends no size, so older projects draw and cache as before", plainEngine)
+    var sizedProject = VideoProject(clips: [ProjectClip(gradeOther)], settings: ExportSettings(), selection: gradeOther.id)
+    sizedProject.clips[0].graphics = GraphicsTrack(style: phoneStyle)
+    var sizedAsFifteen = sizedProject; sizedAsFifteen.version = 15
+    check((try? sizedAsFifteen.validate()) == nil && (try? sizedProject.validate()) != nil,
+          "a version 15 file with a graphics size is refused; the current version keeps it")
+
+    func styleCall(_ id: String, _ keys: [String: Any]) async -> [String: Any] {
+        var request = address(gfxAgent)
+        request["method"] = "apply"; request["requestID"] = id; request["client"] = "Claude"
+        request["commands"] = [["type": "setGraphicsStyle", "clipID": gfxClip.uuidString, "graphicsStyle": keys]]
+        return await agentCall(gfxAgent, request)
+    }
+    let sizeSet = await styleCall("graphics-size-1", ["size": 1.3])
+    check(sizeSet["ok"] as? Bool == true && gfxAgent.items[0].graphics?.style.size == 1.3 && gfxAgent.items[0].graphics?.style.panel == .solid,
+          "an agent sets the graphics size, and the other style keys stay", "\(sizeSet)")
+    let sizeOne = await styleCall("graphics-size-2", ["size": 1])
+    check(sizeOne["ok"] as? Bool == true && gfxAgent.items[0].graphics?.style.size == nil, "a size of 1 is stored as no size at all")
+    equal(agentError(await styleCall("graphics-size-3", ["size": 2])), "invalid_command", "an agent cannot set a size above 1.5")
+
+    // The engine: a card grows left from the column's right edge, a panel half as much.
+    let sizedRuleID = UUID()
+    var sizeTrack = GraphicsTrack(items: [
+        Graphic(id: placedPlate.id, kind: .namePlate, start: 0.2, end: 1.4,
+                props: ["kicker": .string("Yamparala Media"), "title": .string("Yamparala Rahul"), "detail": .string("UX Design Engineer")]),
+        Graphic(id: sizedRuleID, kind: .rule, start: 1.6, end: 2.8,
+                props: ["kicker": .string("Phones"), "title": .string("Text a phone can read"),
+                        "points": .array([.object(["text": .string("Larger cards"), "at": .number(0.2)])])]),
+    ])
+    let unsizedBoxes = try await GraphicsSnapshot.bounds(sizeTrack, duration: 3, fps: "30")
+    sizeTrack.style.size = 1.4
+    let sizedBoxes = try await GraphicsSnapshot.bounds(sizeTrack, duration: 3, fps: "30")
+    if let card = unsizedBoxes[placedPlate.id], let bigCard = sizedBoxes[placedPlate.id],
+       let panel = unsizedBoxes[sizedRuleID], let bigPanel = sizedBoxes[sizedRuleID] {
+        check(abs(bigCard.content.width - card.content.width * 1.4) < 2 && abs((1840 - bigCard.content.maxX) - (1840 - card.content.maxX) * 1.4) < 2
+                  && abs((bigCard.content.minY - 72) - (card.content.minY - 72) * 1.4) < 2 && bigCard.origin == card.origin,
+              "with size 1.4 a card is 1.4 times larger and grows left and down from the column's top-right corner",
+              "\(card.content) → \(bigCard.content)")
+        check(abs(bigPanel.content.width - panel.content.width * 1.2) < 2 && abs((1860 - bigPanel.content.maxX) - (1860 - panel.content.maxX) * 1.2) < 2,
+              "a panel grows half as much, 1.2 times, from the panel's top-right corner", "\(panel.content) → \(bigPanel.content)")
+        let movedBig = bigCard.placed(GraphicTransform(x: -100, y: 0, scale: 1))
+        check(abs(movedBig.minX - (bigCard.content.minX - 100)) < 0.5, "a graphic's own transform applies on top of the size")
+    } else {
+        check(false, "the engine measures the card and the panel at both sizes", "\(unsizedBoxes) \(sizedBoxes)")
+    }
+    let sizedShot = try await GraphicsSnapshot.draw(sizeTrack, duration: 3, fps: "30", time: 1.0, over: CGImage.blank(width: 1280, height: 720))
+    if let drawn = sizedShot.boxes[placedPlate.id], let measuredBig = sizedBoxes[placedPlate.id] {
+        let k = 1280.0 / 1920
+        check(abs(drawn.minX - measuredBig.content.minX * k) < 2 && abs(drawn.width - measuredBig.content.width * k) < 2,
+              "the drawn card is where the measured box says", "\(drawn) vs \(measuredBig.content)")
+    } else {
+        check(false, "the snapshot reports the sized card's box")
+    }
 }

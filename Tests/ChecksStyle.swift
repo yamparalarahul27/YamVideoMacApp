@@ -92,7 +92,7 @@ import Foundation
     let projectFile = scratch.appendingPathComponent("style-project/Talk.yamvideo")
     editor.save(to: projectFile, asCopy: false)
     let saved = try VideoProject.decodeMigrating(from: Data(contentsOf: projectFile))
-    check(saved.version == 15 && saved.notes == editor.projectNotes && saved.log?.count == editor.changeLog.count,
+    check(saved.version == VideoProject.currentVersion && saved.notes == editor.projectNotes && saved.log?.count == editor.changeLog.count,
           "a saved project keeps its notes and history (version 15)")
     var older = saved; older.version = 14
     check((try? older.validate()) == nil, "a version 14 file with notes is refused")

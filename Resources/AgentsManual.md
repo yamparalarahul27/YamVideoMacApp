@@ -123,6 +123,12 @@ edit, and each edit becomes one undo step with your name on it.
 - Graphics (`addGraphic`, `replaceGraphics`) are timed on what is said: read
   `transcript` to place them. The owner's style and accent are in
   `state.clips[].graphics.style`.
+- Most viewers watch on a phone. Look at frames from `preview --composed` scaled to
+  about 640 px wide: every text must be easy to read there. If it is small, set the
+  style's `size` (`setGraphicsStyle`, 1 to 1.5; 1.3 to 1.4 suits a phone) before you
+  scale graphics one by one. Cards grow to the left and panels grow half as much, so
+  check that no card covers the speaker's face. Read the owner's Style.md too: it can
+  have a rule about this.
 
 ### 4.6 Title, description, chapters and tags
 
