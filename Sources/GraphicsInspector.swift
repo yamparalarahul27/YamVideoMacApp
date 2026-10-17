@@ -142,6 +142,15 @@ struct GraphicsSection: View {
                 Picker("Look", selection: styleBinding(\.look)) {
                     ForEach(GraphicsLook.allCases) { Text($0.label).tag($0) }
                 }
+                HStack {
+                    Text("Size").font(.caption).foregroundStyle(.secondary)
+                    Slider(value: Binding(get: { style.size ?? 1 }, set: { value in
+                        model.setGraphicsStyle { $0.size = abs(value - 1) < 0.0005 ? nil : value }
+                    }), in: GraphicsStyle.sizes, step: 0.05)
+                        .accessibilityLabel("Size of cards and panels")
+                    Text("\(Int(((style.size ?? 1) * 100).rounded()))%").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .help("Larger cards and panels read better on a phone. Cards grow to the left from the column's right edge; panels grow half as much. Logo badges, the end screen and Shorts keep their sizes.")
                 Picker("Panel", selection: styleBinding(\.panel)) {
                     ForEach(PanelStyle.allCases) { Text($0.label).tag($0) }
                 }

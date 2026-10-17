@@ -188,7 +188,7 @@ struct WireCommand: Codable, Equatable {
     var graphicID: UUID?
     var graphic: WireGraphic?
     var graphics: [WireGraphic]?
-    /// Only the keys to change: accent, panel, moveVideo, edge, look.
+    /// Only the keys to change: accent, panel, moveVideo, edge, look, size.
     var graphicsStyle: [String: JSONValue]?
     /// Only the keys to change: title, description, tags, category, chapters, thumbnail, language, channel.
     var publish: [String: JSONValue]?
@@ -1078,17 +1078,20 @@ extension AppModel {
             return graphic
         }
         func mergedStyle(_ changes: [String: JSONValue], onto style: GraphicsStyle) throws -> GraphicsStyle {
-            let known: Set<String> = ["accent", "panel", "moveVideo", "edge", "look"]
+            let known: Set<String> = ["accent", "panel", "moveVideo", "edge", "look", "size"]
             if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
-                throw EditError.invalid("Unknown graphics style key \"\(unknown)\". Keys: accent, panel, moveVideo, edge, look.")
+                throw EditError.invalid("Unknown graphics style key \"\(unknown)\". Keys: accent, panel, moveVideo, edge, look, size.")
             }
             guard case .object(var merged) = try JSONValue.from(style) else { return style }
             for (key, value) in changes { merged[key] = value }
             do {
-                return try AgentProtocol.decoder.decode(GraphicsStyle.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+                var decoded = try AgentProtocol.decoder.decode(GraphicsStyle.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+                // A size of 1 is the template's own: stored as no size at all.
+                if let size = decoded.size, abs(size - 1) < 0.0005 { decoded.size = nil }
+                return decoded
             } catch {
                 throw EditError.invalid("graphicsStyle: panel is shade or solid, look is glass, ink or mix, "
-                    + "moveVideo is true or false, edge is a number and accent is a colour like #F5C42C.")
+                    + "moveVideo is true or false, edge and size are numbers (size 1 to 1.5, or null) and accent is a colour like #F5C42C.")
             }
         }
         func mergedPublish(_ changes: [String: JSONValue], onto info: PublishInfo) throws -> PublishInfo {

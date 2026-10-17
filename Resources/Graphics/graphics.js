@@ -25,6 +25,20 @@
   };
   const STAGE = { left: 0, top: 0, width: 1920, height: 1080 };
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
+  /**
+   * The style's size, for viewers on a phone (the app's GraphicsStyle.size, 1 to 1.5):
+   * cards grow by it about the column's top-right corner (a 600 px card's right edge), so
+   * they grow left, away from the frame's edge; panels grow by half as much about the
+   * panel's top-right corner, so they stay on their shade. Speaker and screen zones, and
+   * Shorts, keep their own sizes.
+   */
+  const SIZE_RANGE = { min: 1, max: 1.5 };
+  const SIZE_ANCHOR = { column: { x: 1840, y: 72 }, panel: { x: 1860, y: 40 } };
+  function sizeOf(zone, style, short) {
+    if (short || !SIZE_ANCHOR[zone]) return 1;
+    const size = Math.max(SIZE_RANGE.min, Math.min(SIZE_RANGE.max, num(style.size, 1)));
+    return zone === "panel" ? 1 + (size - 1) / 2 : size;
+  }
   const PANEL_PAD = 108;         // panel content starts this far past the soft edge's start
 
   /**
@@ -1096,11 +1110,21 @@
       } else if (zone === "panel" && style.moveVideo && panelOffset && look === "glass") inner.style.transform = "translateX(" + panelOffset + "px)";
       append(host, inner);
       // The place carries the owner's move and scale; the host keeps the template's own
-      // motion, so the two never fight over one transform.
+      // motion, so the two never fight over one transform. Between them, the style's size.
       const place = h("div", { class: "yg-place" });
       place.style.transformOrigin = rect.left + "px " + rect.top + "px";
       setPlace(place, graphic.transform);
-      append(place, host);
+      const grow = sizeOf(zone, style, short);
+      if (grow > 1) {
+        const anchor = SIZE_ANCHOR[zone];
+        const sized = h("div", { class: "yg-place yg-sized" });
+        sized.style.transformOrigin = anchor.x + "px " + anchor.y + "px";
+        sized.style.transform = "scale(" + grow + ")";
+        append(sized, host);
+        append(place, sized);
+      } else {
+        append(place, host);
+      }
       append(container, place);
       places[graphic.id] = { place, host, rect, graphic };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;

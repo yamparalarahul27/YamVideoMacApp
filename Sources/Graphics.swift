@@ -112,6 +112,14 @@ struct GraphicsStyle: Codable, Equatable {
     /// Soft edge of the shade next to the speaker, in design pixels.
     var edge: Double = 170
     var look = GraphicsLook.glass
+    /// How large cards and panels are drawn, for viewers on a phone: nil (or 1) as the
+    /// template draws them, up to `sizes.upperBound`. Cards grow by it from the column's
+    /// top-right corner, so they grow away from the frame's edge; panels grow half as much,
+    /// from the panel's top-right corner, so they stay on their shade. Logo badges, the end
+    /// screen and Shorts keep their own sizes. Version 16 onwards.
+    var size: Double?
+
+    static let sizes = 1.0...1.5
 
     init() {}
 
@@ -123,6 +131,7 @@ struct GraphicsStyle: Codable, Equatable {
         moveVideo = try c.decodeIfPresent(Bool.self, forKey: .moveVideo) ?? moveVideo
         edge = try c.decodeIfPresent(Double.self, forKey: .edge) ?? edge
         look = try c.decodeIfPresent(GraphicsLook.self, forKey: .look) ?? look
+        size = try c.decodeIfPresent(Double.self, forKey: .size)
     }
 }
 
@@ -268,6 +277,11 @@ struct GraphicsTrack: Codable, Equatable {
         guard style.edge.isFinite, (0...400).contains(style.edge) else {
             return "The shade edge must be from 0 to 400 pixels."
         }
+        if let size = style.size {
+            guard size.isFinite, GraphicsStyle.sizes.contains(size) else {
+                return String(format: "The graphics size must be from %.1f to %.1f.", GraphicsStyle.sizes.lowerBound, GraphicsStyle.sizes.upperBound)
+            }
+        }
         guard Set(items.map(\.id)).count == items.count else { return "Two graphics share one ID." }
         for graphic in items {
             let name = graphic.kind.label.lowercased()
@@ -358,12 +372,15 @@ struct GraphicsTrack: Codable, Equatable {
             }
             items.append(.object(item))
         }
+        var styleData: [String: JSONValue] = [
+            "accent": .string(style.accent), "panel": .string(style.panel.rawValue),
+            "moveVideo": .bool(style.moveVideo), "edge": .number(style.edge), "look": .string(style.look.rawValue),
+        ]
+        // Only a size above 1 goes in, so a track without one renders (and caches) as before.
+        if let size = style.size, size > 1 { styleData["size"] = .number(size) }
         var root: [String: JSONValue] = [
             "version": .number(1), "duration": .number(duration), "fps": .string(fps),
-            "style": .object([
-                "accent": .string(style.accent), "panel": .string(style.panel.rawValue),
-                "moveVideo": .bool(style.moveVideo), "edge": .number(style.edge), "look": .string(style.look.rawValue),
-            ]),
+            "style": .object(styleData),
             "items": .array(items),
         ]
         if let layout = canvas.shortLayout {
