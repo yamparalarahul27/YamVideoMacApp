@@ -3,13 +3,13 @@ import AppKit
 import AVFoundation
 import Foundation
 
-/// A square PNG of one colour, for a logo.
-func logoFixture(_ name: String, red: Double, green: Double, blue: Double) throws -> URL {
+/// A PNG of one colour, for a logo: square, or `width` × `height` (a wordmark is wide).
+func logoFixture(_ name: String, red: Double, green: Double, blue: Double, width: Int = 128, height: Int = 128) throws -> URL {
     let url = scratch.appendingPathComponent(name)
-    let context = CGContext(data: nil, width: 128, height: 128, bitsPerComponent: 8, bytesPerRow: 0,
+    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     context.setFillColor(CGColor(red: red, green: green, blue: blue, alpha: 1))
-    context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
     try NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!.write(to: url)
     return url
 }
@@ -139,6 +139,80 @@ func logoFixture(_ name: String, red: Double, green: Double, blue: Double) throw
         check((one.boxes[good.id]?.width ?? 0) < (two.boxes[good.id]?.width ?? 0) - 100,
               "each logo pops in at its own time", "\(String(describing: one.boxes[good.id])) \(String(describing: two.boxes[good.id]))")
     }
+
+    print("\nWide logos (wordmarks)")
+    // CoinDCX's wordmark is 496×149: a 3.3:1 logo.
+    let wide = try logoFixture("logo-wide.png", red: 0.1, green: 0.3, blue: 0.9, width: 496, height: 149)
+    let tall = try logoFixture("logo-tall.png", red: 0.2, green: 0.7, blue: 0.3, width: 100, height: 200)
+    let wordmarkSVG = scratch.appendingPathComponent("logo-wordmark.svg")
+    try Data("<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 100\"><rect width=\"240\" height=\"100\" fill=\"#36c\"/></svg>".utf8)
+        .write(to: wordmarkSVG)
+    check(abs(LogoBadge.aspect(of: wide.path) - 496.0 / 149) < 0.0001 && LogoBadge.aspect(of: red.path) == 1
+              && LogoBadge.aspect(of: wordmarkSVG.path) == 2.4 && LogoBadge.aspect(of: "/tmp/no-such-logo.png") == 1,
+          "the app reads a logo's aspect from its pixel size, an SVG's from its viewBox; a logo it cannot read is square")
+    check(LogoBadge.svgAspect("<svg width=\"496\" height=\"149px\" viewBox=\"0 0 10 10\">") == 496.0 / 149
+              && LogoBadge.svgAspect("<svg xmlns=\"http://www.w3.org/2000/svg\">") == nil,
+          "an SVG's width and height win over its viewBox, as a web page draws it")
+    func props(_ logos: [(String, String?)]) -> [String: JSONValue] {
+        badge(0, 2, logos.map { ($0.0, $0.1, 0) }).props
+    }
+    equal(LogoBadge.logoWidths(props([(wide.path, nil), (red.path, nil), (tall.path, nil), (wordmarkSVG.path, nil)]), compact: false), [300, 100, 100, 240],
+          "a logo is 100 px tall and as wide as its aspect asks, up to 300 px; a square or tall logo keeps the square box")
+    equal(LogoBadge.logoWidths(props([(wide.path, nil), (red.path, nil)]), compact: true), [288, 96], "in a Short a logo is 96 px tall, up to 288 px wide")
+    equal(LogoBadge.size(props([(wide.path, nil)]), compact: false), CGSize(width: 332, height: 132), "a wordmark without a label makes a wider chip")
+    equal(LogoBadge.size(props([(wide.path, "CoinDCX")]), compact: false).width, 16 + 300 + 20 + 7 * 27.6 + 36, "a wordmark's label goes after the wide logo")
+    equal(LogoBadge.size(props([(wide.path, nil)]), compact: true), CGSize(width: 312, height: 120), "a wordmark's compact chip is wider too")
+    equal(LogoBadge.size(props([(red.path, nil)]), compact: false), CGSize(width: 132, height: 132), "a square logo's chip is unchanged")
+
+    var wideTalk = talk
+    let wideSpeaker = badge(5, 7, [(wide.path, nil, 0)]), squareSpeaker = badge(2, 4, [(red.path, nil, 0)])
+    let wideShort = badge(31, 33, [(wide.path, nil, 0)]), threeWide = badge(35, 38, [(wide.path, nil, 0), (wide.path, nil, 0.3), (wide.path, nil, 0.6)])
+    wideTalk.graphics = GraphicsTrack(items: [squareSpeaker, wideSpeaker, wideShort, threeWide])
+    let widePlaced = wideTalk.placedGraphics!
+    let wideSpot = spot(wideSpeaker, in: widePlaced)
+    check(wideSpot["widths"] == .array([.number(300)]) && wideSpot["x"]?.number == 1209 && wideSpot["alignX"]?.string == "start",
+          "a wordmark's spot carries its width for the engine, and the badge still sits beside the face", "\(wideSpot)")
+    check(spot(squareSpeaker, in: widePlaced)["widths"] == nil && spot(inSpeaker, in: placed).keys.sorted() == ["alignX", "alignY", "compact", "vertical", "x", "y"],
+          "a square logo's spot is as before, with no widths")
+    let wideEngineData = String(decoding: try widePlaced.engineData(duration: 60, fps: "30"), as: UTF8.self)
+    check(wideTalk.exportGraphics(ExportSettings()) == widePlaced && wideEngineData.contains("\"widths\":[300]"),
+          "the export gives the engine the widths the preview gives it")
+    func box(_ graphic: Graphic, in track: GraphicsTrack, compact: Bool) -> (spot: [String: JSONValue], box: CGRect) {
+        let found = spot(graphic, in: track)
+        let at = LogoSpot(x: found["x"]?.number ?? 0, y: found["y"]?.number ?? 0,
+                          alignX: LogoSpot.Edge(rawValue: found["alignX"]?.string ?? "") ?? .start,
+                          alignY: LogoSpot.Edge(rawValue: found["alignY"]?.string ?? "") ?? .start, compact: compact)
+        return (found, at.box(size: LogoBadge.size(graphic.props, compact: compact, vertical: found["vertical"] == .bool(true))))
+    }
+    check(GraphicPlacement.safeArea.contains(box(wideSpeaker, in: widePlaced, compact: false).box), "a wordmark's badge stays inside the safe area")
+    let wideShortTrack = wideTalk.shortGraphics(short)!
+    let inShort = box(wideShort, in: wideShortTrack, compact: true), threeInShort = box(threeWide, in: wideShortTrack, compact: true)
+    check(inShort.spot["widths"] == .array([.number(288)]) && inShort.spot["vertical"] == .bool(false) && ShortFormat.clearArea.contains(inShort.box),
+          "in a Short a wordmark's chip is wider and stays inside YouTube's clear area", "\(inShort)")
+    check(threeInShort.spot["vertical"] == .bool(true) && threeInShort.box.width == 312 && ShortFormat.clearArea.contains(threeInShort.box),
+          "three wordmarks, too wide for the clear area side by side, go one above the other inside it", "\(threeInShort)")
+    check(wideTalk.shortItem(short).exportGraphics(ExportSettings()) == wideShortTrack
+              && spot(wideShort, in: wideTalk.shortGraphics(short, recordingTime: true)!) == inShort.spot,
+          "a Short's export and its viewer place a wordmark the same")
+    do {
+        let blank = CGImage.blank(width: 1920, height: 1080)
+        let drawn = try await GraphicsSnapshot.draw(widePlaced, duration: 60, fps: "30", time: 6, over: blank).boxes[wideSpeaker.id]
+        check(drawn.map { abs($0.minX - 1209) < 1.5 && abs($0.width - 332) < 1.5 && abs($0.height - 132) < 1.5 } == true,
+              "the preview draws a wordmark's chip at the width the app worked out", "\(String(describing: drawn))")
+        let square = try await GraphicsSnapshot.draw(widePlaced, duration: 60, fps: "30", time: 3, over: blank).boxes[squareSpeaker.id]
+        check(square.map { abs($0.width - 132) < 1.5 && abs($0.height - 132) < 1.5 } == true,
+              "the preview draws a square logo's chip as before, 132 px square", "\(String(describing: square))")
+        let tallFrame = CGImage.blank(width: 1080, height: 1920)
+        let shortDrawn = try await GraphicsSnapshot.draw(wideShortTrack, duration: short.end - short.start, fps: "30", time: 12, over: tallFrame)
+            .boxes[wideShort.id]
+        check(shortDrawn.map { abs($0.width - 312) < 1.5 && abs($0.minX - inShort.box.minX) < 1.5 && ShortFormat.clearArea.contains($0.insetBy(dx: 1, dy: 1)) } == true,
+              "a Short draws the wordmark's chip where and as wide as the app placed it", "\(String(describing: shortDrawn)) \(inShort.box)")
+        let column = try await GraphicsSnapshot.draw(wideShortTrack, duration: short.end - short.start, fps: "30", time: 17, over: tallFrame)
+            .boxes[threeWide.id]
+        check(column.map { abs($0.width - 312) < 1.5 && abs($0.height - 388) < 1.5 && ShortFormat.clearArea.contains($0.insetBy(dx: 1, dy: 1)) } == true,
+              "a Short draws the three wordmarks one above the other", "\(String(describing: column))")
+    }
+
     let nodeBinary = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
     if let nodeBinary {
         let planFile = scratch.appendingPathComponent("logo-plan.json")

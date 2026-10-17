@@ -66,10 +66,13 @@ page folder under a content-hash name, so the page has no paths outside its fold
 - `logoBadge` shows brand logos next to the speaker when the brand is said: `props.logos`
   is one to three `{image, label, at}` (each logo pops in `at` seconds after the start),
   and `props.tone` is `light` (white chips, the default) or `dark`. The app writes
-  `props.spot` `{x, y, alignX, alignY, compact}` when it draws the badge: the point that
-  the badge's `alignX` and `alignY` edges (`start`, `middle` or `end`) go to, next to the
-  speaker in the layout at that moment (`LogoSpot` in Sources/Logos.swift). `compact`
-  (in a Short) shows the logos without their labels. Without a spot, the badge sits at
-  the top right.
+  `props.spot` `{x, y, alignX, alignY, compact, vertical, widths}` when it draws the
+  badge: the point that the badge's `alignX` and `alignY` edges (`start`, `middle` or
+  `end`) go to, next to the speaker in the layout at that moment (`LogoSpot` in
+  Sources/Logos.swift). `compact` (in a Short) shows the logos without their labels.
+  `vertical` puts the logos one above the other. `widths`, when a logo is wider than
+  tall, gives each logo's width in pixels from the image's own size: a logo is 100 px
+  tall (96 compact) and up to 3 times as wide. Without `widths` each logo is square.
+  Without a spot, the badge sits at the top right.
 
 The kinds and their props are in section 3 of the plan.
