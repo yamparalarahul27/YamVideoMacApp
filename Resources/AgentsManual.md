@@ -134,6 +134,14 @@ edit, and each edit becomes one undo step with your name on it.
   scale graphics one by one. Cards grow to the left and panels grow half as much, so
   check that no card covers the speaker's face. Read the owner's Style.md too: it can
   have a rule about this.
+- Two graphics cover the whole picture, for design videos that move from part to part:
+  - `kineticText`: a short phrase in big words, each on the time it is spoken. Give
+    `words: "transcript"` and the app takes the words said over its time. Keep it to
+    a phrase of 1–8 words that carries the point, and 1.5–4 s.
+  - `sectionCard`: the title of the next part over a seek bar that shows how far into
+    the video it starts. Put one at each part's first sentence, for 2–3 s, and use the
+    chapter's words for the title.
+  Nothing else may show with them; leave gaps round them for other graphics.
 
 ### 4.6 Title, description, chapters and tags
 

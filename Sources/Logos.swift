@@ -152,13 +152,13 @@ struct LogoSpot: Equatable {
 extension VideoItem {
     /// The recording's graphics as the engine draws them on the 16:9 video: each logo badge
     /// with its spot next to the speaker.
-    var placedGraphics: GraphicsTrack? { graphics.map { placingLogos($0, short: nil) } }
+    var placedGraphics: GraphicsTrack? { graphics.map { placingSections(placingLogos($0, short: nil), short: nil) } }
 
     /// A Short's graphics (`GraphicsTrack.forShort`), each logo badge placed next to the
     /// speaker as the Short shows them. The spots are worked out in recording time, as the
     /// Short viewer plays it, so the viewer and the export agree.
     func shortGraphics(_ short: Short, recordingTime: Bool = false) -> GraphicsTrack? {
-        graphics.map { placingLogos($0, short: short).forShort(short, recordingTime: recordingTime) }
+        graphics.map { placingSections(placingLogos($0, short: short), short: short).forShort(short, recordingTime: recordingTime) }
     }
 
     /// `track` with a spot in each logo badge's props, for the 16:9 video or for `short`.

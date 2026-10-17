@@ -1067,6 +1067,22 @@ extension AppModel {
             }
             return result
         }
+        /// A kinetic text with words "transcript" gets the words spoken over its time, each
+        /// at its edited time.
+        func spokenWords(_ graphic: Graphic, on clipID: UUID) throws -> Graphic {
+            guard graphic.kind == .kineticText, graphic.props["words"]?.string == "transcript" else { return graphic }
+            let clip = try record(clipID)
+            guard clip.transcript != nil else {
+                throw EditError.invalid("words \"transcript\" needs the recording's transcript; transcribe it first, or give the words.")
+            }
+            let words = KineticText.words(clip.transcript, timeline: clip.timeline, from: graphic.start, to: graphic.end)
+            guard !words.isEmpty else {
+                throw EditError.invalid(String(format: "No words are spoken from %.2f to %.2f s; move the kinetic text, or give the words.", graphic.start, graphic.end))
+            }
+            var filled = graphic
+            filled.props["words"] = .array(words)
+            return filled
+        }
         func checkedImages(_ graphic: Graphic) throws -> Graphic {
             var missing: String?
             JSONValue.object(graphic.props).visit { key, value in
@@ -1299,7 +1315,7 @@ extension AppModel {
             if value.id == nil { value.id = wire.graphicID }
             let clip = wire.timeSpace == "movie" ? try placed(try field(value.start, "graphic.start")).0
                 : try field(wire.clipID, "clipID")
-            return .addGraphic(clip: clip, graphic: try checkedImages(try graphic(value)))
+            return .addGraphic(clip: clip, graphic: try spokenWords(try checkedImages(try graphic(value)), on: clip))
         case "updateGraphic":
             let clipID = try field(wire.clipID, "clipID")
             let value = try field(wire.graphic, "graphic")
@@ -1307,12 +1323,12 @@ extension AppModel {
             guard let old = try record(clipID).graphics?.items.first(where: { $0.id == graphicID }) else {
                 throw EditError.notFound("No graphic \(graphicID) on recording \(clipID).")
             }
-            return .updateGraphic(clip: clipID, graphic: try checkedImages(try graphic(value, keeping: old)))
+            return .updateGraphic(clip: clipID, graphic: try spokenWords(try checkedImages(try graphic(value, keeping: old)), on: clipID))
         case "removeGraphic":
             return .removeGraphic(clip: try field(wire.clipID, "clipID"), graphic: try field(wire.graphicID, "graphicID"))
         case "replaceGraphics":
             let clipID = try field(wire.clipID, "clipID")
-            let graphics = try field(wire.graphics, "graphics").map { try checkedImages(try graphic($0)) }
+            let graphics = try field(wire.graphics, "graphics").map { try spokenWords(try checkedImages(try graphic($0)), on: clipID) }
             let style = try wire.graphicsStyle.map { try mergedStyle($0, onto: try record(clipID).graphics?.style ?? GraphicsStyle()) }
             return .replaceGraphics(clip: clipID, graphics: graphics, style: style)
         case "setGraphicsStyle":

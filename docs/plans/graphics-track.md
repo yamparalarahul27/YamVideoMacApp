@@ -937,3 +937,25 @@ the limits (3:00, the window inside the picture and 9:16, no overlap).
   Checking the overlay against a screenshot of YouTube's app on the owner's phone.
   Hands-on dragging in the Short viewer. Custom Shorts covers depend on YouTube's rollout to the channel. Movie mode has
   no Shorts.
+
+## 18. Covers: kinetic text and section cards (2026-10-17)
+
+For design videos in the style of "I Redesigned VLC" (Juxtopposed), where big words and
+section titles carry the structure. Both kinds sit in a new zone, `cover`: the whole
+1920×1080 picture (a Short's 1080×1920 canvas), over a background of their own, `solid`
+(near black) or `dim` (the picture darkened). Nothing else may show with a cover (a panel
+must have slid away first), and a cover cannot be moved on the picture.
+
+- **`kineticText`**: big words, each popping in on the time it is spoken. `words`
+  [{text, at}], 1–24, in order; an agent may send `"transcript"` and the app fills in the
+  words said over the graphic's time (`KineticText.words`, from the transcript and the
+  timeline). Or `text`, spread evenly near the start. `layout` line (one centred line that
+  wraps) or stack (one word on each line); fewer words get bigger type (170 px stacked,
+  150 px for up to 4 words, down to 92 px); `*words*` take the accent colour.
+- **`sectionCard`**: a title (and a kicker) over a seek bar split at every section card,
+  its fill moving from the section before up to this one. The app writes `progress` and
+  `marks` (0–1) when it draws (`placingSections`, next to `placingLogos`), so they follow
+  cuts and work out a Short's own place; render units carry them, so the cache knows.
+- **Shorts**: captions pause under a cover, whatever the Short's caption option.
+- **App**: the inspector's **Kinetic Text** (from the playhead, 3 s of what is said) and
+  **Section Card** (2.5 s); **Words from the Transcript** fills a kinetic text again.

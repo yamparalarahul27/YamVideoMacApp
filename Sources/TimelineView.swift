@@ -678,6 +678,7 @@ private struct GraphicBlock: View {
         case .screen: return .teal
         case .column: return .purple
         case .speaker: return .pink
+        case .cover: return .indigo
         }
     }
     /// The end screen ends where the video ends: dragging it moves only its start.
@@ -685,7 +686,9 @@ private struct GraphicBlock: View {
     private var title: String {
         let props = graphic.props
         let labels = LogoBadge.logos(props).compactMap(\.label).joined(separator: " + ")
-        let text = props["title"]?.string ?? props["kicker"]?.string ?? props["url"]?.string ?? (labels.isEmpty ? graphic.kind.label : labels)
+        let spoken = (props["words"]?.array ?? []).compactMap { $0.object?["text"]?.string }.joined(separator: " ")
+        let text = props["title"]?.string ?? props["kicker"]?.string ?? props["url"]?.string ?? props["text"]?.string
+            ?? (spoken.isEmpty ? nil : spoken) ?? (labels.isEmpty ? graphic.kind.label : labels)
         return (props["number"]?.string.map { $0 + " " } ?? "") + text
     }
 
