@@ -50,6 +50,15 @@ func ideaImage(_ name: String) throws -> URL {
     check(model.library.revision == revision && model.library.items.count == 2, "so a refused batch changes nothing")
     var newer = model.library; newer.version = Library.currentVersion + 1
     check((try? Library.decode(newer.encoded())) == nil, "a Library from a newer YamVideo is refused, not half read")
+    let newerFolder = scratch.appendingPathComponent("library-newer", isDirectory: true)
+    try FileManager.default.createDirectory(at: newerFolder, withIntermediateDirectories: true)
+    let newerData = try newer.encoded()
+    try newerData.write(to: newerFolder.appendingPathComponent("Library.json"))
+    let older = AppModel(recoveryURL: nil)
+    older.loadLibrary(from: newerFolder)
+    older.performLibrary([.addIdea(ContentItem(title: "Not saved"))])
+    check((try? Data(contentsOf: newerFolder.appendingPathComponent("Library.json"))) == newerData && older.libraryFolderURL == nil,
+          "an older YamVideo leaves a newer Library untouched and saves nothing over it")
 
     print("\nUndo, typing and topics")
     model.editIdea(first.id, notes: "Hook: one")

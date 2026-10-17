@@ -206,14 +206,14 @@ struct Library: Codable, Equatable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var library = try decoder.decode(Library.self, from: data)
-        guard library.version <= currentVersion else {
-            throw EditError.invalid("This Library was saved by a newer version of YamVideo.")
-        }
+        guard library.version <= currentVersion else { throw EditError(code: .unsupportedCapability, message: newerMessage) }
         if let problem = library.problem { throw EditError.invalid(problem) }
         // An older file has nothing a newer version lacks; it is written back as current.
         library.version = currentVersion
         return library
     }
+
+    static let newerMessage = "This Library was saved by a newer version of YamVideo. Open it with that version; this one leaves it as it is and saves nothing to it."
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()

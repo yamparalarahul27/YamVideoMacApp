@@ -82,7 +82,13 @@ extension AppModel {
         libraryUndoEntries = []; libraryRedoEntries = []
         let file = folder.appendingPathComponent("Library.json")
         if let data = try? Data(contentsOf: file) {
-            do { library = try Library.decode(data) } catch {
+            do { library = try Library.decode(data) } catch let error as EditError where error.code == .unsupportedCapability {
+                // A newer YamVideo's Library: leave it untouched, and write nothing over it.
+                library = Library()
+                libraryFolderURL = nil
+                statusMessage = error.message
+                return
+            } catch {
                 let aside = folder.appendingPathComponent("Library (unreadable \(Int(Date().timeIntervalSince1970))).json")
                 try? FileManager.default.moveItem(at: file, to: aside)
                 library = Library()
