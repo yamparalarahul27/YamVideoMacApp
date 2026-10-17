@@ -502,8 +502,9 @@ enum FFmpeg {
         let t1 = t0 + ease
         let t2 = t1 + shot.hold
         let t3 = t2 + ease
-        let up = "(3*pow((in_time-\(num(t0)))/\(num(ease)),2)-2*pow((in_time-\(num(t0)))/\(num(ease)),3))"
-        let down = "(3*pow((\(num(t3))-in_time)/\(num(ease)),2)-2*pow((\(num(t3))-in_time)/\(num(ease)),3))"
+        // Times in brackets: a Short's zoom that began before the Short has a start below 0.
+        let up = "(3*pow((in_time-(\(num(t0))))/\(num(ease)),2)-2*pow((in_time-(\(num(t0))))/\(num(ease)),3))"
+        let down = "(3*pow(((\(num(t3)))-in_time)/\(num(ease)),2)-2*pow(((\(num(t3)))-in_time)/\(num(ease)),3))"
         return "if(lt(in_time,\(num(t0))),0,"
             + "if(lt(in_time,\(num(t1))),\(up),"
             + "if(lt(in_time,\(num(t2))),1,"

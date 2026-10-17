@@ -658,8 +658,9 @@ extension ScreenTrack {
             var moved = span; moved.start = start - short.start; moved.end = end - short.start
             return moved
         }
-        track.zooms = zooms.filter { $0.start >= short.start - 0.0005 && $0.end <= short.end + 0.0005 }.map {
-            var shot = $0; shot.start = max(0, shot.start - short.start); return shot
+        // Zooms that cross the Short's edges come along whole, as the preview shows them.
+        track.zooms = zooms.filter { $0.end > short.start + 0.000001 && $0.start < short.end - 0.000001 }.map {
+            var shot = $0; shot.start -= short.start; return shot
         }
         return track
     }
