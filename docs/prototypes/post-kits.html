@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post kits mock-ups</title>
+<!-- Phase 2 of docs/plans/distribution.md (section 14.4): the Publish sheet's platform
+     picker in layout B (the owner's choice, 2026-10-17), the Post Kit sheet, the
+     Platforms page and the Library row. Drawn with a stand-in cover. -->
+<style>
+:root{--bg:#f4f3ef;--card:#fff;--soft:#f7f6f2;--text:#1d1d1b;--muted:#6b6a65;--line:#d9d7cf;--line2:#bdbab0;
+--acc:#185fa5;--accbg:#e6f1fb;--ok:#3b6d11;--okbg:#eaf3de;--warn:#854f0b;--warnbg:#faeeda}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1b;--card:#262624;--soft:#2e2e2c;--text:#eceae4;--muted:#a3a19a;
+--line:#3d3d3a;--line2:#55544f;--acc:#85b7eb;--accbg:#0c447c;--ok:#97c459;--okbg:#27500a;--warn:#ef9f27;--warnbg:#633806}}
+body{margin:0;padding:24px 16px;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
+main{max-width:760px;margin:0 auto}
+h2{font-size:14px;font-weight:600;margin:28px 0 8px}
+.w{border:1px solid var(--line2);border-radius:12px;background:var(--card);overflow:hidden}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.lab{font-size:11px;color:var(--muted)}
+.fld{border:1px solid var(--line2);border-radius:6px;padding:4px 7px;background:var(--soft)}
+.btn{border:1px solid var(--line2);border-radius:6px;padding:2px 9px;font-size:12px;background:var(--soft);white-space:nowrap}
+.pri{background:var(--acc);color:#fff;border-color:transparent}
+.chip{display:inline-block;padding:1px 7px;border-radius:10px;background:var(--accbg);color:var(--acc);font-size:11px;margin:0 3px 3px 0}
+.pill{font-size:11px;padding:1px 7px;border-radius:10px}
+.on{background:var(--okbg);color:var(--ok)}.ready{background:var(--accbg);color:var(--acc)}
+.ok{color:var(--ok)}.wa{color:var(--warn)}
+.row{display:flex;align-items:center;gap:6px}
+.pl{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:5px}
+.cover{background:repeating-linear-gradient(135deg,#3a3a38 0 10px,#444441 10px 20px);border-radius:10px;position:relative;color:#fff}
+.sel{background:var(--accbg);color:var(--acc);border-radius:6px}
+.three{display:grid;grid-template-columns:130px minmax(0,1fr) 160px}
+@media (max-width:620px){.three{grid-template-columns:1fr}.three>*{border-right:none!important;border-bottom:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<main>
+<h2>Publish sheet, layout B: the platforms down the left</h2>
+<div class="w">
+  <div class="bar"><b style="font-size:15px">Publish</b><span class="lab">AppStore.mov</span><span style="flex:1"></span><span class="fld lab">App Store tip: let users delete everything ▾</span></div>
+  <div class="three">
+    <div style="border-right:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:3px">
+      <div class="lab" style="padding:0 6px 3px">Goes to</div>
+      <div style="padding:5px 6px">☑ YouTube<div class="ok lab" style="padding-left:16px;color:var(--ok)">Ready</div></div>
+      <div class="sel" style="padding:5px 6px">☑ Instagram<div style="font-size:11px;padding-left:16px">Ready</div></div>
+      <div style="padding:5px 6px">☑ X<div class="lab" style="padding-left:16px;color:var(--warn)">1 to check</div></div>
+      <div style="padding:5px 6px;color:var(--muted)">☐ LinkedIn<div class="lab" style="padding-left:16px">Off</div></div>
+    </div>
+    <div style="padding:10px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:8px">
+      <div><div class="lab">Caption <span style="float:right">Copy</span></div>
+        <div class="fld">Apple wants an option to delete the account and every bit of data you capture. Plan the whole flow, from sign-up to deletion, before you submit.</div>
+        <div class="lab">146 / 2,200 · the first 125 show before "more"</div></div>
+      <div><div class="lab">Hashtags <span style="float:right">Copy</span></div><span class="chip">#appstore</span><span class="chip">#iosdev</span><span class="chip">#privacy</span><div class="lab">3 / 5 · Instagram allows 5 since December 2025</div></div>
+      <div class="lab">Footer from your Instagram profile: "More tips: link in bio" · <span style="color:var(--acc)">Edit Profile</span></div>
+      <div><div class="lab">Checks</div><div class="ok">✓ 9:16, 1080×1920</div><div class="ok">✓ 0:48, under 3:00, so Instagram shows it to new viewers</div></div>
+    </div>
+    <div style="padding:10px;display:flex;justify-content:center">
+      <div class="cover" style="width:135px;height:240px">
+        <div style="position:absolute;left:7px;right:22px;bottom:9px;font-size:9px;line-height:1.35"><b>yamparala</b> · Follow<br>Apple wants an option to delete the account and every bit… <span style="opacity:.8">more</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="bar" style="border-top:1px solid var(--line);border-bottom:none"><span class="wa lab" style="color:var(--warn)">⚠ 1 to check on X</span><span style="flex:1"></span><span class="btn">Close</span><span class="btn pri">Export Post Kit…</span></div>
+</div>
+
+<h2>Post Kit sheet: after Export Post Kit, and from the Library</h2>
+<div class="w">
+  <div class="bar"><b style="font-size:15px">Post Kit</b><span class="lab">App Store tip: let users delete everything · Short · 0:48</span><span style="flex:1"></span><span class="btn">Show in Finder</span></div>
+  <div style="padding:10px 12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">
+    <div class="pl"><div class="row"><b>YouTube</b><span style="flex:1"></span><span class="pill on">On YouTube</span></div>
+      <div class="row"><span class="lab" style="flex:1">Title</span><span class="btn">Copy</span></div>
+      <div class="row"><span class="lab" style="flex:1">Description</span><span class="btn">Copy</span></div>
+      <div class="row"><span class="lab" style="flex:1">Tags</span><span class="btn">Copy</span></div>
+      <span class="btn" style="text-align:center">Open Post ↗</span></div>
+    <div class="pl" style="border-color:var(--acc)"><div class="row"><b>Instagram</b><span style="flex:1"></span><span class="pill ready">Kit ready</span></div>
+      <div class="row"><span class="lab" style="flex:1">Caption, footer and hashtags</span><span class="btn">Copy</span></div>
+      <div class="row"><span class="lab" style="flex:1">Video · 1080×1920</span><span class="btn">Show</span></div>
+      <div class="row"><span class="lab" style="flex:1">Cover · cover.jpg</span><span class="btn">Show</span></div>
+      <span class="btn pri" style="text-align:center">Open Upload Page ↗</span>
+      <div class="row"><span class="fld lab" style="flex:1">Paste the post's link</span><span class="btn">Mark Posted</span></div></div>
+    <div class="pl"><div class="row"><b>X</b><span style="flex:1"></span><span class="pill ready">Kit ready</span></div>
+      <div class="row"><span class="lab" style="flex:1">Post text</span><span class="btn">Copy</span></div>
+      <div class="row"><span class="lab" style="flex:1">Video · 1080×1920</span><span class="btn">Show</span></div>
+      <span class="btn" style="text-align:center">Open Upload Page ↗</span>
+      <div class="row"><span class="fld lab" style="flex:1">Paste the post's link</span><span class="btn">Mark Posted</span></div></div>
+  </div>
+  <div class="lab" style="padding:0 12px 10px">Open Upload Page only opens the page in the browser. The owner drags the video in, pastes the text and presses Post.</div>
+</div>
+
+<h2>Platforms page: a new module in the sidebar, one profile per platform</h2>
+<div class="w"><div style="display:grid;grid-template-columns:120px minmax(0,1fr)">
+  <div style="border-right:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:3px">
+    <div style="padding:5px 7px">YouTube<div class="lab">@yamparala</div></div>
+    <div class="sel" style="padding:5px 7px">Instagram<div style="font-size:11px">@yamparala</div></div>
+    <div style="padding:5px 7px">X<div class="lab">Premium</div></div>
+    <div style="padding:5px 7px">LinkedIn<div class="lab">No handle yet</div></div>
+  </div>
+  <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><div class="lab">Handle</div><div class="fld">@yamparala</div></div>
+      <div><div class="lab">Upload page</div><div class="row"><div class="fld" style="flex:1;overflow:hidden">instagram.com</div><span class="btn">Open</span></div></div></div>
+    <div><div class="lab">Links</div><div class="fld">yamparala.com</div></div>
+    <div><div class="lab">Footer, added under every caption</div><div class="fld">More tips: link in bio</div></div>
+    <div><div class="lab">Usual posting times</div><div class="row"><span class="btn">Tue 18:30</span><span class="btn">Sat 11:00</span><span class="btn">+</span></div></div>
+    <div style="border-top:1px solid var(--line);padding-top:6px"><div class="lab">Rules, checked 17 Oct 2026</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;font-size:12px"><span>Caption 2,200 characters</span><span>Hashtags 5</span><span>Reels up to 20 min</span><span>Over 3:00: followers only</span><span>Shape 9:16 best</span><span class="lab">Source: Instagram Help</span></div></div>
+  </div>
+</div></div>
+
+<h2>Library: a video's row shows each platform of its kit</h2>
+<div class="w" style="padding:8px 12px"><div class="row" style="gap:10px;flex-wrap:wrap">
+  <div class="cover" style="width:30px;height:54px;border-radius:4px"></div>
+  <div style="flex:1;display:flex;flex-direction:column;gap:3px;min-width:220px"><b>App Store tip: let users delete everything</b><span class="lab">Short · 0:48 · kit exported 17 Oct</span>
+    <div class="row" style="gap:4px;flex-wrap:wrap"><span class="pill on">On YouTube</span><span class="pill ready">Instagram: kit ready</span><span class="pill ready">X: kit ready</span></div></div>
+  <span class="btn">▶</span><span class="btn">Post Kit…</span><span class="btn">⋯</span>
+</div></div>
+</main>
+</body>
+</html>

@@ -1,9 +1,10 @@
 # Distribution — implementation plan
 
 **Updated:** 2026-10-17. **Status:** phase 1 (the Library, the sidebar and Ideas) is
-merged (PR #33, section 11), and so is phase 1b, past videos (PR #34, section 12). Phase 1c,
-Style.md and Video.md, is implemented on the `style-notes` branch (section 13). Next:
-phases 2 to 5.
+merged (PR #33, section 11), and so are phase 1b, past videos (PR #34, section 12), and
+phase 1c, Style.md and Video.md (PR #35, section 13). Phase 2 has started: the platforms'
+rules are checked, the owner's answers are in, and the design and mock-ups are agreed
+(section 14). Nothing of phase 2 is built yet. **Next up** is section 14.6.
 
 ## 1. Goal
 
@@ -219,7 +220,8 @@ by `yamvideoctl`.
 
 - Phase 1: Ideas as a list or as columns by stage? (Mock-ups first.) **Answered:** a list
   by stage with the editor always on the right (2026-10-16).
-- Phase 2: confirm that post kit text lives in the project.
+- Phase 2: confirm that post kit text lives in the project. **Answered:** yes, in the
+  project, next to the YouTube text (2026-10-17). Section 14.2 has the other answers.
 - Phase 3: at what time of day the check-in reminders come.
 - Phase 4: which exports each platform offers today.
 
@@ -229,8 +231,8 @@ by `yamvideoctl`.
 |---|---|---|
 | 1 | Library, sidebar, Ideas | Merged (PR #33) |
 | 1b | Past videos: scan a folder, the videos of an item, posts | Merged (PR #34) |
-| 1c | Style.md, project notes and Video.md | Implemented (`style-notes`) |
-| 2 | Platforms and post kits | Not started |
+| 1c | Style.md, project notes and Video.md | Merged (PR #35) |
+| 2 | Platforms and post kits | Rules checked, design and mock-ups agreed (section 14); not built |
 | 3 | Calendar | Not started |
 | 4 | Results | Not started |
 | 5 | In-app AI | Not started |
@@ -383,3 +385,198 @@ Notes). Real use: an isolated instance with a copy of AppStore.yamvideo and the 
 Style.md read the style, took two notes, saved (writing a real `AppStore Video.md` with
 the 5 Shorts and the 9 graphics), and added a rule to Style.md; nothing was written into
 DJIFootage.
+
+## 14. Phase 2: Platforms and post kits (started 2026-10-17)
+
+Phase 2 started in a chat on 2026-10-17. The owner stopped it after the rules check, the
+questions and the mock-ups, before any code, and asked for this plan to be merged with
+everything that comes next. The build is section 14.6.
+
+### 14.1 The platforms' rules, checked 2026-10-17
+
+Checked on the platforms' own help pages without signing in. "3P" marks a number that
+only third-party sites give. Rules change, so the app keeps them with this date and shows
+it; check again before trusting them after a few months.
+
+**YouTube (long video).** Title 100 characters, no `<` or `>`. Description 5,000
+characters (the API says 5,000 *bytes*, so count UTF-8 bytes too). Tags 500 characters in
+all, counting the commas and 2 more for a tag with a space. Hashtags: up to 3 show by the
+title; with more than 60, YouTube ignores them all. Length: 15 minutes until the channel
+is verified, then up to 12 hours or 256 GB. MP4, H.264, AAC; 16:9. Upload page:
+`https://www.youtube.com/upload`, which goes on to
+`studio.youtube.com/channel/UC/content?d=ud`. Sources: support.google.com/youtube answers
+57407, 6390658, 71673 and 1722171; developers.google.com/youtube/v3/docs/videos.
+
+**YouTube Shorts.** A square or vertical video of up to 3:00 is a Short by itself;
+landscape never is. Shorts play at most at 1080p. Title, description and hashtags as for
+long videos; no current official page asks for #Shorts. Same upload page. Sources:
+support.google.com/youtube answers 15424877 and 10059070.
+
+**Instagram Reels.** Caption 2,200 characters. **Hashtags: 5 per post or Reel**, since
+18 December 2025 (Meta's developer docs still say 30; the Help Center and @creators say 5).
+Length up to 20 minutes, but Reels over 3:00 are not shown to new audiences. 9:16 is best;
+a 16:9 video still posts as a Reel, with bars. 23–60 fps, H.264 or HEVC, AAC. About 125
+characters show before "more" (3P). No file size is stated for posting by hand. Posting
+from a Mac: instagram.com, Create, Post, Select from computer, then the cover, trim and
+caption. Sources: facebook.com/help/instagram/351460621611097 (the Help Center page),
+about.instagram.com/features/reels, the Graph API media reference.
+
+**X.** 280 characters, or **25,000 with Premium**, counted with a link as 23 and an emoji
+as 2; the video does not count. Video: 140 s and 512 MB without Premium; with Premium under
+4 hours at 1080p and up to 16 GB on the web and iOS (the About Premium page says about
+3 hours and 8 GB). Shapes from 1:2.39 to 2.39:1, so 16:9 and 9:16 both fit. The help page
+lists at most 40 fps and 25 Mbps (the developer docs say 30 or 60 fps). X recommends no
+more than 2 hashtags. Upload page: `https://x.com/compose/post`. Sources:
+help.x.com/en/using-x/x-videos, help.x.com/en/using-x/premium-longer-videos,
+help.x.com/en/using-x/how-to-use-hashtags, docs.x.com/fundamentals/counting-characters.
+
+**LinkedIn (the owner's own profile).** Post text 3,000 characters; about 140 (phone) to
+210 (desktop) show before "see more" (3P). Video 3 s to 15 min, 75 KB to 5 GB, shapes
+from 1:2.4 to 2.4:1 (16:9 and 9:16 both fit), 10–60 fps, MP4 or MOV (ProRes does not
+process). No official hashtag guidance any more (the help page is gone; 3–5 or none is
+common advice, 3P). Upload page: `https://www.linkedin.com/feed/`, then Start a post and
+Add media (the `?shareActive=true` address is not documented). Sources:
+linkedin.com/help/linkedin answers a528176 and a548372.
+
+**Best shape.** The long 16:9 video suits YouTube, X and LinkedIn; on Instagram it is a
+Reel with bars. A 9:16 Short suits all four.
+
+### 14.2 The owner's answers (2026-10-17)
+
+1. **Post kit text lives in the project**, next to the YouTube text: one set per piece
+   (the long video and each Short) and platform. It goes with the project file, undoes
+   with the edit, shows in Video.md, and agents change it with project commands. The
+   Library keeps only the posts: platform, when the kit was exported, its folder, the
+   link.
+2. **X has Premium**, so X is checked against 25,000 characters and Premium's video
+   lengths. It is a switch in X's profile.
+3. **The Publish sheet uses layout B:** the platforms in a list down the left, each with
+   a tick and its state (Ready, 2 to fix, 1 to check, Off), the form in the middle and the
+   preview on the right. Chosen over tabs across the top.
+4. The **Post Kit sheet, the Platforms page and the Library row** were shown as in the
+   mock-ups (`docs/prototypes/post-kits.html`). The owner stopped before saying yes or
+   asking for changes, so show them again before building them.
+
+### 14.3 The design to build
+
+**Data in the project (version 16).**
+- `PostKit` on `PublishInfo.kit` (the long video) and on `Short.kit`: `platforms` (where
+  the piece goes, YouTube included) and `posts`, the text for Instagram, X and LinkedIn
+  keyed by platform: `PlatformPost {caption, hashtags}`. No kit means YouTube only, as
+  today, so older projects read unchanged. A platform's text is kept when it is ticked
+  off. YouTube's own text stays where it is.
+
+**Data in the Library (version 3).**
+- `Library.platforms`: a `PlatformProfile` for each of the four: handle, links, footer
+  (added under every caption, and under YouTube's description), usual posting times
+  (weekday and time, for the calendar in phase 3), upload page address (the defaults in
+  14.1, editable) and, for X, Premium. They undo with the Library and move its revision.
+- `VideoExport.platforms`: the platforms a kit was made for (nil is an older YouTube-only
+  export). `VideoPost.platform`: the platform of a post marked without a link.
+- Reuse `Platform`, `VideoPiece`, `VideoPost` and `VideoExport`. An exported kit makes
+  the video Ready, as an export already does.
+
+**The rules in code.** `PlatformRules` holds the numbers in 14.1 with the date checked;
+X's Premium switch picks its limits. The Platforms page and the agents' state show them.
+
+**The text each platform gets:** the caption, the profile's footer, then the hashtags
+with `#`. X counts a link as 23 characters and an emoji as 2.
+
+**Checks for each platform** (issues like YouTube's: blocking or warning): caption over
+the limit (blocking); more than 5 hashtags on Instagram (blocking), more than 2 on X
+(warning); Instagram over 3:00 (warning: followers only) or over 20 minutes (blocking); X
+over Premium's length, or over 40 fps (warning); LinkedIn under 3 s or over 15 minutes
+(blocking); a 16:9 video on Instagram (warning: bars); after export, a file over a
+platform's size. YouTube's checks count only when YouTube is ticked.
+
+**Export Post Kit.** The Publish sheet's button reads Export for YouTube… when only
+YouTube is ticked, and Export Post Kit… when more are. It writes what Export for YouTube
+(or Export Short for YouTube) writes today, into the folder the owner picks, plus
+`<title> Instagram.txt`, `<title> X.txt` and `<title> LinkedIn.txt` for the ticked
+platforms. One video serves them all: the 16:9 MP4 or the 1080×1920 Short. The
+`.youtube.json` stays the machine file (so the Library and Scan a Folder keep working) and
+gains `kit: true` and `platforms`, each with its final text and upload page. YouTube.txt is
+written only when YouTube is ticked.
+
+**The Publish sheet (layout B).** Left: "Goes to", a tick and a state per platform.
+Middle: YouTube's form as today; Instagram, X and LinkedIn get a caption with its count
+and how much shows before "more", hashtags with their count, the footer from the profile
+(with Edit Profile), and the checks. Right: the preview, an Instagram Reel over the cover,
+an X post or a LinkedIn post. Copy buttons on every field.
+
+**The Post Kit sheet** opens after Export Post Kit and from the Library row's Post Kit….
+A card per platform: a copy button for each field, the video and cover shown in Finder,
+**Open Upload Page** (it only opens the address in the default browser), and a field to
+paste the post's link with Mark Posted. Posted platforms show "On Instagram" and Open Post.
+
+**The Platforms page**, a new module in the sidebar after Studio: the four platforms on
+the left, the profile on the right (handle, upload page with Open, links, footer, usual
+times, X's Premium), and the rules with the date checked and their sources.
+
+**The Library row** of a video shows a chip per platform of its latest kit: "On X"
+(posted, green) or "X: kit ready" (blue), with Post Kit… beside Play.
+
+**Agents** (the owner's rule for every feature):
+- Project command `setPostKit {clipID, shortID?, platforms?, posts?}`; only the keys given
+  change. State: `clips[].publish.kit` and `clips[].kitIssues` by platform, and the same
+  on each Short.
+- Library command `updatePlatform {platform, handle?, links?, footer?, times?, uploadPage?,
+  premium?}`; `library.platforms` with each profile, its rules and the date checked;
+  exports list their platforms, posts their platform; `addPost` takes `platform` for a
+  post with no link.
+- Method `postKit {clip, short?}`, the preview: each ticked platform's text exactly as its
+  file will hold it, its issues, its upload page and the video it uses. It changes
+  nothing. `export` with `kit: true` writes the kit. `reveal` with `platform` shows the
+  Platforms page.
+- `yamvideoctl postkit`, `yamvideoctl export --kit`, `yamvideoctl platforms`; MCP tools to
+  match; AgentCatalog entries, kept in step with `WireCommand.types` and
+  `LibraryWireCommand.types`.
+- Agents Manual recipe **Captions for each platform**: read Style.md, the platforms'
+  rules and footers, and the piece's YouTube text and transcript; write each caption with
+  `setPostKit` in the owner's style; check it with `postKit`; show the owner; export the
+  kit only when asked. Agents never open upload pages and never post.
+
+**Checks.** `./test.sh platforms` (rules, counting, issues, kit files, Library v3 and
+project v16 round trips, agent commands, catalog). Snapshots with
+`YAMVIDEO_SNAPSHOT_ONLY=platforms`: the Publish sheet for a Short and for the long video,
+the Post Kit sheet, the Platforms page, a Library row with kits. A real-use check on an
+isolated instance (`YAMVIDEO_LIBRARY_PATH`, `YAMVIDEO_RECOVERY_PATH`,
+`YAMVIDEO_AGENT_BRIDGE_DIR`) driven by yamvideoctl, writing nothing into the owner's
+folders.
+
+### 14.4 Mock-ups
+
+`docs/prototypes/post-kits.html` has the agreed Publish sheet (layout B), the Post Kit
+sheet, the Platforms page and the Library row, drawn with a stand-in cover. The owner saw
+them on their "App Store tip: let users delete everything" Short.
+
+### 14.5 Found on the way
+
+- Instagram's limit dropped to 5 hashtags in December 2025; older advice (30) is wrong.
+- X's help page caps video at 40 fps. A 50 or 60 fps export should get a warning on X.
+- The upload pages need the owner to be signed in to each site in their own browser; the
+  app only opens the address.
+
+### 14.6 Next up, in order
+
+1. **Phase 2, the build** (a new chat, branch `distribution-platforms` or a new one):
+   1. Show the Post Kit sheet, Platforms page and Library row mock-ups again and get the
+      owner's yes or changes.
+   2. `PlatformRules` and the text and counting for each platform.
+   3. Library version 3: profiles, kit platforms on exports, a post's platform.
+   4. The Platforms page and module.
+   5. Project version 16: `PostKit` on the long video and each Short, and `setPostKit`.
+   6. The Publish sheet in layout B, with the checks and previews.
+   7. Export Post Kit and the Post Kit sheet, with Open Upload Page and Mark Posted.
+   8. Kits and posts in the Library row.
+   9. Agents: commands, state, `postKit`, `export --kit`, `reveal`, catalog, yamvideoctl,
+      MCP, the manual's recipe.
+   10. `./test.sh platforms`, snapshots, the real-use check, one PR.
+2. **Phase 3, Calendar** (section 7): first ask at what time of day the check-in
+   reminders come. The profiles' usual posting times suggest slots.
+3. **Phase 4, Results**: first check which export files each platform's analytics give.
+4. **Phase 5, in-app AI**: the owner turns on Apple Intelligence first (it was off on
+   2026-10-16).
+5. **Still open from phases 1 to 1c:** hands-on clicks in the running app (typing, drag
+   and drop, paste, the save panel), and the idea chip in Studio's toolbar, which only
+   shows in the running app.
