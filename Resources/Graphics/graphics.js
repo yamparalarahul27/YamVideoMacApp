@@ -1342,7 +1342,7 @@
    * possible toward the far side, and gets smaller (never past `zoom`, growing from the
    * bottom of their box) when the head would leave the picture. Returns the scale.
    */
-  function placeClear(root, cut, column, speaker, head, bands, zoom, textOnLeft) {
+  function placeClear(root, cut, column, speaker, head, bands, zoom, textOnLeft, smallest) {
     const stage = root.getBoundingClientRect();
     const k = 1920 / (stage.width || 1920);
     const text = [];
@@ -1379,11 +1379,24 @@
       return textOnLeft ? { low: need, high: 1920 - margin - h.x1 } : { low: margin - h.x0, high: need };
     };
     let s = zoom, found = limits(s);
-    for (let next = zoom; next >= 0.4 && found.low > found.high; next -= 0.02) { s = next; found = limits(s); }
+    for (let next = zoom; next >= (smallest || 0.4) && found.low > found.high; next -= 0.02) { s = next; found = limits(s); }
     let tx = textOnLeft ? Math.max(found.low, Math.min(0, found.high)) : Math.min(found.high, Math.max(0, found.low));
     if (!isFinite(tx)) tx = 0;
     cut.style.transform = "translateX(" + tx.toFixed(1) + "px) scale(" + s.toFixed(4) + ")";
     return s;
+  }
+
+  /**
+   * Draws the picture beside the title `imageSize` (1 to 1.6) times its usual size: at
+   * most 520×340 and never larger than the file. The title then fits what is left.
+   */
+  function sizePicture(img, imageSize) {
+    const k = Math.max(1, Math.min(1.6, num(imageSize, 1)));
+    if (!img || k === 1 || !img.naturalWidth || !img.naturalHeight) return;
+    const f = k * Math.min(1, 520 / img.naturalWidth, 340 / img.naturalHeight);
+    img.style.maxWidth = "none"; img.style.maxHeight = "none";
+    img.style.width = (img.naturalWidth * f).toFixed(1) + "px";
+    img.style.height = (img.naturalHeight * f).toFixed(1) + "px";
   }
 
   /**
@@ -1404,6 +1417,13 @@
     const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
     append(root, outlineFilter(d.outlineWidth));
     if (d.frame) append(root, picture(d.frame, "yg-thumb-bg"));
+    const frost = d.background === "frost" && d.frame;
+    // The white frost: a blurred copy of the frame under a white wash, faded out toward the speaker.
+    if (frost) {
+      const layer = h("div", { class: "yg-thumb-frost" });
+      append(layer, picture(d.frame, "yg-thumb-frost-bg"));
+      append(root, layer);
+    }
     append(root, h("div", { class: "yg-thumb-scrim" }));
     if (d.cutout) {
       const cut = picture(d.cutout, "yg-thumb-cut" + (d.outline ? " outlined" : ""));
@@ -1423,11 +1443,19 @@
     append(document.getElementById("stage") || document.body, root);
     const loaded = pictures.map((img) => (img.decode ? img.decode().catch(() => null) : Promise.resolve()));
     return Promise.all(loaded).then(() => document.fonts.ready).then(() => {
+      sizePicture(root.querySelector(".yg-thumb-image"), d.imageSize);
       const size = fitTitle(title, column);
       const cut = root.querySelector(".yg-thumb-cut");
       if (d.place === "clear" && cut) {
         const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
-        placeClear(root, cut, column, d.speaker || { x: 0, y: 0, w: 1920, h: 1080 }, d.head, d.bands, zoom, d.side === "left");
+        // Under the frost the frame moves with the speaker, so it may not get smaller than the picture.
+        placeClear(root, cut, column, d.speaker || { x: 0, y: 0, w: 1920, h: 1080 }, d.head, d.bands, zoom, d.side === "left", frost ? 1 : 0.4);
+      }
+      if (frost && cut) {
+        root.querySelectorAll(".yg-thumb-bg, .yg-thumb-frost-bg").forEach((img) => {
+          img.style.transformOrigin = cut.style.transformOrigin;
+          img.style.transform = cut.style.transform;
+        });
       }
       return size;
     });

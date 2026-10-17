@@ -162,12 +162,15 @@ edit, and each edit becomes one undo step with your name on it.
    - `time`: a suggested frame.
    - `title`: up to 3 lines; put the key words between asterisks.
    - `highlight: true`: the words between asterisks get a band of the accent colour.
-   - `background`: `white`, `solid` (dark), `dim`, `blur` or `frame`.
+   - `background`: `white`, `solid` (dark), `dim`, `blur`, `frame` or `frost` (the
+     whole frame, with a white blurred shade on the title side, as in the Ink layout).
    - `place: "clear"`: the speaker moves clear of the title and the picture, so nothing
-     overlaps. Use it with the `white` or `solid` background.
+     overlaps. Use it with the `white`, `solid` or `frost` background.
    - `outlineWidth`: the white outline round the speaker, 2 to 16 (3 is thin).
    - `image`: a picture under the title, for example logos or icons. Make it a
      transparent PNG.
+   - `imageSize`: the picture's size, 1 to 1.6 times its usual size (at most 520×340
+     pixels of the 1920×1080 frame). A larger picture makes the title smaller.
    - `zoom`: the speaker's size, 1 to 1.6.
 3. Look at each result. Make sure the face is clear, nothing overlaps, and the words
    read at YouTube's small search size.

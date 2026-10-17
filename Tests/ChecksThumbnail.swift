@@ -15,12 +15,15 @@ import Foundation
     var badAccent2 = thumbDesign; badAccent2.accent = "gold"
     var bigZoom = thumbDesign; bigZoom.zoom = 2
     var wideOutline = thumbDesign; wideOutline.outlineWidth = 20
-    check([longTitle, fourLines, longTag, badAccent2, bigZoom, wideOutline].allSatisfy { $0.problem != nil }
-              && bigZoom.problem!.contains("1.6") && longTitle.problem!.contains("90") && wideOutline.problem!.contains("16"),
+    var bigPicture = thumbDesign; bigPicture.imageSize = 2
+    check([longTitle, fourLines, longTag, badAccent2, bigZoom, wideOutline, bigPicture].allSatisfy { $0.problem != nil }
+              && bigZoom.problem!.contains("1.6") && longTitle.problem!.contains("90") && wideOutline.problem!.contains("16")
+              && bigPicture.problem!.contains("1.6"),
           "a design out of range is refused, saying what is allowed")
     let partialDesign = try JSONDecoder().decode(ThumbnailDesign.self, from: Data(#"{"title": "Hi", "image": "~/x.png"}"#.utf8))
     check(partialDesign.cutout && partialDesign.background == .dim && partialDesign.side == .auto && partialDesign.place == .frame
-              && partialDesign.outlineWidth == 9 && !partialDesign.highlight && partialDesign.image?.path.hasPrefix("/") == true,
+              && partialDesign.outlineWidth == 9 && !partialDesign.highlight && partialDesign.imageSize == 1
+              && partialDesign.image?.path.hasPrefix("/") == true,
           "a partial design keeps the defaults, and an image path is a plain path")
 
     // A frame with a clear subject on the left: a head and a body on grey.
@@ -91,6 +94,50 @@ import Foundation
     check(titleColours(markedThumb).accent > titleColours(whiteThumb).accent + 100 && titleColours(markedThumb).dark > titleColours(whiteThumb).dark,
           "with highlight, the *accent* words are dark text on a band of the accent", "\(titleColours(markedThumb)) against \(titleColours(whiteThumb))")
 
+    // The picture's size: imageSize grows its box, and the title gets smaller to make room.
+    let blueRep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 520, pixelsHigh: 340, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: blueRep)
+    NSColor(srgbRed: 0.1, green: 0.3, blue: 0.9, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: 520, height: 340).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    let bluePicture = FileManager.default.temporaryDirectory.appendingPathComponent("thumb-picture-\(UUID().uuidString).png")
+    try blueRep.representation(using: .png, properties: [:])!.write(to: bluePicture)
+    defer { try? FileManager.default.removeItem(at: bluePicture) }
+    // The blue pixels, and the rows where the blue reaches the speaker's red.
+    func blue(_ image: CGImage) -> (count: Int, overlaps: Int) {
+        var count = 0, overlaps = 0
+        for y in stride(from: 0, to: 720, by: 4) {
+            var blueRight = -1, redLeft = Int.max
+            for x in stride(from: 0, to: 1280, by: 4) {
+                let p = rgb(image, x, y)
+                if p.2 > 180 && p.0 < 80 && p.1 < 120 { count += 1; blueRight = max(blueRight, x) }
+                if p.0 > 180 && p.1 < 110 && p.2 < 110 { redLeft = min(redLeft, x) }
+            }
+            if blueRight >= 0 && redLeft <= blueRight + 20 { overlaps += 1 }
+        }
+        return (count, overlaps)
+    }
+    var pictured = clearLeft; pictured.image = bluePicture
+    var bigPictured = pictured; bigPictured.imageSize = 1.6
+    let picturedThumb = try await ThumbnailMaker.render(pictured, sources: subjectSources, accent: "#F5C42C")
+    let bigPicturedThumb = try await ThumbnailMaker.render(bigPictured, sources: subjectSources, accent: "#F5C42C")
+    let smallBlue = blue(picturedThumb), bigBlue = blue(bigPicturedThumb)
+    check(smallBlue.count > 500 && Double(bigBlue.count) > 2 * Double(smallBlue.count)
+              && bigBlue.overlaps == 0 && rowOverlaps(bigPicturedThumb).rows == 0,
+          "imageSize 1.6 draws the picture larger, and the speaker stays clear of it and of the title",
+          "\(smallBlue) against \(bigBlue), \(rowOverlaps(bigPicturedThumb))")
+
+    // White frost: the frame moves with the speaker to the far side; the title side is a white shade.
+    var frosted = clearLeft; frosted.background = .frost
+    let frostThumb = try await ThumbnailMaker.render(frosted, sources: subjectSources, accent: "#F5C42C")
+    let frostShade = rgb(frostThumb, 30, 700), frostFrame = rgb(frostThumb, 1270, 700)
+    check(frostShade.0 > 215 && frostShade.1 > 215 && frostShade.2 > 215 && frostFrame.0 < 200
+              && redShare(frostThumb, xs: 700..<1240) > 0.1 && redShare(frostThumb, xs: 40..<640) < 0.02
+              && titleColours(frostThumb).dark > 50,
+          "with the white frost, the speaker and their frame move to the far side, and the title is dark on a white shade",
+          "shade \(frostShade), frame \(frostFrame), red \(redShare(frostThumb, xs: 700..<1240)) / \(redShare(frostThumb, xs: 40..<640))")
+
     print("\nThumbnails in projects and for agents")
     var subjectItem = subject.item
     let thumbnailer = AppModel(recoveryURL: nil)
@@ -103,6 +150,12 @@ import Foundation
     check(designSaved == thumbnailer.project && designSaved.version >= 9, "the design survives a version 9 round trip")
     var designAsEight = designSaved; designAsEight.version = 8
     check((try? designAsEight.validate()) == nil, "a version 8 file with a design is refused")
+    var frostProject = designSaved
+    frostProject.clips[0].publish?.design?.background = .frost; frostProject.clips[0].publish?.design?.imageSize = 1.4
+    let frostSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(frostProject))
+    var frostAsSixteen = frostSaved; frostAsSixteen.version = 16
+    check(frostSaved == frostProject && frostSaved.version == 17 && (try? frostSaved.validate()) != nil && (try? frostAsSixteen.validate()) == nil,
+          "the frost and the picture size survive a version 17 round trip, and a version 16 file with them is refused")
 
     var designPatch = address(thumbnailer)
     designPatch["method"] = "apply"; designPatch["requestID"] = "design-1"; designPatch["client"] = "Claude"
