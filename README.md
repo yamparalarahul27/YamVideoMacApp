@@ -94,7 +94,9 @@ before it edits and adds a rule only after you say yes; edit it in the app or an
 editor. **Project Notes…** (⇧⌘N) says why a video is edited the way it is, and projects
 now keep a history of every change and who made it. At every save and export YamVideo
 writes `<project> Video.md` beside the project: the edit, each Short, the notes and the
-history, for you and any agent to read.
+history, for you and any agent to read. `docs/channel` keeps a copy of Style.md, each
+Video.md and a recipe for each series in Git: run `docs/channel/sync.sh` after a video,
+then commit.
 
 Everything stays on this Mac, in `~/Library/Application Support/YamVideo/Library`
 (`YAMVIDEO_LIBRARY_PATH` moves it, for a test instance). YamVideo never posts to or reads

@@ -1,0 +1,26 @@
+# Channel style and video notes
+
+This folder keeps the channel's editing style in Git, so a new Mac or a lost folder does
+not lose it.
+
+- `Style.md`: the channel's editing rules. Every agent reads it before it edits. The app
+  keeps the live copy in `~/Library/Application Support/YamVideo/Library/Style.md`.
+- `videos/`: each project's Video.md. YamVideo writes it next to the project at every save
+  and export: the edit, the Shorts, the reasons for each choice and the history.
+- `series/`: a recipe for each series, with the exact settings to use again.
+- `assets/`: pictures made for the thumbnails.
+
+## After each video
+
+1. Save the project in YamVideo.
+2. Run `docs/channel/sync.sh`. It copies Style.md and every Video.md here.
+3. Commit and push.
+
+## On a new Mac
+
+1. Build and open YamVideo once, then quit it.
+2. Copy `docs/channel/Style.md` to `~/Library/Application Support/YamVideo/Library/Style.md`.
+3. Open YamVideo. The Style sheet (⌘3) shows the rules.
+
+Git does not keep the footage, the project files, the exports or the logo library
+(`~/Library/Application Support/YamVideo/Logos`). Back them up on their own.
