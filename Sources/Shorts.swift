@@ -492,15 +492,17 @@ extension VideoItem {
 
     /// The Short as a recording of its own, for exports: its part of the edit, its window
     /// as the crop, the zooms, blur effects and graphics inside it in its own time, and
-    /// no upload details (the Short has its own).
+    /// no upload details (the Short has its own). A zoom that crosses the Short's start or
+    /// end comes along whole, so the Short is zoomed where the preview shows it zoomed; one
+    /// that began before the Short starts before 0.
     func shortItem(_ short: Short) -> VideoItem {
         var item = self
         let timeline = self.timeline.cut(from: short.start, to: short.end)
         item.segments = timeline.segments
         if let info { item.crop = short.picture(info: info, crop: crop) }
         item.aspectLock = ShortFormat.aspect; item.aspectLabel = "9:16"
-        item.zoomShots = zoomShots.filter { $0.start >= short.start - 0.0005 && $0.end <= short.end + 0.0005 }.map {
-            var shot = $0; shot.start = max(0, shot.start - short.start); return shot
+        item.zoomShots = zoomShots.filter { $0.end > short.start + 0.000001 && $0.start < short.end - 0.000001 }.map {
+            var shot = $0; shot.start -= short.start; return shot
         }
         item.blurEffects = blurEffects.compactMap { effect in
             guard effect.end > short.start + 0.000001, effect.start < short.end - 0.000001 else { return nil }
