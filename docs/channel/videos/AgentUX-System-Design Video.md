@@ -3,26 +3,26 @@
 *YamVideo writes this file when the project is saved or exported. Edit the Why notes in YamVideo (File → Project Notes…); changes made here are replaced.*
 
 - **Project:** AgentUX-System-Design.yamvideo
-- **Idea:** not linked to an idea in the Library
+- **Idea:** System design for designers: how I built my own Mobbin (Part 1)
 - **Style:** Style.md, changed 17 Oct
-- **Updated:** 17 Oct at 7:15 PM
+- **Updated:** 17 Oct at 7:27 PM
 
 ## AgentUX-camera-joined.mov
 - Length: 17:50 → **11:54** after cuts (250 sections)
 - Captions uploaded as a file · 3 zooms · with a screen recording
 - Graphics (mix, accent #F5C42C): Yamparala Rahul (0:00) · System design for designers (0:11) · AI builds the interface (6:12) · UI yes, flow not yet (6:44) · System design, part 2 (11:30) · More from Yamparala Media (11:39)
-- Long video: "System design for designers: how I built my own Mobbin (Part 1)"
+- Long video: "System design for designers: how I built my own Mobbin (Part 1)" · exported 17 Oct
 
 ### Shorts
 
 | Short | From – to | Length | Look | Exported | Posted |
 |---|---|---|---|---|---|
-| My team asks Claude for design references | 1:34 – 2:14 | 0:39 | full frame, panels sheet, captions stepUp | — | — |
-| Why I moved from Supabase to Cloudflare | 2:56 – 3:55 | 0:58 | full frame, panels sheet, captions stepUp, screen top | — | — |
-| Why designers should learn system design | 3:56 – 4:28 | 0:32 | full frame, panels sheet, captions stepUp, screen top | — | — |
-| Design for AI agents, not only humans | 4:39 – 5:37 | 0:58 | full frame, panels sheet, captions stepUp, screen top | — | — |
-| AI can build the UI. It can't do the flow (yet) | 6:33 – 7:15 | 0:41 | full frame, panels sheet, captions hide | — | — |
-| Think before you build a feature | 7:59 – 8:37 | 0:37 | full frame, panels sheet, captions stepUp, screen top | — | — |
+| My team asks Claude for design references | 1:34 – 2:14 | 0:39 | full frame, panels sheet, captions stepUp | 17 Oct | — |
+| Why I moved from Supabase to Cloudflare | 2:56 – 3:55 | 0:58 | full frame, panels sheet, captions stepUp, screen top | 17 Oct | — |
+| Why designers should learn system design | 3:56 – 4:28 | 0:32 | full frame, panels sheet, captions stepUp, screen top | 17 Oct | — |
+| Design for AI agents, not only humans | 4:39 – 5:37 | 0:58 | full frame, panels sheet, captions stepUp, screen top | 17 Oct | — |
+| AI can build the UI. It can't do the flow (yet) | 6:33 – 7:15 | 0:41 | full frame, panels sheet, captions hide | 17 Oct | — |
+| Think before you build a feature | 7:59 – 8:37 | 0:37 | full frame, panels sheet, captions stepUp, screen top | 17 Oct | — |
 
 ## Why
 
