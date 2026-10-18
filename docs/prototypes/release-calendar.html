@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Release calendar mock-ups</title>
+<!-- Phase 3 of docs/plans/distribution.md, as the owner asked on 2026-10-18: a calendar of
+     what goes out when, and for each long video a tree of its Shorts, each with the day
+     and the platforms it goes out on. The dates are examples. -->
+<style>
+:root{--bg:#f4f3ef;--card:#fff;--soft:#f7f6f2;--text:#1d1d1b;--muted:#6b6a65;--line:#d9d7cf;--line2:#bdbab0;
+--acc:#185fa5;--accbg:#e6f1fb;--ok:#3b6d11;--okbg:#eaf3de;--warn:#854f0b;--warnbg:#faeeda;--long:#5b3fa8;--longbg:#efeafb}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1b;--card:#262624;--soft:#2e2e2c;--text:#eceae4;--muted:#a3a19a;
+--line:#3d3d3a;--line2:#55544f;--acc:#85b7eb;--accbg:#0c447c;--ok:#97c459;--okbg:#27500a;--warn:#ef9f27;--warnbg:#633806;--long:#c4b2f2;--longbg:#3b2d66}}
+body{margin:0;padding:24px 16px;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
+main{max-width:980px;margin:0 auto}
+h2{font-size:14px;font-weight:600;margin:28px 0 8px}
+p.note{color:var(--muted);margin:0 0 10px;font-size:12px}
+.w{border:1px solid var(--line2);border-radius:12px;background:var(--card);overflow:hidden}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.lab{font-size:11px;color:var(--muted)}
+.btn{border:1px solid var(--line2);border-radius:6px;padding:2px 9px;font-size:12px;background:var(--soft);white-space:nowrap}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:6px;overflow:hidden}
+.seg span{padding:2px 9px;font-size:12px}.seg .on{background:var(--acc);color:#fff}
+.scroll{overflow-x:auto}
+.side{display:grid;grid-template-columns:minmax(0,1fr) 200px;min-width:820px}
+.grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-right:1px solid var(--line)}
+.dh{font-size:11px;color:var(--muted);padding:5px 6px;border-bottom:1px solid var(--line)}
+.day{min-height:92px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:4px 5px;display:flex;flex-direction:column;gap:3px}
+.day:nth-child(7n){border-right:none}
+.num{font-size:11px;color:var(--muted)}.today .num{color:#fff;background:var(--acc);border-radius:9px;padding:0 6px;align-self:flex-start}
+.out{color:var(--line2)}
+.ev{border-radius:6px;padding:3px 5px;font-size:11px;line-height:1.3;background:var(--accbg);color:var(--acc)}
+.ev.long{background:var(--longbg);color:var(--long)}
+.ev .t{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf{display:inline-flex;gap:2px;margin-top:2px}
+.p{font-size:9px;font-weight:700;border-radius:3px;padding:0 3px;border:1px solid currentColor;opacity:.85}
+.p.done{background:currentColor}.p.done b{color:var(--card)}
+.list{padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.list .ev{cursor:grab}
+.tree{padding:16px 14px;display:grid;grid-template-columns:240px 40px minmax(0,1fr);align-items:center}
+.node{border:1px solid var(--line2);border-radius:10px;padding:8px 10px;background:var(--soft);display:flex;flex-direction:column;gap:4px}
+.node.long{border-color:var(--long);background:var(--longbg)}
+.node .t{font-weight:600}
+.kids{display:flex;flex-direction:column;gap:8px;position:relative}
+.kid{display:grid;grid-template-columns:minmax(0,1fr) 110px 150px;gap:8px;align-items:center}
+.links{height:100%;position:relative}
+.links svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.state{font-size:11px;padding:1px 7px;border-radius:10px;justify-self:start}
+.posted{background:var(--okbg);color:var(--ok)}.planned{background:var(--accbg);color:var(--acc)}.none{background:var(--warnbg);color:var(--warn)}
+.pop{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 10px;padding:12px;align-items:center}
+.fld{border:1px solid var(--line2);border-radius:6px;padding:4px 7px;background:var(--soft)}
+.tick{display:inline-flex;align-items:center;gap:4px;margin-right:10px}
+@media (max-width:760px){.tree{grid-template-columns:1fr}.links{display:none}.kid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+
+<h2>1. Calendar, month view</h2>
+<p class="note">A new "Calendar" in the Library sidebar, next to Ideas. Each day shows what goes out: the long video in purple, Shorts in blue, and a mark for each platform (filled once it is posted). Drag a video to another day; drag one from "Not planned" onto a day to plan it. Click a video to open its tree (2) or its plan (3).</p>
+<div class="w">
+  <div class="bar"><b style="font-size:15px">October 2026</b><span class="btn">‹</span><span class="btn">Today</span><span class="btn">›</span>
+    <span style="flex:1"></span><span class="seg"><span class="on">Month</span><span>Week</span></span>
+    <span class="lab">Idea: All ▾</span></div>
+  <div class="scroll"><div class="side">
+    <div class="grid">
+      <div class="dh">Mon</div><div class="dh">Tue</div><div class="dh">Wed</div><div class="dh">Thu</div><div class="dh">Fri</div><div class="dh">Sat</div><div class="dh">Sun</div>
+      <div class="day"><span class="num">12</span></div>
+      <div class="day"><span class="num">13</span></div>
+      <div class="day"><span class="num">14</span></div>
+      <div class="day"><span class="num">15</span></div>
+      <div class="day"><span class="num">16</span></div>
+      <div class="day"><span class="num">17</span>
+        <div class="ev long"><span class="t">System design for designers (Part 1)</span>
+          <span class="pf"><span class="p done"><b>YT</b></span><span class="p">IG</span><span class="p">X</span><span class="p">in</span></span></div></div>
+      <div class="day today"><span class="num">18</span></div>
+      <div class="day"><span class="num">19</span>
+        <div class="ev"><span class="t">AI can build the UI. It can't do the flow</span>
+          <span class="pf"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span></span></div></div>
+      <div class="day"><span class="num">20</span></div>
+      <div class="day"><span class="num">21</span>
+        <div class="ev"><span class="t">Why designers should learn system design</span>
+          <span class="pf"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span></span></div></div>
+      <div class="day"><span class="num">22</span></div>
+      <div class="day"><span class="num">23</span>
+        <div class="ev"><span class="t">Design for AI agents, not only humans</span>
+          <span class="pf"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span></span></div>
+        <div class="ev"><span class="t">Design for AI agents (LinkedIn)</span><span class="pf"><span class="p">in</span></span></div></div>
+      <div class="day"><span class="num">24</span></div>
+      <div class="day"><span class="num">25</span>
+        <div class="ev"><span class="t">Why I moved from Supabase to Cloudflare</span>
+          <span class="pf"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span></span></div></div>
+      <div class="day"><span class="num">26</span></div>
+      <div class="day"><span class="num">27</span></div>
+      <div class="day"><span class="num">28</span></div>
+      <div class="day"><span class="num">29</span></div>
+      <div class="day"><span class="num">30</span></div>
+      <div class="day"><span class="num">31</span></div>
+      <div class="day"><span class="num out">1</span></div>
+    </div>
+    <div class="list">
+      <div class="lab">Not planned · 2</div>
+      <div class="ev"><span class="t">My team asks Claude for design references</span><span class="lab">AgentUX · Short</span></div>
+      <div class="ev"><span class="t">Think before you build a feature</span><span class="lab">AgentUX · Short</span></div>
+      <div class="lab" style="margin-top:8px">In production · 1</div>
+      <div class="ev long"><span class="t">System design, Part 2</span><span class="lab">Idea · no videos yet</span></div>
+    </div>
+  </div></div>
+</div>
+
+<h2>2. An idea's release tree</h2>
+<p class="note">On the idea's page (and from the calendar): the long video on the left, a branch to each of its Shorts, and for each one its day, its platforms and where it stands. The order follows the days.</p>
+<div class="w">
+  <div class="bar"><b style="font-size:15px">System design for designers: how I built my own Mobbin (Part 1)</b><span style="flex:1"></span><span class="btn">Plan all Shorts…</span><span class="btn">Open in Calendar</span></div>
+  <div class="tree">
+    <div class="node long"><span class="t">Long video · 11:54</span><span class="lab">Sat 17 Oct</span>
+      <span class="pf" style="color:var(--long)"><span class="p done"><b>YT</b></span><span class="p">IG</span><span class="p">X</span><span class="p">in</span></span>
+      <span class="state posted">Posted on YouTube</span></div>
+    <div class="links"><svg viewBox="0 0 40 300" preserveAspectRatio="none"><g fill="none" stroke="var(--line2)" stroke-width="1.5">
+      <path d="M0 150 C 20 150, 20 25, 40 25"/><path d="M0 150 C 20 150, 20 75, 40 75"/><path d="M0 150 C 20 150, 20 125, 40 125"/>
+      <path d="M0 150 C 20 150, 20 175, 40 175"/><path d="M0 150 C 20 150, 20 225, 40 225"/><path d="M0 150 C 20 150, 20 275, 40 275"/></g></svg></div>
+    <div class="kids">
+      <div class="kid"><div class="node"><span class="t">AI can build the UI. It can't do the flow</span><span class="lab">Short · 0:42</span></div><span class="lab">Mon 19 Oct</span><span class="pf" style="color:var(--acc)"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span> <span class="state planned">Planned</span></span></div>
+      <div class="kid"><div class="node"><span class="t">Why designers should learn system design</span><span class="lab">Short · 0:33</span></div><span class="lab">Wed 21 Oct</span><span class="pf" style="color:var(--acc)"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span> <span class="state planned">Planned</span></span></div>
+      <div class="kid"><div class="node"><span class="t">Design for AI agents, not only humans</span><span class="lab">Short · 0:58</span></div><span class="lab">Fri 23 Oct</span><span class="pf" style="color:var(--acc)"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span> <span class="state planned">Planned</span></span></div>
+      <div class="kid"><div class="node"><span class="t">Why I moved from Supabase to Cloudflare</span><span class="lab">Short · 0:59</span></div><span class="lab">Sun 25 Oct</span><span class="pf" style="color:var(--acc)"><span class="p">YT</span><span class="p">IG</span><span class="p">X</span><span class="p">in</span> <span class="state planned">Planned</span></span></div>
+      <div class="kid"><div class="node"><span class="t">My team asks Claude for design references</span><span class="lab">Short · 0:40</span></div><span class="lab">—</span><span class="state none">Not planned</span></div>
+      <div class="kid"><div class="node"><span class="t">Think before you build a feature</span><span class="lab">Short · 0:38</span></div><span class="lab">—</span><span class="state none">Not planned</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>3. Plan a video</h2>
+<p class="note">Click a video in the calendar or the tree. One day for all its platforms (the usual case); a platform can take its own day.</p>
+<div class="w" style="max-width:520px">
+  <div class="bar"><b>Design for AI agents, not only humans</b><span class="lab">AgentUX · Short</span></div>
+  <div class="pop">
+    <span class="lab">Day</span><span><span class="fld">Fri 23 Oct 2026</span> <span class="lab">at</span> <span class="fld">7:00 PM</span> <span class="lab">(time is optional)</span></span>
+    <span class="lab">Platforms</span><span><span class="tick">☑ YouTube</span><span class="tick">☑ Instagram</span><span class="tick">☑ X</span><span class="tick">☑ LinkedIn</span></span>
+    <span class="lab">Own day</span><span><span class="tick">LinkedIn</span><span class="fld">Fri 23 Oct</span> <span class="lab">(same day unless changed)</span></span>
+    <span class="lab">Posted</span><span><span class="fld" style="display:inline-block;min-width:220px">Paste a post's link</span> <span class="btn">Mark Posted</span></span>
+    <span></span><span><span class="btn">Not Planned</span> <span class="btn" style="background:var(--acc);color:#fff;border-color:transparent">Save</span></span>
+  </div>
+</div>
+
+<h2>4. Telling an agent the plan</h2>
+<p class="note">You say the plan in words; the agent writes it with one Library command per video, and you see it on the calendar. For example:</p>
+<div class="w"><pre style="margin:0;padding:12px;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap">"Part 1's Shorts: one every two days from Monday, all four platforms, 7 pm."
+
+planRelease {item: Part 1, video: "AI can build the UI…", day: 2026-10-19, clock: "19:00", platforms: [youtube, instagram, x, linkedin]}
+planRelease {item: Part 1, video: "Why designers should…", day: 2026-10-21, clock: "19:00", platforms: [youtube, instagram, x, linkedin]}
+…</pre></div>
+
+</main>
+</body>
+</html>

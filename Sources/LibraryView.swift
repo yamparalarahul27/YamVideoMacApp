@@ -28,7 +28,8 @@ struct ModuleSidebar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(module == .library ? "Your ideas, projects and published videos" : "The editor")
+                .help(module == .library ? "Your ideas, projects and published videos"
+                      : module == .calendar ? "When each video goes out, and where" : "The editor")
                 .accessibilityLabel(module.label)
                 .accessibilityAddTraits(model.module == module ? [.isSelected, .isButton] : .isButton)
             }
@@ -226,6 +227,7 @@ private struct IdeaEditor: View {
                 if item.project != nil || !item.videos.isEmpty {
                     InspectorSection("Project") { project }
                     ItemVideosSection(item: item)
+                    ReleaseTreeSection(item: item)
                     notesSection
                     InspectorSection("Links") { links }
                     InspectorSection("Images") { images }

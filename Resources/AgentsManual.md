@@ -284,6 +284,21 @@ copied.
 4. A video's export (`videos[].exports[].json`) has the title, description and tags it
    went up with. Read them when you write for a new post, to keep the owner's voice.
 
+### 4.11b The release calendar
+
+The owner plans when each video goes out and where, and tells you the plan in words
+("Part 1's Shorts: one every two days from Monday, all four platforms, 7 pm").
+
+1. Read the Library and find the idea and each video's `videos[].id`.
+2. For each video, `planRelease {ideaID, videoID, day: "2026-10-19", clock: "19:00",
+   platforms: [...]}`. Left out, `platforms` is all four (youtube, instagram, x,
+   linkedin) and `clock` is any time that day. Give `ownDays {"linkedin": "2026-10-20"}`
+   when one platform goes out on another day. Send one command per video in one
+   `libraryApply`, so it is one undo step.
+3. `unplanRelease` puts a video back in *Not planned*. Planning never posts anything:
+   the owner posts by hand and gives you the links for `addPost`.
+4. `library` shows each video's `plan`; the owner sees it on the Calendar (⌘4).
+
 ### 4.12 Style.md, project notes and Video.md
 
 - **Style.md** holds the channel's taste as rules, by kind of video. When the owner

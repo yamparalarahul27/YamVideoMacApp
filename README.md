@@ -68,11 +68,18 @@ palettes, preview/export parity, and preserving existing exports on cancellation
 
 ## Library: ideas and past videos
 
-The sidebar on the left switches between **Library** and **Studio** (⌘1, ⌘2). Studio is
+The sidebar on the left switches between **Library**, **Calendar** and **Studio** (⌘1, ⌘4, ⌘2). Studio is
 the editor. The Library keeps what you plan to make and what you made, apart from any project: each idea has a
 title, notes, a topic, links and images (dropped, pasted or chosen; they are copied in).
-The list groups items by stage (*Idea*, *In production*, *Ready*, *Posted*) and filters
-them by topic.
+The list groups items by stage (*Idea*, *In production*, *Ready*, *Scheduled*, *Posted*) and filters
+them by topic. The **Calendar** shows when each video goes out and where: a month or a
+week, the long video in purple, Shorts in blue, and a mark for each platform (YouTube,
+Instagram, X, LinkedIn), filled once it is posted. Drag a video to another day, or from
+*Not planned* onto a day; click one to choose its day, time, platforms (all four unless
+you untick one) and any platform's own day, or to mark it posted. An idea's page shows
+its **Release plan**: the long video with a branch to each Short, each with its day and
+platforms, and **Plan All Shorts…** spreads them one every few days. Nothing is ever
+posted for you.
 
 **Start a Project from This Idea…** saves a new project named after the idea, links it,
 and opens Studio to add the recordings. **Link the Open Project** links one you already

@@ -233,7 +233,7 @@ by `yamvideoctl`.
 | 1b | Past videos: scan a folder, the videos of an item, posts | Merged (PR #34) |
 | 1c | Style.md, project notes and Video.md | Merged (PR #35) |
 | 2 | Platforms and post kits | Rules checked, design and mock-ups agreed (section 14); not built |
-| 3 | Calendar | Not started |
+| 3 | Calendar | Calendar and release tree built (section 15); reminders later |
 | 4 | Results | Not started |
 | 5 | In-app AI | Not started |
 
@@ -563,7 +563,8 @@ them on their "App Store tip: let users delete everything" Short.
    1. Show the Post Kit sheet, Platforms page and Library row mock-ups again and get the
       owner's yes or changes.
    2. `PlatformRules` and the text and counting for each platform.
-   3. Library version 3: profiles, kit platforms on exports, a post's platform.
+   3. Library version 4 (version 3 is the calendar's plans): profiles, kit platforms on
+      exports, a post's platform.
    4. The Platforms page and module.
    5. Project version 16: `PostKit` on the long video and each Short, and `setPostKit`.
    6. The Publish sheet in layout B, with the checks and previews.
@@ -580,3 +581,36 @@ them on their "App Store tip: let users delete everything" Short.
 5. **Still open from phases 1 to 1c:** hands-on clicks in the running app (typing, drag
    and drop, paste, the save panel), and the idea chip in Studio's toolbar, which only
    shows in the running app.
+
+## 15. Phase 3: the release calendar (2026-10-18)
+
+The owner asked for it ahead of phase 2: a calendar of what goes out when, and for each
+long video a tree of its Shorts, each with its day and the platforms it goes out on. "I
+will be telling you" the plan; mostly every platform on the same day. Mock-ups:
+`docs/prototypes/release-calendar.html`.
+
+**The owner's answers (2026-10-18).** Build both views. A plan is one day (and an
+optional time) for all of a video's platforms; a platform can be unticked or given its
+own day. New plans tick all four platforms. Reminders come later, with phase 4.
+
+**As built.**
+- `ReleasePlan` on each `VideoPiece` (Library version 3): `day` "yyyy-MM-dd" (a calendar
+  day, so it never moves with a time zone), `time` "HH:mm" or nil, `platforms`, and
+  `ownDays` {platform: day}. An item with a plan and no post is *Scheduled*.
+- The **Calendar** module (⌘4) between Library and Studio: month and week, from Monday;
+  each day lists its releases (long video purple, Shorts accent), with YT IG X in marks,
+  filled once a post on that platform is recorded. Drag to move (a platform with its own
+  day moves alone; dragged back to the video's day it joins the rest), drag from *Not
+  planned* to plan for all four, click for the plan editor (day, time, platforms, own
+  days, Mark Posted with a link). An idea filter shows one idea's videos.
+- The idea page's **Release plan**: the long video, a branch to each Short, each with its
+  day, marks or state; **Plan All Shorts…** spreads the unplanned Shorts one every N days.
+- Every change is a Library `putVideo`, so it undoes with the Library (⌘Z on the Calendar).
+- Agents: `planRelease` (`day`, `clock`, `platforms`, `ownDays`) and `unplanRelease`; the
+  plan shows in `library` state. `clock`, not `time`: project commands decode `time` as a
+  number from the same request line.
+- `./test.sh calendar`.
+
+**Later.** Reminders (macOS notifications on the day), the check-in reminders of phase 4,
+and post kits (phase 2) opening from a release.
+

@@ -149,6 +149,7 @@ struct YamVideoApp: App {
             CommandMenu("Go") {
                 Button("Library") { model.showModule(.library) }.keyboardShortcut("1")
                 Button("Studio") { model.showModule(.studio) }.keyboardShortcut("2")
+                Button("Calendar") { model.showModule(.calendar) }.keyboardShortcut("4")
                 Divider()
                 Button("Style…") { model.showingStyle = true }.keyboardShortcut("3")
             }

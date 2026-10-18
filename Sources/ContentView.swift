@@ -16,6 +16,7 @@ struct ContentView: View {
                 Divider()
                 switch model.module {
                 case .library: LibraryPage()
+                case .calendar: CalendarView()
                 case .studio: studio
                 }
             }
@@ -26,7 +27,7 @@ struct ContentView: View {
         .frame(minWidth: 1140, minHeight: 800)
         .toolbar {
             switch model.module {
-            case .library: libraryToolbar
+            case .library, .calendar: libraryToolbar
             case .studio: studioToolbar
             }
         }
