@@ -385,6 +385,15 @@ extension AgentCatalog {
         library("removePost", "Take a post off a video.", [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id."),
                  field("link", "string", "The post to remove. Left out: all of them.", required: false)],
                 #"{"type": "removePost", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003"}"#)
+        library("planRelease", "Plan when a video (the long video or a Short) goes out and where, as the owner tells you: one day, an optional time, the platforms (all four unless the owner says fewer), and a platform's own day when one goes out on another day. It replaces the video's plan and shows on the owner's Calendar. Planning never posts anything.",
+                [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id."),
+                 field("day", "string", "The day it goes out, as yyyy-MM-dd."),
+                 field("clock", "string", "The time of day, 24-hour HH:mm; left out, any time that day.", required: false),
+                 field("platforms", "string[]", "Of youtube, instagram, x, linkedin. Left out: all four.", required: false),
+                 field("ownDays", "object", "A platform that goes out on another day: {platform: yyyy-MM-dd}.", required: false)],
+                #"{"type": "planRelease", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003", "day": "2026-10-19", "clock": "19:00", "platforms": ["youtube", "instagram", "x", "linkedin"]}"#)
+        library("unplanRelease", "Take a video's plan away; it waits in the Calendar's Not planned list.", [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id.")],
+                #"{"type": "unplanRelease", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003"}"#)
 
         let session = [field("sessionID", "uuid", "From sessions or state.", required: false),
                        field("projectID", "uuid", "From sessions or state.", required: false)]

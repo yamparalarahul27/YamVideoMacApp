@@ -57,10 +57,12 @@ xcrun swiftc \
 	"$ROOT/Sources/GraphicsOverlay.swift" \
 	"$ROOT/Sources/GraphicsPlacement.swift" \
 	"$ROOT/Sources/Library.swift" \
+	"$ROOT/Sources/ReleaseCalendar.swift" \
 	"$ROOT/Sources/LibraryEditing.swift" \
 	"$ROOT/Sources/LibraryAgents.swift" \
 	"$ROOT/Sources/LibraryScan.swift" \
 	"$ROOT/Sources/LibraryVideos.swift" \
+	"$ROOT/Sources/CalendarEditing.swift" \
 	"$ROOT/Sources/Style.swift" \
 	"$ROOT/Sources/ProjectNotes.swift" \
 	"$ROOT/Sources/AppModel.swift" \

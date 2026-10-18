@@ -7,24 +7,28 @@ import UniformTypeIdentifiers
 // project made from it. See Library.swift for the data and its rules.
 
 /// The parts of the window, in the sidebar. The Library holds ideas, projects and
-/// published videos; Studio is the editor. Later phases add Calendar, Results and
-/// Platforms.
+/// published videos; the Calendar shows when each goes out, and where; Studio is the
+/// editor. Later phases add Results and Platforms.
 enum AppModule: String, CaseIterable, Identifiable {
-    case library, studio
+    case library, calendar, studio
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .library: return "Library"
+        case .calendar: return "Calendar"
         case .studio: return "Studio"
         }
     }
     var systemImage: String {
         switch self {
         case .library: return "books.vertical"
+        case .calendar: return "calendar"
         case .studio: return "film"
         }
     }
+    /// The Library and the Calendar edit the Library, with its own undo.
+    var editsLibrary: Bool { self != .studio }
 }
 
 /// One Library undo step: the ideas as they were before it, and who made it.
@@ -295,10 +299,10 @@ extension AppModel {
 
     // MARK: The Edit menu, whichever module is showing
 
-    var menuUndoTitle: String { module == .library ? libraryUndoTitle : undoTitle }
-    var menuRedoTitle: String { module == .library ? libraryRedoTitle : redoTitle }
-    var canUndoInModule: Bool { module == .library ? !libraryUndoEntries.isEmpty : !undoEntries.isEmpty && !isConverting }
-    var canRedoInModule: Bool { module == .library ? !libraryRedoEntries.isEmpty : !redoEntries.isEmpty && !isConverting }
+    var menuUndoTitle: String { module.editsLibrary ? libraryUndoTitle : undoTitle }
+    var menuRedoTitle: String { module.editsLibrary ? libraryRedoTitle : redoTitle }
+    var canUndoInModule: Bool { module.editsLibrary ? !libraryUndoEntries.isEmpty : !undoEntries.isEmpty && !isConverting }
+    var canRedoInModule: Bool { module.editsLibrary ? !libraryRedoEntries.isEmpty : !redoEntries.isEmpty && !isConverting }
 
     // MARK: The owner's actions
 

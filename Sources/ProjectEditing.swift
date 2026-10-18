@@ -206,7 +206,7 @@ extension AppModel {
            module != .library || text.undoManager?.canUndo == true {
             text.undoManager?.undo(); return
         }
-        if module == .library { libraryUndo(); return }
+        if module.editsLibrary { libraryUndo(); return }
         undo()
     }
 
@@ -215,7 +215,7 @@ extension AppModel {
            module != .library || text.undoManager?.canRedo == true {
             text.undoManager?.redo(); return
         }
-        if module == .library { libraryRedo(); return }
+        if module.editsLibrary { libraryRedo(); return }
         redo()
     }
 

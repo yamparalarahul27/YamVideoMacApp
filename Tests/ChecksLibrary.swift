@@ -341,7 +341,7 @@ func exportFile(_ folder: URL, _ name: String, _ object: [String: Any]) throws -
     older.version = 1
     for index in older.items.indices { older.items[index].videos = [] }
     let reread = try Library.decode(older.encoded())
-    check(reread.version == Library.currentVersion && reread.items.count == older.items.count, "a version 1 Library reads as version 2")
+    check(reread.version == Library.currentVersion && reread.items.count == older.items.count, "a version 1 Library reads as the current version")
 
     let agentModel = AppModel(recoveryURL: nil)
     agentModel.loadLibrary(from: scratch.appendingPathComponent("past-agent-library", isDirectory: true))
