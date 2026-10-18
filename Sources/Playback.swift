@@ -249,13 +249,26 @@ final class PlaybackController: ObservableObject {
         item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original, short: short)
         item.audioTimePitchAlgorithm = .spectral
         let mix = AVMutableAudioMix()
+        let joints = clip.timeline.audioJoints
         mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
             let parameters = AVMutableAudioMixInputParameters(track: track)
             parameters.audioTimePitchAlgorithm = .spectral
+            // The recording's sound fades out and in at each cut, as the export does.
+            if track.trackID == audio?.trackID { Self.fadeJoints(joints, in: parameters) }
             return parameters
         }
         item.audioMix = mix
         return item
+    }
+
+    /// Volume ramps for the fade out and in at each cut, at edited times from `offset`.
+    static func fadeJoints(_ joints: [(time: Double, fade: Double)], offset: Double = 0, in parameters: AVMutableAudioMixInputParameters) {
+        for joint in joints where joint.fade > 0 {
+            let at = CMTime(seconds: offset + joint.time, preferredTimescale: 600_000)
+            let length = CMTime(seconds: joint.fade, preferredTimescale: 600_000)
+            parameters.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0, timeRange: CMTimeRange(start: at - length, duration: length))
+            parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1, timeRange: CMTimeRange(start: at, duration: length))
+        }
     }
 
     /// Everything drawn on top of the assembled sections. A colour stage that cannot be

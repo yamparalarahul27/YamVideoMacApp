@@ -96,6 +96,8 @@ extension PlaybackController {
         let composition = AVMutableComposition()
         var instructions: [MovieInstruction] = []
         var position = CMTime.zero
+        /// Each recording's audio track: where it starts in the movie and where its sound is cut.
+        var joints: [CMPersistentTrackID: (offset: Double, joints: [(time: Double, fade: Double)])] = [:]
         for clip in plan.clips {
             try Task.checkCancellation()
             let source = AVURLAsset(url: clip.url)
@@ -109,6 +111,7 @@ extension PlaybackController {
                 ? composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) : nil
             let audioRange = try await sourceAudio?.load(.timeRange)
             let beginning = position
+            if let audio { joints[audio.trackID] = (beginning.seconds, clip.timeline.audioJoints) }
             for segment in clip.timeline.segments {
                 let range = CMTimeRange(start: CMTime(seconds: segment.start, preferredTimescale: 600000),
                                         duration: CMTime(seconds: segment.sourceDuration, preferredTimescale: 600000))
@@ -152,6 +155,10 @@ extension PlaybackController {
         mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
             let parameters = AVMutableAudioMixInputParameters(track: track)
             parameters.audioTimePitchAlgorithm = .spectral
+            // Each recording's sound fades out and in at its cuts, as its export does.
+            if let clipJoints = joints[track.trackID] {
+                PlaybackController.fadeJoints(clipJoints.joints, offset: clipJoints.offset, in: parameters)
+            }
             return parameters
         }
         item.audioMix = mix
