@@ -635,7 +635,9 @@ from docs/plans/graphics-track.md".
   words ("I think we, I think we"), and a broken-off word ("wh-").
 - **Cuts** (`CutPlanner`): quiet stretches and stumbles that touch become one cut, so
   "videos. [pause] Um, [pause] the" loses the pause, the um and the pause after it in one
-  go. Where a cut meets quiet, the rule's padding stays (0.11 s each side for Tight);
+  go. Where a cut meets quiet, the rule's padding stays (0.11 s each side for Tight;
+  since 2026-10-18 0.20 s after a full stop and 0.15 s after a comma, from the
+  transcript, and every cut's sound fades out and in over 12 ms);
   where it meets speech it ends at the quietest 50 ms in the 0.3 s before the next word,
   the one nearest 0.08 s before whisper's time, because those times run late. Without
   stumbles it is exactly the silence review's cut list (the review now uses it). Every cut

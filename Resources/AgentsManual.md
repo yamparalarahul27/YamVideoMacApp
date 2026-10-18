@@ -72,6 +72,8 @@ edit, and each edit becomes one undo step with your name on it.
    loudness.
 2. Run `yamvideoctl autoedit --clip ID`. It transcribes if necessary, cuts pauses (and
    stumbles for the tight style), and sets captions and loudness in one undo step.
+   Tight keeps a longer breath where the transcript ends a sentence (0.40 s) or a
+   clause (0.30 s), so transcribe before you cut. Every cut's sound fades over 12 ms.
    With the review style, it cuts nothing and gives the proposed cuts to show the owner.
 3. If whisper is not on the Mac, transcribe another way and use `importTranscript` with
    `{model, language, words: [{text, start, end}]}` in source seconds.

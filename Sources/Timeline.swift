@@ -27,6 +27,31 @@ struct ClipTimeline: Equatable {
     var segments: [TimelineSegment]
     var duration: Double { segments.reduce(0) { $0 + $1.duration } }
 
+    /// How long the sound fades out before a cut and back in after it. A hard cut joins two
+    /// waves wherever they are, so it clicks, and the room's hum steps up or down with it;
+    /// 12 ms is too short to hear as a fade.
+    static let jointFade = 0.012
+
+    /// Whether the sound is cut between section `index - 1` and section `index`: the source
+    /// jumps there. A section split where nothing was taken out plays on as one.
+    static func cut(before index: Int, in segments: [TimelineSegment]) -> Bool {
+        index > 0 && index < segments.count && abs(segments[index - 1].end - segments[index].start) > 0.0005
+    }
+
+    /// The edited times where the sound is cut, each with its fade's length: at most a
+    /// quarter of the shorter section beside it.
+    var audioJoints: [(time: Double, fade: Double)] {
+        var joints: [(time: Double, fade: Double)] = []
+        var time = 0.0
+        for index in segments.indices {
+            if Self.cut(before: index, in: segments) {
+                joints.append((time, min(Self.jointFade, segments[index - 1].duration / 4, segments[index].duration / 4)))
+            }
+            time += segments[index].duration
+        }
+        return joints
+    }
+
     func offset(of id: UUID) -> Double {
         var time = 0.0
         for segment in segments {

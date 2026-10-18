@@ -220,9 +220,11 @@ struct SilenceReviewView: View {
     }
     private func update() {
         error = nil
-        cuts = CutPlanner.cuts(levels: overview, timeline: clip.timeline, fps: clip.info!.fps,
-                               rule: PauseRule(threshold: threshold, minimum: minimum, padding: padding),
-                               stumbles: cuttingStumbles ? stumbles : [])
+        // The sliders change the pause rule; its longer breaths after commas and sentences stay.
+        var rule = initialRule
+        rule.threshold = threshold; rule.minimum = minimum; rule.padding = padding
+        cuts = CutPlanner.cuts(levels: overview, timeline: clip.timeline, fps: clip.info!.fps, rule: rule,
+                               stumbles: cuttingStumbles ? stumbles : [], words: clip.transcript?.words ?? [])
     }
     private func apply() {
         if var plan {

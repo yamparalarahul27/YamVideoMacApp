@@ -853,6 +853,18 @@ enum FFmpeg {
         let rate = parseRate(fpsExpression) ?? 30
         var elapsed = 0.0
         var previousFrames = 0
+        // A short fade out and in where the sound is cut, so a joint never clicks.
+        func fades(_ i: Int, _ duration: Double) -> String {
+            var chain = ""
+            if ClipTimeline.cut(before: i, in: segments) {
+                chain += ",afade=t=in:d=\(num(min(ClipTimeline.jointFade, duration / 4, segments[i - 1].duration / 4)))"
+            }
+            if ClipTimeline.cut(before: i + 1, in: segments) {
+                let fade = min(ClipTimeline.jointFade, duration / 4, segments[i + 1].duration / 4)
+                chain += ",afade=t=out:st=\(num(max(0, duration - fade))):d=\(num(fade))"
+            }
+            return chain
+        }
         for (i, segment) in segments.enumerated() {
             // Round cumulative boundaries, not each duration independently. Otherwise
             // dozens of fractional-frame speed edits can accumulate noticeable drift.
@@ -872,7 +884,8 @@ enum FFmpeg {
                 parts.append("[sv\(i)]trim=start=\(num(max(0, from - 0.25 / rate))),setpts=PTS-STARTPTS,"
                              + "tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames)[tv\(i)]")
                 if audio {
-                    parts.append("[sa\(i)]atrim=start=\(String(format: "%.6f", from)):duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS[ta\(i)]")
+                    parts.append("[sa\(i)]atrim=start=\(String(format: "%.6f", from)):duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS"
+                                 + fades(i, outputDuration) + "[ta\(i)]")
                 }
                 continue
             }
@@ -880,7 +893,7 @@ enum FFmpeg {
             parts.append("[sv\(i)]trim=start=\(num(segment.start)):end=\(num(segment.end)),\(retime)[tv\(i)]")
             if audio {
                 let tempo = "," + tempoFilters(segment.speed) + ",apad,atrim=duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS"
-                parts.append("[sa\(i)]atrim=start=\(num(segment.start)):end=\(num(segment.end)),asetpts=PTS-STARTPTS\(tempo)[ta\(i)]")
+                parts.append("[sa\(i)]atrim=start=\(num(segment.start)):end=\(num(segment.end)),asetpts=PTS-STARTPTS\(tempo)" + fades(i, outputDuration) + "[ta\(i)]")
             }
         }
         let inputs = segments.indices.map { audio ? "[tv\($0)][ta\($0)]" : "[tv\($0)]" }.joined()

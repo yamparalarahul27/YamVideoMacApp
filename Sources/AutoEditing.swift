@@ -111,7 +111,8 @@ extension AppModel {
             let levels = try await AudioAnalyzer.analyze(clip.url)
             overview = levels
             if style.cutsStumbles, let transcript = clip.transcript { stumbles = StumbleFinder.stumbles(in: transcript.words) }
-            cuts = CutPlanner.cuts(levels: levels, timeline: clip.timeline, fps: info.fps, rule: style.pauses, stumbles: stumbles)
+            cuts = CutPlanner.cuts(levels: levels, timeline: clip.timeline, fps: info.fps, rule: style.pauses, stumbles: stumbles,
+                                   words: clip.transcript?.words ?? [])
         }
         var settings = committedProject.settings
         settings.captions = options.captions
