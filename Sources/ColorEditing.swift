@@ -74,8 +74,8 @@ extension AppModel {
                                                       contrast: adjustments.contrast, saturation: adjustments.saturation)
         let key = "colour-\(item.id)"
         if live || isGestureOpen(key) {
-            if let error = updateGesture(key, label: "Adjust Colour", [command]) { statusMessage = error.message }
-            if live { refreshPreview(); return }
+            if let error = updateGesture(key, label: "Adjust Colour", [command], keepPreview: true) { statusMessage = error.message }
+            if live { if showPlayback { refreshComposedPreview() } else { refreshPreview() }; return }
             endGesture(); return
         }
         guard adjustments != item.color.adjustments else { return }

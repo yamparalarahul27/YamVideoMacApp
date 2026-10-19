@@ -1016,18 +1016,27 @@ footer ul { margin: 0; padding-left: 18px; }
       "id": "p1",
       "label": "P1 · Timeline",
       "date": "19 Oct 2026",
-      "ref": "PR #49, branch studio-timeline",
+      "ref": "PR #49, merged",
       "img": "img/step1-editor.jpg",
       "note": "Tool bar, row headers, folded rows, filmstrip, badges and scissors on the playhead.",
       "alt": "YamVideo Studio after step 1: the timeline has a tool bar, a header for each row, a filmstrip in each section and badges."
+    },
+    {
+      "id": "p2",
+      "label": "P2 · Player",
+      "date": "19 Oct 2026",
+      "ref": "branch studio-player",
+      "img": "img/step2-editor.jpg",
+      "note": "One player with a bar under the picture, and the crop in the player with Apply.",
+      "alt": "YamVideo Studio after step 2: one player with a player bar under the picture, and no mode controls above it."
     }
   ],
   "steps": [
     {
       "id": "P1",
       "title": "Timeline tool bar, track headers and split on the playhead",
-      "status": "review",
-      "date": "19 Oct 2026",
+      "status": "shipped",
+      "date": "19 Oct 2026, merged",
       "branch": "studio-timeline",
       "pr": "https://github.com/yamparalarahul27/YamVideoMacApp/pull/49",
       "done": [
@@ -1045,24 +1054,61 @@ footer ul { margin: 0; padding-left: 18px; }
         "The Crop tool opens Edit frame until the player crops in place (P2).",
         "The tall linked Audio track and the Captions track come in P4."
       ],
-      "before": { "img": "img/now-timeline.jpg", "caption": "Before: lanes with no names, file names on sections, a thin waveform." },
-      "after": { "img": "img/step1-timeline.jpg", "caption": "After P1: tool bar, row headers, folded rows, filmstrip and badges." }
+      "before": {
+        "img": "img/now-timeline.jpg",
+        "caption": "Before: lanes with no names, file names on sections, a thin waveform."
+      },
+      "after": {
+        "img": "img/step1-timeline.jpg",
+        "caption": "After P1: tool bar, row headers, folded rows, filmstrip and badges."
+      }
     },
     {
       "id": "P2",
       "title": "One player with a player bar, and Crop in the player",
-      "status": "next",
-      "done": [],
+      "status": "review",
+      "date": "19 Oct 2026",
+      "branch": "studio-player",
+      "pr": null,
+      "done": [
+        "One player: Edit frame and Preview are one picture that plays the edit. The Crop, Blur, Zoom and Effects modes are gone.",
+        "A player bar under the picture: the time, frame back, Play, frame forward, Crop, Before/After, Video or Short, Safe zones and Snapshot. Aim shows when a zoom is selected.",
+        "Crop in the player: the whole frame with the crop box, ratio chips, the size in pixels, Reset, Cancel and Apply. Apply is one undo step.",
+        "Blur areas, aiming a zoom and the colour comparison open the frame in place, with a bar and Done.",
+        "Before/After shows the recording as it was, with the same cuts and no crop, zooms, blur, colour or graphics.",
+        "Edits keep the player up, and colour sliders show live in it.",
+        "Snapshot saves the frame under the playhead as a PNG.",
+        "Play and frame step moved from the timeline's tool bar to the player bar.",
+        "The snapshot tool now draws the player's picture, so the tracker shows real frames.",
+        "33 new checks (./test.sh player)."
+      ],
       "left": [
-        "Merge Edit frame and Preview into one player. Remove the Crop / Blur / Zoom / Effects modes.",
-        "A player bar: time, frame step, play, Crop, Before/After, 16:9 or 9:16, safe zones, snapshot.",
-        "Crop in the player with ratio chips, Reset, Cancel and Apply."
+        "A quality menu (Full, ½, ¼) and full screen are not built. They can come if playback is slow on long recordings.",
+        "Snapshot leaves out graphics, because they draw in their own layer."
+      ],
+      "before": {
+        "img": "img/now-player.jpg",
+        "caption": "Before: mode and viewer controls above the picture, playback above the timeline."
+      },
+      "after": {
+        "img": "img/step2-player.jpg",
+        "caption": "After P2: one player with the bar under it."
+      },
+      "more": [
+        {
+          "img": "img/step2-crop.jpg",
+          "caption": "P2 crop: the whole frame with the crop box, the ratios and the size, then Reset, Cancel or Apply."
+        },
+        {
+          "img": "img/step2-zoom.jpg",
+          "caption": "P2 zoom aim: the frame shows what stays in view at the zoom's peak, with Done."
+        }
       ]
     },
     {
       "id": "P3",
       "title": "Inspector tabs, switches, resets and the Changes list",
-      "status": "planned",
+      "status": "next",
       "done": [],
       "left": [
         "Video, Audio, Speed and Colour tabs for a section.",
@@ -1082,14 +1128,46 @@ footer ul { margin: 0; padding-left: 18px; }
       ]
     }
   ],
-  "areas": { "a-layout": "P2", "a-timeline": "P1", "a-crop": "P2", "a-changes": "P3", "a-player": "P2" },
+  "areas": {
+    "a-layout": "P2",
+    "a-timeline": "P1",
+    "a-crop": "P2",
+    "a-changes": "P3",
+    "a-player": "P2"
+  },
   "decisions": [
-    ["19 Oct 2026", "Proceed with the proposal, one step per PR, timeline first."],
-    ["19 Oct 2026", "Crop in the player, for the whole recording, as now."],
-    ["19 Oct 2026", "Blur areas stay for the whole video."],
-    ["19 Oct 2026", "The on/off switch for each change is saved in the project (P3)."],
-    ["19 Oct 2026", "The Media panel comes after the timeline work (P4)."],
-    ["19 Oct 2026", "The page is a local file in the repo. The claude.ai copy is not used."]
+    [
+      "19 Oct 2026",
+      "Proceed with the proposal, one step per PR, timeline first."
+    ],
+    [
+      "19 Oct 2026",
+      "Crop in the player, for the whole recording, as now."
+    ],
+    [
+      "19 Oct 2026",
+      "Blur areas stay for the whole video."
+    ],
+    [
+      "19 Oct 2026",
+      "The on/off switch for each change is saved in the project (P3)."
+    ],
+    [
+      "19 Oct 2026",
+      "The Media panel comes after the timeline work (P4)."
+    ],
+    [
+      "19 Oct 2026",
+      "The page is a local file in the repo. The claude.ai copy is not used."
+    ],
+    [
+      "19 Oct 2026",
+      "Step 1 merged (PR #49). Step 2 starts: one player and crop in the player."
+    ],
+    [
+      "19 Oct 2026",
+      "The shape switch says Video or Short, because the crop can be any ratio, not only 16:9."
+    ]
   ]
 }
 </script>
@@ -1893,7 +1971,8 @@ function renderTracker() {
     const list = (title, items) => items && items.length ? `<div><h4>${title}</h4><ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '';
     const pics = st.before && st.after ? `<div class="ba">
         <figure><img src="${esc(st.before.img)}" alt="${esc(st.before.caption)}" loading="lazy"><figcaption>${esc(st.before.caption)}</figcaption></figure>
-        <figure><img src="${esc(st.after.img)}" alt="${esc(st.after.caption)}" loading="lazy"><figcaption>${esc(st.after.caption)}</figcaption></figure></div>` : '';
+        <figure><img src="${esc(st.after.img)}" alt="${esc(st.after.caption)}" loading="lazy"><figcaption>${esc(st.after.caption)}</figcaption></figure>
+        ${(st.more || []).map(m => `<figure><img src="${esc(m.img)}" alt="${esc(m.caption)}" loading="lazy"><figcaption>${esc(m.caption)}</figcaption></figure>`).join('')}</div>` : '';
     return `<li class="step ${st.status}"><div class="step-head"><span class="id">${st.id}</span><h3>${esc(st.title)}</h3><span class="pill ${st.status}">${STATUS[st.status]}</span></div>
       ${meta ? `<div class="step-meta">${meta}</div>` : ''}
       <div class="step-body">${list(st.status === 'shipped' || st.status === 'review' ? 'Done' : 'Plan', st.done.length ? st.done : st.left)}${st.done.length ? list('Left for later steps', st.left) : ''}${pics ? `<div style="grid-column:1/-1">${pics}</div>` : ''}</div></li>`;

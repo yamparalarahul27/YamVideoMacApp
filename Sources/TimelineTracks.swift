@@ -154,17 +154,9 @@ extension AppModel {
         }
     }
 
-    /// The Crop tool. Until the player crops in place, it opens the crop on the edit frame.
-    func beginCrop() {
-        guard !isMovieMode, selectedItem?.info != nil else { return }
-        editorMode = .crop
-        setViewer(.frame)
-    }
-
     /// The Zoom tool: a zoom at the playhead, aimed at the middle of the frame.
     func addZoomFromTimeline() {
         guard !timelineTracks.locked.contains(.zoom) else { statusMessage = "Zoom is locked. Unlock it to add a zoom."; return }
-        editorMode = .zoom
         addZoomAtCentre()
     }
 }
