@@ -332,6 +332,16 @@ import Foundation
     check(frostSaved == frostProject && frostSaved.version >= 17 && (try? frostSaved.validate()) != nil && (try? frostAsSixteen.validate()) == nil,
           "the frost and the picture size survive a version 17 round trip, and a version 16 file with them is refused")
 
+    thumbnailer.selection = subjectItem.id
+    thumbnailer.showModule(.library)
+    check(thumbnailer.openThumbnailMaker() && thumbnailer.showingThumbnailMaker && thumbnailer.module == .studio,
+          "Make Thumbnail… opens the maker for the selected recording, from any page, on the Studio page")
+    thumbnailer.showingThumbnailMaker = false
+    thumbnailer.setMovieMode(true)
+    check(!thumbnailer.canMakeThumbnail && !thumbnailer.openThumbnailMaker() && !thumbnailer.showingThumbnailMaker
+              && thumbnailer.statusMessage == "Make Thumbnail works in Recording mode.",
+          "in Movie mode it does not open, and says why")
+    thumbnailer.setMovieMode(false)
     var designPatch = address(thumbnailer)
     designPatch["method"] = "apply"; designPatch["requestID"] = "design-1"; designPatch["client"] = "Claude"
     designPatch["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString, "publish": ["design": ["tag": "New", "zoom": 1.2, "place": "clear"]]]]

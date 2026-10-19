@@ -195,6 +195,9 @@ struct YamVideoApp: App {
                 Button("Auto Edit…") { model.showingAutoEdit = true }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 }.disabled(model.module != .studio || model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
+                Button("Make Thumbnail…") { model.openThumbnailMaker() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(!model.canMakeThumbnail)
             }
             CommandGroup(after: .newItem) {
                 Button("Add Videos…") { model.promptForFiles() }

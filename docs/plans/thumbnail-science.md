@@ -32,6 +32,9 @@ What the owner sees:
   finding is one short line (for example "Title too small: 8.9 pt in the search list");
   the full advice shows on hover, and under the line after a click. The counts at the top
   are icons with numbers. The check runs again about 1 s after each change.
+- **Make Thumbnail…** (⇧⌘T) in the Timeline menu opens the maker without the Publish
+  window, from any page (owner, 19 Oct 2026: the Publish route was hard to find, and the
+  Library and Calendar pages have no Publish button).
 - The maker's labels are short (owner, 19 Oct 2026: no long button text): Save, Phone,
   Highlight, Cut-out, Outline, Place: Clear, Title side: Auto, Picture. Long help text
   moved into tooltips.

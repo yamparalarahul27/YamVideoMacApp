@@ -77,6 +77,8 @@ final class AppModel: ObservableObject {
     /// The project's auto edit answers; nil until saved once. See `autoEditOptions`.
     @Published var autoEdit: AutoEditOptions?
     @Published var showingAutoEdit = false
+    /// The thumbnail maker, opened from the menu (Make Thumbnail…, ⇧⌘T).
+    @Published var showingThumbnailMaker = false
     /// What the owner's auto edit is doing while it runs: transcribing, finding cuts.
     @Published var autoEditRun: AutoEditRun?
     /// Cuts waiting for the owner when the cut style is Review each cut.

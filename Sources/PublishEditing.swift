@@ -143,6 +143,22 @@ enum YouTubeExport {
 extension AppModel {
     var selectedPublish: PublishInfo { selectedItem?.publish ?? PublishInfo() }
 
+    /// A loaded recording is selected, in Recording mode, and nothing is exporting.
+    var canMakeThumbnail: Bool { selectedItem?.info != nil && !isMovieMode && !isConverting }
+
+    /// Opens the thumbnail maker for the selected recording without the Publish window
+    /// (Make Thumbnail…, ⇧⌘T), on the Studio page. False when it cannot open.
+    @discardableResult
+    func openThumbnailMaker() -> Bool {
+        guard canMakeThumbnail else {
+            statusMessage = isMovieMode ? "Make Thumbnail works in Recording mode." : "Select a recording to make its thumbnail."
+            return false
+        }
+        showModule(.studio)
+        showingThumbnailMaker = true
+        return true
+    }
+
     /// Changes what YouTube gets for the selected recording, as one undo step.
     func setPublish(label: String = "Publish Details", _ change: (inout PublishInfo) -> Void) {
         guard let index = selectedIndex, items[index].info != nil else { return }
