@@ -2,8 +2,9 @@
 
 **Status (2026-10-19):** Part 1 (phone check) is built and open as
 [PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54). Part 2
-(information gap) is built on top of it, in its own PR. Parts 3 and 4 are planned. The
-owner asked for part 2 after part 1.
+(information gap) is built on top of it, in
+[PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55). Parts 3 and 4 are
+planned. The owner asked for part 2 after part 1.
 **Source:** the backlog item of 2026-10-18, from "Science Behind Thumbnails That Actually
 Work." by HimanshuG (https://youtu.be/9_7q6vUaRsM). Its rules: a viewer decides in 0.5 s,
 a thumbnail opens a question the title does not answer, the eye goes to the face first and
