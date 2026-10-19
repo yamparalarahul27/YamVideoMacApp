@@ -1,10 +1,11 @@
 # Thumbnails: the science of a click
 
-**Status (2026-10-19):** Part 1 (phone check) is built and open as
-[PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54). Part 2
-(information gap) is built on top of it, in
-[PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55). Parts 3 and 4 are
-planned. The owner asked for part 2 after part 1.
+**Status (2026-10-19):** Part 1 (phone check,
+[PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54)) and part 2
+(information gap, [PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55))
+are merged. Part 3 (eye path) is built, in
+[PR #56](https://github.com/yamparalarahul27/YamVideoMacApp/pull/56). Part 4 is planned. The owner asked
+for each part after the one before it.
 **Source:** the backlog item of 2026-10-18, from "Science Behind Thumbnails That Actually
 Work." by HimanshuG (https://youtu.be/9_7q6vUaRsM). Its rules: a viewer decides in 0.5 s,
 a thumbnail opens a question the title does not answer, the eye goes to the face first and
@@ -111,12 +112,24 @@ designers" and "how I built my own", and adds ENGINEERING, Supabase, Claude and 
 
 ## Part 3: eye path
 
-- Show the eye path on the large preview as numbered marks: 1 the face, 2 the biggest
-  words, then the next words by size and contrast.
-- Warn when the important part (the highlighted words, or the words the owner marks with
-  asterisks) is not first or second on the path.
-- Agent command: the `check` result gets the path (an ordered list of boxes with what each
-  one is) and the warning.
+What the owner sees:
+- A third view above the check list: **Design | Eye path | Phone**. Eye path shows the
+  checked picture with a numbered mark just left of each stop (at its middle height, so
+  the words stay clear), joined by a dashed line in order. The mark of the coloured words is yellow. It shows 5 stops at
+  most. A tooltip on each mark names the stop. (The live Design preview stays clean.)
+- A weak finding when the coloured words are not 1st or 2nd, for example "Eye path:
+  “viewer” is 3rd"; the advice on hover says what comes first and what to change.
+
+The rules (`EyePath`, `Sources/ThumbnailEyePath.swift`):
+- The face is always 1st when it shows.
+- Then each run of words (the tag, plain title words, coloured words, each line in the
+  picture) by its pull: letter size × clarity × colour. Clarity is the contrast over
+  4.5:1, at most 1. Colour: 1.15 for accent words, 1.3 for a band of the accent (not the
+  tag). At the same pull, the larger box comes first.
+- The important part is the words between asterisks. With none, there is no warning.
+
+For agents: the `check` result gets `path` ([{step, kind, text, box}]) and the finding
+(kind `eyePath`, no sizes).
 
 Saved data: none.
 

@@ -45,8 +45,9 @@ func hostingViews(in view: NSView) -> [NSView] {
 }
 
 /// The thumbnail maker: the first render cuts the speaker out, the second shows it with
-/// the phone check, then the same in the Phone view. Its live preview is a web view, which this
-/// tool cannot capture in a sheet of its own; the phone views are pictures, so they show.
+/// the check, then the same in the Eye path and Phone views. Its live preview is a web
+/// view, which this tool cannot capture in a sheet of its own; the Eye path and Phone views
+/// are pictures, so they show.
 /// YAMVIDEO_SNAPSHOT_ONLY=thumbnail renders only these, after the Studio with Thumbnail
 /// under Studio in the left bar.
 @MainActor
@@ -61,16 +62,19 @@ func thumbnailMaker(_ model: AppModel, output: URL) async {
     publish.design = design
     made.publish = publish
     let size = CGSize(width: 1200, height: 720)
-    UserDefaults.standard.set(false, forKey: "thumbnailOnPhone")
+    UserDefaults.standard.set("design", forKey: "thumbnailPreview")
     await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
            to: output.appendingPathComponent("5h-thumbnail-maker.png"))
     await pump(1)
     await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
            to: output.appendingPathComponent("5h-thumbnail-maker.png"), settle: 12)
-    UserDefaults.standard.set(true, forKey: "thumbnailOnPhone")
+    UserDefaults.standard.set("eyePath", forKey: "thumbnailPreview")
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-eye-path.png"), settle: 12)
+    UserDefaults.standard.set("phone", forKey: "thumbnailPreview")
     await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
            to: output.appendingPathComponent("5h-thumbnail-on-phone.png"), settle: 12)
-    UserDefaults.standard.removeObject(forKey: "thumbnailOnPhone")
+    UserDefaults.standard.removeObject(forKey: "thumbnailPreview")
 }
 
 @MainActor

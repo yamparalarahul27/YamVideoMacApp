@@ -73,13 +73,14 @@ struct ThumbnailLayout: Codable, Equatable {
 /// The phone check of one design: what does not read on a phone in 0.5 s.
 struct PhoneCheck: Equatable {
     struct Finding: Codable, Equatable, Identifiable {
-        /// title: the thumbnail repeats the video's title (InformationGap).
-        enum Kind: String, Codable, CaseIterable { case textSize, words, contrast, face, title }
+        /// title: the thumbnail repeats the video's title (InformationGap). eyePath: the
+        /// important words are not first or second on the eye path (EyePath).
+        enum Kind: String, Codable, CaseIterable { case textSize, words, contrast, face, title, eyePath }
         /// fails: does not read in 0.5 s. weak: reads, but not at a glance.
         enum Level: String, Codable { case fails, weak }
         var kind: Kind
         var level: Level
-        /// Where it applies; empty for the title, which is the same at every size.
+        /// Where it applies; empty for the title and the eye path, the same at every size.
         var sizes: [PhoneSize]
         /// One short line, like "Title too small: 8.9 pt in the search list".
         var summary: String
@@ -97,6 +98,8 @@ struct PhoneCheck: Equatable {
     var face: CGRect?
     /// The lines Apple Vision read in the picture beside the title.
     var pictureWords: [String] = []
+    /// Where the eye goes, in order: the face, then the words by size, clarity and colour.
+    var path: [EyeStop] = []
 
     var reads: Bool { findings.isEmpty }
     var fails: Int { findings.filter { $0.level == .fails }.count }
@@ -215,10 +218,13 @@ struct PhoneCheck: Equatable {
                                     message: "No face found. A face draws the eye first: pick a frame with a clear face."))
         }
 
+        let path = EyePath.make(layout: layout, contrasts: contrasts, face: face)
+        if let finding = EyePath.finding(path) { findings.append(finding) }
+
         let order = Finding.Kind.allCases
         findings.sort { ($0.level == .fails ? 0 : 1, order.firstIndex(of: $0.kind)!) < ($1.level == .fails ? 0 : 1, order.firstIndex(of: $1.kind)!) }
         return PhoneCheck(findings: findings, words: count, titleSize: layout.titleSize, face: face,
-                          pictureWords: runs.filter { $0.kind == .picture }.map(\.text))
+                          pictureWords: runs.filter { $0.kind == .picture }.map(\.text), path: path)
     }
 
     /// The check with the information gap's finding in the list, worst first.
