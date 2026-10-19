@@ -107,6 +107,7 @@ enum YouTubeExport {
     /// so a cancelled export leaves no half-written video.
     static func run(_ item: VideoItem, info: MediaInfo, publish: PublishInfo, settings: ExportSettings, files: Files,
                     project: UUID? = nil, onProgress: @escaping @Sendable (Double) -> Void) async throws {
+        let item = item.effective
         if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }

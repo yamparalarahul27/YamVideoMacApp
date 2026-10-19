@@ -319,6 +319,11 @@ extension AgentCatalog {
             #"{"type": "updateScreenZoom", "clipID": "CLIP-ID", "zoomID": "ZOOM-ID", "level": 3}"#)
         add("removeScreenZoom", "screen", "Remove a screen zoom.", [clip, field("zoomID", "uuid", "A screen zoom's id.")],
             #"{"type": "removeScreenZoom", "clipID": "CLIP-ID", "zoomID": "ZOOM-ID"}"#)
+        // Changes
+        add("setChange", "changes", "Switch a change off or on, as the inspector's switch does. Off keeps it in the project but leaves it out of the player and every export; on brings it back. state.clips[].switchedOff lists what is off.",
+            [clip, field("change", "string", "The change.", values: SwitchableChange.allCases.map(\.rawValue)),
+             field("on", "boolean", "true brings it back; false switches it off.")],
+            #"{"type": "setChange", "clipID": "CLIP-ID", "change": "zooms", "on": false}"#)
         add("replaceScreenZooms", "screen", "Every screen zoom at once.",
             [clip, field("zooms", "array", "The zooms, each with " + zoomFields + "; they may not overlap.")],
             #"{"type": "replaceScreenZooms", "clipID": "CLIP-ID", "zooms": [{"start": 48.0, "hold": 3, "level": 2, "target": {"x": 1700, "y": 160}}]}"#)

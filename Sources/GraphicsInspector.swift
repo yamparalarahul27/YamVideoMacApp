@@ -127,7 +127,7 @@ struct GraphicsSection: View {
     private var style: GraphicsStyle { item.graphics?.style ?? GraphicsStyle() }
 
     var body: some View {
-        InspectorSection("Graphics") {
+        InspectorSection("Graphics", isOn: changeSwitch(.graphics, item, model)) {
             let count = item.graphics?.items.count ?? 0
             Text(count == 0
                  ? "None. Import a graphics file to add titles, cards and ink notes over the video."

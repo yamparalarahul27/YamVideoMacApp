@@ -60,6 +60,8 @@ final class AppModel: ObservableObject {
     @Published var renamingMarker = false
     /// What the inspector shows: whatever was selected last, or the recording.
     @Published var inspectorFocus: InspectorFocus = .recording
+    /// The inspector tab picked last; nil until one is picked.
+    @Published var inspectorTab: InspectorTab?
 
     let playback = PlaybackController()
     @Published var showPlayback = false
@@ -405,7 +407,7 @@ final class AppModel: ObservableObject {
 
     func refreshPreview() {
         previewTask?.cancel()
-        guard let item = selectedItem, let info = item.info, info.duration >= 0 else {
+        guard let item = selectedItem?.effective, let info = item.info, info.duration >= 0 else {
             previewImage = nil
             previewOriginalImage = nil
             previewIsLoading = false
@@ -868,7 +870,7 @@ final class AppModel: ObservableObject {
                 if Task.isCancelled { break }
                 guard let index = items.firstIndex(where: { $0.id == id }),
                       let info = items[index].info else { continue }
-                let item = items[index]
+                let item = items[index].effective
                 let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
                 let output = FFmpeg.outputURL(for: item.url, settings: exportSettings)
 

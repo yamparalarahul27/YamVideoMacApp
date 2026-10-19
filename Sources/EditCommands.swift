@@ -127,6 +127,9 @@ enum EditCommand: Equatable {
     case updateScreenZoom(clip: UUID, zoom: ZoomShot)
     case removeScreenZoom(clip: UUID, zoom: UUID)
     case replaceScreenZooms(clip: UUID, zooms: [ZoomShot])
+    /// The inspector's switch: off keeps the change but leaves it out of the player and
+    /// exports; on brings it back.
+    case setChange(clip: UUID, change: SwitchableChange, on: Bool)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -189,6 +192,7 @@ enum EditCommand: Equatable {
         case .updateScreenZoom: return "Adjust Screen Zoom"
         case .removeScreenZoom: return "Delete Screen Zoom"
         case .replaceScreenZooms: return "Edit Screen Zooms"
+        case .setChange(_, let change, let on): return "Switch \(change.label) \(on ? "On" : "Off")"
         }
     }
 }
@@ -720,6 +724,13 @@ enum ProjectReducer {
 
         case .replaceScreenZooms(let clip, let replacement):
             try editScreenZooms(clip, in: &outcome) { zooms in zooms = replacement }
+
+        case .setChange(let clip, let change, let on):
+            try editClip(clip, in: &outcome) { record, _ in
+                var off = Set(record.switchedOff ?? [])
+                if on { off.remove(change) } else { off.insert(change) }
+                record.switchedOff = off.isEmpty ? nil : off.sorted()
+            }
 
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()

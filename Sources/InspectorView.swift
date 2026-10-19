@@ -13,7 +13,11 @@ struct InspectorPane: View {
                     movieSummary
                 } else if let item = model.selectedItem, let info = item.info, let crop = item.crop {
                     selection(item: item, info: info)
-                    RecordingInspector(item: item, info: info, crop: crop)
+                    InspectorTabStrip()
+                    switch model.shownInspectorTab {
+                    case .speed: speed(item: item)
+                    case .video, .audio, .colour: RecordingInspector(item: item, info: info, crop: crop, tab: model.shownInspectorTab)
+                    }
                 } else {
                     Text("Select a recording to edit it. Its sections, zooms, blur areas and captions appear here.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -30,14 +34,7 @@ struct InspectorPane: View {
     private func selection(item: VideoItem, info: MediaInfo) -> some View {
         switch model.inspectorFocus {
         case .section:
-            if model.sectionSelection.count > 1 {
-                SectionsInspector(item: item, sections: model.sectionSelection.ordered(in: item.timeline))
-                Divider()
-            } else if let segment = model.selectedSegment,
-               let index = item.timeline.segments.firstIndex(where: { $0.id == segment.id }) {
-                SectionInspector(item: item, segment: segment, index: index)
-                Divider()
-            }
+            SectionSummary(item: item, sections: model.sectionSelection.ordered(in: item.timeline))
         case .zoom:
             if let shot = model.selectedShot {
                 ZoomInspector(item: item, shot: shot)
@@ -79,7 +76,21 @@ struct InspectorPane: View {
                 Divider()
             }
         case .recording:
-            EmptyView()
+            ChangesList(item: item, info: info)
+        }
+    }
+
+    /// The Speed tab: the selected section's speed, trims and order.
+    @ViewBuilder
+    private func speed(item: VideoItem) -> some View {
+        if model.sectionSelection.count > 1 {
+            SectionsInspector(item: item, sections: model.sectionSelection.ordered(in: item.timeline))
+        } else if let segment = model.selectedSegment,
+                  let index = item.timeline.segments.firstIndex(where: { $0.id == segment.id }) {
+            SectionInspector(item: item, segment: segment, index: index)
+        } else {
+            Text("Select a section on the timeline to change its speed.")
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -99,6 +110,11 @@ struct InspectorPane: View {
 /// A titled group in the inspector or the export sheet.
 struct InspectorSection<Content: View>: View {
     let title: String
+    /// The change's switch: off dims and locks the controls, as the change is out of the
+    /// video until it is on again.
+    var isOn: Binding<Bool>? = nil
+    var onReset: (() -> Void)? = nil
+    var resetHelp = "Reset"
     let content: Content
 
     init(_ title: String, @ViewBuilder content: () -> Content) {
@@ -106,15 +122,197 @@ struct InspectorSection<Content: View>: View {
         self.content = content()
     }
 
+    /// A section with Filmora's module header: a reset button and an on/off switch.
+    init(_ title: String, isOn: Binding<Bool>?, onReset: (() -> Void)? = nil, resetHelp: String = "Reset",
+         @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.isOn = isOn
+        self.onReset = onReset
+        self.resetHelp = resetHelp
+        self.content = content()
+    }
+
+    private var off: Bool { isOn?.wrappedValue == false }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
-                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 6) {
+                Text(title.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.6)
+                    .accessibilityAddTraits(.isHeader)
+                if off {
+                    Text("Off").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                }
+                Spacer(minLength: 0)
+                if let onReset {
+                    Button(action: onReset) { Image(systemName: "arrow.counterclockwise") }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help(resetHelp)
+                        .accessibilityLabel(resetHelp)
+                }
+                if let isOn {
+                    Toggle(title, isOn: isOn)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .labelsHidden()
+                        .help(isOn.wrappedValue ? "Switch \(title.lowercased()) off: it stays in the project but leaves the video"
+                                                : "Switch \(title.lowercased()) on again")
+                        .accessibilityLabel("\(title) on")
+                }
+            }
             content
+                .disabled(off)
+                .opacity(off ? 0.5 : 1)
         }
+    }
+}
+
+/// The switch for a change, when the recording has one to switch.
+@MainActor
+func changeSwitch(_ change: SwitchableChange, _ item: VideoItem, _ model: AppModel) -> Binding<Bool>? {
+    guard item.has(change) || !item.isOn(change) else { return nil }
+    return Binding(get: { item.isOn(change) }, set: { model.setChange(change, on: $0) })
+}
+
+/// Video, Audio, Speed and Colour, as Filmora's property panel names them.
+private struct InspectorTabStrip: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Picker("Inspector", selection: Binding(get: { model.shownInspectorTab }, set: { model.inspectorTab = $0 })) {
+            ForEach(model.inspectorTabs) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Inspector tab")
+        .help("⌥R opens Speed for the section under the playhead")
+    }
+}
+
+/// The selected section, or sections, above the tabs. Speed, trims and order are in the
+/// Speed tab.
+private struct SectionSummary: View {
+    @EnvironmentObject var model: AppModel
+    let item: VideoItem
+    let sections: [TimelineSegment]
+
+    var body: some View {
+        let total = sections.reduce(0) { $0 + $1.duration }
+        let number = sections.first.flatMap { first in item.timeline.segments.firstIndex { $0.id == first.id } }.map { $0 + 1 }
+        VStack(alignment: .leading, spacing: 3) {
+            Text(sections.count > 1 ? "\(sections.count) of \(item.timeline.segments.count) sections"
+                 : "Section \(number ?? 1) of \(item.timeline.segments.count)")
+                .font(.headline)
+            Text("Plays for \(timelineTime(total))" + (sections.count == 1 && sections[0].speed != 1 ? " at \(sections[0].speed.formatted())×" : ""))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// With nothing selected: every change on the video in one list, each with its switch,
+/// as Filmora's modules have, and the ones agents made too.
+private struct ChangesList: View {
+    @EnvironmentObject var model: AppModel
+    let item: VideoItem
+    let info: MediaInfo
+
+    private var switchable: [SwitchableChange] { SwitchableChange.allCases.filter { item.has($0) || !item.isOn($0) } }
+
+    var body: some View {
+        InspectorSection("Changes on this video") {
+            if switchable.isEmpty && fixedRows.isEmpty {
+                Text("No changes yet. A crop, colour, blur areas, zooms and graphics show here, each with a switch to turn it off.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(switchable) { change in
+                row(change.symbol, change.label, summary(change),
+                    isOn: Binding(get: { item.isOn(change) }, set: { model.setChange(change, on: $0) }),
+                    reset: change == .graphics || !item.has(change) ? nil : { model.resetChange(change) })
+            }
+            ForEach(fixedRows, id: \.label) { fixed in
+                row(fixed.symbol, fixed.label, fixed.summary, isOn: fixed.isOn, reset: nil)
+            }
+            Text("Off keeps a change in the project and leaves it out of the player and exports. Changes agents make show here too.")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Divider()
+    }
+
+    private struct Fixed {
+        let symbol: String, label: String, summary: String
+        let isOn: Binding<Bool>?
+    }
+
+    /// Changes that are not the recording's own: speed per section, Shorts, effects with
+    /// their own switch, and the export's captions and loudness.
+    private var fixedRows: [Fixed] {
+        var rows: [Fixed] = []
+        let faster = item.timeline.segments.filter { $0.speed != 1 }.count
+        if faster > 0 { rows.append(Fixed(symbol: "gauge.with.dots.needle.67percent", label: "Speed", summary: "\(faster) section\(faster == 1 ? "" : "s") not at 1×", isOn: nil)) }
+        if !item.blurEffects.isEmpty {
+            let on = item.blurEffects.filter(\.isEnabled).count
+            rows.append(Fixed(symbol: "camera.filters", label: "Full-frame blurs", summary: "\(on) of \(item.blurEffects.count) on · each has its own switch", isOn: nil))
+        }
+        if !item.shorts.isEmpty { rows.append(Fixed(symbol: "rectangle.portrait", label: "Shorts", summary: "\(item.shorts.count) Short\(item.shorts.count == 1 ? "" : "s")", isOn: nil)) }
+        if item.subtitles != nil || item.transcript != nil {
+            rows.append(Fixed(symbol: "captions.bubble", label: "Captions", summary: model.settings.captionUse(hasFile: item.subtitles != nil).label,
+                              isOn: Binding(get: { model.captionsOn }, set: { model.setCaptions(on: $0) })))
+        }
+        if info.hasAudio {
+            rows.append(Fixed(symbol: "waveform", label: "Loudness", summary: model.loudnessOn ? "-14 LUFS, for YouTube" : "As recorded",
+                              isOn: Binding(get: { model.loudnessOn }, set: { model.setLoudness(on: $0) })))
+        }
+        return rows
+    }
+
+    private func summary(_ change: SwitchableChange) -> String {
+        switch change {
+        case .crop:
+            let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+            return "\(item.aspectLabel) · \(Int(crop.width))×\(Int(crop.height))"
+        case .colour:
+            let parts = [item.color.correctionEnabled ? "Natural colour" : nil, item.color.adjustments.isNeutral ? nil : "adjustments"].compactMap { $0 }
+            return parts.isEmpty ? "Recorded colour set" : parts.joined(separator: " and ")
+        case .blurAreas: return "\(item.blurRegions.count) area\(item.blurRegions.count == 1 ? "" : "s") · \(model.settings.blurStyle.label.lowercased())"
+        case .zooms: return "\(item.zoomShots.count) zoom\(item.zoomShots.count == 1 ? "" : "s")"
+        case .graphics:
+            let count = item.graphics?.items.count ?? 0
+            return "\(count) graphic\(count == 1 ? "" : "s")"
+        }
+    }
+
+    private func row(_ symbol: String, _ label: String, _ summary: String, isOn: Binding<Bool>?, reset: (() -> Void)?) -> some View {
+        let off = isOn?.wrappedValue == false
+        return HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 24, height: 24)
+                .background(Color.accentColor.opacity(off ? 0.06 : 0.16), in: RoundedRectangle(cornerRadius: 6))
+                .foregroundStyle(off ? Color.secondary : Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.callout.weight(.medium)).foregroundStyle(off ? .secondary : .primary)
+                Text(off ? "Off · " + summary : summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if let reset {
+                Button(action: reset) { Image(systemName: "arrow.counterclockwise") }
+                    .buttonStyle(.borderless).controlSize(.small)
+                    .help("Reset \(label.lowercased())")
+                    .accessibilityLabel("Reset \(label.lowercased())")
+            }
+            if let isOn {
+                Toggle(label, isOn: isOn).toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                    .accessibilityLabel("\(label) on")
+            }
+        }
+        .padding(8)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -127,9 +325,7 @@ private struct SectionInspector: View {
     let index: Int
 
     var body: some View {
-        InspectorSection("Section \(index + 1) of \(item.timeline.segments.count)") {
-            Text("Plays for \(timelineTime(segment.duration))\(segment.speed == 1 ? "" : " at \(segment.speed.formatted())×")")
-                .font(.callout)
+        InspectorSection("Speed") {
             Picker("Speed", selection: Binding(get: { segment.speed }, set: { model.setSegmentSpeed(segment.id, speed: $0) })) {
                 ForEach([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0], id: \.self) { speed in
                     Text(speed == 1 ? "Normal speed" : "\(speed.formatted())×").tag(speed)
@@ -192,9 +388,7 @@ private struct SectionsInspector: View {
     }
 
     var body: some View {
-        InspectorSection("\(sections.count) of \(item.timeline.segments.count) sections") {
-            Text("Play for \(timelineTime(sections.reduce(0) { $0 + $1.duration }))")
-                .font(.callout)
+        InspectorSection("Speed") {
             Picker("Speed", selection: Binding<Double?>(get: { speed }, set: { if let speed = $0 { model.setSelectedSectionsSpeed(speed) } })) {
                 if speed == nil { Text("Mixed").tag(Double?.none) }
                 ForEach(Self.speeds, id: \.self) { speed in
@@ -325,6 +519,7 @@ private struct RecordingInspector: View {
     let item: VideoItem
     let info: MediaInfo
     let crop: CGRect
+    var tab: InspectorTab = .video
 
     private var settingsBinding: Binding<ExportSettings> {
         Binding(get: { model.settings }, set: { model.updateSettings($0) })
@@ -344,20 +539,43 @@ private struct RecordingInspector: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            ScreenSection(item: item, info: info)
-            frame
-            blurAreas
-            zooms
-            GraphicsSection(item: item)
-            ShortsSection(item: item)
-            subtitles
-            ColorInspector(item: item, info: info)
-            EffectsAndMarkersSection(item: item)
+            switch tab {
+            case .video, .speed:
+                ScreenSection(item: item, info: info)
+                frame
+                blurAreas
+                zooms
+                GraphicsSection(item: item)
+                ShortsSection(item: item)
+                EffectsAndMarkersSection(item: item)
+            case .audio:
+                subtitles
+                loudness
+            case .colour:
+                ColorInspector(item: item, info: info)
+            }
+        }
+    }
+
+    /// Loudness, an export setting: on, exports play at -14 LUFS as YouTube plays them.
+    @ViewBuilder
+    private var loudness: some View {
+        if info.hasAudio {
+            InspectorSection("Loudness", isOn: Binding(get: { model.loudnessOn }, set: { model.setLoudness(on: $0) })) {
+                Text("Exports normalise to -14 LUFS and -1 dBTP, the level YouTube plays at. Off keeps the level as recorded.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            InspectorSection("Loudness") {
+                Text("This recording has no audio.").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
     private var frame: some View {
-        InspectorSection("Frame") {
+        InspectorSection("Frame", isOn: changeSwitch(.crop, item, model), onReset: item.has(.crop) ? { model.resetCrop() } : nil,
+                         resetHelp: "Reset the crop to the whole frame") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
                 ForEach(AspectPreset.all) { preset in
                     Button { model.applyAspect(preset) } label: { Text(preset.label).frame(maxWidth: .infinity) }
@@ -369,7 +587,8 @@ private struct RecordingInspector: View {
             .controlSize(.small)
             Text(outputSummary).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             HStack {
-                Button("Reset Crop") { model.resetCrop() }
+                Button { model.beginCrop() } label: { Label("Crop in the Player", systemImage: "crop") }
+                    .help("The crop box on the frame, with the ratios and Apply (⌥C)")
                 Button("Use on All Recordings") { model.applyCropToAll() }
                     .disabled(model.items.count < 2)
                     .help("Copy this recording's crop, blur areas and zooms to every recording of the same size")
@@ -401,7 +620,8 @@ private struct RecordingInspector: View {
     }
 
     private var blurAreas: some View {
-        InspectorSection("Blur areas") {
+        InspectorSection("Blur areas", isOn: changeSwitch(.blurAreas, item, model), onReset: item.has(.blurAreas) ? { model.clearRegions() } : nil,
+                         resetHelp: "Delete every blur area") {
             Text(item.blurRegions.isEmpty
                  ? "None. Press Add Area, then drag over anything you want hidden."
                  : "\(item.blurRegions.count) area\(item.blurRegions.count == 1 ? "" : "s"). Click one on the picture to select it.")
@@ -424,14 +644,15 @@ private struct RecordingInspector: View {
             Text("Style and strength apply to every blur area in the project.").font(.caption2).foregroundStyle(.tertiary)
             HStack {
                 Button("Add Area") { model.addDefaultRegion(); model.beginBlurAreas(selecting: model.selectedRegionID) }
-                Button("Clear All") { model.clearRegions() }.disabled(item.blurRegions.isEmpty)
+                Button("Edit on the Frame") { model.beginBlurAreas() }.disabled(item.blurRegions.isEmpty)
             }
             .controlSize(.small)
         }
     }
 
     private var zooms: some View {
-        InspectorSection("Zooms") {
+        InspectorSection("Zooms", isOn: changeSwitch(.zooms, item, model), onReset: item.has(.zooms) ? { model.clearZooms() } : nil,
+                         resetHelp: "Delete every zoom") {
             Text(item.zoomShots.isEmpty
                  ? "None. Scrub to a moment and press Add at Playhead, or use the Zoom tool on the timeline."
                  : "\(item.zoomShots.count) zoom\(item.zoomShots.count == 1 ? "" : "s"). Select one on the timeline to adjust it.")
@@ -449,7 +670,6 @@ private struct RecordingInspector: View {
                         .help("Find moments of local activity on this Mac; you review them before anything is added")
                 }
                 Spacer()
-                Button("Clear All") { model.clearZooms() }.disabled(item.zoomShots.isEmpty)
             }
             .controlSize(.small)
         }
@@ -461,7 +681,8 @@ private struct RecordingInspector: View {
     }
 
     private var subtitles: some View {
-        InspectorSection("Captions") {
+        InspectorSection("Captions", isOn: item.subtitles != nil || item.transcript != nil
+                         ? Binding(get: { model.captionsOn }, set: { model.setCaptions(on: $0) }) : nil) {
             if let file = item.subtitles {
                 HStack(spacing: 6) {
                     Image(systemName: "captions.bubble").foregroundStyle(.secondary)
