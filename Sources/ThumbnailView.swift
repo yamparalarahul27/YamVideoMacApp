@@ -218,8 +218,9 @@ struct ThumbnailMakerSheet: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Checks the design about 0.7 s after the last change: drawn offscreen once with the
-    /// words and once without, with Apple Vision's face and picture words kept between runs.
+    /// Checks the design about 0.7 s after the last change: drawn offscreen once as it is
+    /// and once with the title's letters marked, with Apple Vision's face and picture words
+    /// kept between runs.
     private func runCheck() async {
         guard let sources, loadedTime != nil, design.problem == nil else { return }
         try? await Task.sleep(nanoseconds: 700_000_000)
@@ -244,7 +245,7 @@ struct ThumbnailMakerSheet: View {
         do {
             let drawn = try await ThumbnailMaker.measure(chosen, sources: sources, accent: accent)
             guard !Task.isCancelled else { return }
-            check = PhoneCheck.make(layout: drawn.layout, image: drawn.image, plate: drawn.plate, face: face,
+            check = PhoneCheck.make(layout: drawn.layout, image: drawn.image, letters: drawn.letters, face: face,
                                     frameWidth: frame.width, pictureWords: words)
             checked = drawn.image
             checkProblem = nil

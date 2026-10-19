@@ -162,6 +162,15 @@ import Foundation
     let rightSamples = halves.samples(in: CGRect(x: 1100, y: 100, width: 600, height: 400))
     check(leftSamples.count > 1000 && leftSamples.allSatisfy { $0 < 0.01 } && rightSamples.allSatisfy { $0 > 0.99 },
           "a picture's luminance is sampled in design pixels", "\(leftSamples.count) \(leftSamples.max() ?? -1) \(rightSamples.min() ?? -1)")
+    let magentaSquare = CGImage.blank(width: 1280, height: 720).drawn { context in
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1)); context.fill(CGRect(x: 200, y: 200, width: 100, height: 100))
+    }
+    let squareMask = LetterMask(magentaSquare)
+    let squareSamples = halves.samples(in: CGRect(x: 0, y: 0, width: 960, height: 1080), outside: squareMask)
+    check(squareMask.values.filter { $0 }.count == 52 * 52 && !squareMask.values[0]
+              && squareSamples.count == 320 * 360 - 52 * 52,
+          "the letters' mask marks magenta and the pixels round it, and samples leave them out",
+          "\(squareMask.values.filter { $0 }.count) \(squareSamples.count)")
     check(PhoneCheck.wordCount(in: "Edit for the *viewer*") == 4 && PhoneCheck.wordCount(in: "3 RULES") == 2
               && PhoneCheck.wordCount(in: "SYSTEM\u{00A0}DESIGN — 2") == 3,
           "words are counted without asterisks and dashes")
@@ -231,15 +240,18 @@ import Foundation
               && measured.layout.runs[0].background == "#F5C42C" && measured.layout.runs[1].color == "#FFFFFF"
               && measured.layout.runs.allSatisfy { !$0.boxes.isEmpty && $0.boxes.allSatisfy { $0.x > 960 } },
           "the page gives each run of words with its boxes, size and colours", "\(measured.layout)")
-    check(measured.image.width == 1280 && brightShare(measured.image, xs: 660..<1240) > 0.04 && brightShare(measured.plate, xs: 660..<1240) < 0.005,
-          "the plate is the same thumbnail without the letters",
-          String(format: "%.3f against %.3f", brightShare(measured.image, xs: 660..<1240), brightShare(measured.plate, xs: 660..<1240)))
-    let drawnCheck = PhoneCheck.make(layout: measured.layout, image: measured.image, plate: measured.plate, face: nil, frameWidth: 1280, pictureWords: [])
+    let titleMask = LetterMask(measured.letters)
+    let maskedTitle = titleMask.values.enumerated().filter { $0.element }.map { $0.offset % titleMask.width }
+    check(measured.image.width == 1280 && maskedTitle.count > 800 && maskedTitle.allSatisfy { $0 > 320 }
+              && LetterMask(measured.image).values.filter { $0 }.isEmpty,
+          "the letters picture marks the title's letters, on the title's side, and the thumbnail has no magenta",
+          "\(maskedTitle.count) \(maskedTitle.min() ?? -1)")
+    let drawnCheck = PhoneCheck.make(layout: measured.layout, image: measured.image, letters: measured.letters, face: nil, frameWidth: 1280, pictureWords: [])
     check(!drawnCheck.findings.contains { $0.kind == .contrast } && drawnCheck.findings.contains { $0.kind == .face } && drawnCheck.words == 6,
           "white and yellow words on the dark plain background read; the frame has no face", "\(drawnCheck.findings)")
     var phoneWhite = phoneDesign; phoneWhite.background = .white; phoneWhite.side = .left; phoneWhite.place = .clear
     let whiteMeasured = try await ThumbnailMaker.measure(phoneWhite, sources: subjectSources, accent: "#F5C42C")
-    let whiteCheck = PhoneCheck.make(layout: whiteMeasured.layout, image: whiteMeasured.image, plate: whiteMeasured.plate,
+    let whiteCheck = PhoneCheck.make(layout: whiteMeasured.layout, image: whiteMeasured.image, letters: whiteMeasured.letters,
                                      face: CGRect(x: 360, y: 60, width: 120, height: 150), frameWidth: 1280, pictureWords: [])
     let speakerMove = whiteMeasured.layout.speaker
     check(whiteCheck.findings.contains { $0.kind == .contrast && $0.level == .fails && $0.message.contains("“viewer”") }
@@ -251,11 +263,11 @@ import Foundation
     check(whiteMeasured.layout.frame == false && measured.layout.frame == false, "the page says when the frame does not show")
     var phoneFrameOnly = phoneWhite; phoneFrameOnly.cutout = false
     let frameOnly = try await ThumbnailMaker.measure(phoneFrameOnly, sources: subjectSources, accent: "#F5C42C")
-    let hiddenFace = PhoneCheck.make(layout: frameOnly.layout, image: frameOnly.image, plate: frameOnly.plate,
+    let hiddenFace = PhoneCheck.make(layout: frameOnly.layout, image: frameOnly.image, letters: frameOnly.letters,
                                      face: CGRect(x: 360, y: 60, width: 120, height: 150), frameWidth: 1280, pictureWords: [])
     var phoneDim = phoneFrameOnly; phoneDim.background = .dim
     let dimFrame = try await ThumbnailMaker.measure(phoneDim, sources: subjectSources, accent: "#F5C42C")
-    let dimFace = PhoneCheck.make(layout: dimFrame.layout, image: dimFrame.image, plate: dimFrame.plate,
+    let dimFace = PhoneCheck.make(layout: dimFrame.layout, image: dimFrame.image, letters: dimFrame.letters,
                                   face: CGRect(x: 360, y: 60, width: 120, height: 150), frameWidth: 1280, pictureWords: [])
     check(frameOnly.layout.speaker == nil && hiddenFace.face == nil && hiddenFace.findings.contains { $0.message.hasPrefix("The face does not show") }
               && dimFrame.layout.frame && dimFace.face == CGRect(x: 540, y: 90, width: 180, height: 225),
@@ -263,7 +275,7 @@ import Foundation
           "\(hiddenFace.findings) \(String(describing: dimFace.face))")
     var phoneMarked = phoneWhite; phoneMarked.highlight = true
     let markedMeasured = try await ThumbnailMaker.measure(phoneMarked, sources: subjectSources, accent: "#F5C42C")
-    let markedCheck = PhoneCheck.make(layout: markedMeasured.layout, image: markedMeasured.image, plate: markedMeasured.plate,
+    let markedCheck = PhoneCheck.make(layout: markedMeasured.layout, image: markedMeasured.image, letters: markedMeasured.letters,
                                       face: nil, frameWidth: 1280, pictureWords: [])
     check(markedMeasured.layout.runs.first { $0.kind == .accent }?.background == "#F5C42C" && !markedCheck.findings.contains { $0.kind == .contrast },
           "with Highlight the yellow band gives the dark words their contrast", "\(markedCheck.findings)")
@@ -285,7 +297,7 @@ import Foundation
           "Apple Vision reads the words in the picture and where they are", "\(readWords)")
     var phonePictured = phoneDesign; phonePictured.image = wordsPicture
     let picturedMeasured = try await ThumbnailMaker.measure(phonePictured, sources: subjectSources, accent: "#F5C42C")
-    let picturedCheck = PhoneCheck.make(layout: picturedMeasured.layout, image: picturedMeasured.image, plate: picturedMeasured.plate,
+    let picturedCheck = PhoneCheck.make(layout: picturedMeasured.layout, image: picturedMeasured.image, letters: picturedMeasured.letters,
                                         face: nil, frameWidth: 1280, pictureWords: readWords)
     check(picturedMeasured.layout.picture != nil && picturedCheck.words == 10
               && picturedCheck.findings.contains { $0.kind == .textSize && $0.message.contains("in the picture") }

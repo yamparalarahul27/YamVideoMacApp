@@ -329,16 +329,62 @@ struct LuminanceMap {
         self.init(width: width, height: height, values: values)
     }
 
-    /// The values inside `rect`, given in stage pixels (1920 wide).
-    func samples(in rect: CGRect) -> [Float] {
+    /// The values inside `rect`, given in stage pixels (1920 wide), but not where `mask`
+    /// (of the same size) is set.
+    func samples(in rect: CGRect, outside mask: LetterMask? = nil) -> [Float] {
         let k = Double(width) / 1920
         let x0 = max(0, Int((rect.minX * k).rounded(.down))), x1 = min(width, Int((rect.maxX * k).rounded(.up)))
         let y0 = max(0, Int((rect.minY * k).rounded(.down))), y1 = min(height, Int((rect.maxY * k).rounded(.up)))
         guard x1 > x0, y1 > y0 else { return [] }
         var found: [Float] = []
         found.reserveCapacity((x1 - x0) * (y1 - y0))
-        for y in y0..<y1 { found.append(contentsOf: values[(y * width + x0)..<(y * width + x1)]) }
+        for y in y0..<y1 {
+            if let mask, mask.width == width, mask.height == height {
+                for x in x0..<x1 where !mask.values[y * width + x] { found.append(values[y * width + x]) }
+            } else {
+                found.append(contentsOf: values[(y * width + x0)..<(y * width + x1)])
+            }
+        }
         return found
+    }
+}
+
+/// Where the title's letters are, from a picture that draws them in pure magenta (#FF00FF)
+/// without a shadow, at a `LuminanceMap`'s size: each letter pixel and its neighbours, so
+/// the soft edges of the letters count as letters too.
+struct LetterMask {
+    let width: Int
+    let height: Int
+    /// Rows from the top.
+    let values: [Bool]
+
+    init(width: Int, height: Int, values: [Bool]) { self.width = width; self.height = height; self.values = values }
+
+    init(_ image: CGImage, width: Int = 640) {
+        let height = max(1, Int((Double(width) * Double(image.height) / Double(max(1, image.width))).rounded()))
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        if let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            context.interpolationQuality = .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        // Magenta: red and blue well over green. A soft edge has some of it.
+        var letter = [Bool](repeating: false, count: width * height)
+        for i in 0..<(width * height) {
+            let r = Int(pixels[i * 4]), g = Int(pixels[i * 4 + 1]), b = Int(pixels[i * 4 + 2])
+            letter[i] = min(r, b) - g > 48
+        }
+        var grown = letter
+        for y in 0..<height {
+            for x in 0..<width where letter[y * width + x] {
+                for dy in -1...1 { for dx in -1...1 {
+                    let nx = x + dx, ny = y + dy
+                    if nx >= 0, nx < width, ny >= 0, ny < height { grown[ny * width + nx] = true }
+                } }
+            }
+        }
+        self.init(width: width, height: height, values: grown)
     }
 }
 
@@ -368,10 +414,11 @@ extension PhoneCheck {
         }
     }
 
-    /// The check of a drawn design: `image` is the thumbnail, `plate` the same without the
-    /// tag and title, `face` the face in the frame's pixels (from `face(in:)`), and
-    /// `pictureWords` the lines found in the picture beside the title (from `words(in:)`).
-    static func make(layout: ThumbnailLayout, image: CGImage, plate: CGImage, face: CGRect?, frameWidth: Int,
+    /// The check of a drawn design: `image` is the thumbnail, `letters` the same with the
+    /// title's letters in magenta (from `ThumbnailMaker.measure`), `face` the face in the
+    /// frame's pixels (from `face(in:)`), and `pictureWords` the lines found in the picture
+    /// beside the title (from `words(in:)`).
+    static func make(layout: ThumbnailLayout, image: CGImage, letters: CGImage, face: CGRect?, frameWidth: Int,
                      pictureWords: [(text: String, box: CGRect)]) -> PhoneCheck {
         var layout = layout
         if let picture = layout.picture?.rect {
@@ -382,13 +429,14 @@ extension PhoneCheck {
                                                        size: box.height, color: nil, background: nil))
             }
         }
-        let full = LuminanceMap(image), behind = LuminanceMap(plate)
+        let full = LuminanceMap(image), mask = LetterMask(letters)
         let contrasts: [Double?] = layout.runs.map { run in
             let boxes = run.boxes.map(\.rect)
             if run.kind == .picture { return Contrast.split(boxes.flatMap { full.samples(in: $0) }) }
             guard let text = Contrast.luminance(hex: run.color) else { return nil }
             if let band = Contrast.luminance(hex: run.background) { return Contrast.ratio(text, band) }
-            return Contrast.ratio(text: text, behind: boxes.flatMap { behind.samples(in: $0) })
+            // What is round the letters in the finished picture: the shadow counts.
+            return Contrast.ratio(text: text, behind: boxes.flatMap { full.samples(in: $0, outside: mask) })
         }
         // The face shows in the cut-out speaker, or in a sharp frame.
         let shows = layout.speaker != nil || layout.frame
@@ -406,7 +454,7 @@ extension PhoneCheck {
         let found = await Task.detached(priority: .userInitiated) {
             (face(in: frame), picture.map { words(in: $0) } ?? [])
         }.value
-        let check = make(layout: drawn.layout, image: drawn.image, plate: drawn.plate, face: found.0,
+        let check = make(layout: drawn.layout, image: drawn.image, letters: drawn.letters, face: found.0,
                          frameWidth: frame.width, pictureWords: found.1)
         return (check, drawn.image)
     }

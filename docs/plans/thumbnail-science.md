@@ -41,10 +41,12 @@ What the check measures (all from the drawn thumbnail, not from guesses):
   a small label, so a small tag is only weak.
 - **Too many words:** the words of the tag, the title and the picture. Up to 5 words read
   in 0.5 s; 6 to 8 words are weak; 9 or more do not read.
-- **Low contrast:** each run of words against what is behind it. The thumbnail is drawn
-  a second time with see-through letters (the title's shadow stays), so the check sees
-  the real background. Behind light words the brightest tenth counts, and behind dark
-  words the darkest tenth. Words in the picture use the two tones inside their box. A
+- **Low contrast:** each run of words against what is behind it, in the finished picture
+  (the title's shadow counts). The thumbnail is drawn a second time with the title's
+  letters in pure magenta and no shadow, so the check can leave the letters out. (Letters
+  made see-through do not work: at 2× WebKit leaves out their shadow.) Behind light words
+  the brightest tenth counts, and behind dark words the darkest tenth. Words in the
+  picture use the two tones inside their box. A
   contrast of 4.5:1 or more reads; 3 to 4.5 is weak; less than 3 does not read. Words on
   their own colour band (the tag, highlighted words) use the band's colour.
 - **Face too small:** the speaker's face (found with Apple Vision), after the speaker's
