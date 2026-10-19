@@ -198,6 +198,14 @@ edit, and each edit becomes one undo step with your name on it.
    (`highlight: true`), or make the other words smaller.
 6. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
    `setPublishInfo` with `{thumbnail: savedPath, design: …}` (and `title`, if it changed).
+7. For YouTube's Test & Compare (two or three thumbnails YouTube tries on viewers): set
+   versions B and C with `setPublishInfo` `{test: {versions: [B, C]}}` (A is `design`).
+   Save each with `thumbnail --version A --save` (then B, C), and store the paths with
+   `{test: {images: [A, B, C]}}`. Export for YouTube then writes "… thumbnail A.jpg" and
+   the others, and the text file says where to upload them. When the owner knows the
+   result, `{test: {winner: 1}}` marks B: its image becomes the thumbnail. Write the result
+   into the project's idea in the Library (`libraryApply`, the idea's notes), so later
+   videos can learn from it.
 
 ### 4.8 Shorts
 

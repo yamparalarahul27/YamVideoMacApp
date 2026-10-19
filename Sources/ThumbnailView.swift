@@ -6,12 +6,18 @@ import WebKit
 /// and see the thumbnail as it will be, large or at a phone's sizes, with the check under
 /// it: what does not read in 0.5 s, and whether the thumbnail only repeats the title.
 /// Saving makes the 1280×720 PNG next to the recording, uses it as the thumbnail and keeps
-/// the title, in one undo step.
+/// the title, in one undo step. With versions B and C for YouTube's Test & Compare, Save
+/// makes a PNG of each, and the Winner menu marks the one that won.
 struct ThumbnailMakerSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let item: VideoItem
+    /// The version shown and edited; it goes back into `versions` when another is shown,
+    /// and on Save.
     @State private var design: ThumbnailDesign
+    /// Every version for YouTube's Test & Compare, A first. One is no test.
+    @State private var versions: [ThumbnailDesign]
+    @State private var current = 0
     /// The video's title on YouTube, written here beside the thumbnail's words.
     @State private var videoTitle: String
     @State private var sources: ThumbnailMaker.Sources?
@@ -37,9 +43,11 @@ struct ThumbnailMakerSheet: View {
     init(item: VideoItem, playhead: Double) {
         self.item = item
         let publish = item.publish ?? PublishInfo()
-        var start = publish.design ?? ThumbnailDesign(time: playhead, title: publish.title)
-        start.time = min(max(0, start.time), item.editedDuration)
-        _design = State(initialValue: start)
+        var all = publish.versions
+        if all.isEmpty { all = [ThumbnailDesign(time: playhead, title: publish.title)] }
+        for index in all.indices { all[index].time = min(max(0, all[index].time), item.editedDuration) }
+        _versions = State(initialValue: all)
+        _design = State(initialValue: all[0])
         _videoTitle = State(initialValue: publish.title)
     }
 
@@ -65,9 +73,10 @@ struct ThumbnailMakerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 10) {
                 Text("Make Thumbnail").font(.title2.weight(.semibold))
                 Spacer()
+                versionControls
             }
             .padding(.horizontal, 18).padding(.vertical, 14)
             Divider()
@@ -106,7 +115,7 @@ struct ThumbnailMakerSheet: View {
                 Button("Save") { save() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(working != nil || sources == nil || design.problem != nil)
+                    .disabled(working != nil || sources == nil || design.problem != nil || versions.contains { $0.problem != nil })
                     .help("Makes the 1280×720 PNG next to the recording, uses it as the video's thumbnail and keeps the video title")
             }
             .padding(14)
@@ -117,6 +126,59 @@ struct ThumbnailMakerSheet: View {
     }
 
     // MARK: - On a phone
+
+    // MARK: - Versions
+
+    /// The recording's saved Test & Compare, as the project has it now.
+    private var savedTest: ThumbnailTest? { model.items.first { $0.id == item.id }?.publish?.test }
+
+    /// The versions for YouTube's Test & Compare: A, B and C, one more or one less, and,
+    /// once they are saved, the one that won.
+    @ViewBuilder private var versionControls: some View {
+        if versions.count > 1 {
+            Picker("Version", selection: Binding(get: { current }, set: { show($0) })) {
+                ForEach(versions.indices, id: \.self) { index in Text(ThumbnailTest.letters[index]).tag(index) }
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help("The versions for YouTube's Test & Compare")
+            Button { removeVersion() } label: { Image(systemName: "minus") }
+                .disabled(current == 0)
+                .help(current == 0 ? "Version A stays" : "Remove version \(ThumbnailTest.letters[current])")
+        }
+        Button { addVersion() } label: { Label("Version", systemImage: "plus") }
+            .disabled(versions.count >= ThumbnailTest.most)
+            .help("Add a version for YouTube's Test & Compare: a copy of this one to change. Up to 3.")
+        if let saved = savedTest, !saved.images.isEmpty {
+            Picker("Winner", selection: Binding(get: { savedTest?.winner }, set: { model.markThumbnailWinner($0) })) {
+                Text("None").tag(Int?.none)
+                ForEach(0..<saved.count, id: \.self) { index in Text(ThumbnailTest.letters[index]).tag(Int?.some(index)) }
+            }
+            .fixedSize()
+            .help("After the test in YouTube Studio: the version that won becomes the thumbnail, and the project's idea in the Library notes it")
+        }
+    }
+
+    private func show(_ index: Int) {
+        guard versions.indices.contains(index), index != current else { return }
+        versions[current] = design
+        current = index
+        design = versions[index]
+    }
+
+    /// A copy of the version shown, to change.
+    private func addVersion() {
+        guard versions.count < ThumbnailTest.most else { return }
+        versions[current] = design
+        versions.append(design)
+        current = versions.count - 1
+    }
+
+    private func removeVersion() {
+        guard current > 0 else { return }
+        versions.remove(at: current)
+        current -= 1
+        design = versions[current]
+    }
 
     // MARK: - Eye path
 
@@ -542,19 +604,31 @@ struct ThumbnailMakerSheet: View {
         working = nil
     }
 
+    /// Makes a PNG of each version (with its letter in the name when there are more than
+    /// one) and keeps them, in one undo step. A winner already marked stays, and its picture
+    /// stays the thumbnail.
     private func save() {
+        versions[current] = design
         working = "Making the thumbnail…"
         let clip = ProjectClip(item)
-        let chosen = design, title = videoTitle
+        let all = versions, title = videoTitle
+        let winner = savedTest?.winner.flatMap { $0 < all.count ? $0 : nil }
         Task {
             do {
-                let url = try await model.saveThumbnail(clip, design: chosen)
+                var urls: [URL] = []
+                for (index, version) in all.enumerated() {
+                    let letter = all.count > 1 ? ThumbnailTest.letters[index] : nil
+                    if let letter { working = "Making version \(letter)…" }
+                    urls.append(try await model.saveThumbnail(clip, design: version, version: letter))
+                }
                 model.setPublish(label: "Make Thumbnail") { info in
-                    info.design = chosen
-                    info.thumbnail = url
+                    info.design = all[0]
+                    info.test = all.count > 1 ? ThumbnailTest(versions: Array(all.dropFirst()), images: urls, winner: winner) : nil
+                    info.thumbnail = urls[winner ?? 0]
                     info.title = title
                 }
-                model.statusMessage = "Saved the thumbnail as \(url.lastPathComponent)."
+                model.statusMessage = all.count > 1 ? "Saved \(all.count) versions for Test & Compare."
+                    : "Saved the thumbnail as \(urls[0].lastPathComponent)."
                 dismiss()
             } catch {
                 problem = error.localizedDescription

@@ -361,15 +361,16 @@ extension AppModel {
         return ThumbnailMaker.Sources(frame: frame, cutout: cut)
     }
 
-    /// Makes the thumbnail and saves it as a PNG next to the recording.
-    func saveThumbnail(_ clip: ProjectClip, design: ThumbnailDesign) async throws -> URL {
+    /// Makes the thumbnail and saves it as a PNG next to the recording; a Test & Compare
+    /// version's letter (`version`) goes in the name, like "… thumbnail B.png".
+    func saveThumbnail(_ clip: ProjectClip, design: ThumbnailDesign, version: String? = nil) async throws -> URL {
         let sources = try await thumbnailSources(clip, at: design.time, cutout: design.cutout)
         let image = try await ThumbnailMaker.render(design, sources: sources, accent: clip.graphics?.style.accent ?? GraphicsStyle().accent)
         guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
             throw FFmpegError(message: "The thumbnail could not be saved.")
         }
         let folder = clip.url.deletingLastPathComponent()
-        let stem = clip.url.deletingPathExtension().lastPathComponent + " thumbnail"
+        let stem = clip.url.deletingPathExtension().lastPathComponent + " thumbnail" + (version.map { " " + $0 } ?? "")
         var target = folder.appendingPathComponent(stem + ".png")
         var counter = 2
         while FileManager.default.fileExists(atPath: target.path) {

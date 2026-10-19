@@ -607,7 +607,7 @@ enum ProjectReducer {
             try editClip(clip, in: &outcome) { record, _ in
                 if let problem = info.problem { throw EditError.invalid(problem) }
                 let duration = record.timeline.duration
-                if let design = info.design, design.time > duration + 0.0005 {
+                if info.versions.contains(where: { $0.time > duration + 0.0005 }) {
                     throw EditError.invalid("The thumbnail's frame must be within the edited recording (0–\(PublishInfo.timestamp(duration))).")
                 }
                 if let late = info.chapters.first(where: { $0.time > duration + 0.0005 }) {
@@ -865,6 +865,13 @@ enum ProjectReducer {
                 // The thumbnail's frame follows its footage, or stays inside the recording.
                 if let time = publish.design?.time {
                     publish.design?.time = timeline.carry(time, from: old) ?? min(time, timeline.duration)
+                }
+                if var test = publish.test {
+                    for index in test.versions.indices {
+                        let time = test.versions[index].time
+                        test.versions[index].time = timeline.carry(time, from: old) ?? min(time, timeline.duration)
+                    }
+                    publish.test = test
                 }
                 record.publish = publish
             }

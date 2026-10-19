@@ -74,6 +74,21 @@ func thumbnailMaker(_ model: AppModel, output: URL) async {
     UserDefaults.standard.set("phone", forKey: "thumbnailPreview")
     await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
            to: output.appendingPathComponent("5h-thumbnail-on-phone.png"), settle: 12)
+    // Test & Compare: versions A and B, saved, with B marked the winner, so the header shows
+    // the A | B switch and the Winner menu.
+    var versionB = design
+    versionB.title = "*3 rules* to edit"
+    versionB.background = .white
+    let picture = output.appendingPathComponent("5h-thumbnail-maker.png")
+    var tested = publish
+    tested.test = ThumbnailTest(versions: [versionB], images: [picture, picture], winner: 1)
+    if case .success = model.perform([.setPublishInfo(clip: made.id, info: tested)]) {
+        made.publish = tested
+        UserDefaults.standard.set("eyePath", forKey: "thumbnailPreview")
+        await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+               to: output.appendingPathComponent("5h-thumbnail-versions.png"), settle: 12)
+        model.undo()
+    }
     UserDefaults.standard.removeObject(forKey: "thumbnailPreview")
 }
 

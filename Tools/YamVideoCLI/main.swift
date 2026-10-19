@@ -20,7 +20,7 @@ Reading
                                                  (--furniture: YouTube's Shorts player over it, the clear area dashed)
   yamvideoctl preview --clip ID --time SECONDS --draft GRAPHICS.json [--short ID]
                                                  also draw graphics that are not stored, to show the owner a plan
-  yamvideoctl thumbnail --clip ID [--save] [--check [--video-title TEXT]]
+  yamvideoctl thumbnail --clip ID [--version A|B|C] [--save] [--check [--video-title TEXT]]
                                                  the thumbnail from the stored design, as a PNG
                                                  (--check: also what does not read on a phone in 0.5 s,
                                                  and whether it repeats the video title, or TEXT)
@@ -293,6 +293,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         if arguments.flags.contains("save") { request["save"] = true }
         if arguments.flags.contains("check") { request["check"] = true }
         if let title = arguments.values["video-title"] { request["videoTitle"] = title }
+        if let version = arguments.values["version"] { request["version"] = version }
     case "analyze":
         request["method"] = "analyze"
         request["kind"] = try value("kind")

@@ -215,10 +215,11 @@ struct VideoProject: Codable, Equatable {
     /// screen recording and its layouts. 15: adds the project's Why notes and its history
     /// of changes. 16: adds the graphics style's size, for phones. 17: adds the thumbnail
     /// maker's picture size and its white frost background. 18: adds the changes a
-    /// recording has switched off in the inspector. Every edited
+    /// recording has switched off in the inspector. 19: adds the thumbnail's versions for
+    /// YouTube's Test & Compare and the winner. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 18
+    static let currentVersion = 19
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -317,6 +318,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 18, clips.contains(where: { $0.switchedOff != nil }) {
             try reject("The project claims an older format but contains changes switched off."); return
+        }
+        if version < 19, clips.contains(where: { $0.publish?.test != nil }) {
+            try reject("The project claims an older format but contains thumbnail versions for Test & Compare."); return
         }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
