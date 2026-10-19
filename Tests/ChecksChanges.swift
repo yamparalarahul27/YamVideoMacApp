@@ -48,7 +48,7 @@ import Foundation
     let project = VideoProject(clips: [clip], settings: ExportSettings(), selection: clip.id)
     let data = try JSONEncoder().encode(project)
     let read = try VideoProject.decodeMigrating(from: data)
-    equal(read.version, 18, "a project is saved as version 18")
+    equal(read.version, 19, "a project is saved as version 19")
     equal(read.clips.first?.item().switchedOff, [.zooms, .blurAreas], "and reads back with the same changes off")
     var older = project
     older.version = 17

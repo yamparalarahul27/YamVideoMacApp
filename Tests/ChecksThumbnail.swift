@@ -470,6 +470,120 @@ import Foundation
     check(((await agentCall(thumbnailer, badDesign))["error"] as? [String: Any])?["message"] as? String ?? "" == "The outline's width is from 2 to 16 pixels.",
           "an outline too wide is refused")
 
+    print("\nTest & Compare")
+    var versionB = ThumbnailDesign(time: 1, title: "*3 rules*"); versionB.background = .white
+    var versionC = ThumbnailDesign(time: 0.5, title: "Big *title*"); versionC.zoom = 1.3
+    let imageA = URL(fileURLWithPath: savedThumbPath)
+    let imageB = scratch.appendingPathComponent("subject thumbnail B.png")
+    try? FileManager.default.removeItem(at: imageB)
+    try FileManager.default.copyItem(at: imageA, to: imageB)
+    check(ThumbnailTest(versions: []).problem != nil && ThumbnailTest(versions: [versionB, versionC, versionB]).problem != nil
+              && ThumbnailTest(versions: [versionB], images: [imageA]).problem != nil
+              && ThumbnailTest(versions: [versionB], winner: 1).problem?.contains("Save") == true
+              && ThumbnailTest(versions: [versionB], images: [imageA, imageB], winner: 2).problem != nil
+              && ThumbnailTest(versions: [versionB, versionC], images: [imageA, imageB, imageB], winner: 2).problem == nil,
+          "a test has 2 or 3 versions, an image for each once saved, and a winner among them after a save")
+    var noDesign = PublishInfo(); noDesign.test = ThumbnailTest(versions: [versionB])
+    check(noDesign.problem?.contains("version A") == true, "a test needs version A, the design")
+    var tested = PublishInfo(); tested.title = "Subject"; tested.design = ThumbnailDesign(time: 1, title: "Big *title*")
+    tested.test = ThumbnailTest(versions: [versionB], images: [imageA, imageB])
+    tested.thumbnail = imageA
+    var marked = tested; marked.markWinner(1)
+    check(tested.versions.map(\.title) == ["Big *title*", "*3 rules*"] && marked.test?.winner == 1 && marked.thumbnail == imageB,
+          "the winner's picture becomes the thumbnail")
+    marked.markWinner(nil)
+    check(marked.test?.winner == nil && marked.thumbnail == imageB, "clearing the winner leaves the thumbnail")
+
+    check(thumbnailer.perform([.setPublishInfo(clip: subjectItem.id, info: tested)]).isSuccess, "versions are kept with the publish details")
+    let testedSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(thumbnailer.project))
+    var testedAsEighteen = testedSaved; testedAsEighteen.version = 18
+    check(testedSaved == thumbnailer.project && testedSaved.version >= 19 && (try? testedSaved.validate()) != nil
+              && (try? testedAsEighteen.validate()) == nil && testedSaved.clips[0].publish?.test?.images == [imageA, imageB],
+          "the versions survive a version 19 round trip, and a version 18 file with them is refused")
+    var lateVersion = tested; lateVersion.test?.versions[0].time = 9
+    check(thumbnailer.perform([.setPublishInfo(clip: subjectItem.id, info: lateVersion)]).isFailure,
+          "a version's frame after the end is refused")
+    _ = thumbnailer.perform([.splitSection(clip: subjectItem.id, at: 0.5)])
+    let afterSplit = thumbnailer.items[0].timeline.segments
+    _ = thumbnailer.perform([.deleteSection(clip: subjectItem.id, section: afterSplit[0].id)])
+    check(abs((thumbnailer.items[0].publish?.test?.versions[0].time ?? 0) - 0.5) < 0.01,
+          "a version's frame follows its footage when a cut removes time before it",
+          "\(String(describing: thumbnailer.items[0].publish?.test?.versions[0].time))")
+    thumbnailer.undo(); thumbnailer.undo()
+
+    // Export for YouTube writes each version, and says where they go.
+    let testFiles = YouTubeExport.files(in: scratch, publish: marked, fallback: "x", captions: false, unique: false)
+    var winnerMarked = marked; winnerMarked.markWinner(1)
+    let testJSON = try JSONSerialization.jsonObject(with: try YouTubeExport.json(winnerMarked, files: testFiles)) as? [String: Any] ?? [:]
+    let testJSONVersions = (testJSON["thumbnailTest"] as? [String: Any])?["versions"] as? [[String: Any]] ?? []
+    let testText = winnerMarked.uploadText(files: [], tests: testFiles.tests.map(\.lastPathComponent))
+    check(testFiles.tests.map(\.lastPathComponent) == ["Subject thumbnail A.jpg", "Subject thumbnail B.jpg"]
+              && testJSONVersions.map { $0["version"] as? String ?? "" } == ["A", "B"]
+              && (testJSON["thumbnailTest"] as? [String: Any])?["winner"] as? String == "B"
+              && testText.contains("THUMBNAIL TEST & COMPARE") && testText.contains("B: Subject thumbnail B.jpg") && testText.contains("Winner: B"),
+          "Export for YouTube names a JPEG for each version, and the text and JSON list them with the winner", testText)
+    for (target, source) in zip(testFiles.tests, winnerMarked.test!.images) { try YouTubeExport.writeThumbnail(source, to: target) }
+    var testWidths: [Int] = []
+    for file in testFiles.tests { testWidths.append((try? await FFmpeg.probe(url: file))?.width ?? 0) }
+    equal(testWidths, [1280, 1280], "each version becomes a 1280×720 JPEG")
+    var missingVersion = winnerMarked; missingVersion.test?.images[1] = scratch.appendingPathComponent("gone.png")
+    check(missingVersion.issues(duration: 2).contains { $0.severity == .blocking && $0.message.contains("Version B") }
+              && tested.issues(duration: 2).allSatisfy { $0.severity != .blocking || $0.field != "thumbnail" },
+          "a version's missing picture stops Export for YouTube")
+    var unsavedTest = tested; unsavedTest.test?.images = []
+    check(unsavedTest.issues(duration: 2).contains { $0.severity == .warning && $0.message.contains("not saved") },
+          "versions not yet saved are a warning")
+
+    // Agents set the versions, draw each, and mark the winner.
+    var setVersions = address(thumbnailer)
+    setVersions["method"] = "apply"; setVersions["requestID"] = "versions-1"; setVersions["client"] = "Claude"
+    setVersions["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString,
+                                "publish": ["test": ["versions": [["time": 1, "title": "*Agent* B", "background": "white"]], "images": []]]]]
+    let versionsReply = await agentCall(thumbnailer, setVersions)
+    check(versionsReply["ok"] as? Bool == true && thumbnailer.items[0].publish?.test?.versions.first?.title == "*Agent* B"
+              && thumbnailer.items[0].publish?.test?.images.isEmpty == true,
+          "an agent sets version B", "\(versionsReply)")
+    var drawB = address(thumbnailer)
+    drawB["method"] = "thumbnail"; drawB["clip"] = subjectItem.id.uuidString; drawB["version"] = "b"; drawB["save"] = true
+    let drawnB = agentResult(await agentCall(thumbnailer, drawB))
+    check(drawnB["version"] as? String == "B" && (drawnB["design"] as? [String: Any])?["title"] as? String == "*Agent* B"
+              && (drawnB["savedPath"] as? String ?? "").contains("subject thumbnail B"),
+          "an agent draws and saves version B, with its letter in the file's name", "\(drawnB)")
+    drawB["version"] = "C"; drawB["save"] = nil
+    check(((await agentCall(thumbnailer, drawB))["error"] as? [String: Any])?["message"] as? String ?? "" == "The recording has no version C. Add it with setPublishInfo: {test: {versions: [B, C]}}.",
+          "a version the recording does not have is refused")
+    drawB["version"] = "D"
+    check(((await agentCall(thumbnailer, drawB))["error"] as? [String: Any])?["message"] as? String ?? "" == "version is A, B or C.",
+          "only A, B and C are versions")
+    var setImages = address(thumbnailer)
+    setImages["method"] = "apply"; setImages["client"] = "Claude"; setImages["requestID"] = "versions-2"
+    setImages["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString,
+                              "publish": ["test": ["images": [imageA.path, drawnB["savedPath"] as? String ?? ""]]]]]
+    check((await agentCall(thumbnailer, setImages))["ok"] as? Bool == true && thumbnailer.items[0].publish?.test?.images.count == 2,
+          "an agent stores the versions' images")
+    var setWinner = address(thumbnailer)
+    setWinner["method"] = "apply"; setWinner["client"] = "Claude"; setWinner["requestID"] = "versions-3"
+    setWinner["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString, "publish": ["test": ["winner": 1]]]]
+    let winnerReply = await agentCall(thumbnailer, setWinner)
+    check(winnerReply["ok"] as? Bool == true && thumbnailer.items[0].publish?.test?.winner == 1
+              && thumbnailer.items[0].publish?.thumbnail?.path == drawnB["savedPath"] as? String
+              && thumbnailer.items[0].publish?.test?.versions.first?.title == "*Agent* B",
+          "an agent marks B the winner: its picture becomes the thumbnail, and the versions stay", "\(winnerReply)")
+
+    // The owner marks the winner in the maker: the project's idea in the Library notes it.
+    thumbnailer.loadLibrary(from: scratch.appendingPathComponent("thumb-library-\(UUID().uuidString)", isDirectory: true))
+    let testIdea = ContentItem(title: "Edit for the viewer", notes: "Hook first.")
+    _ = thumbnailer.performLibrary([.addIdea(testIdea), .linkProject(id: testIdea.id, link: ProjectLink(projectID: thumbnailer.projectID, path: "/tmp/x.yamvideo"))])
+    thumbnailer.selection = subjectItem.id
+    thumbnailer.markThumbnailWinner(0)
+    let ideaNotes = thumbnailer.library.item(testIdea.id)?.notes ?? ""
+    check(thumbnailer.items[0].publish?.test?.winner == 0 && thumbnailer.items[0].publish?.thumbnail == imageA
+              && ideaNotes.hasPrefix("Hook first.\nThumbnail test, ") && ideaNotes.hasSuffix(": A won of 2 (“Big title”)."),
+          "the owner marks A the winner: it becomes the thumbnail, and the idea's notes keep the result", ideaNotes)
+    thumbnailer.markThumbnailWinner(nil)
+    check(thumbnailer.items[0].publish?.test?.winner == nil && thumbnailer.library.item(testIdea.id)?.notes == ideaNotes,
+          "clearing the winner adds no note")
+
     print("\nSuggest Frames")
     let smiling = face([CGPoint(x: 0.25, y: 0.35), CGPoint(x: 0.35, y: 0.28), CGPoint(x: 0.45, y: 0.25), CGPoint(x: 0.55, y: 0.28),
                         CGPoint(x: 0.65, y: 0.35), CGPoint(x: 0.45, y: 0.40)])
@@ -538,6 +652,10 @@ import Foundation
     check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("eyePath") && "\($0)".contains("path (where the eye goes") } == true
               && manualText.contains("check.path"),
           "the catalog and the manual give the eye path")
+    let catalogJSON = String(decoding: try JSONEncoder().encode(manualCatalog), as: UTF8.self)
+    check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("\"version\"") } == true
+              && catalogJSON.contains("test (YouTube's Test & Compare") && manualText.contains("Test & Compare"),
+          "the catalog and the manual give the versions for Test & Compare")
     check(AgentsManual.brief(ctl: "/x/yamvideoctl").contains("/x/yamvideoctl manual") && AgentsManual.brief(ctl: nil).contains("yamvideo_manual"),
           "the brief for an agent names how to read the manual")
 

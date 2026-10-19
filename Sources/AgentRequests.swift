@@ -46,6 +46,8 @@ struct AgentRequest: Codable {
     var check: Bool?
     /// thumbnail with check: a video title to compare with, in place of the stored one; not stored.
     var videoTitle: String?
+    /// thumbnail: which version of a Test & Compare to draw: A (the design, the default), B or C.
+    var version: String?
     var scope: String?
     var kind: String?
     var job: UUID?
@@ -1122,7 +1124,7 @@ extension AppModel {
             }
         }
         func mergedPublish(_ changes: [String: JSONValue], onto info: PublishInfo) throws -> PublishInfo {
-            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design", "endScreen"]
+            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design", "endScreen", "test"]
             if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
                 throw EditError.invalid("Unknown publish key \"\(unknown)\". Keys: \(known.sorted().joined(separator: ", ")).")
             }
@@ -1139,15 +1141,18 @@ extension AppModel {
             guard case .object(var merged) = try JSONValue.from(info) else { return info }
             for (key, value) in changes {
                 if value == .null { merged.removeValue(forKey: key) }
-                else if key == "design" || key == "endScreen", case .object(let patch) = value {
-                    // The design's and the end screen's keys merge too: only those given change.
+                else if key == "design" || key == "endScreen" || key == "test", case .object(let patch) = value {
+                    // The design's, the end screen's and the test's keys merge too: only those given change.
                     var object = merged[key]?.object ?? [:]
                     for (name, part) in patch { if part == .null { object.removeValue(forKey: name) } else { object[name] = part } }
                     merged[key] = .object(object)
                 } else { merged[key] = value }
             }
             do {
-                return try AgentProtocol.decoder.decode(PublishInfo.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+                var decoded = try AgentProtocol.decoder.decode(PublishInfo.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+                // The winner of a Test & Compare becomes the thumbnail, unless the thumbnail is given too.
+                if case .number? = changes["test"]?.object?["winner"], changes["thumbnail"] == nil { decoded.markWinner(decoded.test?.winner) }
+                return decoded
             } catch {
                 throw EditError.invalid("publish: title, description, language and channel are text; tags is a list of text; "
                     + "category is one of \(YouTubeCategory.allCases.map(\.rawValue).joined(separator: ", ")); chapters is a list of "
@@ -1156,7 +1161,8 @@ extension AppModel {
                     + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))), zoom and place "
                     + "(\(ThumbnailDesign.Place.allCases.map(\.rawValue).joined(separator: ", "))); endScreen has circle "
                     + "(\(EndScreenElements.Circle.allCases.map(\.rawValue).joined(separator: ", "))), channel, message and videos, a list of "
-                    + "{kind (\(EndScreenElements.Kind.allCases.map(\.rawValue).joined(separator: ", "))), link, title}.")
+                    + "{kind (\(EndScreenElements.Kind.allCases.map(\.rawValue).joined(separator: ", "))), link, title}; "
+                    + "test has versions (B and C: designs), images (paths, A first) and winner (0 is A).")
             }
         }
         func zoom(_ value: WireZoom) -> ZoomShot {
@@ -2177,6 +2183,7 @@ extension AppModel {
                                                "text": .string(files.text.path), "json": .string(files.json.path)]
             if let captions = files.captions, FileManager.default.fileExists(atPath: captions.path) { result["captions"] = .string(captions.path) }
             if let thumbnail = files.thumbnail { result["thumbnail"] = .string(thumbnail.path) }
+            if !files.tests.isEmpty { result["thumbnailTest"] = .array(files.tests.map { .string($0.path) }) }
             return .object(result)
         }
         return .success(job)
@@ -2192,6 +2199,15 @@ extension AppModel {
         guard clip.info != nil else { return .failure(EditError(code: .missingMedia, message: "That recording is still loading.")) }
         var publish = clip.publish ?? PublishInfo()
         if publish.design == nil { publish.design = ThumbnailDesign(time: 0, title: publish.title) }
+        // A version of a Test & Compare: B or C stands in for the design.
+        let letter = request.version?.uppercased() ?? "A"
+        guard let versionIndex = ThumbnailTest.letters.firstIndex(of: letter) else { return .failure(.invalid("version is A, B or C.")) }
+        if versionIndex > 0 {
+            guard let versions = publish.test?.versions, versions.count >= versionIndex else {
+                return .failure(.invalid("The recording has no version \(letter). Add it with setPublishInfo: {test: {versions: [B, C]}}."))
+            }
+            publish.design = versions[versionIndex - 1]
+        }
         if let changes = request.design {
             guard case .object(var merged)? = try? JSONValue.from(publish.design!) else { return .failure(.invalid("Could not read the design.")) }
             for (name, value) in changes { if value == .null { merged.removeValue(forKey: name) } else { merged[name] = value } }
@@ -2231,9 +2247,9 @@ extension AppModel {
                 check = AgentPhoneCheck(checked.check.adding(gap), gap: AgentGap(title: title, gap), phone: phoneFile.path)
             }
             var saved: String?
-            if request.save == true { saved = try await saveThumbnail(clip, design: design).path }
+            if request.save == true { saved = try await saveThumbnail(clip, design: design, version: request.version == nil ? nil : letter).path }
             let k = 1920 / Double(sources.frame.width)
-            return .success(AgentThumbnail(path: file.path, savedPath: saved, width: image.width, height: image.height, design: design,
+            return .success(AgentThumbnail(path: file.path, savedPath: saved, width: image.width, height: image.height, design: design, version: letter,
                                            speakerFound: sources.cutout != nil,
                                            speaker: sources.cutout.map { WireRect(CGRect(x: $0.box.minX * k, y: $0.box.minY * k,
                                                                                          width: $0.box.width * k, height: $0.box.height * k)) },
@@ -2250,6 +2266,8 @@ struct AgentThumbnail: Encodable {
     var width: Int
     var height: Int
     var design: ThumbnailDesign
+    /// A, B or C: the version drawn.
+    var version: String
     var speakerFound: Bool
     /// The speaker's box in design pixels of a 1920×1080 frame.
     var speaker: WireRect?

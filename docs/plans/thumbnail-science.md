@@ -3,9 +3,9 @@
 **Status (2026-10-19):** Part 1 (phone check,
 [PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54)) and part 2
 (information gap, [PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55))
-are merged. Part 3 (eye path) is built, in
-[PR #56](https://github.com/yamparalarahul27/YamVideoMacApp/pull/56). Part 4 is planned. The owner asked
-for each part after the one before it.
+are merged, and so is part 3 (eye path,
+[PR #56](https://github.com/yamparalarahul27/YamVideoMacApp/pull/56)). Part 4 (Test & Compare) is
+built, in [PR #57](https://github.com/yamparalarahul27/YamVideoMacApp/pull/57). The owner asked for each part after the one before it.
 **Source:** the backlog item of 2026-10-18, from "Science Behind Thumbnails That Actually
 Work." by HimanshuG (https://youtu.be/9_7q6vUaRsM). Its rules: a viewer decides in 0.5 s,
 a thumbnail opens a question the title does not answer, the eye goes to the face first and
@@ -135,15 +135,27 @@ Saved data: none.
 
 ## Part 4: three versions for Test & Compare
 
-- The maker keeps up to three designs (A, B, C) for a recording. The owner makes one,
-  duplicates it, and changes the words, the frame or the colour.
-- Export for YouTube writes all three PNGs, named A, B and C, for YouTube Studio's Test &
-  Compare.
-- After the test, the owner marks the version that won. The winner becomes the thumbnail,
-  and the Library keeps the result for the next videos.
-- Agent commands: set the versions with `setPublishInfo`, render each with `thumbnail`,
-  and mark the winner.
+What the owner sees:
+- In the maker's header: **+ Version** adds a copy of the version shown, to change (up to
+  3). With more than one, an **A | B | C** switch shows each, and **−** removes the one
+  shown (not A). The check, the eye path and the phone view work on the version shown.
+- **Save** makes a PNG of each version, with its letter in the name ("… thumbnail B.png"),
+  and keeps them in one undo step. A winner already marked stays the thumbnail.
+- After a save, a **Winner** menu (None, A, B, C). Marking a version makes its picture the
+  thumbnail (one undo step), and adds a line to the notes of the project's idea in the
+  Library, like "Thumbnail test, 2026-10-19: B won of 3 (“3 rules”)." So the Library keeps
+  the result for the next videos.
+- **Export for YouTube** also writes "… thumbnail A.jpg", B and C (1280×720, under 2 MB).
+  The text file has a THUMBNAIL TEST & COMPARE section with the files and the winner, and
+  the JSON has `thumbnailTest`. A missing version picture stops the export; versions not
+  yet saved are a warning.
 
-Saved data: the versions and the winner in the publish details. This bumps
-`VideoProject.currentVersion` from 18 to 19, and the validation refuses an older version
-that holds the new fields.
+Saved data (version 19): `PublishInfo.test` (`ThumbnailTest`): `versions` (B and C; A is
+`design`), `images` (each version's PNG, A first, after a save) and `winner` (0 is A).
+`VideoProject.currentVersion` is 19, and a file of version 18 or older that holds a test is
+refused. A version's frame follows its footage through cuts, as the design's does.
+
+For agents: `setPublishInfo` with `{test: {versions, images, winner}}` (only the keys given
+change; a winner makes its image the thumbnail unless `thumbnail` is given too), and
+`thumbnail` with `version` (A, B or C; `--version`), which `save` names with its letter.
+The Agents Manual (4.7 Thumbnail, step 7) gives the order.

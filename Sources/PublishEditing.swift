@@ -16,8 +16,10 @@ enum YouTubeExport {
         var thumbnail: URL?
         var text: URL
         var json: URL
+        /// The Test & Compare versions' thumbnails, A first, when they are saved.
+        var tests: [URL] = []
 
-        var all: [URL] { [video, captions, thumbnail, text, json].compactMap { $0 } }
+        var all: [URL] { [video, captions, thumbnail, text, json].compactMap { $0 } + tests }
     }
 
     /// The names for a recording in `folder`, from its title. With `unique`, a number is
@@ -29,7 +31,8 @@ enum YouTubeExport {
                   captions: captions ? folder.appendingPathComponent("\(stem).\(publish.language).srt") : nil,
                   thumbnail: publish.thumbnail == nil ? nil : folder.appendingPathComponent(stem + " thumbnail.jpg"),
                   text: folder.appendingPathComponent(stem + " YouTube.txt"),
-                  json: folder.appendingPathComponent(stem + ".youtube.json"))
+                  json: folder.appendingPathComponent(stem + ".youtube.json"),
+                  tests: (publish.test?.images ?? []).indices.map { folder.appendingPathComponent("\(stem) thumbnail \(ThumbnailTest.letters[$0]).jpg") })
         }
         var files = named(stem)
         var counter = 2
@@ -87,6 +90,14 @@ enum YouTubeExport {
                                               "text": .string(files.text.lastPathComponent)]
         if let captions = files.captions { fileNames["captions"] = .string(captions.lastPathComponent) }
         if let thumbnail = files.thumbnail { fileNames["thumbnail"] = .string(thumbnail.lastPathComponent) }
+        var test: JSONValue?
+        if let tested = publish.test, !files.tests.isEmpty {
+            var object: [String: JSONValue] = ["versions": .array(files.tests.enumerated().map {
+                .object(["version": .string(ThumbnailTest.letters[$0.offset]), "file": .string($0.element.lastPathComponent)])
+            })]
+            if let winner = tested.winner { object["winner"] = .string(ThumbnailTest.letters[winner]) }
+            test = .object(object)
+        }
         var root: [String: JSONValue] = [
             "title": .string(publish.title), "description": .string(publish.fullDescription),
             "tags": .array(publish.tags.map(JSONValue.string)),
@@ -94,6 +105,7 @@ enum YouTubeExport {
             "language": .string(publish.language), "chapters": .array(chapters), "files": .object(fileNames),
         ]
         if let plan { root["endScreen"] = plan.json }
+        if let test { root["thumbnailTest"] = test }
         if let project { root["projectID"] = .string(project.uuidString) }
         if let recording { root["recordingID"] = .string(recording.uuidString) }
         let encoder = JSONEncoder()
@@ -131,9 +143,11 @@ enum YouTubeExport {
         if let thumbnail = files.thumbnail, let source = publish.thumbnail {
             try writeThumbnail(source, to: thumbnail)
         }
+        for (target, source) in zip(files.tests, publish.test?.images ?? []) { try writeThumbnail(source, to: target) }
         let names = files.all.filter { $0 != files.text && ($0 == files.json || manager.fileExists(atPath: $0.path)) }.map(\.lastPathComponent)
         let plan = EndScreenPlan(graphics: item.graphics, publish: publish, duration: item.editedDuration)
-        try Data(publish.uploadText(files: names, endScreen: plan).utf8).write(to: files.text, options: .atomic)
+        try Data(publish.uploadText(files: names, endScreen: plan, tests: files.tests.map(\.lastPathComponent)).utf8)
+            .write(to: files.text, options: .atomic)
         try json(publish, files: files, endScreen: plan, project: project, recording: item.id).write(to: files.json, options: .atomic)
     }
 }
@@ -142,6 +156,22 @@ enum YouTubeExport {
 
 extension AppModel {
     var selectedPublish: PublishInfo { selectedItem?.publish ?? PublishInfo() }
+
+    /// Marks the version that won YouTube's Test & Compare: its picture becomes the
+    /// thumbnail, as one undo step. The project's idea in the Library gets a line in its
+    /// notes (a Library step), so later videos can learn from it. Nil clears the mark.
+    func markThumbnailWinner(_ index: Int?) {
+        guard let test = selectedPublish.test else { return }
+        setPublish(label: "Thumbnail Winner") { $0.markWinner(index) }
+        guard let index, selectedPublish.test?.winner == index, let idea = openProjectIdea else { return }
+        let words = selectedPublish.versions[index].title.replacingOccurrences(of: "*", with: "")
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = .current
+        let line = "Thumbnail test, \(formatter.string(from: Date())): \(ThumbnailTest.letters[index]) won of \(test.count) (“\(words)”)."
+        editIdea(idea.id, notes: idea.notes.isEmpty ? line : idea.notes + "\n" + line)
+    }
 
     /// A loaded recording is selected, in Recording mode, and nothing is exporting.
     var canMakeThumbnail: Bool { selectedItem?.info != nil && !isMovieMode && !isConverting }
