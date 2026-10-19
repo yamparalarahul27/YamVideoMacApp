@@ -304,6 +304,30 @@ enum ThumbnailMaker {
         return try await GraphicsSnapshot.capture(page: index, folder: folder, size: size,
                                                   script: "await YamGraphics.thumbnail(\(data));")
     }
+
+    /// The finished 1280×720 picture, what the page measured of it, and the plate: the same
+    /// picture with the letters of the tag and the title made see-through, so the phone
+    /// check sees what is behind them. The title's shadow and the bands stay, as the viewer
+    /// sees them round the letters.
+    @MainActor
+    static func measure(_ design: ThumbnailDesign, sources: Sources, accent: String) async throws
+        -> (image: CGImage, plate: CGImage, layout: ThumbnailLayout) {
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("YamVideo/Thumbnails/\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let index = try writePage(to: folder)
+        let media = try writeMedia(sources, folder: folder)
+        let data = String(decoding: try pageData(design, media: media, accent: accent, folder: folder), as: UTF8.self)
+        let shots = try await GraphicsSnapshot.capture(page: index, folder: folder, size: size, steps: [
+            "await YamGraphics.thumbnail(\(data));\nreturn JSON.stringify(YamGraphics.thumbnailLayout());",
+            "document.querySelectorAll('.yg-thumb-tag, .yg-thumb-title, .yg-thumb-title em').forEach((node) => { node.style.color = 'transparent'; });\nreturn null;",
+        ])
+        guard shots.count == 2, let json = shots[0].result,
+              let layout = try? JSONDecoder().decode(ThumbnailLayout.self, from: Data(json.utf8)) else {
+            throw FFmpegError(message: "The thumbnail could not be measured.")
+        }
+        return (shots[0].image, shots[1].image, layout)
+    }
 }
 
 // MARK: - The frame and the speaker, for a recording

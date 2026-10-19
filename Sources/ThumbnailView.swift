@@ -3,8 +3,9 @@ import SwiftUI
 import WebKit
 
 /// The thumbnail maker: choose a frame, write the title and tag, and see the thumbnail as
-/// it will be, large and at YouTube's search size. Saving makes the 1280×720 PNG next to
-/// the recording and uses it as the thumbnail, in one undo step.
+/// it will be, large or at a phone's sizes, with the phone check under it: what does not
+/// read in 0.5 s. Saving makes the 1280×720 PNG next to the recording and uses it as the
+/// thumbnail, in one undo step.
 struct ThumbnailMakerSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -16,6 +17,16 @@ struct ThumbnailMakerSheet: View {
     @State private var problem: String?
     @State private var suggestions: [FrameSuggestion] = []
     @State private var suggesting: Task<Void, Never>?
+    /// The phone check of the design as it was a moment ago, and the picture it checked.
+    @State private var check: PhoneCheck?
+    @State private var checked: CGImage?
+    @State private var checking = false
+    @State private var checkRun = 0
+    @State private var checkProblem: String?
+    /// Apple Vision's finds, kept while the frame and the picture stay the same.
+    @State private var faceFound: (frame: CGImage, face: CGRect?)?
+    @State private var pictureWords: (url: URL, words: [(text: String, box: CGRect)])?
+    @AppStorage("thumbnailOnPhone") private var onPhone = false
 
     init(item: VideoItem, playhead: Double) {
         self.item = item
@@ -26,6 +37,13 @@ struct ThumbnailMakerSheet: View {
     }
 
     private var accent: String { item.graphics?.style.accent ?? GraphicsStyle().accent }
+    private var publish: PublishInfo { item.publish ?? PublishInfo() }
+
+    /// What the phone check depends on: the design and the frame it was drawn from.
+    private struct CheckInput: Equatable {
+        var design: ThumbnailDesign
+        var frame: Double?
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,21 +57,16 @@ struct ThumbnailMakerSheet: View {
                 ScrollView { controls.padding(18) }.frame(width: 360)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
-                    preview(width: 640)
-                    HStack(alignment: .top, spacing: 14) {
-                        preview(width: 360)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("At YouTube's search size").font(.caption.weight(.semibold))
-                            Text("Most people see it this small. A short title in big letters reads best.")
-                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            if let cut = sources?.cutout, design.cutout {
-                                Text("Speaker found: \(Int(cut.box.width)) × \(Int(cut.box.height)) px.").font(.caption2).foregroundStyle(.tertiary)
-                            } else if sources != nil, design.cutout {
-                                Label("No speaker found in this frame; it is used as it is.", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
+                    Picker("Preview", selection: $onPhone) {
+                        Text("Design").tag(false)
+                        Text("On a phone").tag(true)
                     }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    Group {
+                        if onPhone { phoneViews } else { preview(width: 640) }
+                    }
+                    .frame(height: 360, alignment: .topLeading)
+                    checkPanel
                 }
                 .padding(18)
             }
@@ -75,8 +88,169 @@ struct ThumbnailMakerSheet: View {
             }
             .padding(14)
         }
-        .frame(width: 1060, height: 720)
+        .frame(width: 1200, height: 720)
         .task(id: design.time) { await loadFrame() }
+        .task(id: CheckInput(design: design, frame: loadedTime)) { await runCheck() }
+    }
+
+    // MARK: - On a phone
+
+    /// The checked picture at the phone's sizes, with the title and channel as YouTube's
+    /// app shows them beside it.
+    private var phoneViews: some View {
+        let title = publish.title.isEmpty ? "Your title" : publish.title
+        let channel = publish.channel.isEmpty ? "Your channel" : publish.channel
+        return HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                phoneThumbnail(.homeFeed)
+                HStack(alignment: .top, spacing: 10) {
+                    Circle().fill(Color.accentColor.opacity(0.85)).frame(width: 34, height: 34)
+                        .overlay(Text(String(channel.prefix(1)).uppercased()).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.system(size: 15, weight: .medium)).lineLimit(2)
+                        Text("\(channel) · 0 views · just now").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                phoneSizeLabel(.homeFeed)
+            }
+            .frame(width: PhoneSize.homeFeed.width)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    phoneThumbnail(.searchList)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.system(size: 14, weight: .medium)).lineLimit(3)
+                        Text("\(channel) · 0 views").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                phoneSizeLabel(.searchList)
+                Text("These are the sizes on an iPhone. Hold the Mac at arm's length to see them about as a phone shows them. Up next, the history and playlists use the search list's size.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            .frame(width: PhoneSize.homeFeed.width, alignment: .leading)
+        }
+    }
+
+    private func phoneThumbnail(_ size: PhoneSize) -> some View {
+        ZStack {
+            Rectangle().fill(Color.black)
+            if let checked {
+                Image(decorative: checked, scale: 1).resizable().interpolation(.high)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .overlay(alignment: .bottomTrailing) {
+            Text(PublishInfo.timestamp(item.editedDuration)).font(.system(size: size == .homeFeed ? 12 : 10, weight: .semibold))
+                .foregroundStyle(.white).padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
+                .padding(size == .homeFeed ? 6 : 4)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: size == .homeFeed ? 12 : 8))
+        .accessibilityElement()
+        .accessibilityLabel("The thumbnail in the \(size.label.lowercased())")
+    }
+
+    private func phoneSizeLabel(_ size: PhoneSize) -> some View {
+        Text("\(size.label), \(Int(size.width)) × \(Int(size.height)) pt").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+    }
+
+    /// What does not read on a phone in 0.5 s, worst first.
+    private var checkPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Phone check").font(.headline)
+                if checking { ProgressView().controlSize(.small) }
+                Spacer()
+                if let check {
+                    if check.reads {
+                        Label("Reads in 0.5 s", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                    } else {
+                        let weak = check.findings.count - check.fails
+                        Text([check.fails > 0 ? "\(check.fails) do not read" : nil, weak > 0 ? "\(weak) to look at" : nil]
+                                .compactMap { $0 }.joined(separator: ", "))
+                            .font(.caption.weight(.semibold)).foregroundStyle(check.fails > 0 ? .red : .orange)
+                    }
+                }
+            }
+            if sources != nil, sources?.cutout == nil, design.cutout {
+                Label("No speaker found in this frame; it is used as it is.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+            if let checkProblem {
+                Label(checkProblem, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 7) {
+                    if let check {
+                        if check.reads {
+                            Text("The words and the face read at a glance in the home feed and in the search list.")
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        ForEach(check.findings) { finding in findingRow(finding) }
+                    } else if design.problem == nil {
+                        Text("Checking the design at a phone's sizes…").font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func findingRow(_ finding: PhoneCheck.Finding) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: finding.level == .fails ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(finding.level == .fails ? Color.red : Color.orange)
+            Text(finding.message).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Text(finding.sizes.count == PhoneSize.allCases.count ? "Both sizes" : finding.sizes.map(\.label).joined(separator: ", "))
+                .font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.primary.opacity(0.07), in: Capsule())
+                .fixedSize()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Checks the design about 0.7 s after the last change: drawn offscreen once with the
+    /// words and once without, with Apple Vision's face and picture words kept between runs.
+    private func runCheck() async {
+        guard let sources, loadedTime != nil, design.problem == nil else { return }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard !Task.isCancelled else { return }
+        checkRun += 1
+        let run = checkRun
+        checking = true
+        defer { if run == checkRun { checking = false } }
+        let chosen = design, frame = sources.frame
+        let face: CGRect?
+        if let found = faceFound, found.frame === frame { face = found.face } else {
+            face = await Task.detached(priority: .userInitiated) { PhoneCheck.face(in: frame) }.value
+            faceFound = (frame, face)
+        }
+        var words: [(text: String, box: CGRect)] = []
+        if let url = chosen.image {
+            if let found = pictureWords, found.url == url { words = found.words } else {
+                words = await Task.detached(priority: .userInitiated) { PhoneCheck.words(in: url) }.value
+                pictureWords = (url, words)
+            }
+        }
+        do {
+            let drawn = try await ThumbnailMaker.measure(chosen, sources: sources, accent: accent)
+            guard !Task.isCancelled else { return }
+            check = PhoneCheck.make(layout: drawn.layout, image: drawn.image, plate: drawn.plate, face: face,
+                                    frameWidth: frame.width, pictureWords: words)
+            checked = drawn.image
+            checkProblem = nil
+        } catch {
+            if !Task.isCancelled { checkProblem = "The phone check could not run: \(error.localizedDescription)" }
+        }
     }
 
     @ViewBuilder private func preview(width: CGFloat) -> some View {

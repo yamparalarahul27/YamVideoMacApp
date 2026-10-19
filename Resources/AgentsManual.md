@@ -182,8 +182,11 @@ edit, and each edit becomes one undo step with your name on it.
    - `imageSize`: the picture's size, 1 to 1.6 times its usual size (at most 520×340
      pixels of the 1920×1080 frame). A larger picture makes the title smaller.
    - `zoom`: the speaker's size, 1 to 1.6.
-3. Look at each result. Make sure the face is clear, nothing overlaps, and the words
-   read at YouTube's small search size.
+3. Look at each result. Make sure the face is clear and nothing overlaps. Then add
+   `check: true` (or `--check`) to see it on a phone: `check.findings` says what does
+   not read in 0.5 s at the size of the home feed and of the search list (letters too
+   small, too many words, low contrast, a face too small), and `check.phone` is a PNG of
+   both sizes. Fix each finding with level `fails` before you show the owner.
 4. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
    `setPublishInfo` with `{thumbnail: savedPath, design: …}`.
 

@@ -44,6 +44,32 @@ func hostingViews(in view: NSView) -> [NSView] {
     }
 }
 
+/// The thumbnail maker: the first render cuts the speaker out, the second shows it with
+/// the phone check, then the same On a phone. Its live preview is a web view, which this
+/// tool cannot capture in a sheet of its own; the phone views are pictures, so they show.
+/// YAMVIDEO_SNAPSHOT_ONLY=thumbnail renders only these.
+@MainActor
+func thumbnailMaker(_ model: AppModel, output: URL) async {
+    var made = model.items[0]
+    var publish = made.publish ?? PublishInfo()
+    if publish.title.isEmpty { publish.title = "How I edit talking-head videos on a Mac" }
+    var design = ThumbnailDesign(time: min(1, made.editedDuration / 2), title: "Edit for the *viewer*")
+    design.tag = "3 rules"
+    publish.design = design
+    made.publish = publish
+    let size = CGSize(width: 1200, height: 720)
+    UserDefaults.standard.set(false, forKey: "thumbnailOnPhone")
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
+    await pump(1)
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-maker.png"), settle: 12)
+    UserDefaults.standard.set(true, forKey: "thumbnailOnPhone")
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-on-phone.png"), settle: 12)
+    UserDefaults.standard.removeObject(forKey: "thumbnailOnPhone")
+}
+
 @MainActor
 func render<V: View>(_ view: V, size: CGSize, to url: URL, settle: TimeInterval = 1.5) async {
     let host = NSHostingView(rootView: view)
@@ -147,7 +173,8 @@ func run() async throws {
     let size = CGSize(width: 1360, height: 880)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
     // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages; =studio only the Studio
-    // pictures up to 4-recording.png, which the redesign tracker uses.
+    // pictures up to 4-recording.png, which the redesign tracker uses; =thumbnail only the
+    // thumbnail maker.
     let only = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"]
     // For the tracker's Studio pictures, captions on the Captions track: an SRT's words
     // spread over its captions' times, as sample words for the recording.
@@ -162,6 +189,10 @@ func run() async throws {
     }
     if only == "ideas" {
         try await ideas(model, output: output, size: size, minimum: CGSize(width: 1140, height: 800))
+        return
+    }
+    if only == "thumbnail" {
+        await thumbnailMaker(model, output: output)
         return
     }
 
@@ -257,17 +288,7 @@ func run() async throws {
            to: output.appendingPathComponent("5f-publish-watch-page.png"))
     await render(PublishSheet(initialPreview: 1).environmentObject(model), size: CGSize(width: 1080, height: 760),
            to: output.appendingPathComponent("5g-publish-search-result.png"))
-    // The thumbnail maker: the first render cuts the speaker out, the second shows it. Its
-    // live previews are web views, which this tool cannot capture in a sheet of its own.
-    var made = model.items[0]
-    var makerDesign = ThumbnailDesign(time: min(1, length / 2), title: "Edit for the *viewer*")
-    makerDesign.tag = "3 rules"
-    made.publish?.design = makerDesign
-    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
-           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
-    await pump(1)
-    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
-           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
+    await thumbnailMaker(model, output: output)
     // The end screen: the speaker in a frame beside YouTube's boxes, on the timeline and in
     // the inspector, and the choice of element for each box (from Publish).
     if length >= EndScreen.lengths.lowerBound {
