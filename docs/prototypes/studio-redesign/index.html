@@ -1,0 +1,1961 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>YamVideo Studio Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a full-width "stage" that swaps the real app picture and the clickable mockup;
+   each area is a Now | Proposed pair. The mockup is a fixed dark Mac window (it mirrors the app), the page follows the theme. */
+:root {
+  --paper: #f3f4f6;
+  --card: #ffffff;
+  --ink: #15181d;
+  --muted: #59616d;
+  --line: #dadde3;
+  --accent: #b25500;
+  --accent-ink: #ffffff;
+  --accent-soft: #fdf0e2;
+  --now: #5f6773;
+  --now-soft: #e9ebee;
+  --code-bg: #eceef1;
+  --ok: #1f7a4d;
+  --ok-soft: #e1f3e9;
+  --info: #2457c5;
+  --info-soft: #e6edfb;
+  --f-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* The mockup: YamVideo in dark mode. Same in both page themes. */
+  --m-win: #1b1c1f;
+  --m-bar: #141517;
+  --m-panel: #1f2023;
+  --m-panel2: #27282c;
+  --m-raise: #303136;
+  --m-line: #33353a;
+  --m-text: #e9e9eb;
+  --m-text2: #a1a4ab;
+  --m-text3: #6e717a;
+  --m-acc: #0a84ff;
+  --m-zoom: #38bdf8;
+  --m-gfx: #a78bfa;
+  --m-fx: #ff9f0a;
+  --m-short: #ff5c8a;
+  --m-cap: #facc15;
+  --m-audio: #2dd4bf;
+  --m-clip: #1d3554;
+  --m-pin: #ffa24a;
+  --m-pin-ink: #1b1c1f;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1114;
+    --card: #171a1e;
+    --ink: #e8ebef;
+    --muted: #9aa2ad;
+    --line: #2a2f36;
+    --accent: #ffa24a;
+    --accent-ink: #1b1c1f;
+    --accent-soft: #2b1e11;
+    --now: #a3abb6;
+    --now-soft: #22262c;
+    --code-bg: #20242a;
+    --ok: #5fd39a;
+    --ok-soft: #12291d;
+    --info: #8fb2ff;
+    --info-soft: #172235;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1114;
+  --card: #171a1e;
+  --ink: #e8ebef;
+  --muted: #9aa2ad;
+  --line: #2a2f36;
+  --accent: #ffa24a;
+  --accent-ink: #1b1c1f;
+  --accent-soft: #2b1e11;
+  --now: #a3abb6;
+  --now-soft: #22262c;
+  --code-bg: #20242a;
+  --ok: #5fd39a;
+  --ok-soft: #12291d;
+  --info: #8fb2ff;
+  --info-soft: #172235;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(30px, 4.6vw, 48px); line-height: 1.08; font-weight: 700; }
+h2 { font-size: clamp(22px, 2.8vw, 30px); line-height: 1.15; font-weight: 700; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); }
+code, kbd, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+kbd {
+  display: inline-block; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line);
+  background: var(--card); font-size: 0.8em; line-height: 1.5; white-space: nowrap;
+}
+.eyebrow { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Header */
+.top { padding-block: 48px 28px; display: grid; gap: 16px; }
+.top .lede { font-size: 19px; color: var(--muted); max-width: 64ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 14px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.tag { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.tag.now { background: var(--now-soft); color: var(--now); }
+.tag.prop { background: var(--accent); color: var(--accent-ink); }
+
+section.block { padding-block: 36px; border-top: 1px solid var(--line); display: grid; gap: 18px; }
+.block > .head { display: grid; gap: 8px; }
+.block > .head p { color: var(--muted); max-width: 70ch; }
+
+/* Stage */
+.stage-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; justify-content: space-between; }
+.seg { display: inline-flex; background: var(--now-soft); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg button {
+  font: 600 14px var(--f-body); border: 0; background: transparent; color: var(--muted);
+  padding: 7px 16px; border-radius: 8px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.seg button[data-view="proposed"][aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.stage-hint { font-size: 14px; color: var(--muted); }
+.actual { font: 500 13px var(--f-body); border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer; display: none; }
+@media (max-width: 760px) { .actual { display: inline-block; } }
+.stage { position: relative; width: 100%; border-radius: 14px; overflow: hidden; background: #111214; box-shadow: 0 18px 50px -24px rgba(0,0,0,.45); }
+.stage.scroll { overflow: auto; }
+.stage-inner { position: relative; width: 100%; }
+.stage img.now-shot { display: block; width: 100%; height: auto; }
+.stage .mock-holder { position: relative; width: 1280px; height: 877px; transform-origin: top left; }
+.stage.scroll .stage-inner { width: 1280px; }
+.pins { position: absolute; inset: 0; pointer-events: none; }
+.pin {
+  position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+  background: var(--m-pin); color: var(--m-pin-ink); font: 700 13px var(--f-body); display: grid; place-items: center;
+  box-shadow: 0 0 0 3px rgba(255,162,74,.28), 0 4px 10px rgba(0,0,0,.4); pointer-events: auto; text-decoration: none; z-index: 30;
+}
+.pin:hover { transform: scale(1.1); }
+@media (max-width: 760px) { .pin { width: 18px; height: 18px; margin: -9px 0 0 -9px; font-size: 10px; box-shadow: 0 0 0 2px rgba(255,162,74,.28); } }
+.side > .tag { justify-self: start; }
+.try-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 18px; font-size: 14px; color: var(--muted); padding: 0; margin: 0; list-style: none; }
+.try-list li { display: flex; gap: 10px; align-items: baseline; }
+.try-list b { color: var(--ink); font-weight: 600; }
+.try-list li::before { content: ""; flex: 0 0 7px; height: 7px; border-radius: 50%; background: var(--accent); transform: translateY(-1px); }
+
+/* Summary table */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; background: var(--now-soft); }
+tr:last-child td { border-bottom: 0; }
+td.n { font-family: var(--f-mono); color: var(--accent); font-weight: 500; width: 36px; }
+td.size { font-family: var(--f-mono); white-space: nowrap; }
+table.keys td:nth-child(n+2) { white-space: nowrap; }
+.size-pill { display: inline-block; min-width: 26px; text-align: center; border-radius: 6px; padding: 1px 6px; font: 600 12px var(--f-mono); background: var(--now-soft); color: var(--ink); }
+
+/* Area sections */
+.area-head { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: baseline; }
+.area-head .num { font: 700 15px var(--f-mono); color: var(--accent-ink); background: var(--accent); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; align-self: center; }
+.area-head p { grid-column: 2; color: var(--muted); max-width: 72ch; }
+.cmp { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 860px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
+.side { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.side.prop { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.side figure { margin: 0; border-radius: 9px; overflow: hidden; background: #111214; }
+.side figure img { display: block; width: 100%; height: auto; }
+.side figcaption { font-size: 13px; color: var(--muted); padding: 8px 2px 0; background: var(--card); }
+.side ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; font-size: 15px; }
+.side ul li::marker { color: var(--muted); }
+.side.prop ul li::marker { color: var(--accent); }
+.try {
+  justify-self: start; display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); font: 600 14px var(--f-body); padding: 9px 14px; border-radius: 9px;
+}
+.try svg { width: 16px; height: 16px; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px 18px; font-size: 14.5px; color: var(--muted); }
+.notes p b { color: var(--ink); }
+
+.keep-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.keep-grid .side h3 { font-size: 16px; }
+.keep-grid .side p { font-size: 14.5px; color: var(--muted); }
+
+ol.phases { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: ph; }
+ol.phases li { counter-increment: ph; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 4px 14px; align-items: start; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+ol.phases li::before { content: "P" counter(ph); font: 600 14px var(--f-mono); color: var(--accent); padding-top: 2px; }
+ol.phases h3 { font-size: 16px; }
+ol.phases p { grid-column: 2; font-size: 14.5px; color: var(--muted); }
+ol.phases .size-pill { grid-row: 1; grid-column: 3; }
+
+.decide { display: grid; gap: 12px; }
+.q { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; }
+.q legend { font-weight: 600; padding: 0; font-size: 15.5px; }
+.q fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; }
+.q .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.q label { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; font-size: 14px; cursor: pointer; background: var(--paper); }
+.q label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.q input { accent-color: var(--accent); margin: 0; }
+.q .why { font-size: 13.5px; color: var(--muted); }
+.copy-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.copy-row textarea { width: 100%; min-height: 120px; font: 13px var(--f-mono); border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--card); color: var(--ink); }
+.status { font-size: 14px; color: var(--muted); }
+
+/* Tracker */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.step { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 10px; }
+.step.review, .step.shipped { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.step-head .id { font: 600 14px var(--f-mono); color: var(--accent); }
+.step-head h3 { flex: 1 1 260px; font-size: 16.5px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.shipped { background: var(--ok-soft); color: var(--ok); }
+.pill.review { background: var(--accent-soft); color: var(--accent); }
+.pill.next { background: var(--info-soft); color: var(--info); }
+.pill.planned { background: var(--now-soft); color: var(--muted); }
+.step-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13.5px; color: var(--muted); }
+.step-meta code { font-size: 12.5px; }
+.step-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 860px) { .step-body { grid-template-columns: minmax(0, 1fr); } }
+.step-body h4 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.step-body ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 14.5px; }
+.ba { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.ba figure { margin: 0; border-radius: 9px; overflow: hidden; background: #111214; }
+.ba figure img { display: block; width: 100%; height: auto; }
+.ba figcaption { font-size: 12.5px; color: var(--muted); padding: 6px 2px 0; background: var(--card); }
+.sub { font-size: 18px; margin-top: 8px; }
+.versions { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.version { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: grid; text-align: left; padding: 0; cursor: pointer; font: inherit; color: inherit; }
+.version:hover { border-color: var(--accent); }
+.version img { display: block; width: 100%; height: auto; aspect-ratio: 1600 / 1096; object-fit: cover; background: #111214; }
+.version .vt { padding: 10px 12px 12px; display: grid; gap: 3px; }
+.version .vt b { font-size: 15px; }
+.version .vt span { font-size: 13px; color: var(--muted); }
+.decided { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14.5px; color: var(--muted); }
+.decided b { color: var(--ink); font-weight: 600; }
+.area-status { grid-column: 2; justify-self: start; }
+footer { padding-block: 30px 60px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); display: grid; gap: 8px; }
+footer ul { margin: 0; padding-left: 18px; }
+
+/* ===================== The mockup ===================== */
+.mock {
+  position: absolute; inset: 0; width: 1280px; height: 877px; background: var(--m-win); color: var(--m-text);
+  font: 12px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  display: grid; grid-template-rows: 44px 1fr 22px; overflow: hidden; outline: none; user-select: none; -webkit-user-select: none;
+}
+.mock svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.mock .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; }
+.mock button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.m-title { background: var(--m-bar); display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #000; }
+.lights { display: flex; gap: 8px; margin-right: 14px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #3a3b3f; }
+.m-title .grow { flex: 1; }
+.tb { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; color: var(--m-text2); font-size: 12.5px; }
+.tb:hover { background: var(--m-raise); color: var(--m-text); }
+.tb.strong { color: var(--m-text); }
+.mseg { display: inline-flex; background: #0c0c0d; border-radius: 8px; padding: 2px; }
+.mseg span { padding: 4px 12px; border-radius: 6px; color: var(--m-text2); font-size: 12.5px; }
+.mseg span.on { background: var(--m-raise); color: var(--m-text); }
+.m-body { display: grid; grid-template-columns: 64px 1fr; min-height: 0; }
+.m-rail { background: var(--m-bar); border-right: 1px solid #000; display: flex; flex-direction: column; gap: 6px; padding: 10px 6px; }
+.m-rail div { display: grid; justify-items: center; gap: 3px; padding: 8px 0; border-radius: 9px; color: var(--m-text2); font-size: 10.5px; }
+.m-rail div svg.i { width: 20px; height: 20px; }
+.m-rail div.on { background: rgba(10,132,255,.18); color: var(--m-acc); }
+.m-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; min-width: 0; }
+.m-left { display: grid; grid-template-rows: 455px 1fr; min-height: 0; min-width: 0; }
+.m-top { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 0; border-bottom: 1px solid #000; }
+
+/* Assets panel */
+.m-assets { background: var(--m-panel); border-right: 1px solid #000; display: grid; grid-template-rows: auto auto 1fr; min-height: 0; }
+.m-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--m-line); }
+.m-tabs button { display: grid; justify-items: center; gap: 3px; padding: 8px 0 7px; color: var(--m-text3); font-size: 10.5px; border-bottom: 2px solid transparent; }
+.m-tabs button svg.i { width: 18px; height: 18px; }
+.m-tabs button.on { color: var(--m-text); border-bottom-color: var(--m-acc); }
+.m-tabs button:hover { color: var(--m-text); }
+.m-assets-bar { display: flex; gap: 6px; padding: 8px; }
+.m-search { flex: 1; height: 26px; border-radius: 7px; background: var(--m-panel2); color: var(--m-text3); display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+.m-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; background: var(--m-raise); color: var(--m-text); font-size: 11.5px; white-space: nowrap; }
+.m-btn:hover { background: #3a3c42; }
+.m-btn.primary { background: var(--m-acc); color: #fff; }
+.m-btn.small { height: 22px; padding: 0 7px; font-size: 11px; }
+.m-assets-list { overflow: auto; padding: 0 8px 10px; display: grid; gap: 8px; align-content: start; }
+.m-group { font-size: 10.5px; color: var(--m-text3); text-transform: uppercase; letter-spacing: .06em; padding: 6px 2px 0; }
+.m-card { position: relative; border-radius: 8px; overflow: hidden; background: var(--m-panel2); border: 1px solid transparent; }
+.m-card:hover { border-color: var(--m-line); }
+.m-card .thumb { aspect-ratio: 16/9; background: #000 center/cover no-repeat; position: relative; }
+.m-card .meta { padding: 6px 8px; display: grid; gap: 1px; }
+.m-card .meta b { font-weight: 600; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-card .meta span { color: var(--m-text3); font-size: 10.5px; }
+.m-card .used { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 5px; }
+.m-card .dur { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 4px; }
+.m-card .add { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 6px; background: var(--m-acc); color: #fff; display: grid; place-items: center; opacity: 0; transition: opacity .12s; }
+.m-card:hover .add { opacity: 1; }
+.m-dash { border: 1px dashed var(--m-line); border-radius: 8px; padding: 14px 8px; color: var(--m-text3); display: grid; justify-items: center; gap: 4px; text-align: center; font-size: 11px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.gfx { aspect-ratio: 16/9; background: #2b2c31; position: relative; overflow: hidden; }
+.gfx .np { position: absolute; left: 8%; bottom: 14%; background: #fff; color: #111; padding: 3px 6px; border-radius: 3px; font-size: 8px; font-weight: 700; line-height: 1.1; }
+.gfx .np small { display: block; font-weight: 500; color: #555; font-size: 6.5px; }
+.gfx .tc { position: absolute; inset: 22% 10%; display: grid; place-items: center; font-weight: 800; font-size: 11px; text-align: center; line-height: 1.05; color: #fff; }
+.gfx .sc { position: absolute; inset: 0; display: grid; place-items: center; background: #111; color: #fff; font-weight: 800; font-size: 10px; }
+.gfx .sc i { font-style: normal; color: var(--m-fx); margin-right: 4px; }
+.gfx .kt { position: absolute; left: 10%; top: 32%; font-weight: 800; font-size: 12px; color: #fff; }
+.gfx .kt em { font-style: normal; background: var(--m-cap); color: #111; padding: 0 2px; }
+.gfx .es { position: absolute; inset: 14%; display: grid; grid-template-columns: 1fr 1fr; gap: 6%; }
+.gfx .es i { border: 1px solid #777; border-radius: 3px; }
+.gfx .bd { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 34%; aspect-ratio: 1; border-radius: 50%; background: #fff; color: #111; display: grid; place-items: center; font-weight: 800; font-size: 9px; }
+.gfx .fl { position: absolute; left: 10%; top: 18%; display: grid; gap: 3px; }
+.gfx .fl i { display: block; height: 5px; border-radius: 2px; background: #888; }
+.logo-tile { aspect-ratio: 1.6; border-radius: 8px; background: var(--m-panel2); display: grid; place-items: center; gap: 0; font-size: 11px; color: var(--m-text2); position: relative; }
+.logo-tile b { width: 30px; height: 30px; border-radius: 50%; background: #fff; color: #111; display: grid; place-items: center; font-size: 13px; }
+.fx-row { display: flex; align-items: center; gap: 9px; padding: 8px; border-radius: 8px; background: var(--m-panel2); position: relative; }
+.fx-row .sw { width: 34px; height: 24px; border-radius: 5px; flex: none; }
+.fx-row b { font-weight: 600; font-size: 11.5px; display: block; }
+.fx-row span { color: var(--m-text3); font-size: 10.5px; }
+.fx-row .add { position: static; opacity: 1; margin-left: auto; width: 22px; height: 22px; border-radius: 6px; background: var(--m-raise); display: grid; place-items: center; }
+
+/* Player */
+.m-player { background: #121315; display: grid; grid-template-rows: 30px 1fr 40px; min-width: 0; min-height: 0; position: relative; }
+.m-phead { display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--m-text2); font-size: 11.5px; border-bottom: 1px solid #000; }
+.m-phead b { color: var(--m-text); font-weight: 600; }
+.m-phead .grow { flex: 1; }
+.m-qual { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 6px; background: var(--m-panel2); }
+.m-pic { position: relative; display: grid; place-items: center; min-height: 0; overflow: hidden; }
+.frame { position: relative; overflow: hidden; background: #000; }
+.layer { position: absolute; inset: 0; overflow: hidden; }
+.layer .zoomer { position: absolute; inset: 0; transform-origin: 50% 50%; }
+.layer img { position: absolute; display: block; max-width: none; }
+.layer.before { clip-path: inset(0 50% 0 0); }
+.layer.before img { filter: saturate(.72) contrast(.9) brightness(1.04); }
+.cmp-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #fff; transform: translateX(-1px); z-index: 5; }
+.cmp-tag { position: absolute; top: 8px; z-index: 6; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; background: rgba(0,0,0,.6); color: #fff; padding: 3px 7px; border-radius: 5px; }
+.blur-area { position: absolute; -webkit-backdrop-filter: blur(9px); backdrop-filter: blur(9px); background: rgba(255,255,255,.03); }
+.ov-np { position: absolute; left: 4%; bottom: 12%; background: #fff; color: #111; padding: 6px 12px 7px; border-radius: 5px; font-weight: 700; font-size: 15px; line-height: 1.15; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.ov-np small { display: block; font-weight: 500; font-size: 10.5px; color: #555; }
+.ov-card { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10,10,12,.88); color: #fff; font-weight: 800; font-size: 26px; text-align: center; padding: 10%; line-height: 1.1; }
+.ov-card small { display: block; font-size: 12px; color: var(--m-fx); letter-spacing: .14em; text-transform: uppercase; margin-bottom: 6px; }
+.ov-end { position: absolute; inset: 0; background: #0d0d0f; display: grid; grid-template-columns: 1.3fr 1fr; gap: 5%; padding: 9% 7%; }
+.ov-end i { border: 1.5px solid #8a8a90; border-radius: 6px; display: grid; place-items: center; color: #aaa; font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.ov-end .stack { display: grid; gap: 10%; }
+.ov-cap { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); max-width: 86%; text-align: center; background: rgba(0,0,0,.72); color: #fff; font-weight: 600; font-size: 15px; line-height: 1.25; padding: 4px 10px; border-radius: 5px; }
+.safe { position: absolute; inset: 0; pointer-events: none; }
+.safe .r { position: absolute; right: 3%; bottom: 18%; display: grid; gap: 9px; }
+.safe .r i { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.28); }
+.safe .b { position: absolute; left: 4%; right: 18%; bottom: 4%; height: 12%; border-radius: 6px; background: rgba(255,255,255,.18); }
+.safe .t { position: absolute; left: 0; right: 0; top: 0; height: 9%; background: linear-gradient(rgba(0,0,0,.4), transparent); }
+.cropbox { position: absolute; box-shadow: 0 0 0 2000px rgba(0,0,0,.58); border: 1.5px solid #fff; cursor: move; z-index: 4; }
+.cropbox .third { position: absolute; background: rgba(255,255,255,.35); }
+.cropbox .h { position: absolute; width: 12px; height: 12px; background: #fff; border-radius: 2px; }
+.cropbox .h.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.cropbox .h.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.cropbox .h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.cropbox .h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.cropbox .dim { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); background: rgba(0,0,0,.6); color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 5px; white-space: nowrap; pointer-events: none; }
+.zoom-target { position: absolute; border: 1.5px dashed var(--m-zoom); z-index: 4; pointer-events: none; }
+.zoom-target b { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px; border-radius: 50%; border: 2px solid var(--m-zoom); }
+.zoom-target span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, 14px); background: var(--m-zoom); color: #001018; font-size: 10px; font-weight: 800; padding: 0 5px; border-radius: 6px; }
+.m-pbar { display: flex; align-items: center; gap: 4px; padding: 0 10px; border-top: 1px solid #000; background: var(--m-panel); }
+.m-pbar .grow { flex: 1; }
+.m-pbar .tc { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--m-text); min-width: 138px; }
+.m-pbar .tc span { color: var(--m-text3); }
+.ib { width: 28px; height: 28px; border-radius: 7px; display: inline-grid; place-items: center; color: var(--m-text2); position: relative; }
+.ib:hover { background: var(--m-raise); color: var(--m-text); }
+.ib.on { color: var(--m-acc); background: rgba(10,132,255,.14); }
+.ib.play { width: 32px; height: 32px; border-radius: 50%; background: var(--m-raise); color: var(--m-text); }
+.ib.play svg.i { fill: currentColor; stroke: none; }
+.ib[disabled] { opacity: .35; cursor: default; }
+.sep { width: 1px; height: 18px; background: var(--m-line); margin: 0 4px; }
+.mseg2 { display: inline-flex; background: var(--m-panel2); border-radius: 7px; padding: 2px; }
+.mseg2 button { padding: 3px 8px; border-radius: 5px; color: var(--m-text2); font-size: 11px; }
+.mseg2 button.on { background: var(--m-raise); color: var(--m-text); }
+.chip { height: 24px; padding: 0 9px; border-radius: 6px; background: var(--m-panel2); color: var(--m-text2); font-size: 11px; display: inline-flex; align-items: center; }
+.chip:hover { color: var(--m-text); }
+.chip.on { background: var(--m-acc); color: #fff; }
+.m-cropbar { display: flex; align-items: center; gap: 4px; padding: 0 10px; border-top: 1px solid #000; background: #1a2533; }
+.m-cropbar .lbl { font-weight: 600; margin-right: 6px; display: inline-flex; gap: 6px; align-items: center; color: var(--m-text); }
+.m-cropbar .px { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--m-text2); margin: 0 6px; }
+.toast { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); background: rgba(30,31,35,.96); border: 1px solid var(--m-line); color: var(--m-text); padding: 6px 12px; border-radius: 8px; font-size: 11.5px; z-index: 20; white-space: nowrap; box-shadow: 0 10px 24px rgba(0,0,0,.4); opacity: 0; transition: opacity .18s; pointer-events: none; }
+.toast.show { opacity: 1; }
+
+/* Inspector */
+.m-insp { background: var(--m-panel); border-left: 1px solid #000; display: grid; grid-template-rows: auto auto 1fr; min-height: 0; }
+.m-ihead { padding: 10px 12px 8px; display: grid; gap: 2px; border-bottom: 1px solid var(--m-line); }
+.m-ihead .k { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--m-text3); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.m-ihead h4 { margin: 0; font-size: 14px; font-weight: 650; }
+.m-ihead span { color: var(--m-text2); font-size: 11px; }
+.m-itabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--m-line); }
+.m-itabs button { padding: 6px 9px 7px; color: var(--m-text3); font-size: 11.5px; border-bottom: 2px solid transparent; }
+.m-itabs button.on { color: var(--m-text); border-bottom-color: var(--m-acc); }
+.m-ibody { overflow: auto; padding: 8px 10px 14px; display: grid; gap: 8px; align-content: start; }
+.chg { background: var(--m-panel2); border-radius: 9px; padding: 8px 9px; display: grid; gap: 7px; }
+.chg-row { display: flex; align-items: center; gap: 8px; }
+.chg-row .ic { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; flex: none; }
+.chg-row .ic svg.i { width: 14px; height: 14px; }
+.chg-row .txt { flex: 1; min-width: 0; display: grid; }
+.chg-row .txt b { font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.chg-row .txt span { color: var(--m-text2); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chg.off .txt b, .chg.off .txt span { color: var(--m-text3); }
+.chg.off .ic { filter: grayscale(1); opacity: .5; }
+.all { font-size: 9px; font-weight: 600; color: var(--m-text3); border: 1px solid var(--m-line); border-radius: 4px; padding: 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+.switch { width: 30px; height: 18px; border-radius: 9px; background: #45474d; position: relative; flex: none; transition: background .15s; }
+.switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch.on { background: #30d158; }
+.switch.on::after { transform: translateX(12px); }
+.reset { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--m-text3); }
+.reset:hover { color: var(--m-text); background: var(--m-raise); }
+.reset svg.i { width: 13px; height: 13px; }
+.kv { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--m-text2); }
+.kv .grow { flex: 1; }
+.kv .val { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--m-text); min-width: 42px; text-align: right; }
+.slider { flex: 1; height: 4px; border-radius: 2px; background: #45474d; position: relative; }
+.slider i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--m-acc); }
+.slider b { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px; border-radius: 50%; background: #fff; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.m-field { height: 24px; border-radius: 6px; background: #17181a; border: 1px solid var(--m-line); display: flex; align-items: center; padding: 0 8px; color: var(--m-text); font-size: 11.5px; }
+.ilabel { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--m-text3); font-weight: 600; padding: 4px 2px 0; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.m-btn.danger { color: #ff6961; }
+.hint { color: var(--m-text3); font-size: 10.5px; line-height: 1.35; }
+
+/* Timeline */
+.m-tl { background: var(--m-win); display: grid; grid-template-rows: 32px 1fr; min-height: 0; min-width: 0; }
+.m-tools { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid #000; background: var(--m-panel); }
+.m-tools .grow { flex: 1; }
+.m-tools .ib { width: 28px; height: 26px; }
+.m-tools .zs { width: 84px; height: 4px; border-radius: 2px; background: #45474d; position: relative; margin: 0 4px; cursor: pointer; }
+.m-tools .zs b { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px; border-radius: 50%; background: #fff; }
+.m-tools .lbl-ai { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; height: 26px; border-radius: 7px; color: var(--m-text2); font-size: 11.5px; }
+.m-tools .lbl-ai:hover { background: var(--m-raise); color: var(--m-text); }
+.m-tlbody { display: grid; grid-template-columns: 132px 1fr; min-height: 0; position: relative; }
+.m-heads { background: var(--m-panel); border-right: 1px solid #000; display: flex; flex-direction: column; gap: 2px; padding-top: 0; }
+.m-heads .row { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; color: var(--m-text2); font-size: 11px; }
+.m-heads .row .nm { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.m-heads .row .nm svg.i { width: 14px; height: 14px; }
+.m-heads .row .hb { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; color: var(--m-text3); }
+.m-heads .row .hb svg.i { width: 13px; height: 13px; }
+.m-heads .row .hb:hover { background: var(--m-raise); color: var(--m-text); }
+.m-heads .row .hb.on { color: var(--m-fx); }
+.m-heads .row.hidden .nm { opacity: .45; }
+.m-heads .tcell { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; color: var(--m-text); }
+.m-scroll { overflow-x: auto; overflow-y: hidden; position: relative; }
+.m-scroll::-webkit-scrollbar { height: 8px; }
+.m-scroll::-webkit-scrollbar-thumb { background: #3a3c42; border-radius: 4px; }
+.m-content { position: relative; display: flex; flex-direction: column; gap: 2px; min-height: 100%; }
+.trow { position: relative; flex: none; }
+.trow.track { background: rgba(255,255,255,.025); }
+.trow.hidden > * { opacity: .35; }
+.r-ruler { cursor: ew-resize; border-bottom: 1px solid var(--m-line); }
+.tick { position: absolute; bottom: 0; width: 1px; background: #5a5d64; }
+.tlab { position: absolute; top: 3px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9px; color: var(--m-text2); transform: translateX(3px); white-space: nowrap; }
+.flag { position: absolute; top: 2px; width: 9px; height: 10px; clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); cursor: pointer; }
+.blk { position: absolute; top: 3px; bottom: 3px; border-radius: 5px; overflow: hidden; display: flex; align-items: center; gap: 5px; padding: 0 6px; font-size: 10.5px; white-space: nowrap; cursor: pointer; }
+.blk svg.i { width: 12px; height: 12px; }
+.blk.g { background: rgba(167,139,250,.28); color: #e9e2ff; border: 1px solid rgba(167,139,250,.55); }
+.blk.g.sel { background: var(--m-gfx); color: #1a1033; }
+.blk.s { top: 2px; bottom: 2px; border-radius: 3px; padding: 0 5px; font-size: 9px; font-weight: 600; background: rgba(255,92,138,.3); color: #ffd6e2; border: 1px solid rgba(255,92,138,.6); }
+.blk.s.sel { background: var(--m-short); color: #2a0612; }
+.blk.e { background: rgba(255,159,10,.3); color: #ffe2b8; border: 1px solid rgba(255,159,10,.6); top: 2px; bottom: auto; height: 18px; }
+.blk.e.sel { background: var(--m-fx); color: #2b1600; }
+.band { position: absolute; left: 0; bottom: 2px; height: 9px; border-radius: 3px; background: repeating-linear-gradient(135deg, rgba(255,159,10,.5) 0 4px, rgba(255,159,10,.18) 4px 8px); font-size: 7.5px; line-height: 9px; color: #ffe2b8; padding-left: 5px; white-space: nowrap; overflow: hidden; }
+.band.off { background: repeating-linear-gradient(135deg, rgba(160,160,160,.3) 0 4px, rgba(160,160,160,.1) 4px 8px); color: var(--m-text3); text-decoration: line-through; }
+.zb { position: absolute; top: 4px; bottom: 3px; cursor: pointer; display: grid; place-items: end center; }
+.zb .shape { position: absolute; inset: 0; background: rgba(56,189,248,.35); }
+.zb .shape.top { background: var(--m-zoom); }
+.zb b { position: relative; font-size: 9.5px; font-weight: 800; color: #e0f6ff; padding-bottom: 2px; }
+.zb.sel .shape { background: var(--m-zoom); }
+.zb.sel b { color: #001018; }
+.clip { position: absolute; top: 0; bottom: 0; border-radius: 6px; overflow: hidden; background: var(--m-clip); cursor: pointer; border: 1px solid rgba(255,255,255,.12); }
+.clip.sel { outline: 2px solid var(--m-acc); outline-offset: -1px; }
+.strip { position: absolute; inset: 0; display: flex; }
+.strip img { height: 100%; width: auto; flex: none; display: block; opacity: .9; }
+.clip .top { position: absolute; left: 0; right: 0; top: 0; padding: 3px 6px 10px; display: flex; align-items: center; gap: 5px; background: linear-gradient(rgba(0,0,0,.7), transparent); font-size: 10.5px; }
+.clip .top .n { width: 16px; height: 16px; border-radius: 4px; background: rgba(0,0,0,.55); display: grid; place-items: center; font-weight: 700; font-size: 10px; }
+.clip .top .t { color: #dfe6ef; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip .top .grow { flex: 1; }
+.badge { display: inline-flex; align-items: center; gap: 2px; height: 16px; padding: 0 4px; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 9.5px; font-weight: 700; }
+.badge svg.i { width: 11px; height: 11px; }
+.badge.sp { background: #ffd60a; color: #1c1600; }
+.trim { position: absolute; top: 0; bottom: 0; width: 6px; background: var(--m-acc); }
+.trim.l { left: 0; border-radius: 5px 0 0 5px; }
+.trim.r { right: 0; border-radius: 0 5px 5px 0; }
+.trim::after { content: ""; position: absolute; left: 2px; top: 40%; bottom: 40%; width: 2px; background: rgba(255,255,255,.8); border-radius: 1px; }
+.aclip { position: absolute; top: 0; bottom: 0; border-radius: 6px; overflow: hidden; background: #0f2a2a; border: 1px solid rgba(45,212,191,.25); cursor: pointer; }
+.aclip.sel { outline: 2px solid var(--m-acc); outline-offset: -1px; }
+.aclip canvas { position: absolute; left: 0; top: 0; }
+.aclip .lab { position: absolute; left: 6px; top: 3px; font-size: 9.5px; color: #9ff3e6; }
+.cue { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; background: rgba(250,204,21,.22); border-left: 2px solid var(--m-cap); color: #fff3c2; font-size: 9px; padding: 0 4px; overflow: hidden; white-space: nowrap; display: flex; align-items: center; }
+.trow.cap-off .cue { background: rgba(160,160,160,.15); border-left-color: #777; color: var(--m-text3); }
+.ph { position: absolute; top: 0; bottom: 0; width: 1px; background: #fff; pointer-events: none; z-index: 8; }
+.ph::before { content: ""; position: absolute; top: 0; left: -5px; border: 5px solid transparent; border-top: 8px solid #fff; }
+.scissors { position: absolute; z-index: 9; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: #fff; color: #111; display: grid; place-items: center; opacity: 0; transition: opacity .12s; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+.scissors svg.i { width: 13px; height: 13px; stroke-width: 2; }
+.m-tlbody:hover .scissors { opacity: 1; }
+.m-status { background: var(--m-bar); border-top: 1px solid #000; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: var(--m-text2); font-size: 11px; }
+.m-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #30d158; margin-right: 6px; }
+.flash { animation: flash 2.6s ease-out 1; position: relative; z-index: 15; }
+@keyframes flash { 0%, 60% { box-shadow: 0 0 0 3px var(--m-pin), 0 0 30px rgba(255,162,74,.5); } 100% { box-shadow: 0 0 0 0 rgba(255,162,74,0); } }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none; box-shadow: 0 0 0 3px var(--m-pin); } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="m5 7 1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/></symbol>
+    <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88"/><path d="M14.47 14.48 20 20"/><path d="M8.12 8.12 12 12"/></symbol>
+    <symbol id="i-crop" viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></symbol>
+    <symbol id="i-speed" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+    <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></symbol>
+    <symbol id="i-zoomout" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/></symbol>
+    <symbol id="i-blur" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.2"/><circle cx="12" cy="8" r="1.2"/><circle cx="16" cy="8" r="1.2"/><circle cx="8" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="16" cy="12" r="1.2"/><circle cx="8" cy="16" r="1.2"/><circle cx="12" cy="16" r="1.2"/><circle cx="16" cy="16" r="1.2"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="m19 15 .8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></symbol>
+    <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M5 3h4v8a3 3 0 0 0 6 0V3h4v8a7 7 0 0 1-14 0z"/><path d="M5 7h4"/><path d="M15 7h4"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M3 12h18"/><path d="m7 8-4 4 4 4"/><path d="m17 8 4 4-4 4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m16 6-7 6 7 6z"/><path d="M7 6v12"/></symbol>
+    <symbol id="i-fwd" viewBox="0 0 24 24"><path d="m8 6 7 6-7 6z"/><path d="M17 6v12"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1"/><path d="M6.6 6.6C3.9 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16"/><path d="M17 4v16"/><path d="M3 9h4"/><path d="M3 15h4"/><path d="M17 9h4"/><path d="M17 15h4"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h2"/><path d="M7 8v8"/><path d="M11 5v14"/><path d="M15 9v6"/><path d="M19 11v2"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></symbol>
+    <symbol id="i-fx" viewBox="0 0 24 24"><path d="M5 3v4"/><path d="M3 5h4"/><path d="M6 17v4"/><path d="M4 19h4"/><path d="m13 3 1.5 4.5L19 9l-4.5 1.5L13 15l-1.5-4.5L7 9l4.5-1.5z"/></symbol>
+    <symbol id="i-cc" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 10.2a2.4 2.4 0 1 0 0 3.6"/><path d="M17 10.2a2.4 2.4 0 1 0 0 3.6"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+    <symbol id="i-safe" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 7h10v10H7z" stroke-dasharray="2 2"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4v16"/><path d="M8 4v16"/><path d="m12 5 4 15"/><path d="M18 4v16"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2a5 5 0 0 1 5.5 4.8"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 13v7h14v-7"/></symbol>
+    <symbol id="i-publish" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M5 15v5h14v-5"/></symbol>
+    <symbol id="i-media" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/></symbol>
+    <symbol id="i-badge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-rows" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-colour" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+  </defs>
+</svg>
+
+<header class="wrap top">
+  <p class="eyebrow">YamVideo · UI/UX proposal · compared with Filmora 15 and 16 · 19 October 2026</p>
+  <h1>Studio, with Filmora's timeline, crop and edit panels</h1>
+  <p class="lede">You use Filmora a lot. This page puts YamVideo's Studio next to a proposal that brings in Filmora's timeline, crop and property panel. Click the proposal: it works.</p>
+  <div class="legend">
+    <span><span class="tag now">Before</span> Real renders of the app on main (9498061), before the redesign, with your 14 October recording.</span>
+    <span><span class="tag prop">Proposed</span> A clickable mockup with example data. The <a href="#tracker">tracker</a> shows what is built.</span>
+  </div>
+</header>
+
+<main>
+<section class="block wrap" id="tracker" aria-labelledby="tracker-h">
+  <div class="head">
+    <h2 id="tracker-h">Tracker</h2>
+    <p>How the Studio changes, step by step. Each step adds real pictures of the app, so the page keeps the history of the UI.</p>
+  </div>
+  <ol class="steps" id="steps"></ol>
+  <h3 class="sub">How the Studio changed</h3>
+  <p class="status">Click a version to show it in the editor below, next to the proposal.</p>
+  <div class="versions" id="versions"></div>
+  <h3 class="sub">Decisions</h3>
+  <ul class="decided" id="decided"></ul>
+</section>
+
+<section class="block wrap" id="editor" aria-labelledby="editor-h">
+  <div class="head">
+    <h2 id="editor-h">The editor, then and proposed</h2>
+    <p>All pictures have the same size, so you can switch between them and compare. Before and each built step are real renders of the app. The numbers go to the sections below.</p>
+  </div>
+  <div class="stage-bar">
+    <div class="seg" role="group" aria-label="Which editor to show" id="view-seg"></div>
+    <span class="stage-hint" id="stage-hint">Click a section, a zoom or a graphic on the timeline. Hover the playhead to split.</span>
+    <button type="button" class="actual" id="actual" aria-pressed="false">Show at full size</button>
+  </div>
+  <div class="stage" id="stage">
+    <div class="stage-inner" id="stage-inner">
+      <img class="now-shot" id="now-shot" src="img/now-editor.jpg" width="1600" height="1096" alt="YamVideo Studio now: recordings list on the left, the picture with Crop, Blur, Zoom and Effects modes, the inspector on the right and the timeline at the bottom." hidden>
+      <div class="mock-holder" id="mock-holder">
+        <div class="mock" id="mock" tabindex="0" aria-label="Proposed YamVideo Studio, interactive mockup">
+          <div class="m-title">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="grow"></div>
+            <button class="tb" title="Add videos"><svg class="i"><use href="#i-plus"/></svg></button>
+            <button class="tb" title="Save project"><svg class="i"><use href="#i-save"/></svg></button>
+            <span class="tb strong">AppStore-Learnings ·</span>
+            <button class="tb" data-act="undo" title="Undo (⌘Z)"><svg class="i"><use href="#i-undo"/></svg></button>
+            <button class="tb" data-act="redo" title="Redo (⇧⌘Z)"><svg class="i"><use href="#i-redo"/></svg></button>
+            <div class="mseg"><span class="on">Recording</span><span>Movie</span></div>
+            <div class="grow"></div>
+            <span class="tb"><svg class="i"><use href="#i-users"/></svg>Local agents</span>
+            <span class="tb"><svg class="i"><use href="#i-sparkles"/></svg>Auto Edit…</span>
+            <span class="tb"><svg class="i"><use href="#i-publish"/></svg>Publish…</span>
+            <span class="tb"><svg class="i"><use href="#i-export"/></svg>Export…</span>
+          </div>
+          <div class="m-body">
+            <nav class="m-rail">
+              <div><svg class="i"><use href="#i-library"/></svg>Library</div>
+              <div><svg class="i"><use href="#i-cal"/></svg>Calendar</div>
+              <div class="on"><svg class="i"><use href="#i-film"/></svg>Studio</div>
+            </nav>
+            <div class="m-main">
+             <div class="m-left">
+              <div class="m-top">
+                <aside class="m-assets" id="m-assets">
+                  <div class="m-tabs" id="m-atabs">
+                    <button data-atab="media" class="on"><svg class="i"><use href="#i-media"/></svg>Media</button>
+                    <button data-atab="graphics"><svg class="i"><use href="#i-text"/></svg>Graphics</button>
+                    <button data-atab="logos"><svg class="i"><use href="#i-badge"/></svg>Logos</button>
+                    <button data-atab="effects"><svg class="i"><use href="#i-fx"/></svg>Effects</button>
+                  </div>
+                  <div class="m-assets-bar">
+                    <div class="m-search"><svg class="i"><use href="#i-search"/></svg>Search</div>
+                    <button class="m-btn" id="m-import"><svg class="i"><use href="#i-plus"/></svg>Import</button>
+                  </div>
+                  <div class="m-assets-list" id="m-alist"></div>
+                </aside>
+                <section class="m-player" id="m-player">
+                  <div class="m-phead">
+                    <b>DJI_20261014194430_0007_D.MP4</b><span>1920×1080 · 30 fps</span>
+                    <div class="grow"></div>
+                    <span class="m-qual" title="Playback quality">Full <svg class="i" style="width:12px;height:12px"><use href="#i-down"/></svg></span>
+                  </div>
+                  <div class="m-pic" id="m-pic"><div class="frame" id="frame"></div></div>
+                  <div id="m-pbar-slot"></div>
+                  <div class="toast" id="toast"></div>
+                </section>
+              </div>
+              <div class="m-tl" id="m-tl">
+                <div class="m-tools" id="m-tools">
+                  <button class="ib" data-act="undo" title="Undo (⌘Z)"><svg class="i"><use href="#i-undo"/></svg></button>
+                  <button class="ib" data-act="redo" title="Redo (⇧⌘Z)"><svg class="i"><use href="#i-redo"/></svg></button>
+                  <span class="sep"></span>
+                  <button class="ib" data-act="delete" title="Delete (⌫). A section closes the gap."><svg class="i"><use href="#i-trash"/></svg></button>
+                  <button class="ib" data-act="split" title="Split at the playhead (⌘B)"><svg class="i"><use href="#i-scissors"/></svg></button>
+                  <button class="ib" data-act="crop" title="Crop in the player (⌥C)"><svg class="i"><use href="#i-crop"/></svg></button>
+                  <button class="ib" data-act="speed" title="Speed of the selected section (⌥R)"><svg class="i"><use href="#i-speed"/></svg></button>
+                  <button class="ib" data-act="zoom" title="Add a zoom at the playhead (Z)"><svg class="i"><use href="#i-zoom"/></svg></button>
+                  <button class="ib" data-act="blur" title="Add a full-frame blur at the playhead"><svg class="i"><use href="#i-blur"/></svg></button>
+                  <button class="ib" data-act="marker" title="Add a marker at the playhead (M)"><svg class="i"><use href="#i-flag"/></svg></button>
+                  <span class="sep"></span>
+                  <button class="lbl-ai" data-act="auto" title="Auto Edit (⇧⌘E)"><svg class="i"><use href="#i-sparkles"/></svg>Auto Edit</button>
+                  <button class="lbl-ai" data-act="silence" title="Review the pauses on the Audio track"><svg class="i"><use href="#i-wave"/></svg>Review Silence</button>
+                  <div class="grow"></div>
+                  <button class="ib on" data-act="snap" id="t-snap" title="Snapping (N). Hold ⌥ to place freely."><svg class="i"><use href="#i-magnet"/></svg></button>
+                  <button class="ib" data-act="height" id="t-height" title="Track height: tall or short"><svg class="i"><use href="#i-rows"/></svg></button>
+                  <span class="sep"></span>
+                  <button class="ib" data-act="zout" title="Zoom out (⌘−)"><svg class="i"><use href="#i-zoomout"/></svg></button>
+                  <div class="zs" id="t-zs" title="Timeline zoom"><b id="t-zsb"></b></div>
+                  <button class="ib" data-act="zin" title="Zoom in (⌘=)"><svg class="i"><use href="#i-zoom"/></svg></button>
+                  <button class="ib" data-act="fit" title="Zoom to fit (⇧Z)"><svg class="i"><use href="#i-fit"/></svg></button>
+                </div>
+                <div class="m-tlbody" id="m-tlbody">
+                  <div class="m-heads" id="m-heads"></div>
+                  <div class="m-scroll" id="m-scroll"><div class="m-content" id="m-content"></div></div>
+                </div>
+              </div>
+             </div>
+             <aside class="m-insp" id="m-insp"></aside>
+            </div>
+          </div>
+          <div class="m-status"><span><span class="dot"></span>Claude: Speed up the ending</span><span>→ alongside originals</span></div>
+        </div>
+      </div>
+      <div class="pins" id="pins"></div>
+    </div>
+  </div>
+  <ul class="try-list" aria-label="Things to try in the mockup">
+    <li><span><b>Split:</b> hover the timeline, then click the scissors on the playhead. Or press <kbd>⌘B</kbd>.</span></li>
+    <li><span><b>Crop:</b> press the crop tool. Drag the box, pick a ratio, then Apply.</span></li>
+    <li><span><b>Changes:</b> click an empty part of a track. The inspector lists every change with a switch.</span></li>
+    <li><span><b>Speed:</b> select a section, open the Speed tab and pick 2×. The timeline closes up.</span></li>
+    <li><span><b>Compare:</b> press Before/After in the player bar.</span></li>
+    <li><span><b>Undo:</b> <kbd>⌘Z</kbd> and <kbd>⇧⌘Z</kbd> work after you click the mockup.</span></li>
+  </ul>
+</section>
+
+<section class="block wrap" id="summary" aria-labelledby="summary-h">
+  <div class="head">
+    <h2 id="summary-h">Five changes, in short</h2>
+    <p>Size is a rough guess of the work: S is a day or two, M is about a week, L is more.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">#</th><th scope="col">Area</th><th scope="col">Now</th><th scope="col">Proposed</th><th scope="col">Size</th></tr></thead>
+      <tbody>
+        <tr><td class="n">1</td><td><a href="#a-layout">Layout</a></td><td>Recordings list on the left. Two pictures: Edit frame and Preview. Crop, Blur, Zoom and Effects are modes.</td><td>Media panel with tabs. One player. The inspector at full height on the right. No modes: the selection sets what you edit.</td><td class="size"><span class="size-pill">M</span></td></tr>
+        <tr><td class="n">2</td><td><a href="#a-timeline">Timeline</a></td><td>Lanes with no names. Sections show the file name. A thin waveform. Only Split, Snapping and zoom above it.</td><td>Track headers, a tool bar, a filmstrip in each section, a tall Audio track, badges and split on the playhead.</td><td class="size"><span class="size-pill">L</span></td></tr>
+        <tr><td class="n">3</td><td><a href="#a-crop">Crop</a></td><td>A mode on a still frame. Ratio buttons are in the inspector, far from the picture.</td><td>A Crop tool. Crop in the player with ratio chips, Cancel and Apply. A crop badge on the timeline.</td><td class="size"><span class="size-pill">M</span></td></tr>
+        <tr><td class="n">4</td><td><a href="#a-changes">Changes on the video</a></td><td>One long inspector. The crop and blur areas are not on the timeline. You cannot turn one change off.</td><td>Inspector tabs. Each change has a switch and a reset. A list of all changes when nothing is selected.</td><td class="size"><span class="size-pill">M</span></td></tr>
+        <tr><td class="n">5</td><td><a href="#a-player">Player</a></td><td>Transport above the timeline. Compare is for colour only.</td><td>A player bar: transport, Crop, Before/After, 16:9 or 9:16, safe zones, snapshot.</td><td class="size"><span class="size-pill">S</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="block wrap" id="a-layout" aria-labelledby="a-layout-h">
+  <div class="area-head"><span class="num">1</span><h2 id="a-layout-h">Layout: four panels and one player</h2>
+    <p>Filmora has four panels. Media and Player are at the top left, the Timeline is under them, and the Property panel uses the full height on the right. YamVideo has the same four places, but each one does a different job.</p>
+    <span class="pill area-status" data-area="a-layout" hidden></span></div>
+  <div class="cmp">
+    <div class="side">
+      <span class="tag now">Before</span>
+      <figure><img src="img/now-editor.jpg" width="1600" height="1096" alt="The whole Studio now" loading="lazy"><figcaption>Studio with one recording and the first section selected.</figcaption></figure>
+      <ul>
+        <li>The left pane lists recordings. With one recording, most of the pane is empty.</li>
+        <li>The picture has two views. Edit frame shows a still frame to crop and mark. Preview plays the edit. You switch between them.</li>
+        <li>Crop, Blur, Zoom and Effects are modes of the picture. You pick a mode before you can edit on the picture.</li>
+        <li>The inspector shows the selection, then every setting of the recording in one long scroll.</li>
+      </ul>
+    </div>
+    <div class="side prop">
+      <span class="tag prop">Proposed</span>
+      <ul>
+        <li>Replace the recordings list with a <b>Media panel</b> with tabs: Media, Graphics, Logos, Effects. Click <b>+</b> on an item to add it at the playhead, or drag it to the timeline.</li>
+        <li>Use <b>one player</b>. It plays the edit, and you edit on it. What you select on the timeline sets what the handles on the picture do.</li>
+        <li>Remove the Crop / Blur / Zoom / Effects modes. Select a block on the timeline, or use a tool in the timeline tool bar.</li>
+        <li>Put the <b>inspector at full height</b> on the right, as Filmora does. The timeline goes under the Media panel and the player. Keep the Library, Calendar and Studio rail and the Auto Edit, Publish and Export buttons.</li>
+      </ul>
+      <button type="button" class="try" data-try="layout"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Show in the mockup</button>
+    </div>
+  </div>
+  <div class="notes">
+    <p><b>From Filmora:</b> the Property panel shows the selected clip only and uses the full height of the window. Panels resize when you drag their edges. Filmora 16 has nine layout presets.</p>
+    <p><b>Keep from YamVideo:</b> the Movie workspace, Local agents and the status line for agent changes.</p>
+  </div>
+</section>
+
+<section class="block wrap" id="a-timeline" aria-labelledby="a-timeline-h">
+  <div class="area-head"><span class="num">2</span><h2 id="a-timeline-h">Timeline: tracks you can read</h2>
+    <p>This is the largest change. The edit model stays the same: the sections have no gaps. Only what you see and where the tools are changes.</p>
+    <span class="pill area-status" data-area="a-timeline" hidden></span></div>
+  <div class="cmp">
+    <div class="side">
+      <span class="tag now">Before</span>
+      <figure><img src="img/now-timeline.jpg" width="1400" height="352" alt="The timeline now" loading="lazy"><figcaption>Three sections, a thin waveform, one zoom and three empty lanes.</figcaption></figure>
+      <ul>
+        <li>Lanes have no names or controls. An empty lane shows a help sentence, for example "Effects · add a full-frame blur in the inspector".</li>
+        <li>Each section shows the file name and the source times, not the picture.</li>
+        <li>The waveform is a thin line under the sections. Pauses are hard to see.</li>
+        <li>The bar above has Split, Snapping and zoom only. Speed, Delete and order are in the inspector.</li>
+        <li>A 2 s zoom on a 4:37 timeline is a very small block. It is hard to click.</li>
+      </ul>
+    </div>
+    <div class="side prop">
+      <span class="tag prop">Proposed</span>
+      <ul>
+        <li><b>Track headers</b> at the left: icon, name, eye (hide in the player) and lock. The Audio track also has mute.</li>
+        <li>Tracks from top to bottom: Graphics, Effects, Zoom, Video, Audio, Captions. Shorts show as ranges under the ruler.</li>
+        <li>Video sections show a <b>filmstrip</b>, the section number and <b>badges</b>: speed, crop, blur, colour.</li>
+        <li>The <b>Audio track</b> shows a tall waveform from your recording, linked to the sections. You can see the pauses and cut on them.</li>
+        <li>A <b>tool bar</b>: Undo, Redo, Delete, Split, Crop, Speed, Zoom, Blur, Marker, Auto Edit, Review Silence. Then Snapping, track height and zoom.</li>
+        <li>Hover the timeline to show a <b>scissors button on the playhead</b>. Click it to split.</li>
+        <li>An empty track folds to a thin row with <b>+ Add</b>. A track that is in use shows its blocks.</li>
+      </ul>
+      <button type="button" class="try" data-try="timeline"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Show in the mockup</button>
+    </div>
+  </div>
+  <div class="notes">
+    <p><b>From Filmora:</b> the bar above the timeline, track headers with lock, mute and hide, the scissors on the playhead, filmstrips in clips, markers on the ruler and Zoom to Fit. Filmora shows linked audio as a strip at the bottom of the video clip. YamVideo gets a tall Audio track, because you cut talking-head videos on the pauses.</p>
+    <p><b>Keep from YamVideo:</b> a deleted section always closes its gap, so YamVideo needs no magnetic or ripple switch. Zoom, Effects, Graphics and Shorts stay YamVideo's own tracks.</p>
+  </div>
+</section>
+
+<section class="block wrap" id="a-crop" aria-labelledby="a-crop-h">
+  <div class="area-head"><span class="num">3</span><h2 id="a-crop-h">Crop: in the player, with Apply</h2>
+    <p>Filmora opens a Crop and Zoom window from the Crop tool or <kbd>⌥C</kbd>. You set the box, pick a ratio and press Apply. We propose the same controls inside the player, as Final Cut Pro does, so the timeline stays in view.</p>
+    <span class="pill area-status" data-area="a-crop" hidden></span></div>
+  <div class="cmp">
+    <div class="side">
+      <span class="tag now">Before</span>
+      <figure><img src="img/now-crop.jpg" width="1300" height="702" alt="Crop now: the Crop mode, the crop box on the frame, and the Frame section in the inspector" loading="lazy"><figcaption>Crop mode and Edit frame, with the Frame section on the right.</figcaption></figure>
+      <ul>
+        <li>To crop, select Crop mode and Edit frame. Then drag the box on a still frame.</li>
+        <li>The ratio buttons (Free, 16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) are in the inspector's Frame section, far from the picture.</li>
+        <li>There is no Cancel or Apply. Each drag changes the crop at once. Undo works.</li>
+        <li>The crop applies to the whole recording. The timeline does not show it.</li>
+      </ul>
+    </div>
+    <div class="side prop">
+      <span class="tag prop">Proposed</span>
+      <ul>
+        <li>Press <b>Crop</b> in the timeline tool bar or the player bar, or press <kbd>⌥C</kbd>. The player shows the whole frame with the crop box on it.</li>
+        <li><b>Ratio chips</b> sit under the picture, with the size in pixels, Reset, Cancel and Apply.</li>
+        <li>Drag in the box to move it. Drag a corner to change its size. The ratio stays the same unless you pick Free.</li>
+        <li>After Apply, each video section shows a <b>crop badge</b>. The player shows the cropped picture.</li>
+        <li>Filmora's Pan & Zoom is YamVideo's Zoom. Zooms stay on their own track, with their eased push-ins.</li>
+      </ul>
+      <button type="button" class="try" data-try="crop"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Show in the mockup</button>
+    </div>
+  </div>
+  <div class="notes">
+    <p><b>From Filmora:</b> a Crop and Zoom window with Crop and Pan & Zoom tabs, a Ratio menu (Original, 16:9, 1:1, 9:16, 4:3, 3:4, 21:9, 4:5, Custom), W × H fields, Reset, Cancel and Apply.</p>
+    <p><b>Your decisions:</b> crop in the player or in a window, and crop for the whole recording or for each section. See the questions at the end.</p>
+  </div>
+</section>
+
+<section class="block wrap" id="a-changes" aria-labelledby="a-changes-h">
+  <div class="area-head"><span class="num">4</span><h2 id="a-changes-h">Changes on the video: see them, turn them off, reset them</h2>
+    <p>In Filmora, each module in the Property panel has a switch and a reset button, and a clip with keyframes shows a badge. You can see what is applied, and turn it off to compare.</p>
+    <span class="pill area-status" data-area="a-changes" hidden></span></div>
+  <div class="cmp">
+    <div class="side">
+      <span class="tag now">Before</span>
+      <figure><img src="img/now-blur.jpg" width="1300" height="702" alt="A blur area selected now, with the blur area inspector" loading="lazy"><figcaption>A blur area selected. "Blur (1)" in the mode control is the only sign of it.</figcaption></figure>
+      <ul>
+        <li>The inspector is one long scroll: Recording, Screen, Frame, Blur areas, Zooms, Graphics, Shorts, Captions, Colour, Effects and markers.</li>
+        <li>The crop and the blur areas are not on the timeline.</li>
+        <li>You cannot turn one change off to compare. Colour has Original, Corrected and Compare. Other changes do not.</li>
+      </ul>
+    </div>
+    <div class="side prop">
+      <span class="tag prop">Proposed</span>
+      <ul>
+        <li><b>Inspector tabs</b> for a section: Video, Audio, Speed, Colour. A zoom, a graphic, an effect, a Short or a marker has its own panel.</li>
+        <li>Each change is a row with an <b>on/off switch</b>, a summary and a <b>reset</b> button. Off hides the change in the player.</li>
+        <li>A change that applies to all sections (crop, colour, blur areas, loudness) shows an <b>All sections</b> tag.</li>
+        <li>With nothing selected, the inspector shows <b>Changes on this video</b>: one list of every change, each with its switch.</li>
+        <li><b>Badges</b> on the timeline show the changes on each section.</li>
+      </ul>
+      <button type="button" class="try" data-try="changes"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Show in the mockup</button>
+    </div>
+  </div>
+  <div class="notes">
+    <p><b>From Filmora:</b> property tabs (Video, Audio, Speed, Animation, Color). Each module header has an on/off switch, a collapse arrow, a reset ↺ and a keyframe ◇. You turn a module on before you edit it. Before/After compare is for colour only.</p>
+    <p><b>New in YamVideo:</b> the Changes list. Filmora does not have one list. It fits YamVideo because agents also make changes, and you need to see all of them in one place.</p>
+  </div>
+</section>
+
+<section class="block wrap" id="a-player" aria-labelledby="a-player-h">
+  <div class="area-head"><span class="num">5</span><h2 id="a-player-h">Player: one bar under the picture</h2>
+    <p>Filmora puts the player controls directly under the preview. YamVideo has them above the timeline, and the view controls at the top of the picture.</p>
+    <span class="pill area-status" data-area="a-player" hidden></span></div>
+  <div class="cmp">
+    <div class="side">
+      <span class="tag now">Before</span>
+      <figure><img src="img/now-player.jpg" width="900" height="801" alt="The picture area now, with the mode and viewer controls at the top" loading="lazy"><figcaption>Mode and viewer controls at the top. Transport is above the timeline.</figcaption></figure>
+      <ul>
+        <li>Frame back, play, frame forward and the time are above the timeline, far from the picture.</li>
+        <li>Edit frame, Preview and Short are three views at the top of the picture.</li>
+        <li>YouTube's buttons for a Short show only in the Short view. Original / Corrected floats over the picture.</li>
+      </ul>
+    </div>
+    <div class="side prop">
+      <span class="tag prop">Proposed</span>
+      <ul>
+        <li>A <b>player bar</b> under the picture: the time, frame back, play, frame forward.</li>
+        <li>Then the tools for the picture: <b>Crop</b>, <b>Before/After</b>, <b>16:9 or 9:16</b>, <b>Safe zones</b> (YouTube's buttons), <b>Snapshot</b> (a frame for the thumbnail maker) and full screen.</li>
+        <li>A quality menu (Full, ½, ¼) at the top right of the picture, for smooth playback on long recordings.</li>
+        <li>Before/After compares the frame with and without all changes, not only colour.</li>
+      </ul>
+      <button type="button" class="try" data-try="player"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Show in the mockup</button>
+    </div>
+  </div>
+  <div class="notes">
+    <p><b>From Filmora:</b> frame back, frame forward, play and stop at the left of the bar. Project ratio, mark in and out, display settings (safe zones, zoom), snapshot, volume and full screen at the right. Quality (Full, ½, ¼) at the top.</p>
+    <p><b>Keep from YamVideo:</b> the Short view with YouTube's buttons. It becomes the 9:16 switch and the Safe zones button.</p>
+  </div>
+</section>
+
+<section class="block wrap" id="keys" aria-labelledby="keys-h">
+  <div class="head">
+    <h2 id="keys-h">Shortcuts</h2>
+    <p>Keep the Mac keys YamVideo has. Add Filmora's keys where YamVideo has none. When Filmora's key is a Windows habit, use the Mac form.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="keys">
+      <thead><tr><th scope="col">Action</th><th scope="col">Filmora (Mac)</th><th scope="col">YamVideo now</th><th scope="col">Proposed</th></tr></thead>
+      <tbody id="keys-body">
+        <tr><td>Split at the playhead</td><td><kbd>⌘B</kbd></td><td><kbd>⌘B</kbd></td><td><kbd>⌘B</kbd> and the scissors on the playhead</td></tr>
+        <tr><td>Delete the selection</td><td><kbd>⌫</kbd></td><td><kbd>⌫</kbd></td><td><kbd>⌫</kbd>. A section always closes its gap.</td></tr>
+        <tr><td>Ripple delete</td><td><kbd>⇧⌫</kbd></td><td>Not needed</td><td>Not needed</td></tr>
+        <tr><td>Crop</td><td><kbd>⌥C</kbd></td><td>None</td><td><kbd>⌥C</kbd></td></tr>
+        <tr><td>Speed</td><td><kbd>⌥R</kbd></td><td>None</td><td><kbd>⌥R</kbd> opens the Speed tab</td></tr>
+        <tr><td>Trim start / end to the playhead</td><td><kbd>⌥[</kbd> <kbd>⌥]</kbd></td><td><kbd>⇧⌘[</kbd> <kbd>⇧⌘]</kbd></td><td>Both</td></tr>
+        <tr><td>Add / edit a marker</td><td><kbd>M</kbd> <kbd>⇧M</kbd></td><td><kbd>M</kbd> <kbd>⇧M</kbd></td><td>Same</td></tr>
+        <tr><td>Mark in / out</td><td><kbd>I</kbd> <kbd>O</kbd></td><td>None</td><td><kbd>I</kbd> <kbd>O</kbd> set a Short's start and end</td></tr>
+        <tr><td>Zoom the timeline in / out / fit</td><td><kbd>⌘=</kbd> <kbd>⌘−</kbd> <kbd>⇧Z</kbd></td><td><kbd>⌘=</kbd> <kbd>⌘−</kbd> <kbd>⇧Z</kbd></td><td>Same</td></tr>
+        <tr><td>Play / pause, one frame</td><td><kbd>Space</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td><kbd>Space</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>Same</td></tr>
+        <tr><td>Snapshot</td><td><kbd>⌃⌥S</kbd></td><td>None</td><td><kbd>⌃⌥S</kbd></td></tr>
+        <tr><td>Snapping</td><td>None</td><td>Menu only</td><td><kbd>N</kbd>, as in Final Cut Pro and Resolve</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="status" id="keys-note">Filmora keys come from Filmora's official Mac shortcut list. Filmora 16 also lets you change them.</p>
+</section>
+
+<section class="block wrap" id="keep" aria-labelledby="keep-h">
+  <div class="head">
+    <h2 id="keep-h">What we do not copy</h2>
+    <p>Filmora is a general editor. YamVideo edits talking-head recordings with agents. Some Filmora parts do not fit.</p>
+  </div>
+  <div class="keep-grid">
+    <div class="side"><h3>No magnetic or ripple switch</h3><p>YamVideo sections have no gaps. A delete always closes the gap, so the switch has nothing to do.</p></div>
+    <div class="side"><h3>One video track</h3><p>No stacked videos for now. Graphics, Zoom and Effects are their own tracks. Stacked video is a later design step.</p></div>
+    <div class="side"><h3>No general keyframes</h3><p>Zooms already ease in and out. The Zoom track shows each ease as a ramp. A keyframe editor adds a lot of work for little use here.</p></div>
+    <div class="side"><h3>Every tool is also a command</h3><p>Each new button must have a yamvideoctl command, so an agent can make the same edit and you can see it in the Changes list.</p></div>
+  </div>
+</section>
+
+<section class="block wrap" id="order" aria-labelledby="order-h">
+  <div class="head">
+    <h2 id="order-h">Order of work</h2>
+    <p>Each step is one PR and can ship alone. The first two steps do not change the project file.</p>
+  </div>
+  <ol class="phases">
+    <li><h3>Timeline tool bar, track headers and split on the playhead</h3><span class="size-pill">M</span><p>Move Delete, Speed and the add tools to the bar. Add headers with eye and lock. Fold empty tracks. Add badges and the filmstrip.</p></li>
+    <li><h3>One player with a player bar, and Crop in the player</h3><span class="size-pill">M</span><p>Merge Edit frame and Preview. Remove the modes. Add Crop with ratio chips, Cancel and Apply, and Before/After.</p></li>
+    <li><h3>Inspector tabs, switches, resets and the Changes list</h3><span class="size-pill">M</span><p>Needs a saved on/off state for each change, so the project version goes up by one.</p></li>
+    <li><h3>Media panel, Audio track and Captions track</h3><span class="size-pill">L</span><p>Tabs for Media, Graphics, Logos and Effects with add and drag. A tall linked waveform. Caption blocks you can click to edit.</p></li>
+  </ol>
+</section>
+
+<section class="block wrap" id="decide" aria-labelledby="decide-h">
+  <div class="head">
+    <h2 id="decide-h">Your decisions</h2>
+    <p>On 19 October you said "proceed with Proposed", so the work uses the answers marked here. To change one, pick another answer, copy your answers and paste them in our chat.</p>
+  </div>
+  <form class="decide" id="decide-form">
+    <div class="q"><fieldset><legend>1. Crop: in the player, or in a window like Filmora?</legend>
+      <div class="opts">
+        <label><input type="radio" name="q0" value="In the player" id="q0a" checked>In the player</label>
+        <label><input type="radio" name="q0" value="In a Crop and Zoom window, like Filmora" id="q0b">In a Crop and Zoom window, like Filmora</label>
+      </div><p class="why">In the player, the timeline and the inspector stay in view. A window is what your hands know from Filmora.</p></fieldset></div>
+    <div class="q"><fieldset><legend>2. Crop: for the whole recording, or for each section?</legend>
+      <div class="opts">
+        <label><input type="radio" name="q1" value="Whole recording, as now" id="q1a" checked>Whole recording, as now</label>
+        <label><input type="radio" name="q1" value="Each section, like Filmora" id="q1b">Each section, like Filmora</label>
+      </div><p class="why">Each section needs a change to the project file and to the export.</p></fieldset></div>
+    <div class="q"><fieldset><legend>3. Blur areas: for the whole video, or with a start and an end?</legend>
+      <div class="opts">
+        <label><input type="radio" name="q2" value="Whole video, as now" id="q2a" checked>Whole video, as now</label>
+        <label><input type="radio" name="q2" value="A start and an end on the Effects track" id="q2b">A start and an end on the Effects track</label>
+      </div><p class="why">Timed areas let you hide something that shows for a few seconds only.</p></fieldset></div>
+    <div class="q"><fieldset><legend>4. On/off switch for each change: save it in the project?</legend>
+      <div class="opts">
+        <label><input type="radio" name="q3" value="Yes, save it (new project version)" id="q3a" checked>Yes, save it (new project version)</label>
+        <label><input type="radio" name="q3" value="No, only for the player while I edit" id="q3b">No, only for the player while I edit</label>
+      </div></fieldset></div>
+    <div class="q"><fieldset><legend>5. Media panel with tabs: now, or after the timeline work?</legend>
+      <div class="opts">
+        <label><input type="radio" name="q4" value="After the timeline work (P4)" id="q4a" checked>After the timeline work (P4)</label>
+        <label><input type="radio" name="q4" value="Now, in the first step" id="q4b">Now, in the first step</label>
+      </div></fieldset></div>
+    <div class="q"><fieldset><legend>6. Which step first?</legend>
+      <div class="opts">
+        <label><input type="radio" name="q5" value="P1 Timeline" id="q5a" checked>P1 Timeline</label>
+        <label><input type="radio" name="q5" value="P2 Player and Crop" id="q5b">P2 Player and Crop</label>
+        <label><input type="radio" name="q5" value="P3 Changes and inspector" id="q5c">P3 Changes and inspector</label>
+      </div></fieldset></div>
+    <div class="copy-row">
+      <button type="button" class="try" id="copy-btn">Copy my answers</button>
+      <span class="status" id="copy-status" role="status"></span>
+      <textarea id="answers" readonly aria-label="Your answers as text"></textarea>
+    </div>
+  </form>
+</section>
+</main>
+
+<footer class="wrap">
+  <p><b>How this page was made.</b> The Before and step pictures come from <code>Tools/Snapshot/snapshot.sh</code> on main with <code>DJI_20261014194430_0007_D.MP4</code>. The mockup uses frames, the waveform and the captions of that recording. Its sections, zooms and graphics are example data.</p>
+  <ul id="sources">
+    <li>YamVideo's own Filmora study: <code>docs/plans/timeline-navigation.md</code> (6 September 2026).</li>
+    <li>Filmora Mac guide: <a href="https://filmora.wondershare.com/guide-mac/panel-layout.html">panel layout</a>, <a href="https://filmora.wondershare.com/guide-mac/manage-timeline.html">timeline</a>, <a href="https://filmora.wondershare.com/guide-mac/split-cut-video.html">split</a>, <a href="https://filmora.wondershare.com/guide-mac/filmora-pan-and-zoom.html">crop and pan &amp; zoom</a>, <a href="https://filmora.wondershare.com/guide-mac/transform.html">transform</a>, <a href="https://filmora.wondershare.com/guide-mac/keyframing.html">keyframes</a>, <a href="https://filmora.wondershare.com/guide-mac/color-comparison-view.html">colour compare</a>, <a href="https://filmora.wondershare.com/guide-mac/keyboard-shortcuts-for-mac.html">Mac shortcuts</a>.</li>
+    <li>The Filmora facts are from the guide pages for Filmora 15 and 16, read on 19 October 2026. Filmora 16 came out in September 2026.</li>
+  </ul>
+</footer>
+
+<script type="application/json" id="tracker-data">
+{
+  "versions": [
+    {
+      "id": "before",
+      "label": "Before",
+      "date": "19 Oct 2026",
+      "ref": "main 9498061",
+      "img": "img/now-editor.jpg",
+      "note": "Recordings list, two pictures, modes, and lanes with no names.",
+      "alt": "YamVideo Studio before the redesign: recordings list on the left, the picture with Crop, Blur, Zoom and Effects modes, the inspector on the right and the timeline at the bottom."
+    },
+    {
+      "id": "p1",
+      "label": "P1 · Timeline",
+      "date": "19 Oct 2026",
+      "ref": "PR #49, branch studio-timeline",
+      "img": "img/step1-editor.jpg",
+      "note": "Tool bar, row headers, folded rows, filmstrip, badges and scissors on the playhead.",
+      "alt": "YamVideo Studio after step 1: the timeline has a tool bar, a header for each row, a filmstrip in each section and badges."
+    }
+  ],
+  "steps": [
+    {
+      "id": "P1",
+      "title": "Timeline tool bar, track headers and split on the playhead",
+      "status": "review",
+      "date": "19 Oct 2026",
+      "branch": "studio-timeline",
+      "pr": "https://github.com/yamparalarahul27/YamVideoMacApp/pull/49",
+      "done": [
+        "A tool bar above the rows: Undo, Redo, Delete, Split, Crop, Speed, Zoom, Blur, Marker, Auto Edit and Review Silence, then Snapping, Tall rows and the timeline zoom.",
+        "A header for each row: icon, name, eye (hide in the preview), lock, and mute on Audio.",
+        "Rows in Filmora's order: Shorts, Graphics, Effects, Zoom, Video, Audio. An empty row folds to a thin row with +.",
+        "Each section shows a filmstrip, its number and badges: speed, crop, blur, colour.",
+        "Scissors on the playhead while the pointer is over the rows. Click them to split.",
+        "Blur areas show as a band on the Effects row.",
+        "Keys: N for snapping, ⌥[ and ⌥] to trim to the playhead, ⌥C to crop.",
+        "36 new checks (./test.sh tracks)."
+      ],
+      "left": [
+        "Play, frame back and frame forward stay in the tool bar until the player bar (P2).",
+        "The Crop tool opens Edit frame until the player crops in place (P2).",
+        "The tall linked Audio track and the Captions track come in P4."
+      ],
+      "before": { "img": "img/now-timeline.jpg", "caption": "Before: lanes with no names, file names on sections, a thin waveform." },
+      "after": { "img": "img/step1-timeline.jpg", "caption": "After P1: tool bar, row headers, folded rows, filmstrip and badges." }
+    },
+    {
+      "id": "P2",
+      "title": "One player with a player bar, and Crop in the player",
+      "status": "next",
+      "done": [],
+      "left": [
+        "Merge Edit frame and Preview into one player. Remove the Crop / Blur / Zoom / Effects modes.",
+        "A player bar: time, frame step, play, Crop, Before/After, 16:9 or 9:16, safe zones, snapshot.",
+        "Crop in the player with ratio chips, Reset, Cancel and Apply."
+      ]
+    },
+    {
+      "id": "P3",
+      "title": "Inspector tabs, switches, resets and the Changes list",
+      "status": "planned",
+      "done": [],
+      "left": [
+        "Video, Audio, Speed and Colour tabs for a section.",
+        "An on/off switch and a reset for each change, saved in the project (new project version).",
+        "The Changes on this video list when nothing is selected."
+      ]
+    },
+    {
+      "id": "P4",
+      "title": "Media panel, Audio track and Captions track",
+      "status": "planned",
+      "done": [],
+      "left": [
+        "Media, Graphics, Logos and Effects tabs with add and drag.",
+        "A tall Audio track linked to the sections.",
+        "Caption blocks you can click to edit."
+      ]
+    }
+  ],
+  "areas": { "a-layout": "P2", "a-timeline": "P1", "a-crop": "P2", "a-changes": "P3", "a-player": "P2" },
+  "decisions": [
+    ["19 Oct 2026", "Proceed with the proposal, one step per PR, timeline first."],
+    ["19 Oct 2026", "Crop in the player, for the whole recording, as now."],
+    ["19 Oct 2026", "Blur areas stay for the whole video."],
+    ["19 Oct 2026", "The on/off switch for each change is saved in the project (P3)."],
+    ["19 Oct 2026", "The Media panel comes after the timeline work (P4)."],
+    ["19 Oct 2026", "The page is a local file in the repo. The claude.ai copy is not used."]
+  ]
+}
+</script>
+
+<script>
+(() => {
+'use strict';
+const WAVE = [14,21,12,13,100,100,79,63,72,78,72,79,75,58,59,58,45,11,36,100,98,87,70,69,62,65,14,46,43,11,10,51,86,54,59,33,68,87,66,67,18,51,77,67,54,64,21,9,41,72,56,49,24,65,59,67,65,66,65,65,17,10,71,66,83,87,82,78,77,68,61,58,57,12,8,51,42,77,65,65,57,55,47,14,12,71,81,21,66,68,24,9,9,59,61,90,37,87,69,58,58,23,12,29,39,11,63,83,92,62,76,61,61,66,55,40,11,11,44,81,92,75,63,59,73,48,62,58,21,10,12,14,54,76,14,73,79,81,100,85,73,93,57,77,79,71,63,54,66,49,10,9,66,60,28,98,74,80,96,82,16,55,64,13,11,38,80,75,12,61,81,100,64,70,76,19,14,50,74,67,37,9,38,58,55,61,17,9,74,90,76,70,59,55,55,24,8,8,9,8,43,80,81,97,93,68,77,61,57,62,66,60,64,66,51,55,60,72,16,9,66,77,55,49,10,57,86,40,52,66,17,79,70,58,54,77,60,17,9,49,61,67,78,86,10,9,11,10,71,95,91,67,78,40,57,54,43,39,70,64,65,16,10,58,67,75,62,54,38,12,11,13,11,88,100,96,94,100,82,76,71,19,11,67,82,74,76,65,14,11,11,39,58,42,92,100,67,18,16,16,12,100,100,88,90,75,48,61,80,63,13,10,12,46,90,89,72,67,23,17,61,66,73,65,64,24,11,12,63,60,44,12,11,10,85,80,90,82,70,63,46,10,14,72,79,61,63,62,15,10,58,72,22,77,86,82,72,59,61,64,19,11,12,72,98,68,79,79,71,67,17,36,63,46,70,68,65,37,9,76,72,43,13,9,9,82,74,69,76,67,17,48,64,15,61,17,14,91,77,59,73,67,24,70,70,68,66,62,61,53,61,62,13,42,50,16,10,80,80,92,64,74,62,11,11,80,57,72,70,59,41,12,46,74,86,94,77,67,60,62,64,60,57,58,55,43,13,13,64,59,60,62,82,18,47,63,64,44,12,27,94,92,88,89,66,72,59,36,43,53,12,31,88,97,74,55,39,56,60,64,48,53,48,12,10,10,64,33,13,43,54,19,73,70,58,59,63,57,33,14,9,51,59,17,10,12,83,76,82,100,100,62,11,30,83,100,100,100,88,54,75,64,41,31,10,88,94,88,70,68,79,74,52,62,43,72,69,57,10,69,75,76,73,69,64,48,9,47,68,63,56,47,68,60,56,74,39,10,17,68,51,88,75,64,69,58,16,9,48,70,42,32,68,68,79,65,50,12,52,77,57,31,10,10,12,89,88,60,55,21,13,12,14,13,57,74,78,100,91,12,9,82,85,77,36,59,48,54,78,100,95,71,61,55,12,9,80,80,77,86,74,59,74,63,39,59,54,54,34,12,63,96,100,56,11,11,34,90,95,70,55,12,57,79,52,70,66,13,76,86,63,18,47,66,71,65,60,59,17,77,57,59,11,9,67,70,39,12,10,57,90,75,42,76,85,16,57,70,29,12,10,63,87,87,78,69,19,13,58,85,91,70,26,10,45,74,92,46,66,80,33,12,11,10,70,64,89,100,18,47,100,55,65,85,91,16,35,75,96,62,63,57,11,83,96,87,82,64,75,54,61,73,74,93,85,73,14,10,9,9,72,65,100,66,49,10,54,22,73,76,57,99,78,68,55,79,24,86,78,10,55,87,97,90,27,89,72,12,58,84,70,13,9,78,86,91,74,68,62,64,72,36,67,54,12,10,51,67,76,36,20,32,86,79,87,70,59,12,10,10,67,88,71,61,10,71,68,80,79,85,37,76,47,66,60,14,13,92,100,77,97,91,68,71,65,79,55,56,12,29,86,87,48,75,69,25,77,96,85,68,72,53,61,66,53,61,11,11,37,12,12,85,81,87,74,71,68,52,72,59,37,11,10,100,94,75,67,66,100,100,19,10,33,100,74,65,29,71,64,59,41,59,97,82,16,12,91,90,73,34,100,70,84,86,16,10,65,71,86,59,61,63,60,29,59,87,61,48,9,90,67,75,60,56,49,9,59,86,66,92,94,77,47,9,59,59,17,35,63,100,48,62,88,89,70,77,66,46,9,9,80,94,78,71,65,66,11,14,80,77,74,66,68,13,11,41,71,58,83,70,68,60,47,66,68,16,48,92,85,57,68,86,34,15,12,69,90,62,55,68,60,49,18,10,10,11,74,89,82,94,35,10,77,66,80,68,89,78,79,70,65,51,77,17,30,64,57,27,11,11,10,49,67,54,38,14,13,100,83,76,88,26,11,11,9,38,56,44,22,9,11,68,81,96,82,77,74,66,56,59,57,14,57,71,17,68,65,70,38,95,79,60,57,65,31,47,57,32,11,9,12,62,87,100,90,74,73,65,25,14,71,75,45,55,55,57,48,11,48,77,71,69,54,28,71,38,44,64,57,81,59,54,67,52,78,83,42,87,66,12,46,89,66,12,13,12,74,94,80,68,52,59,18,12,9,13,76,17,90,100,85,63,79,67,66,76,42,10,8,73,49,75,84,77,66,67,42,77,94,61,44,85,75,61,24,9,45,95,70,59,56,54,49,48,48,45,11,40,69,67,66,67,48,58,58,58,46,40,28,15,8,9,73,82,96,61,40,60,93,61,79,68,54,33,48,57,64,35,36,69,59,57,19,52,26,10,11,12,21,54,30,22,23,55,63,79,19,41,86,94,71,56,10,65,77,18,71,59,58,11,11,66,67,69,52,45,45,34,74,78,89,78,22,11,10,74,51,62,63,100,51,75,73,67,69,70,64,65,66,65,49,56,63,54,15,59,65,65,49,31,14,32,52,58,63,21,13,12,50,91,78,66,66,56,71,70,49,51,11,52,76,83,66,67,59,15,13,38,58,20,49,88,79,18,56,63,37,41,71,24,23,21,20,13];
+const CUES = [[0.21,2.15,"Hey everyone, welcome back to a brand new"],[2.19,3.55,"video from Yamparala Media."],[3.62,6.13,"After a long time, I am making videos."],[6.38,8.76,"This time, with totally a new gear,"],[8.8,12.03,"I got an Osmo Pocket 3, which I will be"],[12.07,13.4,"using to record videos."],[13.44,15.26,"So you can see the overall quality of"],[15.3,17.9,"video increased by 10x or 100x,"],[17.94,18.64,"I would say."],[18.68,20.27,"I have a new mic."],[20.7,23.78,"This is Hollyland mic, which perfectly"],[23.82,25.74,"pairs with the DJI Osmo."],[25.78,27.8,"So all the content coming up will be"],[27.84,28.42,"really good."],[28.46,31.14,"So this video is specifically about my"],[31.18,32.32,"recent experience."],[32.36,34.6,"So in the last 2-3 months,"],[34.64,37.81,"I was working properly to build products"],[37.92,40.94,"using AI and getting into design"],[40.98,41.84,"engineering skills."],[41.88,44.33,"So this video, I want to share about my"],[44.37,48.4,"recent experience of how I have applied"],[48.53,51.0,"for an app submission, iOS app,"],[51.35,54.18,"regarding my first proper build of"],[54.22,55.79,"application, which is called YamDrive,"],[55.83,57.38,"which you can see on your screen."],[57.43,60.34,"So this app is all about tracking your"],[60.38,63.06,"bike rides and lot in depth."],[63.1,65.87,"So the reason I started this app is I"],[65.91,68.19,"wanted to get my bike from Guntur to"],[68.23,71.38,"Bangalore and I wanted to have a"],[71.53,73.58,"navigation where I don't miss up the path."],[74.2,76.27,"And I don't want to use my iPhone because"],[76.36,79.42,"keeping that iPhone on a mount while"],[79.46,80.98,"driving has a lot of risks."],[81.02,83.07,"A couple of them is falling and next is"],[83.4,85.26,"getting hit by sun and getting heated and"],[85.3,86.1,"all those damage."],[86.68,88.88,"So I wanted to use something else plus"],[88.92,91.31,"having a navigation and taking that as an"],[91.35,91.61,"inspiration."],[91.65,94.0,"I made a simple application where I can"],[94.04,96.18,"set up my route and do the ride."],[96.22,98.89,"I use my old dad's phone Nokia and it"],[98.93,99.73,"turned out to be good."],[99.92,102.78,"You can see it on the site also,"],[102.82,106.08,"which is at hirahul.xyz/yamdrive."],[106.35,108.85,"That's what the starting point was."],[108.89,112.31,"So later on, once I got it in Bangalore,"],[112.35,114.49,"I thought why not to improvise it,"],[114.53,117.0,"improvise in such a way that I can track"],[117.04,119.93,"the quality of my riding in a city,"],[119.97,121.9,"what's the mileage I'm getting and other"],[121.94,122.27,"stuff."],[122.31,123.58,"So like that it started."],[123.64,125.88,"And overall, it was a really good"],[126.03,126.29,"experience."],[126.33,128.18,"In the upcoming videos, I will be sharing"],[128.84,131.06,"what I tried, how I built and what are my"],[131.09,131.54,"learnings."],[131.59,133.87,"But this video, I will just keep it"],[134.08,137.13,"concise to what happened while submitting"],[137.17,139.58,"it to App Store on iOS."],[139.62,140.49,"So a couple of things."],[140.53,144.04,"I used some of the bike images from Royal"],[144.08,146.46,"Enfield, which are not mine."],[146.5,150.28,"So Apple in its review specifically"],[150.32,152.34,"mentions that whatever you are doing on"],[152.38,154.22,"your app, it should be totally owned by"],[154.26,154.69,"you."],[154.73,157.34,"Like the assets, all the stuff should be"],[157.51,158.01,"owned."],[158.05,160.94,"It should not be morphed or should not be"],[161.11,163.82,"edited versions of any branded work."],[163.86,165.26,"So that's the first thing."],[165.3,168.78,"Second thing is the privacy and couple of"],[168.82,170.66,"features that it mandates."],[170.7,172.6,"So your app should have an option to"],[172.64,175.68,"delete an account, remove or like clear up"],[175.72,177.81,"all the data which is being captured."],[178.34,180.78,"That comes in a privacy part of it."],[180.82,183.65,"The flow of creation and deletion."],[183.69,184.64,"So end to end."],[184.68,187.81,"So what happens, how a user onboards onto"],[187.85,190.25,"the application, what happens,"],[190.29,192.48,"what data will be captured and how much"],[192.52,193.53,"control user will have."],[193.57,196.98,"So Apple have a proper guidelines on this."],[197.02,199.36,"So whenever you're making an app where you"],[199.4,202.08,"want it to be published on App Store,"],[202.12,204.48,"make sure the flow, end to end flow is"],[204.52,206.29,"there from the creation, from the deletion"],[206.33,206.99,"part of it."],[207.03,209.54,"So if that is covered, it will make easier"],[209.59,212.34,"for your app to get approved and get live."],[212.38,213.46,"So that's the second thing."],[213.5,215.77,"Third thing is accessibility."],[215.81,218.38,"That's the one thing that AI doesn't do"],[218.53,221.66,"and that's where you being as a designer"],[221.89,222.6,"comes in play."],[222.64,224.56,"So whatever you're doing all in all,"],[224.6,226.57,"make sure it is accessible in a bigger"],[226.61,227.41,"font."],[227.77,231.05,"It's accessible in terms of contrast,"],[231.09,234.45,"color and all in a bigger text."],[234.51,236.29,"So when you're doing it with AI,"],[236.33,238.98,"you can just tell it to mess up the UI"],[239.02,241.53,"using unrelated and not making sense of"],[241.57,243.11,"the content into it."],[243.15,245.55,"Like random emails, random numbers and all"],[245.59,246.23,"of those stuff."],[246.27,248.34,"So once you do that, it will show you how"],[248.38,251.12,"the UI getting broken down and you can fix"],[251.16,252.13,"it side by side."],[252.17,254.44,"So these are the three points content,"],[254.53,256.75,"privacy and accessibility."],[256.79,258.92,"So these are the three things that you"],[258.96,260.92,"should be keeping in your mind when you're"],[260.96,263.28,"building an iOS app and want to publish it"],[263.32,264.12,"on App Store."],[264.82,267.18,"So with that note, signing off,"],[267.25,268.88,"I will see you in the next one."],[268.95,270.36,"More videos will be coming up."],[270.43,271.89,"So stay tuned."],[271.93,272.91,"I will see you in the next one."],[272.95,273.58,"Bye."]];
+const FRAMES = [0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315];
+const SRC_W = 1920, SRC_H = 1080, FPS = 30;
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const svg = (id, extra = '') => `<svg class="i" ${extra}><use href="#i-${id}"/></svg>`;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function fmt(t) {
+  t = Math.max(0, t);
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return String(m).padStart(2, '0') + ':' + s.toFixed(2).padStart(5, '0');
+}
+function fmtS(t) {
+  t = Math.max(0, Math.round(t));
+  return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+}
+
+/* ---------- Model (undoable) ---------- */
+function initial() {
+  return {
+    sections: [
+      { id: 's1', a: 0, b: 97.80, speed: 1, mute: false },
+      { id: 's2', a: 97.80, b: 244.48, speed: 1.5, mute: false },
+      { id: 's3', a: 244.48, b: 325.96, speed: 1, mute: false }
+    ],
+    zooms: [
+      { id: 'z1', t: 28, level: 1.5, hold: 3, x: 0.54, y: 0.36 },
+      { id: 'z2', t: 97.79, level: 2, hold: 2, x: 0.5, y: 0.4 },
+      { id: 'z3', t: 168, level: 2, hold: 4, x: 0.55, y: 0.38 }
+    ],
+    graphics: [
+      { id: 'g1', t0: 2.2, t1: 8, kind: 'name', label: 'Name plate' },
+      { id: 'g2', t0: 30, t1: 36, kind: 'title', label: 'Title card' },
+      { id: 'g3', t0: 97.8, t1: 102, kind: 'section', label: 'Section card 1', n: 1 },
+      { id: 'g4', t0: 150, t1: 154, kind: 'section', label: 'Section card 2', n: 2 },
+      { id: 'g5', t0: 200, t1: 204, kind: 'section', label: 'Section card 3', n: 3 },
+      { id: 'g6', t0: 257.07, t1: 277.07, kind: 'end', label: 'End screen' }
+    ],
+    effects: [{ id: 'e1', t0: 4, t1: 6.97, label: 'Full-frame blur', amount: 24 }],
+    shorts: [
+      { id: 'h1', t0: 40.5, t1: 75.2, label: 'Short 1' },
+      { id: 'h2', t0: 181, t1: 219, label: 'Short 2' }
+    ],
+    markers: [
+      { id: 'k1', t: 62, label: 'Hook', color: '#ff9f0a' },
+      { id: 'k2', t: 150, label: 'Lesson 2', color: '#30d158' }
+    ],
+    cues: CUES.map((c, i) => ({ id: 'c' + i, t0: c[0], t1: c[1], text: c[2] })),
+    crop: { x: 0.06, y: 0.04, w: 0.88, h: 0.88, ratio: '16:9' },
+    on: { crop: true, colour: true, blur: true, captions: true, loud: true, fades: true, zooms: true, graphics: true },
+    next: 10
+  };
+}
+let M = initial();
+const undoStack = [], redoStack = [];
+function commit(label, fn) {
+  undoStack.push(JSON.stringify(M));
+  if (undoStack.length > 60) undoStack.shift();
+  redoStack.length = 0;
+  fn();
+  if (label) toast(label);
+  renderAll();
+}
+function undo() {
+  if (!undoStack.length) { toast('Nothing to undo'); return; }
+  redoStack.push(JSON.stringify(M)); M = JSON.parse(undoStack.pop()); fixSel(); toast('Undo'); renderAll();
+}
+function redo() {
+  if (!redoStack.length) { toast('Nothing to redo'); return; }
+  undoStack.push(JSON.stringify(M)); M = JSON.parse(redoStack.pop()); fixSel(); toast('Redo'); renderAll();
+}
+
+/* ---------- UI state ---------- */
+const U = {
+  t: 121.4, sel: { kind: 'section', id: 's2' }, playing: false, scale: 1, itab: 'video', atab: 'media',
+  crop: null, compare: false, aspect: '16:9', safe: false, hidden: {}, locked: {}, compact: false, snap: true
+};
+function fixSel() {
+  const list = listFor(U.sel.kind);
+  if (U.sel.kind && list && !list.find(x => x.id === U.sel.id)) U.sel = { kind: null, id: null };
+}
+function listFor(kind) {
+  return { section: M.sections, zoom: M.zooms, graphic: M.graphics, effect: M.effects, short: M.shorts, marker: M.markers, cue: M.cues }[kind];
+}
+
+/* ---------- Timeline maths ---------- */
+const dur = s => (s.b - s.a) / s.speed;
+function placed() { let o = 0; return M.sections.map((s, i) => { const p = { s, i, o, d: dur(s) }; o += p.d; return p; }); }
+function total() { return M.sections.reduce((n, s) => n + dur(s), 0); }
+function sectionAt(t) { const ps = placed(); return ps.find(p => t >= p.o && t < p.o + p.d) || ps[ps.length - 1]; }
+function srcAt(t) { const p = sectionAt(t); return p ? p.s.a + (t - p.o) * p.s.speed : 0; }
+function frameFor(src) { const f = FRAMES.reduce((b, v) => Math.abs(v - src) < Math.abs(b - src) ? v : b, 0); return 'img/p' + f + '.jpg'; }
+
+function shiftAfter(at, delta, removeFrom, removeTo) {
+  const fix = item => {
+    if (removeFrom != null && item.t0 >= removeFrom - 0.001 && item.t1 <= removeTo + 0.001) return null;
+    if (item.t0 >= at - 0.001) { item.t0 += delta; item.t1 += delta; }
+    else if (item.t1 > at) { item.t1 = Math.max(item.t0 + 0.5, item.t1 + delta); }
+    return item;
+  };
+  M.graphics = M.graphics.map(fix).filter(Boolean);
+  M.effects = M.effects.map(fix).filter(Boolean);
+  M.shorts = M.shorts.map(fix).filter(Boolean);
+  M.cues = M.cues.map(fix).filter(Boolean);
+  M.zooms = M.zooms.filter(z => removeFrom == null || !(z.t >= removeFrom && z.t < removeTo)).map(z => { if (z.t >= at - 0.001) z.t += delta; return z; });
+  M.markers = M.markers.filter(k => removeFrom == null || !(k.t >= removeFrom && k.t < removeTo)).map(k => { if (k.t >= at - 0.001) k.t += delta; return k; });
+}
+
+/* ---------- Actions ---------- */
+function split() {
+  const p = sectionAt(U.t);
+  if (!p) return;
+  const into = U.t - p.o;
+  if (into < 0.3 || p.d - into < 0.3) { toast('Move the playhead into a section to split it'); return; }
+  commit('Split section ' + (p.i + 1) + ' at ' + fmt(U.t), () => {
+    const cut = p.s.a + into * p.s.speed;
+    const right = { id: 's' + (M.next++), a: cut, b: p.s.b, speed: p.s.speed, mute: p.s.mute };
+    const left = M.sections[p.i]; left.b = cut;
+    M.sections.splice(p.i + 1, 0, right);
+    U.sel = { kind: 'section', id: right.id };
+  });
+}
+function del() {
+  const { kind, id } = U.sel;
+  if (!kind) { toast('Select something to delete'); return; }
+  if (U.locked[trackOf(kind)]) { toast('The track is locked'); return; }
+  if (kind === 'section') {
+    if (M.sections.length < 2) { toast('A recording keeps at least one section'); return; }
+    const p = placed().find(q => q.s.id === id);
+    commit('Deleted section ' + (p.i + 1) + '. The gap closed.', () => {
+      M.sections.splice(p.i, 1);
+      shiftAfter(p.o + p.d, -p.d, p.o, p.o + p.d);
+      U.t = clamp(Math.min(U.t, p.o), 0, total());
+      U.sel = { kind: null, id: null };
+    });
+    return;
+  }
+  const names = { zoom: 'zoom', graphic: 'graphic', effect: 'effect', short: 'Short', marker: 'marker', cue: 'caption' };
+  commit('Deleted the ' + names[kind], () => {
+    const list = listFor(kind); const i = list.findIndex(x => x.id === id); if (i >= 0) list.splice(i, 1);
+    U.sel = { kind: null, id: null };
+  });
+}
+function setSpeed(id, v) {
+  const p = placed().find(q => q.s.id === id); if (!p || p.s.speed === v) return;
+  commit('Section ' + (p.i + 1) + ' at ' + v + '×', () => {
+    const s = M.sections[p.i]; const old = dur(s); s.speed = v; const delta = dur(s) - old;
+    shiftAfter(p.o + old, delta);
+  });
+}
+function addZoom() {
+  if (U.locked.zoom) { toast('The Zoom track is locked'); return; }
+  commit('Added a 2× zoom at ' + fmt(U.t), () => {
+    const z = { id: 'z' + (M.next++), t: U.t, level: 2, hold: 2, x: 0.5, y: 0.42 }; M.zooms.push(z); U.sel = { kind: 'zoom', id: z.id };
+  });
+}
+function addBlur() {
+  if (U.locked.effects) { toast('The Effects track is locked'); return; }
+  commit('Added a full-frame blur at ' + fmt(U.t), () => {
+    const e = { id: 'e' + (M.next++), t0: U.t, t1: Math.min(total(), U.t + 3), label: 'Full-frame blur', amount: 24 }; M.effects.push(e); U.sel = { kind: 'effect', id: e.id };
+  });
+}
+function addMarker() {
+  commit('Added a marker at ' + fmt(U.t), () => {
+    const k = { id: 'k' + (M.next++), t: U.t, label: 'Marker', color: '#0a84ff' }; M.markers.push(k); U.sel = { kind: 'marker', id: k.id };
+  });
+}
+function addGraphic(kind, label) {
+  if (U.locked.graphics) { toast('The Graphics track is locked'); return; }
+  commit('Added ' + label + ' at ' + fmt(U.t), () => {
+    const g = { id: 'g' + (M.next++), t0: U.t, t1: Math.min(total(), U.t + 5), kind, label, n: 4 }; M.graphics.push(g); U.sel = { kind: 'graphic', id: g.id };
+  });
+}
+function toggleOn(key, label) {
+  commit(label + (M.on[key] ? ' off' : ' on'), () => { M.on[key] = !M.on[key]; });
+}
+function resetChange(key) {
+  const labels = { crop: 'Crop reset to the whole frame', colour: 'Colour reset', blur: 'Blur areas cleared', loud: 'Loudness reset to −14 LUFS', zooms: 'Zooms cleared', graphics: 'Graphics cleared', captions: 'Captions reset', fades: 'Fades reset to 12 ms' };
+  commit(labels[key] || 'Reset', () => {
+    if (key === 'crop') M.crop = { x: 0, y: 0, w: 1, h: 1, ratio: 'Free' };
+    if (key === 'blur') M.on.blur = false;
+    if (key === 'zooms') M.zooms = [];
+    if (key === 'graphics') M.graphics = [];
+    if (key !== 'blur') M.on[key] = true;
+  });
+}
+function trackOf(kind) { return { section: 'video', zoom: 'zoom', graphic: 'graphics', effect: 'effects', short: 'shorts', marker: 'ruler', cue: 'captions' }[kind]; }
+
+/* ---------- Toast ---------- */
+let toastTimer;
+function toast(text) {
+  const el = $('#toast'); el.textContent = text; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+/* ---------- Player ---------- */
+function cropRatioPx(c) { return (c.w * SRC_W) / (c.h * SRC_H); }
+function zoomAt(t) {
+  if (!M.on.zooms || U.hidden.zoom) return null;
+  for (const z of M.zooms) {
+    const a = z.t, b = z.t + z.hold + 1;
+    if (t >= a && t <= b) {
+      const ease = x => x * x * (3 - 2 * x);
+      let k = 1;
+      if (t < a + 0.5) k = ease((t - a) / 0.5); else if (t > b - 0.5) k = ease((b - t) / 0.5);
+      return { z, s: 1 + (z.level - 1) * k };
+    }
+  }
+  return null;
+}
+function geometry(c, boxW, boxH) {
+  return { w: boxW / c.w, h: boxH / c.h, l: -c.x / c.w * boxW, t: -c.y / c.h * boxH };
+}
+function renderPlayer() {
+  const pic = $('#m-pic'); const frame = $('#frame');
+  const areaW = pic.clientWidth - 24, areaH = pic.clientHeight - 20;
+  const inCrop = !!U.crop;
+  const short = U.aspect === '9:16' && !inCrop;
+  let view;
+  if (inCrop) view = { x: 0, y: 0, w: 1, h: 1 };
+  else if (short) { const w = (SRC_H * 9 / 16) / SRC_W; view = { x: clamp(0.56 - w / 2, 0, 1 - w), y: 0, w, h: 1 }; }
+  else view = M.on.crop ? M.crop : { x: 0, y: 0, w: 1, h: 1 };
+  const ratio = short ? 9 / 16 : cropRatioPx(view);
+  let fw = areaW, fh = fw / ratio; if (fh > areaH) { fh = areaH; fw = fh * ratio; }
+  frame.style.width = Math.round(fw) + 'px'; frame.style.height = Math.round(fh) + 'px';
+  const src = frameFor(srcAt(U.t));
+  const g = geometry(view, fw, fh);
+  const zr = inCrop ? null : zoomAt(U.t);
+  const zoomCss = zr ? `transform-origin:${((zr.z.x - view.x) / view.w * 100).toFixed(1)}% ${((zr.z.y - view.y) / view.h * 100).toFixed(1)}%;transform:scale(${zr.s.toFixed(3)})` : '';
+  const fxBlur = !inCrop && M.effects.some(e => U.t >= e.t0 && U.t <= e.t1) && !U.hidden.effects;
+  const colourOff = !M.on.colour;
+  const imgCss = `width:${g.w}px;height:${g.h}px;left:${g.l}px;top:${g.t}px;${colourOff ? 'filter:saturate(.72) contrast(.9) brightness(1.04);' : ''}${fxBlur ? 'filter:blur(7px);' : ''}`;
+  // A blur area over the shelf, in source coordinates.
+  const area = { x: 0.015, y: 0.02, w: 0.205, h: 0.17 };
+  const areaCss = `left:${(area.x - view.x) / view.w * fw}px;top:${(area.y - view.y) / view.h * fh}px;width:${area.w / view.w * fw}px;height:${area.h / view.h * fh}px`;
+  const showArea = M.on.blur && !U.hidden.effects;
+  let html = `<div class="layer after"><div class="zoomer" style="${zoomCss}"><img src="${src}" alt="" style="${imgCss}">${showArea ? `<div class="blur-area" style="${areaCss}"></div>` : ''}</div></div>`;
+  if (U.compare && !inCrop) {
+    html += `<div class="layer before"><img src="${src}" alt="" style="width:${g.w}px;height:${g.h}px;left:${g.l}px;top:${g.t}px"></div><div class="cmp-line"></div><span class="cmp-tag" style="left:8px">Before</span><span class="cmp-tag" style="right:8px">After</span>`;
+  }
+  if (!inCrop) {
+    if (M.on.graphics && !U.hidden.graphics) {
+      const gfx = M.graphics.find(x => U.t >= x.t0 && U.t <= x.t1);
+      if (gfx) html += overlayFor(gfx);
+    }
+    if (M.on.captions && !U.hidden.captions) {
+      const cue = M.cues.find(c => U.t >= c.t0 && U.t <= c.t1);
+      if (cue) html += `<div class="ov-cap" style="font-size:${short ? 12 : 15}px">${esc(cue.text)}</div>`;
+    }
+    if (U.sel.kind === 'zoom') {
+      const z = M.zooms.find(q => q.id === U.sel.id);
+      if (z) {
+        const zw = view.w / z.level, zh = view.h / z.level;
+        const zx = clamp(z.x - zw / 2, view.x, view.x + view.w - zw), zy = clamp(z.y - zh / 2, view.y, view.y + view.h - zh);
+        html += `<div class="zoom-target" style="left:${(zx - view.x) / view.w * fw}px;top:${(zy - view.y) / view.h * fh}px;width:${zw / view.w * fw}px;height:${zh / view.h * fh}px"><b></b><span>${z.level}×</span></div>`;
+      }
+    }
+    if (short && U.safe) html += `<div class="safe"><div class="t"></div><div class="r"><i></i><i></i><i></i><i></i></div><div class="b"></div></div>`;
+  } else {
+    const c = U.crop;
+    const px = Math.round(c.w * SRC_W / 2) * 2 + '×' + Math.round(c.h * SRC_H / 2) * 2;
+    html += `<div class="cropbox" id="cropbox" style="left:${c.x * fw}px;top:${c.y * fh}px;width:${c.w * fw}px;height:${c.h * fh}px">
+      <i class="third" style="left:33.33%;top:0;bottom:0;width:1px"></i><i class="third" style="left:66.66%;top:0;bottom:0;width:1px"></i>
+      <i class="third" style="top:33.33%;left:0;right:0;height:1px"></i><i class="third" style="top:66.66%;left:0;right:0;height:1px"></i>
+      <span class="dim">${px}</span>
+      <i class="h nw" data-h="nw"></i><i class="h ne" data-h="ne"></i><i class="h sw" data-h="sw"></i><i class="h se" data-h="se"></i></div>`;
+  }
+  frame.innerHTML = html;
+  renderPbar();
+}
+function overlayFor(g) {
+  if (g.kind === 'name') return `<div class="ov-np">Yamparala Rahul<small>UX Design Engineer</small></div>`;
+  if (g.kind === 'title') return `<div class="ov-card"><div><small>New video</small>3 things App Store review taught me</div></div>`;
+  if (g.kind === 'section') return `<div class="ov-card"><div><small>Lesson ${g.n || 1}</small>${['Reviewers use your app like a user', 'Write the review notes first', 'Plan for a second review'][((g.n || 1) - 1) % 3]}</div></div>`;
+  if (g.kind === 'end') return `<div class="ov-end"><i>SPEAKER</i><div class="stack"><i>VIDEO</i><i>VIDEO</i></div></div>`;
+  return `<div class="ov-np">${esc(g.label)}</div>`;
+}
+function renderPbar() {
+  const slot = $('#m-pbar-slot');
+  if (U.crop) {
+    const ratios = ['Free', '16:9', '9:16', '1:1', '4:5', '4:3', '2.39:1'];
+    slot.className = 'm-cropbar';
+    slot.innerHTML = `<span class="lbl">${svg('crop')}Crop</span>${ratios.map(r => `<button class="chip ${U.crop.ratio === r ? 'on' : ''}" data-ratio="${r}">${r}</button>`).join('')}
+      <span class="px">${Math.round(U.crop.w * SRC_W / 2) * 2}×${Math.round(U.crop.h * SRC_H / 2) * 2}</span><span class="grow" style="flex:1"></span>
+      <button class="m-btn small" data-act="crop-reset">Reset</button><button class="m-btn small" data-act="crop-cancel">Cancel</button><button class="m-btn small primary" data-act="crop-apply">Apply</button>`;
+    return;
+  }
+  slot.className = 'm-pbar';
+  slot.innerHTML = `<span class="tc">${fmt(U.t)} <span>/ ${fmt(total())}</span></span>
+    <span class="grow"></span>
+    <button class="ib" data-act="back" title="Previous frame (←)">${svg('back')}</button>
+    <button class="ib play" data-act="play" title="Play / pause (Space)">${svg(U.playing ? 'pause' : 'play')}</button>
+    <button class="ib" data-act="fwd" title="Next frame (→)">${svg('fwd')}</button>
+    <span class="grow"></span>
+    <button class="ib" data-act="crop" title="Crop (⌥C)">${svg('crop')}</button>
+    <button class="ib ${U.compare ? 'on' : ''}" data-act="compare" title="Before/After: the frame with and without all changes">${svg('compare')}</button>
+    <span class="mseg2"><button class="${U.aspect === '16:9' ? 'on' : ''}" data-aspect="16:9">16:9</button><button class="${U.aspect === '9:16' ? 'on' : ''}" data-aspect="9:16">9:16</button></span>
+    <button class="ib ${U.safe ? 'on' : ''}" data-act="safe" title="Safe zones: where YouTube draws its buttons on a Short" ${U.aspect === '9:16' ? '' : 'disabled'}>${svg('safe')}</button>
+    <button class="ib" data-act="snapshot" title="Snapshot: save this frame for the thumbnail maker">${svg('camera')}</button>
+    <button class="ib" data-act="full" title="Full screen">${svg('expand')}</button>`;
+}
+
+/* ---------- Inspector ---------- */
+function chgRow(o) {
+  return `<div class="chg ${o.on === false ? 'off' : ''}"><div class="chg-row">
+    <span class="ic" style="background:${o.bg};color:${o.fg}">${svg(o.icon)}</span>
+    <span class="txt"><b>${o.name}${o.all ? ' <span class="all">All sections</span>' : ''}</b><span>${o.sum}</span></span>
+    ${o.key ? `<button class="reset" data-reset="${o.key}" title="Reset">${svg('reset')}</button><button class="switch ${o.on ? 'on' : ''}" data-on="${o.key}" data-label="${o.name}" role="switch" aria-checked="${o.on}" title="Turn ${o.name.toLowerCase()} on or off"></button>` : ''}
+  </div>${o.extra || ''}</div>`;
+}
+function slider(label, v, min, max, unit) {
+  const p = (v - min) / (max - min) * 100;
+  return `<div class="kv"><span style="min-width:74px">${label}</span><span class="slider"><i style="width:${p}%"></i><b style="left:${p}%"></b></span><span class="val">${v}${unit || ''}</span><button class="reset" title="Reset">${svg('reset')}</button></div>`;
+}
+const C = {
+  crop: ['rgba(10,132,255,.2)', '#5eb0ff'], colour: ['rgba(255,214,10,.18)', '#ffd60a'], blur: ['rgba(255,159,10,.2)', '#ff9f0a'],
+  zoom: ['rgba(56,189,248,.2)', '#38bdf8'], gfx: ['rgba(167,139,250,.2)', '#c4b5fd'], cap: ['rgba(250,204,21,.18)', '#facc15'],
+  audio: ['rgba(45,212,191,.18)', '#2dd4bf'], short: ['rgba(255,92,138,.2)', '#ff7aa2'], speed: ['rgba(255,214,10,.18)', '#ffd60a']
+};
+function cropSum() { const c = M.crop; return (c.w > 0.999 && c.h > 0.999 ? 'Whole frame' : c.ratio) + ' · ' + Math.round(c.w * SRC_W / 2) * 2 + '×' + Math.round(c.h * SRC_H / 2) * 2; }
+function renderInspector() {
+  const el = $('#m-insp');
+  const { kind, id } = U.sel;
+  let head = '', tabs = '', body = '';
+  if (kind === 'section') {
+    const p = placed().find(q => q.s.id === id);
+    const zin = M.zooms.filter(z => z.t >= p.o && z.t < p.o + p.d).length;
+    head = `<div class="k">${svg('film', 'style="width:12px;height:12px"')}Section</div><h4>Section ${p.i + 1} of ${M.sections.length}</h4><span>Recording ${fmt(p.s.a)} – ${fmt(p.s.b)} · plays ${fmt(p.d)}</span>`;
+    const T = [['video', 'Video'], ['audio', 'Audio'], ['speed', 'Speed'], ['colour', 'Colour']];
+    tabs = `<div class="m-itabs">${T.map(([k, n]) => `<button class="${U.itab === k ? 'on' : ''}" data-itab="${k}">${n}</button>`).join('')}</div>`;
+    if (U.itab === 'video') {
+      body = chgRow({ icon: 'crop', name: 'Crop', all: true, sum: cropSum(), on: M.on.crop, key: 'crop', bg: C.crop[0], fg: C.crop[1], extra: `<div class="btn-row"><button class="m-btn small" data-act="crop">${svg('crop')}Edit in the player</button></div>` })
+        + chgRow({ icon: 'blur', name: 'Blur areas', all: true, sum: '1 area · blur 24', on: M.on.blur, key: 'blur', bg: C.blur[0], fg: C.blur[1], extra: `<div class="btn-row"><button class="m-btn small">Add Area</button></div>` })
+        + chgRow({ icon: 'zoom', name: 'Zooms', sum: zin + ' in this section · ' + M.zooms.length + ' in the video', on: M.on.zooms, key: 'zooms', bg: C.zoom[0], fg: C.zoom[1], extra: `<div class="btn-row"><button class="m-btn small" data-act="zoom">Add at Playhead</button><button class="m-btn small">${svg('sparkles')}Suggest</button></div>` })
+        + `<p class="hint">"All sections" means the change applies to the whole recording, as now. Switch it off to see the video without it.</p>`;
+    } else if (U.itab === 'audio') {
+      body = chgRow({ icon: 'wave', name: 'Loudness', all: true, sum: '−14 LUFS, for YouTube', on: M.on.loud, key: 'loud', bg: C.audio[0], fg: C.audio[1] })
+        + chgRow({ icon: 'scissors', name: 'Smoother cuts', all: true, sum: '12 ms fades at each cut', on: M.on.fades, key: 'fades', bg: C.audio[0], fg: C.audio[1] })
+        + `<div class="chg"><div class="chg-row"><span class="ic" style="background:${C.audio[0]};color:${C.audio[1]}">${svg('mute')}</span><span class="txt"><b>Mute this section</b><span>The picture stays</span></span><button class="switch ${p.s.mute ? 'on' : ''}" data-mute="${p.s.id}" role="switch" aria-checked="${p.s.mute}"></button></div></div>`
+        + `<div class="btn-row"><button class="m-btn small" data-act="silence">${svg('wave')}Review Silence…</button></div>`;
+    } else if (U.itab === 'speed') {
+      const sp = [0.5, 0.75, 1, 1.25, 1.5, 2];
+      body = `<div class="chg"><div class="ilabel">Speed</div><div class="chips">${sp.map(v => `<button class="chip ${p.s.speed === v ? 'on' : ''}" data-speed="${v}">${v}×</button>`).join('')}</div>
+          <p class="hint">Plays ${fmt(p.d)}. The sections after it move up, and the timeline stays without gaps.</p></div>
+        <div class="chg"><div class="ilabel">Edges</div><div class="btn-row"><button class="m-btn small">Start at Playhead</button><button class="m-btn small">End at Playhead</button></div>
+          <div class="ilabel">Order</div><div class="btn-row"><button class="m-btn small">← Earlier</button><button class="m-btn small">Later →</button><span style="flex:1"></span><button class="m-btn small danger" data-act="delete">${svg('trash')}Delete</button></div></div>`;
+    } else {
+      body = chgRow({ icon: 'colour', name: 'Colour', all: true, sum: 'Natural · Normal profile', on: M.on.colour, key: 'colour', bg: C.colour[0], fg: C.colour[1],
+        extra: slider('Exposure', 0, -2, 2) + slider('Contrast', 5, -50, 50) + slider('Saturation', 10, -50, 50) + slider('Temperature', 0, -50, 50) })
+        + `<div class="btn-row"><button class="m-btn small" data-act="compare">${svg('compare')}Before/After in the player</button></div>`;
+    }
+  } else if (kind === 'zoom') {
+    const z = M.zooms.find(q => q.id === id);
+    head = `<div class="k">${svg('zoom', 'style="width:12px;height:12px"')}Zoom</div><h4>Zoom ${z.level}× at ${fmt(z.t)}</h4><span>Eases in and out over 0.5 s each way</span>`;
+    body = `<div class="chg"><div class="ilabel">Level</div><div class="chips">${[1.5, 2, 3].map(v => `<button class="chip ${z.level === v ? 'on' : ''}" data-zlevel="${v}">${v}×</button>`).join('')}</div>
+      ${slider('Hold', z.hold.toFixed(1), 0.5, 10, ' s')}
+      <p class="hint">The dashed box on the picture shows what stays in view. Drag its centre to aim the zoom.</p></div>
+      <div class="btn-row"><button class="m-btn small">Move to Playhead</button><span style="flex:1"></span><button class="m-btn small danger" data-act="delete">${svg('trash')}Delete</button></div>`;
+  } else if (kind === 'graphic') {
+    const g = M.graphics.find(q => q.id === id);
+    head = `<div class="k">${svg('text', 'style="width:12px;height:12px"')}Graphic</div><h4>${esc(g.label)}</h4><span>${fmt(g.t0)} – ${fmt(g.t1)} · ${(g.t1 - g.t0).toFixed(1)} s</span>`;
+    body = g.kind === 'name'
+      ? `<div class="chg"><div class="ilabel">Name</div><div class="m-field">Yamparala Rahul</div><div class="ilabel">Role</div><div class="m-field">UX Design Engineer</div><div class="ilabel">Side</div><div class="chips"><button class="chip on">Left</button><button class="chip">Right</button></div></div>`
+      : `<div class="chg"><div class="ilabel">Text</div><div class="m-field">${esc(g.kind === 'end' ? 'Watch one of these next' : g.kind === 'title' ? '3 things App Store review taught me' : g.label)}</div><p class="hint">Drag the graphic on the picture to move it. Drag its edges on the timeline to change when it shows.</p></div>`;
+    body += `<div class="btn-row"><button class="m-btn small">Show It</button><span style="flex:1"></span><button class="m-btn small danger" data-act="delete">${svg('trash')}Delete</button></div>`;
+  } else if (kind === 'effect') {
+    const e = M.effects.find(q => q.id === id);
+    head = `<div class="k">${svg('fx', 'style="width:12px;height:12px"')}Effect</div><h4>${esc(e.label)}</h4><span>${fmt(e.t0)} – ${fmt(e.t1)}</span>`;
+    body = `<div class="chg">${slider('Amount', 24, 0, 80)}${slider('Mix', 100, 0, 100, '%')}${slider('Fade in', 0.25, 0, 2, ' s')}${slider('Fade out', 0.25, 0, 2, ' s')}<p class="hint">Blurs the whole picture after the crop and the zoom.</p></div>
+      <div class="btn-row"><span style="flex:1"></span><button class="m-btn small danger" data-act="delete">${svg('trash')}Delete</button></div>`;
+  } else if (kind === 'short') {
+    const h = M.shorts.find(q => q.id === id);
+    head = `<div class="k">${svg('phone', 'style="width:12px;height:12px"')}Short</div><h4>${esc(h.label)}</h4><span>${fmt(h.t0)} – ${fmt(h.t1)} · ${(h.t1 - h.t0).toFixed(1)} s</span>`;
+    body = `<div class="chg"><div class="ilabel">Layout</div><div class="chips"><button class="chip on">Speaker</button><button class="chip">Screen on top</button></div>
+      <div class="kv"><span>Captions</span><span class="grow"></span><button class="switch on"></button></div></div>
+      <div class="btn-row"><button class="m-btn small" data-aspect="9:16">${svg('phone')}Preview at 9:16</button><button class="m-btn small">Export Short…</button></div>`;
+  } else if (kind === 'marker') {
+    const k = M.markers.find(q => q.id === id);
+    head = `<div class="k">${svg('flag', 'style="width:12px;height:12px"')}Marker</div><h4>${esc(k.label)}</h4><span>At ${fmt(k.t)}</span>`;
+    body = `<div class="chg"><div class="ilabel">Name</div><div class="m-field">${esc(k.label)}</div><div class="ilabel">Colour</div><div class="chips">${['#ff453a', '#ff9f0a', '#ffd60a', '#30d158', '#0a84ff', '#bf5af2'].map(c => `<span style="width:18px;height:18px;border-radius:50%;background:${c};outline:${c === k.color ? '2px solid #fff' : 'none'};outline-offset:1px"></span>`).join('')}</div></div>
+      <div class="btn-row"><span style="flex:1"></span><button class="m-btn small danger" data-act="delete">${svg('trash')}Delete</button></div>`;
+  } else if (kind === 'cue') {
+    const c = M.cues.find(q => q.id === id);
+    head = `<div class="k">${svg('cc', 'style="width:12px;height:12px"')}Caption</div><h4>Caption at ${fmt(c.t0)}</h4><span>${(c.t1 - c.t0).toFixed(2)} s</span>`;
+    body = `<div class="chg"><div class="ilabel">Text</div><div class="m-field" style="height:auto;min-height:24px;padding:5px 8px;line-height:1.3">${esc(c.text)}</div><p class="hint">Fix a word here. The transcript keeps the fix for every export.</p></div>`;
+  } else {
+    head = `<div class="k">${svg('rows', 'style="width:12px;height:12px"')}Nothing selected</div><h4>Changes on this video</h4><span>DJI_20261014194430_0007_D.MP4 · plays ${fmt(total())}</span>`;
+    const sp = M.sections.filter(s => s.speed !== 1).length;
+    body = chgRow({ icon: 'crop', name: 'Crop', sum: cropSum(), on: M.on.crop, key: 'crop', bg: C.crop[0], fg: C.crop[1] })
+      + chgRow({ icon: 'colour', name: 'Colour', sum: 'Natural · Normal profile', on: M.on.colour, key: 'colour', bg: C.colour[0], fg: C.colour[1] })
+      + chgRow({ icon: 'blur', name: 'Blur areas', sum: '1 area for the whole video', on: M.on.blur, key: 'blur', bg: C.blur[0], fg: C.blur[1] })
+      + chgRow({ icon: 'zoom', name: 'Zooms', sum: M.zooms.length + ' zooms', on: M.on.zooms, key: 'zooms', bg: C.zoom[0], fg: C.zoom[1] })
+      + chgRow({ icon: 'text', name: 'Graphics', sum: M.graphics.length + ' graphics', on: M.on.graphics, key: 'graphics', bg: C.gfx[0], fg: C.gfx[1] })
+      + chgRow({ icon: 'cc', name: 'Captions', sum: M.cues.length + ' captions from the transcript', on: M.on.captions, key: 'captions', bg: C.cap[0], fg: C.cap[1] })
+      + chgRow({ icon: 'wave', name: 'Loudness', sum: '−14 LUFS', on: M.on.loud, key: 'loud', bg: C.audio[0], fg: C.audio[1] })
+      + chgRow({ icon: 'speed', name: 'Speed', sum: sp ? sp + ' section' + (sp > 1 ? 's' : '') + ' not at 1×' : 'All sections at 1×', bg: C.speed[0], fg: C.speed[1] })
+      + chgRow({ icon: 'phone', name: 'Shorts', sum: M.shorts.length + ' Shorts', bg: C.short[0], fg: C.short[1] })
+      + `<p class="hint">Switch a change off to see the video without it. Agents' changes show here too.</p>`;
+  }
+  el.innerHTML = `<div class="m-ihead">${head}</div>${tabs || '<div></div>'}<div class="m-ibody">${body}</div>`;
+}
+
+/* ---------- Assets ---------- */
+function renderAssets() {
+  $$('#m-atabs button').forEach(b => b.classList.toggle('on', b.dataset.atab === U.atab));
+  const el = $('#m-alist');
+  if (U.atab === 'media') {
+    el.innerHTML = `<div class="m-group">Recordings</div>
+      <div class="m-card"><div class="thumb" style="background-image:url(img/p90.jpg)"><span class="used">${svg('check', 'style="width:10px;height:10px;vertical-align:-1px"')} In timeline</span><span class="dur">5:26</span></div><div class="meta"><b>DJI_20261014194430_0007_D.MP4</b><span>1920×1080 · 30 fps · Normal</span></div></div>
+      <div class="m-group">Screen recordings</div>
+      <div class="m-dash">${svg('plus')}Add a screen recording<br>The speaker shows in a bubble or beside it</div>`;
+  } else if (U.atab === 'graphics') {
+    const G = [['name', 'Name plate', '<div class="np">Yamparala Rahul<small>UX Design Engineer</small></div>'], ['title', 'Title card', '<div class="tc">3 things App Store taught me</div>'],
+      ['section', 'Section card', '<div class="sc"><i>01</i>Lesson</div>'], ['kinetic', 'Kinetic text', '<div class="kt">Ship <em>first</em></div>'],
+      ['list', 'Feature list', '<div class="fl"><i style="width:60px"></i><i style="width:44px"></i><i style="width:52px"></i></div>'], ['badge', 'Badge', '<div class="bd">NEW</div>'], ['end', 'End screen', '<div class="es"><i></i><i></i></div>']];
+    el.innerHTML = `<div class="m-group">Templates · click + to add at the playhead</div><div class="grid2">${G.map(([k, n, h]) => `<div class="m-card"><div class="gfx">${h}</div><button class="add" data-addg="${k}" data-label="${n}" title="Add ${n} at the playhead">${svg('plus', 'style="width:12px;height:12px"')}</button><div class="meta"><b>${n}</b></div></div>`).join('')}</div>`;
+  } else if (U.atab === 'logos') {
+    const L = ['Figma', 'Swift', 'Xcode', 'Claude', 'Supabase', 'GitHub', 'Notion', 'Apple'];
+    el.innerHTML = `<div class="m-group">Logo library · shows next to the speaker</div><div class="grid2">${L.map(n => `<div class="logo-tile"><b>${n[0]}</b>${n}</div>`).join('')}</div><p class="hint" style="padding:4px 2px">Example names. The app reads your logo library folder.</p>`;
+  } else {
+    const F = [['Blur area', 'Hide a part of the picture', 'blur', '#ff9f0a'], ['Full-frame blur', 'Blur everything for a moment', 'blurfx', '#ff9f0a'], ['Pixelate', 'Blocks in place of a blur', 'pix', '#ff9f0a'], ['Zoom', 'An eased push-in at the playhead', 'zoom', '#38bdf8'], ['Screen zoom', 'Zoom on the screen recording', 'szoom', '#38bdf8']];
+    el.innerHTML = `<div class="m-group">Effects · click + to add at the playhead</div>${F.map(([n, d, k, c]) => `<div class="fx-row"><span class="sw" style="background:linear-gradient(135deg, ${c}, #333)"></span><span><b>${n}</b><span>${d}</span></span><button class="add" data-addfx="${k}" title="Add ${n}">${svg('plus', 'style="width:12px;height:12px"')}</button></div>`).join('')}`;
+  }
+}
+
+/* ---------- Timeline ---------- */
+const ROWS = () => [
+  { key: 'ruler', h: 22 }, { key: 'shorts', h: 15, name: 'Shorts', icon: 'phone', color: 'var(--m-short)' },
+  { key: 'graphics', h: 28, name: 'Graphics', icon: 'text', color: 'var(--m-gfx)' }, { key: 'effects', h: 33, name: 'Effects', icon: 'fx', color: 'var(--m-fx)' },
+  { key: 'zoom', h: 28, name: 'Zoom', icon: 'zoom', color: 'var(--m-zoom)' }, { key: 'video', h: U.compact ? 48 : 70, name: 'Video', icon: 'film', color: '#7fb4ff' },
+  { key: 'audio', h: U.compact ? 40 : 56, name: 'Audio', icon: 'wave', color: 'var(--m-audio)' }, { key: 'captions', h: 26, name: 'Captions', icon: 'cc', color: 'var(--m-cap)' }
+];
+let PPS = 1;
+const PAD = 8;
+const X = t => PAD + t * PPS;
+function renderTimeline() {
+  const scroll = $('#m-scroll');
+  const base = scroll.clientWidth - PAD * 2 - 4;
+  const T = total();
+  PPS = base * U.scale / T;
+  const rows = ROWS();
+  // Headers
+  $('#m-heads').innerHTML = rows.map(r => {
+    if (r.key === 'ruler') return `<div class="row" style="height:${r.h}px"><span class="tcell" id="tcell">${fmt(U.t)}</span></div>`;
+    const btns = r.key === 'shorts' ? '' : `<button class="hb ${U.hidden[r.key] ? 'on' : ''}" data-hide="${r.key}" title="${U.hidden[r.key] ? 'Show' : 'Hide'} in the player">${svg(U.hidden[r.key] ? 'eyeoff' : 'eye')}</button>`
+      + (r.key === 'audio' ? `<button class="hb" title="Mute">${svg('speaker')}</button>` : '')
+      + `<button class="hb ${U.locked[r.key] ? 'on' : ''}" data-lock="${r.key}" title="${U.locked[r.key] ? 'Unlock' : 'Lock'}">${svg('lock')}</button>`;
+    return `<div class="row ${U.hidden[r.key] ? 'hidden' : ''}" style="height:${r.h}px"><span class="nm"><span style="color:${r.color};display:inline-flex">${svg(r.icon)}</span>${r.name}</span>${btns}</div>`;
+  }).join('');
+  // Content
+  const W = X(T) + 40;
+  const parts = rows.map(r => `<div class="trow ${r.key === 'ruler' ? 'r-ruler' : 'track'} ${U.hidden[r.key] ? 'hidden' : ''} ${r.key === 'captions' && !M.on.captions ? 'cap-off' : ''}" data-row="${r.key}" style="height:${r.h}px;width:${W}px">${rowContent(r, T)}</div>`);
+  const content = $('#m-content');
+  content.style.width = W + 'px';
+  const videoTop = rows.slice(0, rows.findIndex(r => r.key === 'video')).reduce((n, r) => n + r.h + 2, 0);
+  content.innerHTML = parts.join('') + `<div class="ph" id="ph" style="left:${X(U.t)}px"></div><button class="scissors" id="scissors" data-act="split" title="Split here (⌘B)" style="left:${X(U.t)}px;top:${videoTop + 4}px">${svg('scissors')}</button>`;
+  // Waveforms
+  $$('.aclip', content).forEach(drawWave);
+  // Zoom slider
+  const zp = Math.log(U.scale) / Math.log(12);
+  $('#t-zsb').style.left = (zp * 100) + '%';
+  $('#t-snap').classList.toggle('on', U.snap);
+  $('#t-height').classList.toggle('on', U.compact);
+}
+function rowContent(r, T) {
+  const sel = (k, id) => U.sel.kind === k && U.sel.id === id ? 'sel' : '';
+  if (r.key === 'ruler') {
+    const ladder = [1, 2, 5, 10, 15, 30, 60, 120];
+    const iv = ladder.find(v => v * PPS >= 64) || 120;
+    const minor = iv / 5;
+    let h = '';
+    for (let t = 0; t <= T + 0.001; t += minor) {
+      const major = Math.abs(t / iv - Math.round(t / iv)) < 0.001;
+      h += `<i class="tick" style="left:${X(t)}px;height:${major ? 7 : 3}px"></i>`;
+      if (major) h += `<span class="tlab" style="left:${X(t)}px">${fmtS(t)}</span>`;
+    }
+    h += M.markers.map(k => `<i class="flag" data-kind="marker" data-id="${k.id}" title="${esc(k.label)} · ${fmt(k.t)}" style="left:${X(k.t) - 4}px;background:${k.color};${sel('marker', k.id) ? 'outline:2px solid #fff;' : ''}"></i>`).join('');
+    return h;
+  }
+  if (r.key === 'shorts') return M.shorts.map(s => `<div class="blk s ${sel('short', s.id)}" data-kind="short" data-id="${s.id}" style="left:${X(s.t0)}px;width:${(s.t1 - s.t0) * PPS}px" title="${esc(s.label)}">${esc(s.label)}</div>`).join('');
+  if (r.key === 'graphics') return M.graphics.map(g => `<div class="blk g ${sel('graphic', g.id)}" data-kind="graphic" data-id="${g.id}" style="left:${X(g.t0)}px;width:${Math.max(6, (g.t1 - g.t0) * PPS)}px" title="${esc(g.label)}">${(g.t1 - g.t0) * PPS > 40 ? svg('text') + esc(g.label) : ''}</div>`).join('') + (M.on.graphics ? '' : '<span class="band off" style="width:100%;top:8px;bottom:auto;height:12px;line-height:12px;font-size:9px">Graphics are off</span>');
+  if (r.key === 'effects') return M.effects.map(e => `<div class="blk e ${sel('effect', e.id)}" data-kind="effect" data-id="${e.id}" style="left:${X(e.t0)}px;width:${Math.max(6, (e.t1 - e.t0) * PPS)}px" title="${esc(e.label)}">${(e.t1 - e.t0) * PPS > 60 ? svg('blur') + esc(e.label) : ''}</div>`).join('')
+    + `<div class="band ${M.on.blur ? '' : 'off'}" style="left:${X(0)}px;width:${T * PPS}px">Blur area · whole video</div>`;
+  if (r.key === 'zoom') return M.zooms.map(z => {
+    const w = (z.hold + 1) * PPS, ramp = Math.min(45, 0.5 / (z.hold + 1) * 100);
+    return `<div class="zb ${sel('zoom', z.id)}" data-kind="zoom" data-id="${z.id}" style="left:${X(z.t)}px;width:${Math.max(8, w)}px;${M.on.zooms ? '' : 'opacity:.35'}" title="Zoom ${z.level}× at ${fmt(z.t)}"><span class="shape" style="clip-path:polygon(0 100%, ${ramp}% 8%, ${100 - ramp}% 8%, 100% 100%)"></span>${w > 22 ? `<b>${z.level}×</b>` : ''}</div>`;
+  }).join('');
+  if (r.key === 'video') return placed().map(p => {
+    const w = p.d * PPS, tileW = r.h * 16 / 9;
+    let tiles = '';
+    const n = Math.min(80, Math.ceil(w / tileW));
+    for (let k = 0; k < n; k++) tiles += `<img src="${frameFor(p.s.a + ((k + 0.5) * tileW / PPS) * p.s.speed)}" alt="" style="width:${tileW}px">`;
+    const badges = (p.s.speed !== 1 ? `<span class="badge sp" title="Speed">${p.s.speed}×</span>` : '')
+      + (M.on.crop && (M.crop.w < 0.999 || M.crop.h < 0.999) ? `<span class="badge" title="Crop: ${cropSum()}">${svg('crop')}</span>` : '')
+      + (M.on.blur ? `<span class="badge" title="Blur area">${svg('blur')}</span>` : '')
+      + (M.on.colour ? `<span class="badge" title="Colour: Natural">${svg('colour')}</span>` : '')
+      + (p.s.mute ? `<span class="badge" title="Muted">${svg('mute')}</span>` : '');
+    const isSel = sel('section', p.s.id);
+    return `<div class="clip ${isSel}" data-kind="section" data-id="${p.s.id}" style="left:${X(p.o)}px;width:${w}px"><div class="strip">${tiles}</div>
+      <div class="top"><span class="n">${p.i + 1}</span>${w > 120 ? `<span class="t">${fmtS(p.s.a)}–${fmtS(p.s.b)}</span>` : ''}<span class="grow"></span>${w > 70 ? badges : ''}</div>
+      ${isSel ? '<i class="trim l"></i><i class="trim r"></i>' : ''}</div>`;
+  }).join('');
+  if (r.key === 'audio') return placed().map(p => `<div class="aclip ${sel('section', p.s.id)}" data-kind="section" data-id="${p.s.id}" data-a="${p.s.a}" data-sp="${p.s.speed}" data-mute="${p.s.mute ? 1 : 0}" style="left:${X(p.o)}px;width:${p.d * PPS}px"><canvas></canvas>${p.d * PPS > 90 ? '<span class="lab">Audio · ' + (p.i + 1) + '</span>' : ''}</div>`).join('');
+  if (r.key === 'captions') {
+    const v0 = 0, v1 = T;
+    return M.cues.filter(c => c.t1 > v0 && c.t0 < v1).map(c => {
+      const w = (c.t1 - c.t0) * PPS;
+      return `<div class="cue ${sel('cue', c.id)}" data-kind="cue" data-id="${c.id}" style="left:${X(c.t0)}px;width:${Math.max(2, w - 1)}px;${sel('cue', c.id) ? 'background:var(--m-cap);color:#1c1600;' : ''}" title="${esc(c.text)}">${w > 30 ? esc(c.text) : ''}</div>`;
+    }).join('');
+  }
+  return '';
+}
+function drawWave(el) {
+  const c = el.querySelector('canvas');
+  const w = Math.max(1, Math.round(el.clientWidth)), h = Math.max(1, el.clientHeight);
+  const dpr = 2;
+  c.width = w * dpr; c.height = h * dpr; c.style.width = w + 'px'; c.style.height = h + 'px';
+  const g = c.getContext('2d'); g.scale(dpr, dpr);
+  const a = +el.dataset.a, sp = +el.dataset.sp, muted = el.dataset.mute === '1';
+  g.fillStyle = muted ? 'rgba(160,160,160,.45)' : 'rgba(45,212,191,.85)';
+  const mid = h / 2 + 4, amp = (h - 14) / 2;
+  for (let x = 0; x < w; x += 2) {
+    const s0 = a + (x / PPS) * sp, s1 = a + ((x + 2) / PPS) * sp;
+    let v = 0;
+    for (let b = Math.floor(s0 * 4); b <= Math.floor(s1 * 4); b++) v = Math.max(v, WAVE[b] || 0);
+    const hh = Math.max(1, v / 100 * amp);
+    g.fillRect(x, mid - hh, 1.4, hh * 2);
+  }
+}
+function updatePlayhead() {
+  const ph = $('#ph'), sc = $('#scissors'), tc = $('#tcell');
+  if (ph) ph.style.left = X(U.t) + 'px';
+  if (sc) sc.style.left = X(U.t) + 'px';
+  if (tc) tc.textContent = fmt(U.t);
+}
+function revealPlayhead() {
+  const s = $('#m-scroll'); const x = X(U.t);
+  if (x < s.scrollLeft + 30 || x > s.scrollLeft + s.clientWidth - 30) s.scrollLeft = x - s.clientWidth * 0.4;
+}
+function setZoom(scale) {
+  U.scale = clamp(scale, 1, 12); renderTimeline(); revealPlayhead();
+}
+
+/* ---------- Render all ---------- */
+function renderAll() { renderTimeline(); renderInspector(); renderPlayer(); }
+
+/* ---------- Events in the mockup ---------- */
+const mock = $('#mock');
+let scale = 1;
+function localX(el, e) { return (e.clientX - el.getBoundingClientRect().left) / scale; }
+function localY(el, e) { return (e.clientY - el.getBoundingClientRect().top) / scale; }
+
+function seekFromEvent(e) {
+  const content = $('#m-content');
+  const x = localX(content, e);
+  let t = clamp((x - PAD) / PPS, 0, total());
+  if (U.snap && !e.altKey) {
+    const tol = 8 / PPS;
+    const cands = [0, total(), ...placed().map(p => p.o), ...M.markers.map(k => k.t)];
+    for (const c of cands) if (Math.abs(c - t) < tol) { t = c; break; }
+  }
+  U.t = t; updatePlayhead(); renderPlayer();
+}
+
+mock.addEventListener('pointerdown', e => {
+  mock.focus({ preventScroll: true });
+  const ruler = e.target.closest('.r-ruler');
+  if (ruler && !e.target.closest('.flag')) {
+    stopPlay(); seekFromEvent(e);
+    const move = ev => seekFromEvent(ev);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    return;
+  }
+  const box = e.target.closest('#cropbox');
+  if (box && U.crop) { startCropDrag(e, e.target.dataset.h || 'move'); return; }
+});
+
+mock.addEventListener('click', e => {
+  const t = e.target;
+  const act = t.closest('[data-act]');
+  if (act) { doAct(act.dataset.act); return; }
+  const blk = t.closest('[data-kind]');
+  if (blk) {
+    const kind = blk.dataset.kind;
+    if (U.locked[trackOf(kind)]) { toast('The track is locked'); return; }
+    U.sel = { kind, id: blk.dataset.id };
+    if (kind === 'marker') { const k = M.markers.find(q => q.id === blk.dataset.id); if (k) U.t = k.t; }
+    renderAll(); return;
+  }
+  const row = t.closest('.trow.track');
+  if (row) { U.sel = { kind: null, id: null }; renderAll(); return; }
+  const it = t.closest('[data-itab]'); if (it) { U.itab = it.dataset.itab; renderInspector(); return; }
+  const at = t.closest('[data-atab]'); if (at) { U.atab = at.dataset.atab; renderAssets(); return; }
+  const on = t.closest('[data-on]'); if (on) { toggleOn(on.dataset.on, on.dataset.label); return; }
+  const rs = t.closest('[data-reset]'); if (rs) { resetChange(rs.dataset.reset); return; }
+  const mu = t.closest('[data-mute]');
+  if (mu) { const id = mu.dataset.mute; commit(null, () => { const s = M.sections.find(q => q.id === id); s.mute = !s.mute; toast(s.mute ? 'Section muted' : 'Section sound on'); }); return; }
+  const spd = t.closest('[data-speed]'); if (spd && U.sel.kind === 'section') { setSpeed(U.sel.id, +spd.dataset.speed); return; }
+  const zl = t.closest('[data-zlevel]');
+  if (zl && U.sel.kind === 'zoom') { const v = +zl.dataset.zlevel; commit('Zoom set to ' + v + '×', () => { M.zooms.find(q => q.id === U.sel.id).level = v; }); return; }
+  const asp = t.closest('[data-aspect]'); if (asp) { U.aspect = asp.dataset.aspect; if (U.aspect === '16:9') U.safe = false; renderPlayer(); return; }
+  const ratio = t.closest('[data-ratio]'); if (ratio && U.crop) { setCropRatio(ratio.dataset.ratio); return; }
+  const hide = t.closest('[data-hide]'); if (hide) { const k = hide.dataset.hide; U.hidden[k] = !U.hidden[k]; renderAll(); return; }
+  const lock = t.closest('[data-lock]'); if (lock) { const k = lock.dataset.lock; U.locked[k] = !U.locked[k]; toast((U.locked[k] ? 'Locked' : 'Unlocked') + ' the track'); renderTimeline(); return; }
+  const ag = t.closest('[data-addg]'); if (ag) { addGraphic(ag.dataset.addg, ag.dataset.label); return; }
+  const af = t.closest('[data-addfx]');
+  if (af) { const k = af.dataset.addfx; if (k === 'zoom' || k === 'szoom') addZoom(); else if (k === 'blur') { M.on.blur || toggleOn('blur', 'Blur areas'); toast('Drag on the picture to draw a blur area'); } else addBlur(); return; }
+  if (t.closest('#m-import')) { toast('Opens the file picker, as Add Videos does now'); return; }
+});
+
+function doAct(a) {
+  switch (a) {
+    case 'undo': undo(); break;
+    case 'redo': redo(); break;
+    case 'delete': del(); break;
+    case 'split': split(); break;
+    case 'crop': startCrop(); break;
+    case 'speed':
+      if (U.sel.kind !== 'section') { const p = sectionAt(U.t); U.sel = { kind: 'section', id: p.s.id }; }
+      U.itab = 'speed'; renderAll(); flash($('#m-insp')); break;
+    case 'zoom': addZoom(); break;
+    case 'blur': addBlur(); break;
+    case 'marker': addMarker(); break;
+    case 'auto': toast('Opens Auto Edit, as now'); break;
+    case 'silence': toast('Opens Review Silence. The pauses are the low parts of the Audio track.'); break;
+    case 'snap': U.snap = !U.snap; toast('Snapping ' + (U.snap ? 'on' : 'off')); renderTimeline(); break;
+    case 'height': U.compact = !U.compact; renderTimeline(); break;
+    case 'zin': setZoom(U.scale * 1.6); break;
+    case 'zout': setZoom(U.scale / 1.6); break;
+    case 'fit': setZoom(1); $('#m-scroll').scrollLeft = 0; break;
+    case 'play': U.playing ? stopPlay() : startPlay(); break;
+    case 'back': stopPlay(); U.t = clamp(U.t - 1 / FPS, 0, total()); updatePlayhead(); renderPlayer(); break;
+    case 'fwd': stopPlay(); U.t = clamp(U.t + 1 / FPS, 0, total()); updatePlayhead(); renderPlayer(); break;
+    case 'compare': U.compare = !U.compare; if (U.crop) U.crop = null; renderPlayer(); toast(U.compare ? 'Before/After: left half without changes' : 'Before/After off'); break;
+    case 'safe': U.safe = !U.safe; renderPlayer(); break;
+    case 'snapshot': toast('Saved this frame for the thumbnail maker'); break;
+    case 'full': toast('Full screen'); break;
+    case 'crop-cancel': U.crop = null; renderPlayer(); toast('Crop not changed'); break;
+    case 'crop-reset': U.crop = { x: 0, y: 0, w: 1, h: 1, ratio: 'Free' }; renderPlayer(); break;
+    case 'crop-apply': {
+      const c = U.crop; U.crop = null;
+      commit('Crop applied: ' + c.ratio + ' · ' + Math.round(c.w * SRC_W / 2) * 2 + '×' + Math.round(c.h * SRC_H / 2) * 2, () => { M.crop = c; M.on.crop = true; });
+      break;
+    }
+  }
+}
+
+/* ---------- Crop ---------- */
+function startCrop() {
+  stopPlay(); U.compare = false; U.aspect = '16:9';
+  U.crop = Object.assign({}, M.on.crop ? M.crop : { x: 0, y: 0, w: 1, h: 1, ratio: 'Free' });
+  renderPlayer();
+}
+function ratioValue(r) { return { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5, '4:3': 4 / 3, '2.39:1': 2.39 }[r] || null; }
+function setCropRatio(r) {
+  const c = U.crop; c.ratio = r; const rv = ratioValue(r);
+  if (rv) {
+    const cx = c.x + c.w / 2, cy = c.y + c.h / 2;
+    let w = 1, h = w * SRC_W / (SRC_H * rv);
+    if (h > 1) { h = 1; w = h * SRC_H * rv / SRC_W; }
+    w *= 0.9; h *= 0.9;
+    c.w = w; c.h = h; c.x = clamp(cx - w / 2, 0, 1 - w); c.y = clamp(cy - h / 2, 0, 1 - h);
+  }
+  renderPlayer();
+}
+function startCropDrag(e, mode) {
+  e.preventDefault();
+  const frame = $('#frame'); const fw = frame.clientWidth, fh = frame.clientHeight;
+  const start = { x: localX(frame, e) / fw, y: localY(frame, e) / fh, c: Object.assign({}, U.crop) };
+  const rv = ratioValue(U.crop.ratio);
+  const move = ev => {
+    const px = localX(frame, ev) / fw, py = localY(frame, ev) / fh;
+    const dx = px - start.x, dy = py - start.y, s = start.c, c = U.crop;
+    if (mode === 'move') { c.x = clamp(s.x + dx, 0, 1 - s.w); c.y = clamp(s.y + dy, 0, 1 - s.h); }
+    else {
+      const right = mode.includes('e'), bottom = mode.includes('s');
+      const ax = right ? s.x : s.x + s.w, ay = bottom ? s.y : s.y + s.h;
+      let w = Math.abs(clamp(px, 0, 1) - ax), h = Math.abs(clamp(py, 0, 1) - ay);
+      w = Math.max(0.08, w); h = Math.max(0.08, h);
+      if (rv) { const hFromW = w * SRC_W / (SRC_H * rv); if (hFromW <= h) h = hFromW; else w = h * SRC_H * rv / SRC_W; }
+      c.w = w; c.h = h; c.x = right ? ax : ax - w; c.y = bottom ? ay : ay - h;
+      c.x = clamp(c.x, 0, 1 - c.w); c.y = clamp(c.y, 0, 1 - c.h);
+    }
+    renderPlayer();
+  };
+  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+}
+
+/* ---------- Playback ---------- */
+let raf = 0, last = 0, lastFrame = '';
+function startPlay() {
+  if (U.t >= total() - 0.05) U.t = 0;
+  U.playing = true; U.crop = null; last = performance.now(); renderPlayer();
+  const step = now => {
+    if (!U.playing) return;
+    U.t += (now - last) / 1000; last = now;
+    if (U.t >= total()) { U.t = total(); stopPlay(); return; }
+    updatePlayhead(); revealPlayhead();
+    const f = frameFor(srcAt(U.t)) + '|' + (zoomAt(U.t) ? zoomAt(U.t).s.toFixed(2) : '') + '|' + (M.graphics.find(x => U.t >= x.t0 && U.t <= x.t1) || {}).id + '|' + (M.cues.find(c => U.t >= c.t0 && U.t <= c.t1) || {}).id;
+    if (f !== lastFrame) { lastFrame = f; renderPlayer(); } else { const tc = $('.m-pbar .tc'); if (tc) tc.innerHTML = fmt(U.t) + ' <span>/ ' + fmt(total()) + '</span>'; }
+    raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+function stopPlay() { if (!U.playing) return; U.playing = false; cancelAnimationFrame(raf); renderPlayer(); }
+
+/* ---------- Keys ---------- */
+mock.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase(), cmd = e.metaKey || e.ctrlKey;
+  let done = true;
+  if (cmd && k === 'z' && e.shiftKey) redo();
+  else if (cmd && k === 'z') undo();
+  else if (cmd && k === 'b') split();
+  else if (cmd && (k === '=' || k === '+')) setZoom(U.scale * 1.6);
+  else if (cmd && k === '-') setZoom(U.scale / 1.6);
+  else if (!cmd && e.shiftKey && k === 'z') { setZoom(1); $('#m-scroll').scrollLeft = 0; }
+  else if (e.altKey && (k === 'c' || e.code === 'KeyC')) startCrop();
+  else if (k === 'backspace' || k === 'delete') del();
+  else if (k === ' ') { U.playing ? stopPlay() : startPlay(); }
+  else if (k === 'arrowleft') doAct('back');
+  else if (k === 'arrowright') doAct('fwd');
+  else if (k === 'm' && !cmd) addMarker();
+  else if (k === 'n' && !cmd) doAct('snap');
+  else if (k === 'escape' && U.crop) doAct('crop-cancel');
+  else if (k === 'enter' && U.crop) doAct('crop-apply');
+  else done = false;
+  if (done) e.preventDefault();
+});
+
+$('#t-zs').addEventListener('pointerdown', e => {
+  const el = e.currentTarget;
+  const set = ev => { const p = clamp(localX(el, ev) / el.offsetWidth, 0, 1); setZoom(Math.pow(12, p)); };
+  set(e);
+  const up = () => { window.removeEventListener('pointermove', set); window.removeEventListener('pointerup', up); };
+  window.addEventListener('pointermove', set); window.addEventListener('pointerup', up);
+});
+
+/* ---------- Page: Now / Proposed, scale, pins ---------- */
+const stage = $('#stage'), holder = $('#mock-holder'), nowShot = $('#now-shot'), inner = $('#stage-inner');
+const TRACK = JSON.parse($('#tracker-data').textContent);
+let view = 'proposed', actual = false;
+const PINS = {
+  proposed: [[1, 300, 480, 'a-layout'], [2, 130, 840, 'a-timeline'], [3, 744, 445, 'a-crop'], [4, 1262, 66, 'a-changes'], [5, 596, 445, 'a-player']],
+  before: [[1, 0.15, 0.35, 'a-layout'], [2, 0.5, 0.87, 'a-timeline'], [3, 0.313, 0.045, 'a-crop'], [4, 0.722, 0.5, 'a-changes'], [5, 0.56, 0.045, 'a-player']]
+};
+function fit() {
+  const w = stage.clientWidth;
+  scale = actual ? 1 : w / 1280;
+  stage.classList.toggle('scroll', actual);
+  holder.style.transform = `scale(${scale})`;
+  if (view === 'proposed') inner.style.height = (877 * scale) + 'px'; else inner.style.height = '';
+  renderPins();
+}
+function renderPins() {
+  const pins = $('#pins');
+  if (view === 'proposed') pins.innerHTML = PINS.proposed.map(([n, x, y, href]) => `<a class="pin" href="#${href}" style="left:${x * scale}px;top:${y * scale}px" aria-label="Go to change ${n}">${n}</a>`).join('');
+  else if (view === 'before') pins.innerHTML = PINS.before.map(([n, x, y, href]) => `<a class="pin" href="#${href}" style="left:${x * 100}%;top:${y * 100}%" aria-label="Go to change ${n}">${n}</a>`).join('');
+  else pins.innerHTML = '';
+}
+$('#view-seg').innerHTML = TRACK.versions.map(v => `<button type="button" data-view="${v.id}" aria-pressed="false">${esc(v.label)}</button>`).join('')
+  + '<button type="button" data-view="proposed" aria-pressed="true">Proposed</button>';
+function setView(v) {
+  view = v;
+  $$('#view-seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+  const version = TRACK.versions.find(x => x.id === v);
+  if (version) { nowShot.src = version.img; nowShot.alt = version.alt; }
+  nowShot.hidden = !version; holder.hidden = v !== 'proposed';
+  $('#stage-hint').textContent = version
+    ? `${version.label}, ${version.date} (${version.ref}): ${version.note}`
+    : 'Click a section, a zoom or a graphic on the timeline. Hover the playhead to split.';
+  if (version) { actual = false; $('#actual').setAttribute('aria-pressed', 'false'); $('#actual').textContent = 'Show at full size'; }
+  fit();
+  if (v === 'proposed') requestAnimationFrame(() => renderAll());
+}
+$('#view-seg').addEventListener('click', e => { const b = e.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
+$('#actual').addEventListener('click', e => {
+  actual = !actual; e.currentTarget.setAttribute('aria-pressed', actual);
+  e.currentTarget.textContent = actual ? 'Fit to the page' : 'Show at full size';
+  if (view !== 'proposed') setView('proposed'); else fit();
+});
+new ResizeObserver(() => fit()).observe(stage);
+
+/* ---------- Tracker ---------- */
+const STATUS = { shipped: 'Shipped', review: 'Built, in review', next: 'Next', planned: 'Planned' };
+function renderTracker() {
+  $('#steps').innerHTML = TRACK.steps.map(st => {
+    const meta = [st.date ? `<span>${esc(st.date)}</span>` : '', st.branch ? `<span>Branch <code>${esc(st.branch)}</code></span>` : '',
+      st.pr ? `<span><a href="${esc(st.pr)}">Pull request</a></span>` : (st.status === 'review' ? '<span>No pull request yet</span>' : '')].join('');
+    const list = (title, items) => items && items.length ? `<div><h4>${title}</h4><ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '';
+    const pics = st.before && st.after ? `<div class="ba">
+        <figure><img src="${esc(st.before.img)}" alt="${esc(st.before.caption)}" loading="lazy"><figcaption>${esc(st.before.caption)}</figcaption></figure>
+        <figure><img src="${esc(st.after.img)}" alt="${esc(st.after.caption)}" loading="lazy"><figcaption>${esc(st.after.caption)}</figcaption></figure></div>` : '';
+    return `<li class="step ${st.status}"><div class="step-head"><span class="id">${st.id}</span><h3>${esc(st.title)}</h3><span class="pill ${st.status}">${STATUS[st.status]}</span></div>
+      ${meta ? `<div class="step-meta">${meta}</div>` : ''}
+      <div class="step-body">${list(st.status === 'shipped' || st.status === 'review' ? 'Done' : 'Plan', st.done.length ? st.done : st.left)}${st.done.length ? list('Left for later steps', st.left) : ''}${pics ? `<div style="grid-column:1/-1">${pics}</div>` : ''}</div></li>`;
+  }).join('');
+  $('#versions').innerHTML = TRACK.versions.map(v => `<button type="button" class="version" data-version="${v.id}"><img src="${esc(v.img)}" alt="" loading="lazy"><span class="vt"><b>${esc(v.label)}</b><span>${esc(v.date)} · ${esc(v.ref)}</span><span>${esc(v.note)}</span></span></button>`).join('');
+  $('#decided').innerHTML = TRACK.decisions.map(([d, t]) => `<li><b>${esc(d)}:</b> ${esc(t)}</li>`).join('');
+  $$('.area-status').forEach(el => {
+    const st = TRACK.steps.find(x => x.id === TRACK.areas[el.dataset.area]);
+    if (!st) return;
+    el.hidden = false; el.className = `pill area-status ${st.status}`;
+    el.textContent = st.id + ' · ' + STATUS[st.status];
+  });
+}
+$('#versions').addEventListener('click', e => {
+  const b = e.target.closest('[data-version]'); if (!b) return;
+  setView(b.dataset.version);
+  $('#editor').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+});
+renderTracker();
+
+function flash(el) { if (!el) return; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2700); }
+$$('[data-try]').forEach(b => b.addEventListener('click', () => {
+  setView('proposed');
+  $('#editor').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  const which = b.dataset.try;
+  setTimeout(() => {
+    if (which === 'layout') { U.atab = 'graphics'; renderAssets(); flash($('#m-assets')); setTimeout(() => flash($('#m-player')), 500); }
+    if (which === 'timeline') { U.sel = { kind: 'section', id: M.sections[1] ? M.sections[1].id : M.sections[0].id }; renderAll(); flash($('#m-tools')); setTimeout(() => flash($('#m-heads')), 500); }
+    if (which === 'crop') { startCrop(); flash($('#m-pbar-slot')); }
+    if (which === 'changes') { U.sel = { kind: null, id: null }; renderAll(); flash($('#m-insp')); }
+    if (which === 'player') { U.crop = null; U.compare = true; renderPlayer(); flash($('#m-pbar-slot')); }
+  }, 450);
+}));
+
+/* ---------- Decisions ---------- */
+const form = $('#decide-form');
+function answersText() {
+  const lines = ['My answers on the Studio redesign:'];
+  $$('.q', form).forEach((q, i) => {
+    const legend = q.querySelector('legend').textContent.replace(/^\d+\.\s*/, '');
+    const picked = q.querySelector('input:checked');
+    lines.push((i + 1) + '. ' + legend + ' → ' + (picked ? picked.value : 'no answer'));
+  });
+  return lines.join('\n');
+}
+function syncAnswers() { $('#answers').value = answersText(); }
+form.addEventListener('change', syncAnswers);
+$('#copy-btn').addEventListener('click', () => {
+  syncAnswers();
+  const status = $('#copy-status');
+  const fallback = () => { const ta = $('#answers'); ta.focus(); ta.select(); status.textContent = 'Select all and copy the text below.'; };
+  try {
+    navigator.clipboard.writeText(answersText()).then(() => { status.textContent = 'Copied. Paste it in our chat.'; }, fallback);
+  } catch (err) { fallback(); }
+});
+syncAnswers();
+
+/* ---------- Start ---------- */
+renderAssets();
+setView('proposed');
+window.addEventListener('load', () => renderAll());
+})();
+</script>
+</body>
+</html>

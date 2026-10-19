@@ -176,6 +176,17 @@ or understand which part of your content matters. Quiet footage may yield no sug
   speeds; the minimum-pause setting measures the original recording. One Undo restores
   all removed sections. Low volume is not necessarily silence, so review quiet speech
   and intentional pauses before applying.
+- **Timeline layout:** the tool bar above the timeline has the edit tools: Undo, Redo,
+  Delete, Split, Crop (⌥C), Speed, Zoom, Blur and Marker, then Auto Edit and Review Silence,
+  then Snapping, Tall rows and the timeline zoom. Each row has a header at the left:
+  Shorts, Graphics, Effects, Zoom (and Layout and Screen zoom with a screen recording),
+  Video and Audio. An empty row folds to a thin row; its **+** adds the first item at the
+  playhead. The **eye** hides a row in the Preview only, and the export keeps it. The
+  **lock** stops the timeline from changing a row. On Audio, the speaker mutes the
+  Preview. These are view settings, not saved in the project. Each video section shows
+  frames from the recording, its number, and badges for its speed, the crop, blur areas
+  and colour correction. Blur areas show as a band on the Effects row. **Tall rows**
+  makes the frames and the waveform bigger, and the setting is remembered.
 - **Change speed:** select a video section and choose **Speed**, from **0.25× to 4×**.
   With several sections selected, one choice sets them all as a single undo step; if any
   is too short for that speed, none change. Split a section first to retime only part of it. Audio preserves pitch in native playback
@@ -187,10 +198,11 @@ or understand which part of your content matters. Quiet footage may yield no sug
   Edit frame gives you the original frame and draggable editing handles.
 - **Seek:** click or drag the time ruler, or click inside a video section. The timeline
   magnification slider provides more room for precise cuts; scroll horizontally when zoomed in.
-- **Split:** place the playhead inside a section and press **⌘B** or click **Split**.
+- **Split:** place the playhead inside a section and press **⌘B**, click **Split** in the
+  tool bar, or click the scissors that show on the playhead while the pointer is over the timeline.
 - **Trim:** drag a section's left/right handle, or select it and enter source seconds in
-  **In / Out**. Changes snap to source frames. **⌘⇧[ / ⌘⇧]** trim the current section's
-  start/end to the playhead. Hidden footage can be restored up to neighboring retained ranges.
+  **In / Out**. Changes snap to source frames. **⌘⇧[ / ⌘⇧]** (or **⌥[ / ⌥]**, as in Filmora)
+  trim the current section's start/end to the playhead. Hidden footage can be restored up to neighboring retained ranges.
 - **Select several sections:** **⇧-click** selects every section from the last one clicked
   to this one, in the order they play. **⌘-click** adds or removes one, and **⌘A** selects
   them all. Neither moves the playhead. **⌘← / ⌘→** select the previous or next section,
@@ -201,7 +213,7 @@ or understand which part of your content matters. Quiet footage may yield no sug
   Several go as one undo step. The gap closes automatically. At least one section stays;
   remove the sidebar item to discard a recording.
 - **Reorder:** drag a section onto another, or use the earlier/later arrow buttons.
-- **Snapping:** with **Snapping** on (the button above the timeline, or Timeline ▸
+- **Snapping:** with **Snapping** on (the button above the timeline, **N**, or Timeline ▸
   Snapping), dragged edges line up with the playhead, section boundaries, zoom edges and
   the start and end of the timeline once they come within 8 points of one. An accent
   line shows what an edge is holding to. It applies to trims, moving and resizing zooms,
@@ -492,7 +504,8 @@ Sources/
   AgentProtocol.swift wire types and socket helpers shared with yamvideoctl
   LocalAgentServer.swift private Unix-socket listener and discovery record
   AgentRequests.swift every agent request: state, apply, preview, jobs, save
-  TimelineView.swift timeline, section trim handles and zoom blocks
+  TimelineView.swift timeline: tool bar, row headers, filmstrip sections, trim handles and zoom blocks
+  TimelineTracks.swift the timeline's rows, eye and lock, section badges and filmstrip tiles
   Playback.swift    native video/audio composition and live effects
   ProjectEditing.swift undo history, project files and session recovery
   Movie.swift       movie canvas and multi-source FFmpeg export graph

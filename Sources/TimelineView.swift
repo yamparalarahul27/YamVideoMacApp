@@ -1,42 +1,72 @@
+import AVFoundation
 import SwiftUI
 
+/// The timeline, laid out as Filmora lays it out: a tool bar above it, a header for each
+/// row at the left, and the rows from what draws over the picture down to its sound.
 struct TimelineView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var playback: PlaybackController
     let item: VideoItem
+    @ObservedObject private var filmstrip = FilmstripCache.shared
     @State private var overview: AudioOverview?
     @State private var audioError: String?
     @State private var reviewingSilence = false
     /// Where a drag has snapped to, drawn as a guide for as long as it holds.
     @State private var snapGuide: Double?
+    /// The pointer is over the rows: the playhead shows its scissors.
+    @State private var hovering = false
 
-    // Lane geometry. Every height below derives from these, so adding a lane is one
-    // entry rather than five magic numbers that have to be kept in step.
+    // Row geometry. Every height below derives from these, so adding a row is one entry
+    // rather than magic numbers that have to be kept in step.
     private static let rulerHeight = 22.0
-    private static let sectionHeight = 48.0
-    private static let waveformHeight = 28.0
+    private static let foldedHeight = 16.0
+    private static let headerWidth = 122.0
     private static let zoomHeight = 28.0
-    private static let effectHeight = 24.0
+    private static let effectHeight = 22.0
+    private static let blurBandHeight = 10.0
     /// Two rows: column graphics above, panel graphics below.
-    private static let graphicsRowHeight = 18.0
+    private static let graphicsRowHeight = 17.0
     private static let graphicsHeight = graphicsRowHeight * 2 + 4
-    private static let shortsHeight = 22.0
+    private static let shortsHeight = 20.0
     private static let layoutHeight = 22.0
-    private static let laneSpacing = 5.0
+    private static let laneSpacing = 4.0
+    static let speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
-    private var laneHeights: [Double] {
-        var lanes = [Self.rulerHeight, Self.sectionHeight]
-        if overview != nil { lanes.append(Self.waveformHeight) }
-        if item.screen != nil { lanes += [Self.layoutHeight, Self.zoomHeight] }
-        lanes.append(Self.zoomHeight)
-        lanes.append(Self.effectHeight)
-        lanes.append(Self.graphicsHeight)
-        lanes.append(Self.shortsHeight)
-        return lanes
+    private var sectionHeight: Double { model.timelineTallTracks ? 64 : 44 }
+    private var waveformHeight: Double { model.timelineTallTracks ? 40 : 26 }
+
+    private var tracks: [TimelineTrack] { TimelineTrack.tracks(for: item) }
+    private func folded(_ track: TimelineTrack) -> Bool { track.isEmpty(in: item) }
+    private func hidden(_ track: TimelineTrack) -> Bool { model.timelineTracks.hidden.contains(track) }
+    private func locked(_ track: TimelineTrack) -> Bool { model.timelineTracks.locked.contains(track) }
+
+    private func height(of track: TimelineTrack) -> Double {
+        if folded(track) { return Self.foldedHeight }
+        switch track {
+        case .shorts: return Self.shortsHeight
+        case .graphics: return Self.graphicsHeight
+        case .effects: return Self.effectHeight + (item.blurRegions.isEmpty ? 0 : Self.blurBandHeight + 2)
+        case .zoom, .screenZoom: return Self.zoomHeight
+        case .screenLayout: return Self.layoutHeight
+        case .video: return sectionHeight
+        case .audio: return overview == nil ? 20 : waveformHeight
+        }
     }
+
+    private var laneHeights: [Double] { [Self.rulerHeight] + tracks.map(height(of:)) }
 
     private var contentHeight: Double {
         laneHeights.reduce(0, +) + Self.laneSpacing * Double(laneHeights.count - 1)
+    }
+
+    /// Where a row starts, down from the top of the ruler.
+    private func top(of track: TimelineTrack) -> Double {
+        var y = Self.rulerHeight + Self.laneSpacing
+        for row in tracks {
+            if row == track { return y }
+            y += height(of: row) + Self.laneSpacing
+        }
+        return y
     }
 
     private var total: Double { max(0.001, item.editedDuration) }
@@ -52,71 +82,52 @@ struct TimelineView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            transport
-            GeometryReader { geo in
-                let width = max(1, geo.size.width - 2)
-                let pixels = model.viewport.pixels(across: width)
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: Self.laneSpacing) {
-                        ruler(width: width)
-                        sectionLane(width: width, pixels: pixels)
-                        if let overview {
-                            WaveformView(overview: overview, timeline: item.timeline, window: model.viewport)
-                                .frame(width: width, height: Self.waveformHeight)
-                                .contentShape(Rectangle())
-                                .gesture(scrubGesture(width: width, pixels: pixels))
+        VStack(spacing: 6) {
+            toolbar
+            HStack(alignment: .top, spacing: 0) {
+                headers
+                    .frame(width: Self.headerWidth, height: contentHeight, alignment: .top)
+                GeometryReader { geo in
+                    let width = max(1, geo.size.width - 2)
+                    let pixels = model.viewport.pixels(across: width)
+                    ZStack(alignment: .topLeading) {
+                        VStack(spacing: Self.laneSpacing) {
+                            ruler(width: width)
+                            ForEach(tracks) { track in
+                                lane(track, width: width, pixels: pixels)
+                                    .frame(width: width, height: height(of: track), alignment: .leading)
+                                    .opacity(hidden(track) ? 0.4 : 1)
+                                    .allowsHitTesting(!locked(track))
+                            }
                         }
-                        if let screen = item.screen {
-                            layoutLane(screen, width: width, pixels: pixels)
-                            screenZoomLane(screen, width: width, pixels: pixels)
-                        }
-                        zoomLane(width: width, pixels: pixels)
-                        effectLane(width: width, pixels: pixels)
-                        graphicsLane(width: width, pixels: pixels)
-                        shortsLane(width: width, pixels: pixels)
+                        playhead(width: width)
+                        guide(width: width)
+                        scissors(width: width)
                     }
-                    playhead(width: width)
-                    guide(width: width)
-                }
-                .frame(width: width, height: contentHeight)
-                .overlay(
-                    TimelineGestures(
-                        onPan: { points in model.viewport.pan(by: points / pixels) },
-                        onZoom: { factor, x in
-                            // Hold whatever is under the pointer, so a pinch magnifies
-                            // the part of the timeline being pointed at.
-                            model.viewport.zoom(by: factor, keeping: model.viewport.time(atX: x, across: width))
-                        }
+                    .frame(width: width, height: contentHeight)
+                    .overlay(
+                        TimelineGestures(
+                            onPan: { points in model.viewport.pan(by: points / pixels) },
+                            onZoom: { factor, x in
+                                // Hold whatever is under the pointer, so a pinch magnifies
+                                // the part of the timeline being pointed at.
+                                model.viewport.zoom(by: factor, keeping: model.viewport.time(atX: x, across: width))
+                            }
+                        )
                     )
-                )
-                .clipped()
+                    .clipped()
+                    .onHover { hovering = $0 }
+                }
+                .frame(height: contentHeight)
             }
-            .frame(height: contentHeight + 12)
-            // Section speed, trims and order are in the inspector, which follows the selection.
-            HStack(spacing: 10) {
-                Text(model.sectionSelection.isEmpty
-                     ? "Click a section to edit it in the inspector; ⇧- or ⌘-click to select several. Drag its edges to trim, or drag it to reorder."
-                     : model.sectionSelection.count > 1
-                     ? "⇧-click selects a range, ⌘-click adds or removes a section, ⌘A selects them all."
-                     : "Drag a section's edges to trim it, or drag it to reorder. ⇧- or ⌘-click to select several.")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 0)
-                if item.info?.hasAudio == true {
-                    if overview != nil {
-                        Button("Review Silence…") { playback.pause(); reviewingSilence = true }
-                    } else if let audioError {
-                        Text("Waveform unavailable").font(.caption).foregroundStyle(.secondary).help(audioError)
-                    } else { ProgressView().controlSize(.small); Text("Reading audio…").font(.caption) }
-                } else { Text("No audio track").font(.caption).foregroundStyle(.secondary) }
-            }.controlSize(.small).frame(height: 24)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
         .background(.background.opacity(0.5))
         .onAppear { model.syncViewport() }
-        .onChange(of: item.editedDuration) { _ in model.syncViewport() }
-        .onChange(of: model.previewTime) { time in
+        .onChange(of: item.editedDuration) { _, _ in model.syncViewport() }
+        .onChange(of: model.previewTime) { _, time in
             // Only chase the playhead while it is running away on its own; dragging it
             // should not tug the view out from under the pointer.
             if playback.isPlaying { model.viewport.reveal(time) }
@@ -169,7 +180,6 @@ struct TimelineView: View {
         return target?.time ?? time
     }
 
-    /// Where a zoom being moved whole lands: by whichever of its edges is nearer a target.
     /// Where a block moved whole lands — a zoom or an effect — by whichever of its edges
     /// is nearer a target.
     private func snapSpan(_ id: UUID, start: Double, duration: Double, pixels: Double) -> Double {
@@ -185,35 +195,98 @@ struct TimelineView: View {
 
     private func endSnap() { showGuide(at: nil) }
 
-    private var transport: some View {
-        HStack(spacing: 10) {
-            Button { model.stepFrame(-1) } label: { Image(systemName: "backward.frame") }
-                .help("Previous frame (←)").accessibilityLabel("Previous frame")
-            Button { model.togglePlayback() } label: { Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill") }
-                .help("Play / pause (Space)").accessibilityLabel(playback.isPlaying ? "Pause" : "Play")
-            Button { model.stepFrame(1) } label: { Image(systemName: "forward.frame") }
-                .help("Next frame (→)").accessibilityLabel("Next frame")
-            Text("\(timelineTime(model.previewTime)) / \(timelineTime(item.editedDuration))")
-                .font(.system(.caption, design: .monospaced)).monospacedDigit()
-            Spacer(minLength: 4)
-            Button { model.splitAtPlayhead() } label: { Label("Split", systemImage: "scissors") }
-                .help("Split at the playhead (⌘B)")
+    // MARK: Tool bar
+
+    /// The edit tools sit here, above the rows, as in Filmora: undo, the tools that act on
+    /// the selection or at the playhead, then how the timeline looks.
+    private var toolbar: some View {
+        HStack(spacing: 1) {
+            // Playback stays here until the picture gets a bar of its own.
+            tool("backward.frame", "Previous frame (←)", label: "Previous frame") { model.stepFrame(-1) }
+            tool(playback.isPlaying ? "pause.fill" : "play.fill", "Play / pause (Space)",
+                 label: playback.isPlaying ? "Pause" : "Play") { model.togglePlayback() }
+            tool("forward.frame", "Next frame (→)", label: "Next frame") { model.stepFrame(1) }
+            toolDivider
+            tool("arrow.uturn.backward", model.undoTitle + " (⌘Z)", label: "Undo") { model.undoEdit() }
+                .disabled(!model.canUndoInModule)
+            tool("arrow.uturn.forward", model.redoTitle + " (⇧⌘Z)", label: "Redo") { model.redoEdit() }
+                .disabled(!model.canRedoInModule)
+            toolDivider
+            tool("trash", "Delete the selection (⌫). A deleted section closes its gap.", label: "Delete") { model.deleteSelection() }
+                .disabled(!model.canDeleteSelection)
+            tool("scissors", "Split at the playhead (⌘B)", label: "Split") { model.splitAtPlayhead() }
+                .disabled(locked(.video))
+            tool("crop", "Crop the frame (⌥C)", label: "Crop") { model.beginCrop() }
+            speedMenu
+            tool("viewfinder", "Add a zoom at the playhead", label: "Add zoom") { model.addZoomFromTimeline() }
+                .disabled(locked(.zoom))
+            tool("camera.filters", "Add a full-frame blur at the playhead", label: "Add blur") { model.addBlurEffect() }
+                .disabled(locked(.effects))
+            tool("flag", "Add a marker at the playhead (M)", label: "Add marker") { model.addMarkerAtPlayhead() }
+            toolDivider
+            Button { model.showingAutoEdit = true } label: { Label("Auto Edit", systemImage: "wand.and.stars") }
+                .labelStyle(.titleAndIcon)
+                .help("Transcribe, cut pauses and stumbles, and set captions and loudness (⇧⌘E)")
+            Group {
+                if item.info?.hasAudio == true {
+                    Button { playback.pause(); reviewingSilence = true } label: { Label("Review Silence", systemImage: "waveform") }
+                        .labelStyle(.titleAndIcon)
+                        .disabled(overview == nil)
+                        .help("Review the pauses before you cut them")
+                }
+            }
+            Spacer(minLength: 6)
             Toggle(isOn: $model.timelineSnapping) {
                 Label("Snapping", systemImage: "arrow.right.and.line.vertical.and.arrow.left")
             }
-                .toggleStyle(.button)
+                .toggleStyle(.button).labelStyle(.iconOnly)
                 .help(model.timelineSnapping
-                      ? "Snapping is on: edges line up with the playhead, sections and zooms. Hold ⌥ while dragging to place freely."
-                      : "Snapping is off: drags place edges freely.")
+                      ? "Snapping is on (N): edges line up with the playhead, sections and zooms. Hold ⌥ while dragging to place freely."
+                      : "Snapping is off (N): drags place edges freely.")
                 .accessibilityLabel("Snapping")
+            Toggle(isOn: $model.timelineTallTracks) {
+                Label("Tall rows", systemImage: "rectangle.expand.vertical")
+            }
+                .toggleStyle(.button).labelStyle(.iconOnly)
+                .help(model.timelineTallTracks ? "Tall rows: bigger frames and waveform. Click for short rows." : "Short rows. Click for tall rows with bigger frames.")
+                .accessibilityLabel("Tall rows")
+            toolDivider
             zoomControls
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
+        .frame(height: 24)
+    }
+
+    private func tool(_ symbol: String, _ help: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(width: 24, height: 20) }
+            .help(help)
+            .accessibilityLabel(label)
+    }
+
+    private var toolDivider: some View {
+        Divider().frame(height: 16).padding(.horizontal, 5)
+    }
+
+    private var speedMenu: some View {
+        Menu {
+            ForEach(Self.speeds, id: \.self) { speed in
+                Button(speed == 1 ? "Normal Speed (1×)" : "\(speed.formatted())×") { model.setSelectedSectionsSpeed(speed) }
+            }
+        } label: {
+            Image(systemName: "gauge.with.dots.needle.67percent")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(width: 26)
+        .disabled(model.sectionSelection.isEmpty || locked(.video))
+        .help("Speed of the selected sections")
+        .accessibilityLabel("Speed")
     }
 
     private var zoomControls: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Button { model.zoomTimeline(in: false) } label: { Image(systemName: "minus.magnifyingglass") }
                 .help("Zoom out (⌘−)").accessibilityLabel("Zoom out")
                 .disabled(model.viewport.scale <= 1.0001)
@@ -223,7 +296,7 @@ struct TimelineView: View {
                 get: { log(max(1, model.viewport.scale)) / log(TimelineViewport.maximumScale) },
                 set: { model.viewport.zoom(to: pow(TimelineViewport.maximumScale, $0), keeping: model.viewportAnchor) }
             ), in: 0...1)
-                .frame(width: 68).accessibilityLabel("Timeline magnification")
+                .frame(width: 80).accessibilityLabel("Timeline magnification")
                 .accessibilityValue("\(Int(model.viewport.scale.rounded()))×")
             Button { model.zoomTimeline(in: true) } label: { Image(systemName: "plus.magnifyingglass") }
                 .help("Zoom in (⌘=)").accessibilityLabel("Zoom in")
@@ -231,6 +304,129 @@ struct TimelineView: View {
             Button { model.zoomTimelineToFit() } label: { Image(systemName: "arrow.left.and.right") }
                 .help("Zoom to fit (⇧Z)").accessibilityLabel("Zoom to fit")
                 .disabled(model.viewport.scale <= 1.0001)
+        }
+    }
+
+    // MARK: Row headers
+
+    private var headers: some View {
+        VStack(alignment: .leading, spacing: Self.laneSpacing) {
+            // The ruler's corner: where the playhead is.
+            HStack {
+                Text(timelineTime(model.previewTime)).font(.system(size: 10, design: .monospaced)).monospacedDigit()
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 6)
+            .frame(height: Self.rulerHeight)
+            .accessibilityLabel("Playhead at \(timelineTime(model.previewTime))")
+            ForEach(tracks) { track in
+                header(track).frame(height: height(of: track))
+            }
+        }
+        .padding(.trailing, 6)
+    }
+
+    private func header(_ track: TimelineTrack) -> some View {
+        let isFolded = folded(track)
+        return HStack(spacing: 2) {
+            Image(systemName: track.symbol)
+                .font(.system(size: isFolded ? 9 : 10))
+                .foregroundStyle(tint(track).opacity(isFolded ? 0.6 : 1))
+                .frame(width: 15)
+            Text(track.label)
+                .font(.system(size: isFolded ? 9.5 : 10.5, weight: isFolded ? .regular : .medium))
+                .foregroundStyle(isFolded ? .tertiary : .secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if isFolded {
+                if let add = addAction(track) {
+                    Button(action: add.action) { Image(systemName: "plus").font(.system(size: 9, weight: .semibold)) }
+                        .help(add.help).accessibilityLabel(add.help)
+                }
+            } else {
+                if track.hides {
+                    headerButton(hidden(track) ? "eye.slash" : "eye", on: hidden(track),
+                                 help: hidden(track) ? "Show \(track.label.lowercased()) in the preview" : "Hide \(track.label.lowercased()) in the preview. The export keeps it.") {
+                        model.toggleTrackHidden(track)
+                    }
+                }
+                if track == .audio, item.info?.hasAudio == true {
+                    headerButton(model.timelineTracks.muted ? "speaker.slash" : "speaker.wave.2", on: model.timelineTracks.muted,
+                                 help: model.timelineTracks.muted ? "Turn the preview sound on" : "Mute the preview. The export keeps its sound.") {
+                        model.toggleTrackMuted()
+                    }
+                }
+                if track.locks {
+                    headerButton(locked(track) ? "lock.fill" : "lock.open", on: locked(track),
+                                 help: locked(track) ? "Unlock \(track.label.lowercased())" : "Lock \(track.label.lowercased()), so the timeline does not change it") {
+                        model.toggleTrackLocked(track)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 5)
+        .frame(maxHeight: .infinity)
+        .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(isFolded ? 0.18 : 0.4)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(isFolded ? "\(track.label), empty" : track.label)
+    }
+
+    private func headerButton(_ symbol: String, on: Bool, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 9.5))
+                .foregroundStyle(on ? Color.orange : Color.secondary)
+                .frame(width: 18, height: 16)
+        }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func tint(_ track: TimelineTrack) -> Color {
+        switch track {
+        case .shorts: return .pink
+        case .graphics: return .purple
+        case .effects: return .orange
+        case .zoom: return .cyan
+        case .screenLayout: return .teal
+        case .screenZoom: return .indigo
+        case .video: return .accentColor
+        case .audio: return .teal
+        }
+    }
+
+    /// What the + on an empty row adds, at the playhead.
+    private func addAction(_ track: TimelineTrack) -> (help: String, action: () -> Void)? {
+        switch track {
+        case .shorts: return ("Add a Short at the playhead", { model.addShortAtPlayhead() })
+        case .graphics: return ("Import a graphics file", { model.chooseGraphicsFile() })
+        case .effects: return ("Add a full-frame blur at the playhead", { model.addBlurEffect() })
+        case .zoom: return ("Add a zoom at the playhead", { model.addZoomFromTimeline() })
+        case .screenZoom: return ("Add a screen zoom at the playhead", { model.addScreenZoomAtPlayhead() })
+        case .screenLayout, .video, .audio: return nil
+        }
+    }
+
+    // MARK: Rows
+
+    @ViewBuilder
+    private func lane(_ track: TimelineTrack, width: Double, pixels: Double) -> some View {
+        if folded(track) {
+            RoundedRectangle(cornerRadius: 3).fill(.quaternary.opacity(0.18))
+        } else {
+            switch track {
+            case .shorts: shortsLane(width: width, pixels: pixels)
+            case .graphics: graphicsLane(width: width, pixels: pixels)
+            case .effects: effectLane(width: width, pixels: pixels)
+            case .zoom: zoomLane(width: width, pixels: pixels)
+            case .screenLayout:
+                if let screen = item.screen { layoutLane(screen, width: width, pixels: pixels) }
+            case .screenZoom:
+                if let screen = item.screen { screenZoomLane(screen, width: width, pixels: pixels) }
+            case .video: sectionLane(width: width, pixels: pixels)
+            case .audio: audioLane(width: width, pixels: pixels)
+            }
         }
     }
 
@@ -271,7 +467,7 @@ struct TimelineView: View {
         }
         .frame(width: width, height: Self.rulerHeight, alignment: .leading)
         .overlay(alignment: .topLeading) {
-            // Markers fly in the ruler, not a lane of their own.
+            // Markers fly in the ruler, not a row of their own.
             ForEach(item.markers.filter { viewport.contains($0.time) }) { marker in
                 MarkerFlag(marker: marker, selected: model.selectedMarkerID == marker.id) { model.selectMarker(marker) }
                     .offset(x: viewport.x(of: marker.time, across: width) - 7, y: 3)
@@ -288,15 +484,23 @@ struct TimelineView: View {
 
     private func sectionLane(width: Double, pixels: Double) -> some View {
         let viewport = model.viewport
+        let height = sectionHeight
+        let aspect = item.info.map { Double($0.width) / Double(max(1, $0.height)) } ?? 16.0 / 9.0
+        let tileWidth = max(24, height * aspect)
         return ZStack(alignment: .topLeading) {
             Color.clear
             ForEach(placedSegments.filter { viewport.intersects($0.offset, $0.offset + $0.segment.duration) },
                     id: \.segment.id) { placed in
                 let span = placed.offset...(placed.offset + placed.segment.duration)
-                SegmentBlock(segment: placed.segment, offset: placed.offset, number: placed.index + 1, name: item.name,
+                SegmentBlock(segment: placed.segment, offset: placed.offset, number: placed.index + 1,
                              selected: model.sectionSelection.contains(placed.segment.id),
                              highlighted: model.agentHighlight?.elements.contains(placed.segment.id) == true,
                              pixels: pixels,
+                             badges: item.badges(for: placed.segment, settings: model.settings),
+                             frames: Filmstrip.tiles(for: placed.segment, offset: placed.offset, viewport: viewport,
+                                                     width: width, tileWidth: tileWidth)
+                                .map { FilmstripFrame(x: $0.x, image: filmstrip.image(for: item.url, at: $0.source)) },
+                             tileWidth: tileWidth,
                              // A trim keeps the frame under the edge, so only what lies over
                              // this section's own footage is worth lining up with.
                              snapEdge: { time in snap(time, pixels: pixels, within: span) },
@@ -312,12 +516,38 @@ struct TimelineView: View {
                                      model.moveSegment(placed.segment.id, to: destination)
                                  }
                              })
-                    .frame(width: max(1, placed.segment.duration * pixels), height: Self.sectionHeight)
+                    .frame(width: max(1, placed.segment.duration * pixels), height: height)
                     .offset(x: viewport.x(of: placed.offset, across: width))
             }
         }
-        .frame(width: width, height: Self.sectionHeight, alignment: .leading)
+        .frame(width: width, height: height, alignment: .leading)
         .clipped()
+    }
+
+    /// The recording's sound under its sections, following every cut and speed change.
+    @ViewBuilder
+    private func audioLane(width: Double, pixels: Double) -> some View {
+        if let overview {
+            WaveformView(overview: overview, timeline: item.timeline, window: model.viewport)
+                .frame(width: width, height: waveformHeight)
+                .opacity(model.timelineTracks.muted ? 0.4 : 1)
+                .contentShape(Rectangle())
+                .gesture(scrubGesture(width: width, pixels: pixels))
+        } else {
+            HStack(spacing: 6) {
+                if item.info?.hasAudio != true {
+                    Text("No audio track")
+                } else if let audioError {
+                    Text("Waveform unavailable").help(audioError)
+                } else {
+                    ProgressView().controlSize(.mini)
+                    Text("Reading audio…")
+                }
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+            .padding(.leading, 9)
+            .frame(width: width, alignment: .leading)
+        }
     }
 
     /// The screen's layouts over its base layout.
@@ -327,7 +557,7 @@ struct TimelineView: View {
             RoundedRectangle(cornerRadius: 4).fill(screen.layout.tint.opacity(0.1))
             HStack(spacing: 3) {
                 Image(systemName: screen.layout.symbol)
-                Text(screen.spans.isEmpty ? "Layout · \(screen.layout.label) throughout · add a layout at the playhead in the inspector"
+                Text(screen.spans.isEmpty ? "\(screen.layout.label) throughout · add a layout at the playhead in the inspector"
                      : "\(screen.layout.label) elsewhere")
             }
             .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 4)
@@ -349,16 +579,11 @@ struct TimelineView: View {
         .clipped()
     }
 
-    /// Zooms on the screen recording, as the zoom lane shows the recording's own.
+    /// Zooms on the screen recording, as the zoom row shows the recording's own.
     private func screenZoomLane(_ screen: ScreenTrack, width: Double, pixels: Double) -> some View {
         let viewport = model.viewport
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(Color.indigo.opacity(0.08))
-            if screen.zooms.isEmpty {
-                Text("Screen zooms · add one in the inspector's Screen section")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
-                    .allowsHitTesting(false)
-            }
             ForEach(screen.zooms.filter { viewport.intersects($0.start, $0.end) }) { shot in
                 ZoomBlock(shot: shot, selected: model.selectedScreenZoomID == shot.id,
                           highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
@@ -381,10 +606,6 @@ struct TimelineView: View {
         let viewport = model.viewport
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
-            if item.zoomShots.isEmpty {
-                Text("Zoom track · add a zoom at the playhead")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 7)
-            }
             ForEach(item.zoomShots.filter { viewport.intersects($0.start, $0.start + $0.duration) }) { shot in
                 ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id,
                           highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
@@ -402,14 +623,13 @@ struct TimelineView: View {
         .clipped()
     }
 
+    /// Full-frame blurs on top, and under them a band for the blur areas, which hide their
+    /// part of the picture for the whole video.
     private func effectLane(width: Double, pixels: Double) -> some View {
         let viewport = model.viewport
+        let height = self.height(of: .effects)
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
-            if item.blurEffects.isEmpty {
-                Text("Effects · add a full-frame blur in the inspector")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 5)
-            }
             ForEach(item.blurEffects.filter { viewport.intersects($0.start, $0.end) }) { effect in
                 EffectBlock(effect: effect, selected: model.selectedEffectID == effect.id,
                             highlighted: model.agentHighlight?.elements.contains(effect.id) == true, pixels: pixels,
@@ -424,8 +644,32 @@ struct TimelineView: View {
                     .frame(height: Self.effectHeight)
                     .offset(x: viewport.x(of: effect.start, across: width))
             }
+            if !item.blurRegions.isEmpty {
+                let start = max(0, viewport.x(of: 0, across: width))
+                let end = min(width, viewport.x(of: total, across: width))
+                let selected = model.inspectorFocus == .blurArea
+                HStack(spacing: 3) {
+                    Image(systemName: "camera.filters")
+                    Text(item.blurRegions.count == 1 ? "Blur area · whole video" : "\(item.blurRegions.count) blur areas · whole video")
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 8, weight: .medium))
+                .padding(.horizontal, 6)
+                .frame(width: max(8, end - start), height: Self.blurBandHeight)
+                .background(Color.orange.opacity(selected ? 0.45 : 0.2), in: RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.orange.opacity(selected ? 1 : 0.45)))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.editorMode = .blur
+                    model.setViewer(.frame)
+                    model.selectedRegionID = item.blurRegions.first?.id
+                }
+                .help("Blur areas hide their part of the picture for the whole video. Click to edit them on the frame.")
+                .offset(x: start, y: Self.effectHeight + 2)
+            }
         }
-        .frame(width: width, height: Self.effectHeight, alignment: .leading)
+        .frame(width: width, height: height, alignment: .leading)
         .clipped()
     }
 
@@ -434,10 +678,6 @@ struct TimelineView: View {
         let graphics = item.graphics?.items ?? []
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
-            if graphics.isEmpty {
-                Text("Graphics track · import a graphics file in the inspector")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 12)
-            }
             ForEach(graphics.filter { viewport.intersects($0.start, $0.end) }) { graphic in
                 GraphicBlock(graphic: graphic, ink: item.graphics?.look(of: graphic) == .ink,
                              selected: model.selectedGraphicID == graphic.id,
@@ -468,10 +708,6 @@ struct TimelineView: View {
         let viewport = model.viewport
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
-            if item.shorts.isEmpty {
-                Text("Shorts · add a 9:16 Short in the inspector")
-                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 4)
-            }
             ForEach(Array(item.shorts.enumerated()).filter { viewport.intersects($0.element.start, $0.element.end) }, id: \.element.id) { index, short in
                 ShortBlock(short: short, name: short.name(index: index), selected: model.selectedShortID == short.id,
                            highlighted: model.agentHighlight?.elements.contains(short.id) == true, pixels: pixels,
@@ -498,6 +734,35 @@ struct TimelineView: View {
             .allowsHitTesting(false)
     }
 
+    /// Filmora's split button: scissors on the playhead while the pointer is over the
+    /// rows, where a click splits the section under it.
+    @ViewBuilder
+    private func scissors(width: Double) -> some View {
+        let time = model.previewTime
+        if hovering, !locked(.video), model.viewport.contains(time), canSplit(at: time) {
+            Button { model.splitAtPlayhead() } label: {
+                Image(systemName: "scissors")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(.white))
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+            }
+            .buttonStyle(.plain)
+            .help("Split here (⌘B)")
+            .accessibilityLabel("Split at the playhead")
+            .offset(x: model.viewport.x(of: time, across: width) - 10, y: top(of: .video) - 10)
+        }
+    }
+
+    /// Far enough from a section's edges to make two sections of at least a frame each.
+    private func canSplit(at time: Double) -> Bool {
+        let frame = 1 / max(1, item.info?.fps ?? 30)
+        return placedSegments.contains { placed in
+            time > placed.offset + frame && time < placed.offset + placed.segment.duration - frame
+        }
+    }
+
     /// The line a snapped edge is holding to.
     private func guide(width: Double) -> some View {
         let time = snapGuide ?? 0
@@ -510,16 +775,24 @@ struct TimelineView: View {
     }
 }
 
+/// One tile of a section's filmstrip: where it sits, and its frame once it is made.
+struct FilmstripFrame {
+    let x: Double
+    let image: CGImage?
+}
+
 private struct SegmentBlock: View {
     let segment: TimelineSegment
     /// Where the section starts on the timeline.
     let offset: Double
     let number: Int
-    let name: String
     let selected: Bool
     /// An agent just changed this section: outlined for a moment, never selected.
     var highlighted = false
     let pixels: Double
+    let badges: [SectionBadge]
+    let frames: [FilmstripFrame]
+    let tileWidth: Double
     /// Where a trimmed edge dragged to a timeline time lands.
     let snapEdge: (Double) -> Double
     let endSnap: () -> Void
@@ -532,14 +805,13 @@ private struct SegmentBlock: View {
 
     var body: some View {
         GeometryReader { geo in
-            ZStack {
-                RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(selected ? 0.42 : 0.2))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("\(number) · \(name)").font(.caption.weight(.medium)).lineLimit(1)
-                    Text("\(timelineTime(segment.start)) – \(timelineTime(segment.end))\(segment.speed == 1 ? "" : " · \(segment.speed.formatted())×")")
-                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                }.padding(.horizontal, 13).frame(maxWidth: .infinity, alignment: .leading)
-                RoundedRectangle(cornerRadius: 5).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 1)
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.22))
+                filmstrip(size: geo.size)
+                topBar(width: geo.size.width)
+                RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(selected ? 0.18 : 0))
+                    .allowsHitTesting(false)
+                RoundedRectangle(cornerRadius: 5).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.18), lineWidth: selected ? 2 : 1)
                 RoundedRectangle(cornerRadius: 5).strokeBorder(Color.orange, lineWidth: 2.5)
                     .shadow(color: .orange.opacity(0.6), radius: 4)
                     .opacity(highlighted ? 1 : 0)
@@ -550,10 +822,12 @@ private struct SegmentBlock: View {
                     Spacer(minLength: 0)
                     handle(start: false).offset(x: trimDelta != 0 && !trimmingStart ? trimDelta : 0)
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
                 if trimDelta != 0 {
                     Text(timelineTime((trimmingStart ? segment.start : segment.end) + trimDelta / pixels * segment.speed))
                         .font(.system(.caption, design: .monospaced)).padding(4)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+                        .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             .contentShape(Rectangle())
@@ -561,12 +835,80 @@ private struct SegmentBlock: View {
             .gesture(DragGesture(minimumDistance: 12)
                 .onChanged { moveDelta = $0.translation.width }
                 .onEnded { value in onMove(value.translation.width); moveDelta = 0 })
+            .help("Click to select; ⇧- or ⌘-click to select several. Drag the edges to trim, or drag the section to reorder.")
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Section \(number), \(timelineTime(segment.duration))")
+            .accessibilityLabel("Section \(number), \(timelineTime(segment.duration))"
+                                + (segment.speed == 1 ? "" : ", \(segment.speed.formatted()) times speed"))
         }
         .padding(.horizontal, 1)
         .offset(x: moveDelta)
         .zIndex(moveDelta == 0 ? 0 : 1)
+    }
+
+    /// The frames of the part on screen, one per tile.
+    private func filmstrip(size: CGSize) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(frames, id: \.x) { frame in
+                Group {
+                    if let image = frame.image {
+                        Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.black.opacity(0.18)
+                    }
+                }
+                .frame(width: tileWidth, height: size.height)
+                .clipped()
+                .offset(x: frame.x)
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .allowsHitTesting(false)
+    }
+
+    /// The section's number, its source times and what is applied to it.
+    private func topBar(width: Double) -> some View {
+        HStack(spacing: 4) {
+            Text("\(number)")
+                .font(.system(size: 9.5, weight: .bold))
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 3))
+            if width > 130 {
+                Text("\(timelineTime(segment.start)) – \(timelineTime(segment.end))")
+                    .font(.system(size: 9, design: .monospaced))
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.8), radius: 1)
+            }
+            Spacer(minLength: 0)
+            if width > 70 {
+                ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in badgeView(badge) }
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.leading, 12).padding(.trailing, 13).padding(.top, 3)
+        .padding(.bottom, 8)
+        .background(LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom))
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 5, topTrailingRadius: 5))
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func badgeView(_ badge: SectionBadge) -> some View {
+        switch badge {
+        case .speed(let speed):
+            Text("\(speed.formatted())×")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.yellow, in: RoundedRectangle(cornerRadius: 3))
+                .help(badge.help)
+        default:
+            Image(systemName: badge.symbol)
+                .font(.system(size: 8.5, weight: .semibold))
+                .frame(width: 15, height: 14)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 3))
+                .help(badge.help)
+        }
     }
 
     private func handle(start: Bool) -> some View {
@@ -591,6 +933,98 @@ private struct SegmentBlock: View {
     private func travel(start: Bool, _ translation: Double) -> Double {
         let edge = offset + (start ? 0 : segment.duration)
         return (snapEdge(edge + translation / pixels) - edge) * pixels
+    }
+}
+
+// MARK: - Filmstrip frames
+
+/// Frames for the sections' filmstrips, made on demand from the recording and kept while
+/// the app runs. AVFoundation makes them rather than ffmpeg: a small frame near a time is
+/// all a tile needs, and the nearest keyframe is fast.
+@MainActor
+final class FilmstripCache: ObservableObject {
+    static let shared = FilmstripCache()
+    /// Enough for several long recordings at any zoom; past it the oldest go.
+    static let limit = 1200
+
+    private var images: [String: CGImage] = [:]
+    private var order: [String] = []
+    private var pending: Set<String> = []
+    private var queued: [URL: Set<Double>] = [:]
+    private var generators: [URL: AVAssetImageGenerator] = [:]
+    private var flushScheduled = false
+    private var publishScheduled = false
+
+    private static func key(_ url: URL, _ source: Double) -> String { "\(url.path)|\(Int((source * 100).rounded()))" }
+
+    /// The frame at `source`, or nil while it is being made. Asking starts it.
+    func image(for url: URL, at source: Double) -> CGImage? {
+        let key = Self.key(url, source)
+        if let image = images[key] { return image }
+        if !pending.contains(key) {
+            pending.insert(key)
+            queued[url, default: []].insert(source)
+            scheduleFlush()
+        }
+        return nil
+    }
+
+    /// Asked for during a view update, so the work starts just after it.
+    private func scheduleFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.flush() }
+        }
+    }
+
+    private func flush() {
+        flushScheduled = false
+        let batches = queued
+        queued = [:]
+        for (url, sources) in batches {
+            let generator = generators[url] ?? makeGenerator(url)
+            let times = sources.sorted().map { NSValue(time: CMTime(seconds: $0, preferredTimescale: 600)) }
+            generator.generateCGImagesAsynchronously(forTimes: times) { [weak self] requested, image, _, _, _ in
+                let source = requested.seconds
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self?.store(image, url: url, source: source) }
+                }
+            }
+        }
+    }
+
+    private func makeGenerator(_ url: URL) -> AVAssetImageGenerator {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 320, height: 320)
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+        generators[url] = generator
+        return generator
+    }
+
+    private func store(_ image: CGImage?, url: URL, source: Double) {
+        let key = Self.key(url, source)
+        pending.remove(key)
+        guard let image else { return }
+        images[key] = image
+        order.append(key)
+        if order.count > Self.limit {
+            let dropped = order.prefix(order.count - Self.limit)
+            dropped.forEach { images[$0] = nil }
+            order.removeFirst(dropped.count)
+        }
+        // Many frames land together: one redraw for the lot.
+        guard !publishScheduled else { return }
+        publishScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.publishScheduled = false
+                self?.objectWillChange.send()
+            }
+        }
     }
 }
 

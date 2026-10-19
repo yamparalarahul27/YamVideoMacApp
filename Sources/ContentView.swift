@@ -434,7 +434,8 @@ struct CropEditorPane: View {
             Divider()
 
             if model.showPlayback, model.showsShort, let short = item.short(model.playback.shortID) {
-                PlaybackCanvas(playback: model.playback, graphics: model.shortOverlay(item, info: info, short: short),
+                PlaybackCanvas(playback: model.playback,
+                               graphics: model.timelineTracks.hidden.contains(.graphics) ? nil : model.shortOverlay(item, info: info, short: short),
                                editsGraphics: !model.isConverting, short: short.id, furniture: model.shortFurniture,
                                onGraphicBounds: { model.shortGraphicBounds = $0 })
                     .frame(maxHeight: .infinity)
@@ -495,6 +496,7 @@ struct CropEditorPane: View {
     /// Graphics are drawn at the 1920×1080 design size on a 16:9 picture. Other shapes wait
     /// for the vertical layouts of a later phase.
     private var graphicsOverlay: GraphicsOverlayInput? {
+        guard !model.timelineTracks.hidden.contains(.graphics) else { return nil }
         guard let track = item.placedGraphics, !track.items.isEmpty else { return nil }
         let frame = crop.size
         guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
