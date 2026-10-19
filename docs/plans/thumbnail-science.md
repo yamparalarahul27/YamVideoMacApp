@@ -25,11 +25,16 @@ Each new tool is also an agent command, in the catalog and in the Agents Manual.
 
 What the owner sees:
 - The preview area gets two views: **Design** (the large live preview, as now) and
-  **On a phone**. On a phone shows the thumbnail at the size of an iPhone's YouTube home
+  **Phone**. Phone shows the thumbnail at the size of an iPhone's YouTube home
   feed (390 × 219 pt, with the title and channel under it) and of a search list row
   (168 × 94 pt, with the title beside it).
-- Under the preview, a **Phone check** list says what does not read in 0.5 s, for each
-  size. The check runs again about 1 s after each change.
+- Under the preview, a **Phone check** list says what does not read in 0.5 s. Each
+  finding is one short line (for example "Title too small: 8.9 pt in the search list");
+  the full advice shows on hover, and under the line after a click. The counts at the top
+  are icons with numbers. The check runs again about 1 s after each change.
+- The maker's labels are short (owner, 19 Oct 2026: no long button text): Save, Phone,
+  Highlight, Cut-out, Outline, Place: Clear, Title side: Auto, Picture. Long help text
+  moved into tooltips.
 - The old "At YouTube's search size" preview (a desktop size) goes. The phone sizes
   replace it. The sheet is 1200 pt wide (was 1060), so the search list row has the
   phone's real width.

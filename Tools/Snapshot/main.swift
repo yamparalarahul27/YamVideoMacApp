@@ -45,7 +45,7 @@ func hostingViews(in view: NSView) -> [NSView] {
 }
 
 /// The thumbnail maker: the first render cuts the speaker out, the second shows it with
-/// the phone check, then the same On a phone. Its live preview is a web view, which this
+/// the phone check, then the same in the Phone view. Its live preview is a web view, which this
 /// tool cannot capture in a sheet of its own; the phone views are pictures, so they show.
 /// YAMVIDEO_SNAPSHOT_ONLY=thumbnail renders only these.
 @MainActor

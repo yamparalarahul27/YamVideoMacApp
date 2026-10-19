@@ -13,14 +13,14 @@ struct ThumbnailDesign: Codable, Equatable {
     enum Side: String, Codable, CaseIterable, Identifiable {
         case auto, left, right
         var id: String { rawValue }
-        var label: String { self == .auto ? "Away from the speaker" : rawValue.capitalized }
+        var label: String { self == .auto ? "Auto" : rawValue.capitalized }
     }
     /// Where the cut-out speaker goes: where the frame has them, or moved (and made smaller
     /// when it must) to the far side, clear of the title, the tag and the picture.
     enum Place: String, Codable, CaseIterable, Identifiable {
         case frame, clear
         var id: String { rawValue }
-        var label: String { self == .frame ? "As recorded" : "Clear of the title" }
+        var label: String { self == .frame ? "As recorded" : "Clear" }
     }
     enum Background: String, Codable, CaseIterable, Identifiable {
         /// frost: the frame as recorded, moved with the speaker, under a white blurred shade

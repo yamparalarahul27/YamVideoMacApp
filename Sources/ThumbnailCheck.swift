@@ -80,6 +80,9 @@ struct PhoneCheck: Equatable {
         var level: Level
         /// Where it applies.
         var sizes: [PhoneSize]
+        /// One short line, like "Title too small: 8.9 pt in the search list".
+        var summary: String
+        /// The summary in full, with the limit and what to do.
         var message: String
         var id: String { "\(kind.rawValue)-\(level.rawValue)-\(sizes.map(\.rawValue).joined(separator: "+"))-\(message)" }
     }
@@ -119,27 +122,29 @@ struct PhoneCheck: Equatable {
             findings += bySize(.textSize) { size in
                 let points = size.points(tag.size)
                 guard points < letterLimits.reads else { return nil }
-                return (.weak, "The tag \(quoted(tag.text)) is \(format(points)) pt high in the \(size.label.lowercased()): too small to "
+                return (.weak, "Tag too small: \(format(points)) pt in the \(size.label.lowercased())",
+                        "The tag \(quoted(tag.text)) is \(format(points)) pt high in the \(size.label.lowercased()): too small to "
                         + "read at a glance. The tag has a fixed size, so keep the important words in the title.")
             }
         }
-        var parts: [(name: String, size: Double, advice: String)] = []
+        var parts: [(short: String, name: String, size: Double, advice: String)] = []
         if runs.contains(where: { $0.kind == .title || $0.kind == .accent }) {
-            parts.append(("The title", layout.titleSize, "Use fewer or shorter words, or a smaller picture: the title then grows to fill its space."))
+            parts.append(("Title", "The title", layout.titleSize, "Use fewer or shorter words, or a smaller picture: the title then grows to fill its space."))
         }
         if let line = runs.filter({ $0.kind == .picture }).min(by: { $0.size < $1.size }) {
-            parts.append(("\(quoted(line.text)) in the picture", line.size, "Make the picture larger, or put fewer and bigger words in it."))
+            parts.append(("Picture words", "\(quoted(line.text)) in the picture", line.size, "Make the picture larger, or put fewer and bigger words in it."))
         }
         for part in parts {
             findings += bySize(.textSize) { size in
                 let points = size.points(part.size)
+                let place = "\(format(points)) pt in the \(size.label.lowercased())"
                 if points < letterLimits.smallest {
-                    return (.fails, "\(part.name) is \(format(points)) pt high in the \(size.label.lowercased()). Letters smaller than "
+                    return (.fails, "\(part.short) too small: " + place, "\(part.name) is \(format(points)) pt high in the \(size.label.lowercased()). Letters smaller than "
                             + "\(format(letterLimits.smallest)) pt (\(Int(size.pixels(letterLimits.smallest).rounded(.up))) px of the design) "
                             + "do not read in 0.5 s. " + part.advice)
                 }
                 if points < letterLimits.reads {
-                    return (.weak, "\(part.name) is \(format(points)) pt high in the \(size.label.lowercased()). It reads, but not at a "
+                    return (.weak, "\(part.short) small: " + place, "\(part.name) is \(format(points)) pt high in the \(size.label.lowercased()). It reads, but not at a "
                             + "glance: \(format(letterLimits.reads)) pt (\(Int(size.pixels(letterLimits.reads).rounded(.up))) px of the design) "
                             + "or more reads in 0.5 s.")
                 }
@@ -149,10 +154,10 @@ struct PhoneCheck: Equatable {
 
         let count = runs.reduce(0) { $0 + wordCount(in: $1.text) }
         if count > wordLimits.most {
-            findings.append(Finding(kind: .words, level: .fails, sizes: PhoneSize.allCases,
+            findings.append(Finding(kind: .words, level: .fails, sizes: PhoneSize.allCases, summary: "Too many words: \(count)",
                                     message: "\(count) words. A viewer reads about \(wordLimits.reads) words in 0.5 s. Remove words, or move them to the title."))
         } else if count > wordLimits.reads {
-            findings.append(Finding(kind: .words, level: .weak, sizes: PhoneSize.allCases,
+            findings.append(Finding(kind: .words, level: .weak, sizes: PhoneSize.allCases, summary: "Many words: \(count)",
                                     message: "\(count) words. Up to \(wordLimits.reads) words read in 0.5 s."))
         }
 
@@ -174,12 +179,13 @@ struct PhoneCheck: Equatable {
             let advice = run.background != nil ? " Use another accent colour."
                 : run.kind == .accent ? " Turn on Highlight, or use a darker accent."
                 : " Use a plainer background behind the words."
+            let summary = "Low contrast: " + (kind == .tag ? "tag" : quoted(run.text, limit: 20)) + " \(format(ratio)):1"
             if ratio < contrastLimits.lowest {
-                findings.append(Finding(kind: .contrast, level: .fails, sizes: PhoneSize.allCases,
+                findings.append(Finding(kind: .contrast, level: .fails, sizes: PhoneSize.allCases, summary: summary,
                                         message: "Contrast of \(name): \(format(ratio)):1. Less than \(format(contrastLimits.lowest)):1 "
                                         + "does not read in 0.5 s." + advice))
             } else {
-                findings.append(Finding(kind: .contrast, level: .weak, sizes: PhoneSize.allCases,
+                findings.append(Finding(kind: .contrast, level: .weak, sizes: PhoneSize.allCases, summary: summary,
                                         message: "Contrast of \(name): \(format(ratio)):1. \(format(contrastLimits.reads)):1 or more reads at a glance."))
             }
         }
@@ -187,21 +193,22 @@ struct PhoneCheck: Equatable {
         if let face {
             findings += bySize(.face) { size in
                 let points = face.height * size.height / 1080
+                let place = "\(format(points)) pt in the \(size.label.lowercased())"
                 if points < faceLimits.smallest {
-                    return (.fails, "The face is \(format(points)) pt high in the \(size.label.lowercased()). A face smaller than "
+                    return (.fails, "Face too small: " + place, "The face is \(format(points)) pt high in the \(size.label.lowercased()). A face smaller than "
                             + "\(format(faceLimits.smallest)) pt does not read in 0.5 s. Make the speaker larger, or pick a closer frame.")
                 }
                 if points < faceLimits.reads {
-                    return (.weak, "The face is \(format(points)) pt high in the \(size.label.lowercased()). "
+                    return (.weak, "Face small: " + place, "The face is \(format(points)) pt high in the \(size.label.lowercased()). "
                             + "\(format(faceLimits.reads)) pt or more reads at a glance.")
                 }
                 return nil
             }
         } else if faceHidden {
-            findings.append(Finding(kind: .face, level: .weak, sizes: PhoneSize.allCases,
+            findings.append(Finding(kind: .face, level: .weak, sizes: PhoneSize.allCases, summary: "Face does not show",
                                     message: "The face does not show. A face draws the eye first: cut the speaker out, or use a background that shows the frame."))
         } else {
-            findings.append(Finding(kind: .face, level: .weak, sizes: PhoneSize.allCases,
+            findings.append(Finding(kind: .face, level: .weak, sizes: PhoneSize.allCases, summary: "No face found",
                                     message: "No face found. A face draws the eye first: pick a frame with a clear face."))
         }
 
@@ -212,13 +219,13 @@ struct PhoneCheck: Equatable {
 
     /// One finding for each size where `judge` finds a problem, or one for both sizes when
     /// the level is the same (with the search list's message: it is the smaller size).
-    private static func bySize(_ kind: Finding.Kind, _ judge: (PhoneSize) -> (Finding.Level, String)?) -> [Finding] {
+    private static func bySize(_ kind: Finding.Kind, _ judge: (PhoneSize) -> (Finding.Level, String, String)?) -> [Finding] {
         let home = judge(.homeFeed), search = judge(.searchList)
         if let home, let search, home.0 == search.0 {
-            return [Finding(kind: kind, level: search.0, sizes: PhoneSize.allCases, message: search.1)]
+            return [Finding(kind: kind, level: search.0, sizes: PhoneSize.allCases, summary: search.1, message: search.2)]
         }
-        return [home.map { Finding(kind: kind, level: $0.0, sizes: [.homeFeed], message: $0.1) },
-                search.map { Finding(kind: kind, level: $0.0, sizes: [.searchList], message: $0.1) }].compactMap { $0 }
+        return [home.map { Finding(kind: kind, level: $0.0, sizes: [.homeFeed], summary: $0.1, message: $0.2) },
+                search.map { Finding(kind: kind, level: $0.0, sizes: [.searchList], summary: $0.1, message: $0.2) }].compactMap { $0 }
     }
 
     /// Words with a letter or a digit in them; the asterisks of accent words do not count.
@@ -226,9 +233,9 @@ struct PhoneCheck: Equatable {
         text.split(whereSeparator: { $0.isWhitespace || $0 == "*" }).filter { $0.contains(where: { $0.isLetter || $0.isNumber }) }.count
     }
 
-    private static func quoted(_ text: String) -> String {
+    static func quoted(_ text: String, limit: Int = 28) -> String {
         let plain = text.replacingOccurrences(of: "\u{00A0}", with: " ").split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return "“" + (plain.count > 28 ? String(plain.prefix(27)) + "…" : plain) + "”"
+        return "“" + (plain.count > limit ? String(plain.prefix(limit - 1)) + "…" : plain) + "”"
     }
 
     /// Whole numbers from 10, and below 10 one decimal unless it is whole.

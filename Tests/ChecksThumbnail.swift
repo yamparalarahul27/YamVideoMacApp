@@ -225,6 +225,12 @@ import Foundation
               && weakFace.findings.map(\.level) == [.weak] && noFace.findings.map(\.kind) == [.face] && noFace.findings[0].level == .weak,
           "a face of 150 px does not read in the search list, 200 px is weak, and no face is weak",
           "\(smallFace.findings) \(weakFace.findings) \(noFace.findings)")
+    let allFindings = [smallTitle, weakTitle, tinyTitle, taggedCheck, wordy, someWords, yellowOnWhite, lowTitle, banded, smallFace, weakFace, noFace]
+        .flatMap(\.findings)
+    check(allFindings.allSatisfy { $0.summary.count <= 48 && !$0.summary.isEmpty && $0.message.count > $0.summary.count }
+              && smallTitle.findings[0].summary == "Title too small: 7 pt in the search list"
+              && yellowOnWhite.findings[0].summary == "Low contrast: “viewer” 1.6:1" && taggedCheck.findings[0].summary == "Tag too small: 4 pt in the search list",
+          "each finding has one short line for the maker, and the full advice", "\(allFindings.map(\.summary))")
     let mixed = PhoneCheck.make(layout: phoneLayout(size: 110), contrasts: [12, 1.6], face: nil)
     check(mixed.findings.map(\.level) == [.fails, .weak, .weak] && mixed.findings.map(\.kind) == [.contrast, .textSize, .face],
           "the findings come worst first", "\(mixed.findings.map { "\($0.level) \($0.kind)" })")
