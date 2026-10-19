@@ -73,12 +73,13 @@ struct ThumbnailLayout: Codable, Equatable {
 /// The phone check of one design: what does not read on a phone in 0.5 s.
 struct PhoneCheck: Equatable {
     struct Finding: Codable, Equatable, Identifiable {
-        enum Kind: String, Codable, CaseIterable { case textSize, words, contrast, face }
+        /// title: the thumbnail repeats the video's title (InformationGap).
+        enum Kind: String, Codable, CaseIterable { case textSize, words, contrast, face, title }
         /// fails: does not read in 0.5 s. weak: reads, but not at a glance.
         enum Level: String, Codable { case fails, weak }
         var kind: Kind
         var level: Level
-        /// Where it applies.
+        /// Where it applies; empty for the title, which is the same at every size.
         var sizes: [PhoneSize]
         /// One short line, like "Title too small: 8.9 pt in the search list".
         var summary: String
@@ -94,6 +95,8 @@ struct PhoneCheck: Equatable {
     var titleSize: Double
     /// The face in the thumbnail, in stage pixels; nil when Apple Vision finds none.
     var face: CGRect?
+    /// The lines Apple Vision read in the picture beside the title.
+    var pictureWords: [String] = []
 
     var reads: Bool { findings.isEmpty }
     var fails: Int { findings.filter { $0.level == .fails }.count }
@@ -214,7 +217,18 @@ struct PhoneCheck: Equatable {
 
         let order = Finding.Kind.allCases
         findings.sort { ($0.level == .fails ? 0 : 1, order.firstIndex(of: $0.kind)!) < ($1.level == .fails ? 0 : 1, order.firstIndex(of: $1.kind)!) }
-        return PhoneCheck(findings: findings, words: count, titleSize: layout.titleSize, face: face)
+        return PhoneCheck(findings: findings, words: count, titleSize: layout.titleSize, face: face,
+                          pictureWords: runs.filter { $0.kind == .picture }.map(\.text))
+    }
+
+    /// The check with the information gap's finding in the list, worst first.
+    func adding(_ gap: InformationGap) -> PhoneCheck {
+        guard let finding = gap.finding else { return self }
+        var check = self
+        check.findings.append(finding)
+        let order = Finding.Kind.allCases
+        check.findings.sort { ($0.level == .fails ? 0 : 1, order.firstIndex(of: $0.kind)!) < ($1.level == .fails ? 0 : 1, order.firstIndex(of: $1.kind)!) }
+        return check
     }
 
     /// One finding for each size where `judge` finds a problem, or one for both sizes when
@@ -230,12 +244,24 @@ struct PhoneCheck: Equatable {
 
     /// Words with a letter or a digit in them; the asterisks of accent words do not count.
     static func wordCount(in text: String) -> Int {
-        text.split(whereSeparator: { $0.isWhitespace || $0 == "*" }).filter { $0.contains(where: { $0.isLetter || $0.isNumber }) }.count
+        text.split(whereSeparator: { $0.isWhitespace || $0 == "*" }).filter { isWord(String($0)) }.count
     }
 
+    /// A word has a letter or a digit. One letter alone is a word only as "a" or "I":
+    /// Apple Vision reads a logo as a single letter at times.
+    static func isWord(_ piece: String) -> Bool {
+        let core = piece.filter { $0.isLetter || $0.isNumber }
+        guard !core.isEmpty else { return false }
+        return core.count > 1 || core.allSatisfy(\.isNumber) || ["a", "i"].contains(core.lowercased())
+    }
+
+    /// `text` in quotation marks, cut after a whole word when it is longer than `limit`.
     static func quoted(_ text: String, limit: Int = 28) -> String {
         let plain = text.replacingOccurrences(of: "\u{00A0}", with: " ").split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return "“" + (plain.count > limit ? String(plain.prefix(limit - 1)) + "…" : plain) + "”"
+        guard plain.count > limit else { return "“" + plain + "”" }
+        var cut = String(plain.prefix(limit - 1))
+        if let space = cut.lastIndex(of: " ") { cut = String(cut[..<space]) }
+        return "“" + cut + "…”"
     }
 
     /// Whole numbers from 10, and below 10 one decimal unless it is whole.

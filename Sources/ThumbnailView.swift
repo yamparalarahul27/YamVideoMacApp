@@ -2,15 +2,18 @@ import AppKit
 import SwiftUI
 import WebKit
 
-/// The thumbnail maker: choose a frame, write the title and tag, and see the thumbnail as
-/// it will be, large or at a phone's sizes, with the phone check under it: what does not
-/// read in 0.5 s. Saving makes the 1280×720 PNG next to the recording and uses it as the
-/// thumbnail, in one undo step.
+/// The thumbnail maker: choose a frame, write the video's title and the thumbnail's words,
+/// and see the thumbnail as it will be, large or at a phone's sizes, with the check under
+/// it: what does not read in 0.5 s, and whether the thumbnail only repeats the title.
+/// Saving makes the 1280×720 PNG next to the recording, uses it as the thumbnail and keeps
+/// the title, in one undo step.
 struct ThumbnailMakerSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let item: VideoItem
     @State private var design: ThumbnailDesign
+    /// The video's title on YouTube, written here beside the thumbnail's words.
+    @State private var videoTitle: String
     @State private var sources: ThumbnailMaker.Sources?
     @State private var loadedTime: Double?
     @State private var working: String?
@@ -36,10 +39,22 @@ struct ThumbnailMakerSheet: View {
         var start = publish.design ?? ThumbnailDesign(time: playhead, title: publish.title)
         start.time = min(max(0, start.time), item.editedDuration)
         _design = State(initialValue: start)
+        _videoTitle = State(initialValue: publish.title)
     }
 
     private var accent: String { item.graphics?.style.accent ?? GraphicsStyle().accent }
     private var publish: PublishInfo { item.publish ?? PublishInfo() }
+
+    /// The thumbnail's words against the video's title, as they are now: no drawing needed.
+    private var gap: InformationGap {
+        let lines = design.image != nil && pictureWords?.url == design.image ? pictureWords?.words.map(\.text) ?? [] : []
+        return InformationGap.make(design, pictureWords: lines, title: videoTitle)
+    }
+
+    /// The findings to show: the phone check's (a moment old) and the title's (now).
+    private var findings: [PhoneCheck.Finding]? {
+        check.map { $0.adding(gap).findings }
+    }
 
     /// What the phone check depends on: the design and the frame it was drawn from.
     private struct CheckInput: Equatable {
@@ -86,7 +101,7 @@ struct ThumbnailMakerSheet: View {
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .disabled(working != nil || sources == nil || design.problem != nil)
-                    .help("Makes the 1280×720 PNG next to the recording and uses it as the video's thumbnail")
+                    .help("Makes the 1280×720 PNG next to the recording, uses it as the video's thumbnail and keeps the video title")
             }
             .padding(14)
         }
@@ -100,7 +115,7 @@ struct ThumbnailMakerSheet: View {
     /// The checked picture at the phone's sizes, with the title and channel as YouTube's
     /// app shows them beside it.
     private var phoneViews: some View {
-        let title = publish.title.isEmpty ? "Your title" : publish.title
+        let title = videoTitle.isEmpty ? "Your title" : videoTitle
         let channel = publish.channel.isEmpty ? "Your channel" : publish.channel
         return HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
@@ -158,14 +173,14 @@ struct ThumbnailMakerSheet: View {
                   + (size == .searchList ? " Up next, the history and playlists use this size too." : ""))
     }
 
-    /// What does not read on a phone in 0.5 s, worst first.
+    /// What does not read on a phone in 0.5 s, and a title the thumbnail repeats, worst first.
     private var checkPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("Phone check").font(.headline)
+                Text("Thumbnail check").font(.headline)
                 if checking { ProgressView().controlSize(.small) }
                 Spacer()
-                if let check { counts(check.findings) }
+                if let findings { counts(findings) }
             }
             if sources != nil, sources?.cutout == nil, design.cutout {
                 Label("No speaker found in this frame.", systemImage: "exclamationmark.triangle.fill")
@@ -177,13 +192,14 @@ struct ThumbnailMakerSheet: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 7) {
-                    if let check {
-                        if check.reads {
-                            Text("Reads at a glance on a phone.").font(.callout).foregroundStyle(.secondary)
+                    if let findings {
+                        if findings.isEmpty {
+                            Text("Reads at a glance on a phone, and adds to the video title.").font(.callout).foregroundStyle(.secondary)
                         }
-                        ForEach(check.findings) { finding in findingRow(finding) }
+                        ForEach(findings) { finding in findingRow(finding) }
                     } else if design.problem == nil {
                         Text("Checking…").font(.callout).foregroundStyle(.secondary)
+                        if let finding = gap.finding { findingRow(finding) }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -308,11 +324,23 @@ struct ThumbnailMakerSheet: View {
                     }
                 }
             }
-            InspectorSection("Title") {
+            InspectorSection("Video title") {
+                TextField("The title on YouTube", text: $videoTitle, axis: .vertical)
+                    .lineLimit(1...3).textFieldStyle(.roundedBorder)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Saved with the thumbnail.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Text("\(videoTitle.count)/\(PublishInfo.titleLimit)").font(.caption2.monospacedDigit())
+                        .foregroundStyle(videoTitle.count > PublishInfo.titleLimit ? Color.red : Color.secondary)
+                }
+            }
+            InspectorSection("Thumbnail title") {
                 TextField("Big words, three lines at most", text: $design.title, axis: .vertical)
                     .lineLimit(1...3).textFieldStyle(.roundedBorder)
                 Text("Put *asterisks* round words to colour them.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                gapLine
                 Toggle("Highlight", isOn: $design.highlight)
                     .help("The coloured words get a band of the accent colour, in dark text")
                 TextField("Tag, like NEW or 3 RULES", text: $design.tag).textFieldStyle(.roundedBorder)
@@ -378,6 +406,27 @@ struct ThumbnailMakerSheet: View {
         }
     }
 
+    /// The thumbnail's words against the video's title, as you type, and how to open a
+    /// question the title does not answer.
+    private var gapLine: some View {
+        let gap = self.gap
+        let titled = !videoTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return Group {
+            if !titled {
+                Text("No video title to compare.").foregroundStyle(.secondary)
+            } else if let finding = gap.finding {
+                Label(finding.summary, systemImage: finding.level == .fails ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(finding.level == .fails ? Color.red : Color.orange)
+                    .help(finding.message)
+            } else if !gap.added.isEmpty {
+                Label("Adds: " + gap.added.joined(separator: ", "), systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .help("These words are not in the video title. " + InformationGap.advice)
+            }
+        }
+        .font(.caption).lineLimit(1).truncationMode(.tail)
+    }
+
     private func suggestionButton(_ suggestion: FrameSuggestion) -> some View {
         Button { design.time = suggestion.time } label: {
             VStack(spacing: 2) {
@@ -438,13 +487,14 @@ struct ThumbnailMakerSheet: View {
     private func save() {
         working = "Making the thumbnail…"
         let clip = ProjectClip(item)
-        let chosen = design
+        let chosen = design, title = videoTitle
         Task {
             do {
                 let url = try await model.saveThumbnail(clip, design: chosen)
                 model.setPublish(label: "Make Thumbnail") { info in
                     info.design = chosen
                     info.thumbnail = url
+                    info.title = title
                 }
                 model.statusMessage = "Saved the thumbnail as \(url.lastPathComponent)."
                 dismiss()

@@ -41,8 +41,11 @@ struct AgentRequest: Codable {
     var design: [String: JSONValue]?
     /// thumbnail: also save the PNG next to the recording.
     var save: Bool?
-    /// thumbnail: also run the phone check (what does not read on a phone in 0.5 s).
+    /// thumbnail: also run the phone check (what does not read on a phone in 0.5 s) and
+    /// compare the thumbnail's words with the video's title.
     var check: Bool?
+    /// thumbnail with check: a video title to compare with, in place of the stored one; not stored.
+    var videoTitle: String?
     var scope: String?
     var kind: String?
     var job: UUID?
@@ -2223,7 +2226,9 @@ extension AppModel {
                 }
                 let phoneFile = directory.appendingPathComponent(stem + "-phone.png")
                 try phonePNG.write(to: phoneFile, options: .atomic)
-                check = AgentPhoneCheck(checked.check, phone: phoneFile.path)
+                let title = request.videoTitle ?? publish.title
+                let gap = InformationGap.make(design, pictureWords: checked.check.pictureWords, title: title)
+                check = AgentPhoneCheck(checked.check.adding(gap), gap: AgentGap(title: title, gap), phone: phoneFile.path)
             }
             var saved: String?
             if request.save == true { saved = try await saveThumbnail(clip, design: design).path }
@@ -2252,23 +2257,45 @@ struct AgentThumbnail: Encodable {
     var check: AgentPhoneCheck?
 }
 
-/// The phone check of a thumbnail, for an agent: each finding (kind, level, the phone
-/// sizes, a message), the word count, the title's letter size and the face's box in
-/// design pixels of a 1920×1080 frame, and `phone`, a PNG of the design at both sizes.
+/// The check of a thumbnail, for an agent: each finding (kind, level, the phone sizes, a
+/// message), the word count, the title's letter size and the face's box in design pixels
+/// of a 1920×1080 frame, `gap` (the thumbnail's words against the video's title), and
+/// `phone`, a PNG of the design at both sizes.
 struct AgentPhoneCheck: Encodable {
     var reads: Bool
     var findings: [PhoneCheck.Finding]
     var words: Int
     var titleSize: Double
     var face: WireRect?
+    var gap: AgentGap
     var phone: String
 
-    init(_ check: PhoneCheck, phone: String) {
+    init(_ check: PhoneCheck, gap: AgentGap, phone: String) {
         reads = check.reads
         findings = check.findings
         words = check.words
         titleSize = (check.titleSize * 10).rounded() / 10
         face = check.face.map { WireRect($0.integral) }
+        self.gap = gap
         self.phone = phone
+    }
+}
+
+/// The information gap, for an agent: the video title compared, the thumbnail's words it
+/// repeats, the runs of words both have, the words the thumbnail adds, and the share of
+/// the thumbnail's important words that the title has (0 to 1).
+struct AgentGap: Encodable {
+    var title: String
+    var repeated: [String]
+    var phrases: [String]
+    var added: [String]
+    var overlap: Double
+
+    init(title: String, _ gap: InformationGap) {
+        self.title = title
+        repeated = gap.repeated
+        phrases = gap.phrases
+        added = gap.added
+        overlap = (gap.overlap * 100).rounded() / 100
     }
 }

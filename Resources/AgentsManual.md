@@ -187,8 +187,13 @@ edit, and each edit becomes one undo step with your name on it.
    not read in 0.5 s at the size of the home feed and of the search list (letters too
    small, too many words, low contrast, a face too small), and `check.phone` is a PNG of
    both sizes. Fix each finding with level `fails` before you show the owner.
-4. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
-   `setPublishInfo` with `{thumbnail: savedPath, design: …}`.
+4. Make the thumbnail and the title work together. The title says what the video is; the
+   thumbnail adds what the title does not say: the result, a number, a surprise or a
+   question. A finding of kind `title` says the thumbnail repeats the title;
+   `check.gap` gives the repeated words and phrases and the words the thumbnail adds. To
+   try a new video title without storing it, add `videoTitle` (`--video-title`).
+5. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
+   `setPublishInfo` with `{thumbnail: savedPath, design: …}` (and `title`, if it changed).
 
 ### 4.8 Shorts
 

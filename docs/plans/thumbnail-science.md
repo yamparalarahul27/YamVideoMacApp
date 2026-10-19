@@ -1,8 +1,10 @@
 # Thumbnails: the science of a click
 
 **Status (2026-10-19):** Part 1 (phone check) is built and open as
-[PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54). Parts 2 to 4
-are planned. The owner has not yet confirmed the order; part 1 came first by default.
+[PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54). Part 2
+(information gap) is built on top of it, in
+[PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55). Parts 3 and 4 are
+planned. The owner asked for part 2 after part 1.
 **Source:** the backlog item of 2026-10-18, from "Science Behind Thumbnails That Actually
 Work." by HimanshuG (https://youtu.be/9_7q6vUaRsM). Its rules: a viewer decides in 0.5 s,
 a thumbnail opens a question the title does not answer, the eye goes to the face first and
@@ -67,7 +69,8 @@ easy to change after the owner tries them on real thumbnails.
 
 First result on the AgentUX Part 1 thumbnail: the title is 8.9 pt in the search list
 (fails, just under 9 pt), the badge names are 3.7 pt (fails), 15 words (fails), the tag
-is weak, and the face reads at both sizes. The check took about 1.3 s.
+is weak, and the face reads at both sizes. The check took about 1.3 s. (Part 2 makes it
+14 words: Apple Vision read a logo as "g", and one letter alone is no longer a word.)
 
 For agents: the `thumbnail` request gets `check: true`. The result then has `check`: the
 findings (kind, level, the phone sizes, a message), the word count, the title's letter size,
@@ -77,15 +80,34 @@ Saved data: none. The check is calculated each time.
 
 ## Part 2: information gap
 
-- In the maker, show the video's title (from Publish) beside the thumbnail words, as the
-  phone view already shows them.
-- Warn when the thumbnail words repeat the title: the same important words (not "the",
-  "a", "for" and the like), or the same phrase.
-- Give help to write an open question: short prompts beside the title field, for example
-  "The title says what. Can the thumbnail say the result, the surprise or the number?"
-- Agent command: the `check` result gets the overlap (the repeated words) and a warning.
+What the owner sees:
+- A **Video title** field in the maker, above the **Thumbnail title** (the old "Title"
+  section). The phone view shows the video title as you type. **Save** keeps it with the
+  design, in the same undo step.
+- Under the thumbnail title, one short line that changes as you type: "Repeats the video
+  title: “…”" (orange), "Only repeats the video title" (red), or "Adds: …" (green). The
+  advice (let these words add what the title does not say: the result, a number, a
+  surprise or a question) shows on hover.
+- The check list (now **Thumbnail check**) has the same finding.
+
+The rules (`InformationGap`, `Sources/ThumbnailGap.swift`):
+- Words compare without case, plurals, possessives and asterisks. Small words ("the",
+  "for", "how", "my" and the like) do not count as repeats.
+- The thumbnail's words are the tag, the title and the lines read in the picture.
+- A shared phrase is a run of words in the same order, with two important words or four
+  words in all. A run stops at punctuation in the title (a colon, a bracket) and at the
+  end of the tag, the title or the picture.
+- Fails: the thumbnail has two important words or more, and all are in the title. Weak: a
+  shared phrase, or more than half the important words in the title.
+
+For agents: the `check` result gets the finding (kind `title`, no sizes) and `gap`: the
+title compared, the repeated words, the phrases, the added words and the overlap.
+`videoTitle` (`--video-title`) tries another title without storing it.
 
 Saved data: none. The title is already in the publish details.
+
+First result on the AgentUX Part 1 thumbnail: weak. It repeats "System design for
+designers" and "how I built my own", and adds ENGINEERING, Supabase, Claude and Figma.
 
 ## Part 3: eye path
 
