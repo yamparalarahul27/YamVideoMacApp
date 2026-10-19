@@ -3,7 +3,8 @@
 **Status (2026-10-19):** Part 1 (phone check,
 [PR #54](https://github.com/yamparalarahul27/YamVideoMacApp/pull/54)) and part 2
 (information gap, [PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55))
-are merged. Part 3 (eye path) is built, in its own PR. Part 4 is planned. The owner asked
+are merged. Part 3 (eye path) is built, in
+[PR #56](https://github.com/yamparalarahul27/YamVideoMacApp/pull/56). Part 4 is planned. The owner asked
 for each part after the one before it.
 **Source:** the backlog item of 2026-10-18, from "Science Behind Thumbnails That Actually
 Work." by HimanshuG (https://youtu.be/9_7q6vUaRsM). Its rules: a viewer decides in 0.5 s,
