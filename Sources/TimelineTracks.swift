@@ -7,7 +7,7 @@ import Foundation
 /// name and, where it means something, an eye (hide in the preview) and a lock (no edits
 /// from the timeline).
 enum TimelineTrack: String, CaseIterable, Identifiable {
-    case shorts, graphics, effects, zoom, screenLayout, screenZoom, video, audio
+    case shorts, graphics, effects, zoom, screenLayout, screenZoom, video, audio, captions
 
     var id: String { rawValue }
 
@@ -21,6 +21,7 @@ enum TimelineTrack: String, CaseIterable, Identifiable {
         case .screenZoom: return "Screen zoom"
         case .video: return "Video"
         case .audio: return "Audio"
+        case .captions: return "Captions"
         }
     }
 
@@ -34,6 +35,7 @@ enum TimelineTrack: String, CaseIterable, Identifiable {
         case .screenZoom: return "macwindow"
         case .video: return "film"
         case .audio: return "waveform"
+        case .captions: return "captions.bubble"
         }
     }
 
@@ -56,6 +58,7 @@ enum TimelineTrack: String, CaseIterable, Identifiable {
         case .effects: return item.blurEffects.isEmpty && item.blurRegions.isEmpty
         case .zoom: return item.zoomShots.isEmpty
         case .screenZoom: return item.screen?.zooms.isEmpty ?? true
+        case .captions: return item.subtitles == nil && (item.transcript?.words.isEmpty ?? true)
         case .screenLayout, .video, .audio: return false
         }
     }
@@ -127,6 +130,7 @@ extension AppModel {
         case .short: return .shorts
         case .layout: return .screenLayout
         case .screenZoom: return .screenZoom
+        case .caption: return .captions
         case .marker, .recording: return nil
         }
     }
@@ -150,6 +154,7 @@ extension AppModel {
         case .short: removeSelectedShort()
         case .layout: removeSelectedLayout()
         case .screenZoom: removeSelectedScreenZoom()
+        case .caption: statusMessage = "Captions follow what is said. Cut the section to remove a caption, or change its words in the inspector."
         case .recording: statusMessage = "Select something on the timeline to delete it."
         }
     }

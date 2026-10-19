@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom
+    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom, caption
 }
 
 @MainActor
@@ -62,6 +62,13 @@ final class AppModel: ObservableObject {
     @Published var inspectorFocus: InspectorFocus = .recording
     /// The inspector tab picked last; nil until one is picked.
     @Published var inspectorTab: InspectorTab?
+    /// The caption selected on the Captions track, by its place in `captionCues()`.
+    @Published var selectedCaptionIndex: Int? {
+        didSet {
+            if selectedCaptionIndex != nil { if inspectorFocus != .caption { inspectorFocus = .caption } }
+            else if inspectorFocus == .caption { inspectorFocus = .recording }
+        }
+    }
 
     let playback = PlaybackController()
     @Published var showPlayback = false

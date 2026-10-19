@@ -1034,10 +1034,19 @@ footer ul { margin: 0; padding-left: 18px; }
       "id": "p3",
       "label": "P3 · Inspector",
       "date": "19 Oct 2026",
-      "ref": "PR #51, branch studio-inspector",
+      "ref": "PR #51, merged",
       "img": "img/step3-editor.jpg",
       "note": "Inspector tabs, a switch and a reset for each change, and the Changes list.",
       "alt": "YamVideo Studio after step 3: the inspector shows Changes on this video with a switch for each change, and tabs."
+    },
+    {
+      "id": "p4",
+      "label": "P4 · Media",
+      "date": "19 Oct 2026",
+      "ref": "PR #52, branch studio-media",
+      "img": "img/step4-editor.jpg",
+      "note": "The Media panel with tabs, the linked Audio row with pauses, and the Captions row.",
+      "alt": "YamVideo Studio after step 4: the Media panel with tabs on the left, a caption selected on the Captions row, and its words in the inspector."
     }
   ],
   "steps": [
@@ -1117,8 +1126,8 @@ footer ul { margin: 0; padding-left: 18px; }
     {
       "id": "P3",
       "title": "Inspector tabs, switches, resets and the Changes list",
-      "status": "review",
-      "date": "19 Oct 2026",
+      "status": "shipped",
+      "date": "19 Oct 2026, merged",
       "branch": "studio-inspector",
       "pr": "https://github.com/yamparalarahul27/YamVideoMacApp/pull/51",
       "done": [
@@ -1159,12 +1168,39 @@ footer ul { margin: 0; padding-left: 18px; }
     {
       "id": "P4",
       "title": "Media panel, Audio track and Captions track",
-      "status": "next",
-      "done": [],
+      "status": "review",
+      "date": "19 Oct 2026",
+      "branch": "studio-media",
+      "pr": "https://github.com/yamparalarahul27/YamVideoMacApp/pull/52",
+      "done": [
+        "The Media panel replaces the recordings list, with tabs as in Filmora: Media, Graphics, Logos and Effects.",
+        "Graphics adds a name plate, a title card, kinetic text, a section card or the end screen, or imports a graphics file. Logos adds a badge from the logo library. Effects adds a blur area, a full-frame blur, a zoom, a screen zoom or a marker.",
+        "Click + to add at the playhead, or drag an item onto the timeline to add it where you let go.",
+        "The Audio row is linked to the sections: a click selects the section with its picture, the selected section's sound is outlined, cuts show as lines, and yellow marks the pauses still in the edit.",
+        "The Captions row shows the captions as the export shows them. Click one to fix its words; the transcript keeps the fix for the SRT and burned-in captions. One undo step.",
+        "20 new checks (./test.sh media)."
+      ],
       "left": [
-        "Media, Graphics, Logos and Effects tabs with add and drag.",
-        "A tall Audio track linked to the sections.",
-        "Caption blocks you can click to edit."
+        "Captions from a file show as they are; edit the file, or use captions from the transcript.",
+        "A caption's time is not dragged on the row yet; it follows the words' times."
+      ],
+      "before": {
+        "img": "img/now-media.jpg",
+        "caption": "Before: a list of recordings, mostly empty space."
+      },
+      "after": {
+        "img": "img/step4-media.jpg",
+        "caption": "After P4: the Media panel's Graphics tab, with + and drag."
+      },
+      "more": [
+        {
+          "img": "img/step4-tracks.jpg",
+          "caption": "P4: the Audio row with pauses in yellow, and the Captions row under it."
+        },
+        {
+          "img": "img/step4-caption.jpg",
+          "caption": "P4: a caption selected, with its words to fix in the inspector."
+        }
       ]
     }
   ],
@@ -1215,6 +1251,14 @@ footer ul { margin: 0; padding-left: 18px; }
     [
       "19 Oct 2026",
       "Graphics get a switch but no reset, so no one deletes every graphic by mistake."
+    ],
+    [
+      "19 Oct 2026",
+      "Step 3 merged (PR #51). Step 4 starts: the Media panel, the Audio row and the Captions row."
+    ],
+    [
+      "19 Oct 2026",
+      "Caption fixes go into the transcript, so every export takes them. Captions from a file are shown, not edited."
     ]
   ]
 }

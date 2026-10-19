@@ -20,6 +20,7 @@ xcrun swiftc \
 	"$ROOT/Sources/TimelineTracks.swift" \
 	"$ROOT/Sources/PictureEditing.swift" \
 	"$ROOT/Sources/ChangeSwitches.swift" \
+	"$ROOT/Sources/MediaLibrary.swift" \
 	"$ROOT/Sources/ColorLUT.swift" \
 	"$ROOT/Sources/ColorAdjustments.swift" \
 	"$ROOT/Sources/ColorPipeline.swift" \

@@ -149,6 +149,17 @@ func run() async throws {
     // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages; =studio only the Studio
     // pictures up to 4-recording.png, which the redesign tracker uses.
     let only = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"]
+    // For the tracker's Studio pictures, captions on the Captions track: an SRT's words
+    // spread over its captions' times, as sample words for the recording.
+    if only == "studio", let path = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_CAPTIONS"],
+       let text = try? String(contentsOfFile: path, encoding: .utf8), let parsed = try? Captions.parse(text) {
+        let sample = parsed.flatMap { caption -> [TranscriptWord] in
+            let parts = caption.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            let step = (caption.end - caption.start) / Double(max(1, parts.count))
+            return parts.enumerated().map { TranscriptWord(text: $1, start: caption.start + Double($0) * step, end: caption.start + Double($0 + 1) * step) }
+        }.filter { $0.end <= info.duration }
+        _ = model.perform([.setTranscript(clip: model.items[0].id, transcript: Transcript(model: "sample", language: "en", words: sample))])
+    }
     if only == "ideas" {
         try await ideas(model, output: output, size: size, minimum: CGSize(width: 1140, height: 800))
         return
@@ -185,7 +196,18 @@ func run() async throws {
     model.inspectorFocus = .recording
     await render(window(), size: size, to: output.appendingPathComponent("4b-change-off.png"))
     model.undo()
-    if only == "studio" { return }
+    if only == "studio" {
+        // The Media panel's Graphics tab, and a caption selected on the Captions track.
+        UserDefaults.standard.set("graphics", forKey: "mediaPanelTab")
+        await render(window(), size: size, to: output.appendingPathComponent("4c-media-graphics.png"))
+        UserDefaults.standard.set("media", forKey: "mediaPanelTab")
+        if model.selectedItem?.transcript != nil {
+            model.selectedCaptionIndex = 3
+            if let cue = model.selectedCaption { model.setPreviewFraction(cue.start / max(1, model.items[0].editedDuration)) }
+            await render(window(), size: size, to: output.appendingPathComponent("4d-caption.png"))
+        }
+        return
+    }
 
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),
            to: output.appendingPathComponent("5-export-sheet.png"))

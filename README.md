@@ -176,11 +176,23 @@ or understand which part of your content matters. Quiet footage may yield no sug
   speeds; the minimum-pause setting measures the original recording. One Undo restores
   all removed sections. Low volume is not necessarily silence, so review quiet speech
   and intentional pauses before applying.
+- **Media panel:** the left panel has tabs, as in Filmora. **Media** lists the recordings
+  and adds a screen recording. **Graphics** adds a name plate, a title card, kinetic
+  text, a section card or the end screen, or imports a graphics file. **Logos** shows the
+  logo library (the one Find Brands fills) and adds a logo badge. **Effects** adds a blur
+  area, a full-frame blur, a zoom, a screen zoom or a marker. Click **+** to add at the
+  playhead, or drag an item onto the timeline to add it where you let go.
+- **Audio and Captions rows:** the Audio row is linked to the sections: a click selects
+  the section with its picture, the selected section's sound is outlined, the cuts show
+  as lines, and yellow marks the pauses still in the edit. The Captions row shows the
+  captions as the export shows them. Click one to fix its words in the inspector: the
+  transcript keeps the fix, so the SRT and burned-in captions take it. Captions from a
+  file show as they are.
 - **Timeline layout:** the tool bar above the timeline has the edit tools: Undo, Redo,
   Delete, Split, Crop (⌥C), Speed, Zoom, Blur and Marker, then Auto Edit and Review Silence,
   then Snapping, Tall rows and the timeline zoom. Each row has a header at the left:
   Shorts, Graphics, Effects, Zoom (and Layout and Screen zoom with a screen recording),
-  Video and Audio. An empty row folds to a thin row; its **+** adds the first item at the
+  Video, Audio and Captions. An empty row folds to a thin row; its **+** adds the first item at the
   playhead. The **eye** hides a row in the Preview only, and the export keeps it. The
   **lock** stops the timeline from changing a row. On Audio, the speaker mutes the
   Preview. These are view settings, not saved in the project. Each video section shows
@@ -473,7 +485,8 @@ selects something to show it to you.
 Sources/
   App.swift         @main, menu commands, Finder open-file handling
   AppModel.swift    queue, selection, preview, conversion driver
-  ContentView.swift window layout: the module sidebar; in Studio, media list, picture and inspector over a full-width timeline
+  ContentView.swift window layout: the module sidebar; in Studio, the Media panel, picture and inspector over a full-width timeline
+  MediaPanel.swift / MediaLibrary.swift the Media panel's tabs, what it adds or drops on the timeline, caption cues and audio pauses
   Library.swift     the Library: ideas, their rules, stages and links to projects, the Library commands and reducer
   LibraryEditing.swift / LibraryView.swift loading and saving the Library, its undo, the owner's actions, the sidebar and the Library page
   LibraryAgents.swift the Library for agents: library, libraryApply, libraryUndo, libraryRedo and scanFolder

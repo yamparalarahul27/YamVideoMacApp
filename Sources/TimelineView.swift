@@ -15,6 +15,10 @@ struct TimelineView: View {
     @State private var snapGuide: Double?
     /// The pointer is over the rows: the playhead shows its scissors.
     @State private var hovering = false
+    /// The quiet parts still in the edit, worked out once for each cut, not each frame.
+    @State private var pauses: [ClosedRange<Double>] = []
+    /// The captions on the edited timeline, worked out once for each change.
+    @State private var cues: [CaptionCue] = []
 
     // Row geometry. Every height below derives from these, so adding a row is one entry
     // rather than magic numbers that have to be kept in step.
@@ -29,11 +33,12 @@ struct TimelineView: View {
     private static let graphicsHeight = graphicsRowHeight * 2 + 4
     private static let shortsHeight = 20.0
     private static let layoutHeight = 22.0
+    private static let captionsHeight = 24.0
     private static let laneSpacing = 4.0
     static let speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
     private var sectionHeight: Double { model.timelineTallTracks ? 64 : 44 }
-    private var waveformHeight: Double { model.timelineTallTracks ? 40 : 26 }
+    private var waveformHeight: Double { model.timelineTallTracks ? 52 : 30 }
 
     private var tracks: [TimelineTrack] { TimelineTrack.tracks(for: item) }
     private func folded(_ track: TimelineTrack) -> Bool { track.isEmpty(in: item) }
@@ -58,6 +63,7 @@ struct TimelineView: View {
         case .screenLayout: return Self.layoutHeight
         case .video: return sectionHeight
         case .audio: return overview == nil ? 20 : waveformHeight
+        case .captions: return Self.captionsHeight
         }
     }
 
@@ -125,6 +131,11 @@ struct TimelineView: View {
                     )
                     .clipped()
                     .onHover { hovering = $0 }
+                    .dropDestination(for: String.self) { texts, location in
+                        guard let asset = texts.lazy.compactMap(MediaAsset.init(dragText:)).first else { return false }
+                        model.add(asset, at: model.viewport.time(atX: location.x, across: width))
+                        return true
+                    }
                 }
                 .frame(height: contentHeight)
             }
@@ -151,6 +162,12 @@ struct TimelineView: View {
             } catch is CancellationError { }
             catch { if !Task.isCancelled { audioError = error.localizedDescription } }
         }
+        .task(id: PausesKey(segments: item.timeline.segments, ready: overview != nil)) {
+            pauses = overview?.pauses(in: item.timeline, fps: item.info?.fps ?? 30) ?? []
+        }
+        .task(id: CaptionsKey(segments: item.timeline.segments, transcript: item.transcript, file: item.subtitles)) {
+            cues = item.captionCues()
+        }
         .sheet(isPresented: $reviewingSilence) {
             if let overview {
                 SilenceReviewView(clip: item, overview: overview,
@@ -160,8 +177,11 @@ struct TimelineView: View {
         }
     }
 
-    private func scrubGesture(width: Double, pixels: Double) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+    private struct PausesKey: Equatable { let segments: [TimelineSegment]; let ready: Bool }
+    private struct CaptionsKey: Equatable { let segments: [TimelineSegment]; let transcript: Transcript?; let file: URL? }
+
+    private func scrubGesture(width: Double, pixels: Double, minimumDistance: Double = 0) -> some Gesture {
+        DragGesture(minimumDistance: minimumDistance)
             .onChanged { value in
                 playback.pause()
                 let time = snap(model.viewport.time(atX: value.location.x, across: width), pixels: pixels, playhead: false)
@@ -395,6 +415,7 @@ struct TimelineView: View {
         case .screenZoom: return .indigo
         case .video: return .accentColor
         case .audio: return .teal
+        case .captions: return .yellow
         }
     }
 
@@ -406,6 +427,7 @@ struct TimelineView: View {
         case .effects: return ("Add a full-frame blur at the playhead", { model.addBlurEffect() })
         case .zoom: return ("Add a zoom at the playhead", { model.addZoomFromTimeline() })
         case .screenZoom: return ("Add a screen zoom at the playhead", { model.addScreenZoomAtPlayhead() })
+        case .captions: return ("Choose a caption file. Auto Edit makes captions from what is said.", { model.chooseSubtitles() })
         case .screenLayout, .video, .audio: return nil
         }
     }
@@ -428,6 +450,7 @@ struct TimelineView: View {
                 if let screen = item.screen { screenZoomLane(screen, width: width, pixels: pixels) }
             case .video: sectionLane(width: width, pixels: pixels)
             case .audio: audioLane(width: width, pixels: pixels)
+            case .captions: captionsLane(width: width, pixels: pixels)
             }
         }
     }
@@ -527,14 +550,48 @@ struct TimelineView: View {
     }
 
     /// The recording's sound under its sections, following every cut and speed change.
+    /// It is linked to the picture: a click selects the section, the selected section's
+    /// sound shows with it, and the pauses still in the edit are marked.
     @ViewBuilder
     private func audioLane(width: Double, pixels: Double) -> some View {
         if let overview {
-            WaveformView(overview: overview, timeline: item.timeline, window: model.viewport)
-                .frame(width: width, height: waveformHeight)
-                .opacity(model.timelineTracks.muted ? 0.4 : 1)
-                .contentShape(Rectangle())
-                .gesture(scrubGesture(width: width, pixels: pixels))
+            let viewport = model.viewport
+            ZStack(alignment: .topLeading) {
+                ForEach(placedSegments.filter { model.sectionSelection.contains($0.segment.id)
+                    && viewport.intersects($0.offset, $0.offset + $0.segment.duration) }, id: \.segment.id) { placed in
+                    RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.16))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor.opacity(0.9), lineWidth: 1.5))
+                        .frame(width: max(1, placed.segment.duration * pixels), height: waveformHeight)
+                        .offset(x: viewport.x(of: placed.offset, across: width))
+                }
+                ForEach(Array(pauses.enumerated()).filter { viewport.intersects($0.element.lowerBound, $0.element.upperBound) }, id: \.offset) { _, pause in
+                    Rectangle().fill(Color.yellow.opacity(0.16))
+                        .frame(width: max(1, (pause.upperBound - pause.lowerBound) * pixels), height: waveformHeight)
+                        .offset(x: viewport.x(of: pause.lowerBound, across: width))
+                        .help("A pause of \(String(format: "%.1f", pause.upperBound - pause.lowerBound)) s. Review Silence can cut it.")
+                }
+                WaveformView(overview: overview, timeline: item.timeline, window: viewport)
+                    .frame(width: width, height: waveformHeight)
+                    .allowsHitTesting(false)
+                ForEach(placedSegments.dropFirst().filter { viewport.contains($0.offset) }, id: \.segment.id) { placed in
+                    Rectangle().fill(Color.primary.opacity(0.4))
+                        .frame(width: 1, height: waveformHeight)
+                        .offset(x: viewport.x(of: placed.offset, across: width))
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(width: width, height: waveformHeight, alignment: .leading)
+            .clipped()
+            .opacity(model.timelineTracks.muted ? 0.4 : 1)
+            .contentShape(Rectangle())
+            .onTapGesture { location in
+                let time = viewport.time(atX: location.x, across: width)
+                guard let placed = placedSegments.first(where: { time >= $0.offset && time < $0.offset + $0.segment.duration }) else { return }
+                let modifiers = NSEvent.modifierFlags
+                model.clickSegment(placed.segment.id, at: time, extend: modifiers.contains(.shift), toggle: modifiers.contains(.command))
+            }
+            .simultaneousGesture(scrubGesture(width: width, pixels: pixels, minimumDistance: 3))
+            .help("Click to select a section, with its picture. Drag to move the playhead. Yellow marks a pause.")
         } else {
             HStack(spacing: 6) {
                 if item.info?.hasAudio != true {
@@ -550,6 +607,40 @@ struct TimelineView: View {
             .padding(.leading, 9)
             .frame(width: width, alignment: .leading)
         }
+    }
+
+    /// The captions as the export shows them. A click selects one, so its words can be
+    /// fixed in the inspector.
+    private func captionsLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        let off = model.settings.captionUse(hasFile: item.subtitles != nil) == .off
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
+            ForEach(cues.filter { viewport.intersects($0.start, $0.end) }) { cue in
+                let selected = model.inspectorFocus == .caption && model.selectedCaptionIndex == cue.index
+                let span = max(2, (cue.end - cue.start) * pixels - 1)
+                Text(span > 28 ? cue.text : "")
+                    .font(.system(size: 9.5))
+                    .lineLimit(1)
+                    .padding(.horizontal, 5)
+                    .frame(width: span, height: Self.captionsHeight - 6, alignment: .leading)
+                    .background(Color.yellow.opacity(selected ? 0.6 : 0.18), in: RoundedRectangle(cornerRadius: 3))
+                    .overlay(alignment: .leading) { Rectangle().fill(Color.yellow).frame(width: 2) }
+                    .foregroundStyle(selected ? Color.black : Color.primary)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        playback.pause()
+                        model.selectedCaptionIndex = cue.index
+                        model.setPreviewFraction(min(cue.start + 0.05, cue.end) / total)
+                    }
+                    .help(cue.text)
+                    .offset(x: viewport.x(of: cue.start, across: width), y: 3)
+            }
+        }
+        .frame(width: width, height: Self.captionsHeight, alignment: .leading)
+        .opacity(off ? 0.45 : 1)
+        .clipped()
     }
 
     /// The screen's layouts over its base layout.
