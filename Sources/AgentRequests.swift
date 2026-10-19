@@ -2259,8 +2259,8 @@ struct AgentThumbnail: Encodable {
 
 /// The check of a thumbnail, for an agent: each finding (kind, level, the phone sizes, a
 /// message), the word count, the title's letter size and the face's box in design pixels
-/// of a 1920×1080 frame, `gap` (the thumbnail's words against the video's title), and
-/// `phone`, a PNG of the design at both sizes.
+/// of a 1920×1080 frame, `gap` (the thumbnail's words against the video's title), `path`
+/// (the eye path), and `phone`, a PNG of the design at both sizes.
 struct AgentPhoneCheck: Encodable {
     var reads: Bool
     var findings: [PhoneCheck.Finding]
@@ -2268,6 +2268,8 @@ struct AgentPhoneCheck: Encodable {
     var titleSize: Double
     var face: WireRect?
     var gap: AgentGap
+    /// Where the eye goes, in order: the face, then the words by size, clarity and colour.
+    var path: [AgentEyeStop]
     var phone: String
 
     init(_ check: PhoneCheck, gap: AgentGap, phone: String) {
@@ -2277,7 +2279,24 @@ struct AgentPhoneCheck: Encodable {
         titleSize = (check.titleSize * 10).rounded() / 10
         face = check.face.map { WireRect($0.integral) }
         self.gap = gap
+        path = check.path.enumerated().map { AgentEyeStop(step: $0.offset + 1, $0.element) }
         self.phone = phone
+    }
+}
+
+/// One stop of the eye path, for an agent: its place on the path, what it is (face,
+/// accent, title, tag, picture), its words, and its box in design pixels of 1920×1080.
+struct AgentEyeStop: Encodable {
+    var step: Int
+    var kind: EyeStop.Kind
+    var text: String
+    var box: WireRect
+
+    init(step: Int, _ stop: EyeStop) {
+        self.step = step
+        kind = stop.kind
+        text = stop.text
+        box = WireRect(stop.box.rect.integral)
     }
 }
 

@@ -29,7 +29,8 @@ struct ThumbnailMakerSheet: View {
     /// Apple Vision's finds, kept while the frame and the picture stay the same.
     @State private var faceFound: (frame: CGImage, face: CGRect?)?
     @State private var pictureWords: (url: URL, words: [(text: String, box: CGRect)])?
-    @AppStorage("thumbnailOnPhone") private var onPhone = false
+    /// design, eyePath or phone: the view above the check list.
+    @AppStorage("thumbnailPreview") private var previewMode = "design"
     /// The findings whose advice shows under them.
     @State private var opened: Set<String> = []
 
@@ -74,13 +75,18 @@ struct ThumbnailMakerSheet: View {
                 ScrollView { controls.padding(18) }.frame(width: 360)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("Preview", selection: $onPhone) {
-                        Text("Design").tag(false)
-                        Text("Phone").tag(true)
+                    Picker("Preview", selection: $previewMode) {
+                        Text("Design").tag("design")
+                        Text("Eye path").tag("eyePath")
+                        Text("Phone").tag("phone")
                     }
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                     Group {
-                        if onPhone { phoneViews } else { preview(width: 640) }
+                        switch previewMode {
+                        case "phone": phoneViews
+                        case "eyePath": eyePathView
+                        default: preview(width: 640)
+                        }
                     }
                     .frame(height: 360, alignment: .topLeading)
                     checkPanel
@@ -111,6 +117,58 @@ struct ThumbnailMakerSheet: View {
     }
 
     // MARK: - On a phone
+
+    // MARK: - Eye path
+
+    /// The checked picture with the eye path on it: a numbered mark just left of each stop,
+    /// at its middle height, so the words stay clear; the marks are joined by a line in the
+    /// order the eye takes them.
+    private var eyePathView: some View {
+        let width: CGFloat = 640, scale = width / 1920
+        let stops = Array((check?.path ?? []).prefix(EyePath.shown))
+        let points = stops.map { stop in
+            CGPoint(x: min(max(stop.box.x * scale - 16, 12), width - 12),
+                    y: min(max((stop.box.y + stop.box.h / 2) * scale, 12), width * 9 / 16 - 12))
+        }
+        return ZStack(alignment: .topLeading) {
+            Rectangle().fill(Color.black)
+            if let checked {
+                Image(decorative: checked, scale: 1).resizable().interpolation(.high)
+                Path { line in
+                    guard let first = points.first else { return }
+                    line.move(to: first)
+                    for point in points.dropFirst() { line.addLine(to: point) }
+                }
+                .stroke(Color.white.opacity(0.85), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [6, 5]))
+                .shadow(color: .black.opacity(0.6), radius: 2)
+                ForEach(Array(stops.enumerated()), id: \.offset) { index, stop in
+                    Text("\(index + 1)")
+                        .font(.system(size: 13, weight: .bold).monospacedDigit())
+                        .foregroundStyle(Color.black)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(stop.kind == .accent ? Color.yellow : Color.white))
+                        .overlay(Circle().stroke(Color.black.opacity(0.5), lineWidth: 1))
+                        .position(points[index])
+                        .help(stopLabel(stop))
+                }
+            } else {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(width: width, height: width * 9 / 16)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement()
+        .accessibilityLabel("Eye path: " + stops.enumerated().map { "\($0.offset + 1) \(stopLabel($0.element))" }.joined(separator: ", "))
+    }
+
+    private func stopLabel(_ stop: EyeStop) -> String {
+        switch stop.kind {
+        case .face: return "the face"
+        case .tag: return "the tag"
+        case .picture: return "“\(stop.text)” in the picture"
+        case .title, .accent: return "“\(stop.text)”"
+        }
+    }
 
     /// The checked picture at the phone's sizes, with the title and channel as YouTube's
     /// app shows them beside it.

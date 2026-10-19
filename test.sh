@@ -57,6 +57,7 @@ xcrun swiftc \
 	"$ROOT/Sources/Thumbnail.swift" \
 	"$ROOT/Sources/ThumbnailCheck.swift" \
 	"$ROOT/Sources/ThumbnailGap.swift" \
+	"$ROOT/Sources/ThumbnailEyePath.swift" \
 	"$ROOT/Sources/FrameSuggestions.swift" \
 	"$ROOT/Sources/AgentsManual.swift" \
 	"$ROOT/Sources/GraphicsEditing.swift" \

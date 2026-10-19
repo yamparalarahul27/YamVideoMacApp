@@ -192,7 +192,11 @@ edit, and each edit becomes one undo step with your name on it.
    question. A finding of kind `title` says the thumbnail repeats the title;
    `check.gap` gives the repeated words and phrases and the words the thumbnail adds. To
    try a new video title without storing it, add `videoTitle` (`--video-title`).
-5. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
+5. Check the eye path: `check.path` lists where the eye goes, in order (the face, then
+   the words by size, contrast and colour). The words between asterisks must be 1st or
+   2nd; a finding of kind `eyePath` says when they are not. Make them bigger or clearer
+   (`highlight: true`), or make the other words smaller.
+6. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
    `setPublishInfo` with `{thumbnail: savedPath, design: …}` (and `title`, if it changed).
 
 ### 4.8 Shorts

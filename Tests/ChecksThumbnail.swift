@@ -212,7 +212,7 @@ import Foundation
           "more than 8 words do not read in 0.5 s, and 6 to 8 are weak", "\(wordy.findings) \(someWords.findings)")
     let yellowOnWhite = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 1.6], face: bigFace)
     let lowTitle = PhoneCheck.make(layout: phoneLayout(), contrasts: [3.6, 9], face: bigFace)
-    check(yellowOnWhite.findings.count == 1 && yellowOnWhite.findings[0].kind == .contrast && yellowOnWhite.findings[0].level == .fails
+    check(yellowOnWhite.findings.map(\.kind) == [.contrast, .eyePath] && yellowOnWhite.findings[0].level == .fails
               && yellowOnWhite.findings[0].message.contains("“viewer”") && yellowOnWhite.findings[0].message.contains("Highlight")
               && lowTitle.findings.map(\.level) == [.weak],
           "coloured words with low contrast do not read, and the check says to turn on Highlight", "\(yellowOnWhite.findings)")
@@ -351,6 +351,41 @@ import Foundation
           "the title's finding joins the phone check's list, worst first")
     check(picturedCheck.pictureWords.map { $0.uppercased() } == ["BUILT IN A WEEK"], "the check keeps the lines read in the picture")
 
+    print("\nEye path")
+    let readablePath = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 9], face: bigFace)
+    check(readablePath.path.map(\.kind) == [.face, .accent, .title] && readablePath.path[0].pull == 400
+              && !readablePath.findings.contains { $0.kind == .eyePath },
+          "the eye goes to the face, then to the coloured words, then to the rest of the title", "\(readablePath.path.map(\.kind))")
+    let hiddenAccent = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 1.6], face: bigFace)
+    let pathFinding = hiddenAccent.findings.first { $0.kind == .eyePath }
+    check(hiddenAccent.path.map(\.kind) == [.face, .title, .accent] && pathFinding?.level == .weak && pathFinding?.sizes == []
+              && pathFinding?.summary == "Eye path: “viewer” is 3rd"
+              && pathFinding?.message.contains("after the face and “Edit for the”") == true,
+          "coloured words of low contrast fall to 3rd, and the check says so", "\(hiddenAccent.path.map(\.kind)) \(String(describing: pathFinding))")
+    check(PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 1.6], face: nil).path.map(\.kind) == [.title, .accent]
+              && !PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 1.6], face: nil).findings.contains { $0.kind == .eyePath },
+          "without a face, 2nd is still fine")
+    var bigPictureWords = phoneLayout()
+    bigPictureWords.runs.append(ThumbnailLayout.Run(kind: .picture, text: "10× FASTER", boxes: [ThumbnailLayout.Box(CGRect(x: 1000, y: 600, width: 700, height: 200))],
+                                                    size: 200, color: nil, background: nil))
+    bigPictureWords.runs.insert(ThumbnailLayout.Run(kind: .tag, text: "3 RULES", boxes: [ThumbnailLayout.Box(CGRect(x: 1000, y: 200, width: 200, height: 70))],
+                                                    size: 46, color: "#121417", background: "#F5C42C"), at: 0)
+    let pictureFirst = PhoneCheck.make(layout: bigPictureWords, contrasts: [11, 12, 9, 10], face: bigFace)
+    check(pictureFirst.path.map(\.kind) == [.face, .picture, .accent, .title, .tag]
+              && pictureFirst.findings.contains { $0.kind == .eyePath && $0.message.contains("after the face and the picture's words") },
+          "big words in the picture come before the title; the tag comes last", "\(pictureFirst.path.map(\.kind))")
+    let banded2 = PhoneCheck.make(layout: phoneLayout(band: "#F5C42C"), contrasts: [12, 11], face: bigFace)
+    check(banded2.path[1].kind == .accent && abs(banded2.path[1].pull - 170 * EyePath.colourPull.band) < 0.01,
+          "a band of the accent pulls the eye most of all the words")
+    var plainOnly = phoneLayout(); plainOnly.runs.removeLast()
+    check(!PhoneCheck.make(layout: plainOnly, contrasts: [3], face: bigFace).findings.contains { $0.kind == .eyePath }
+              && EyePath.ordinal(4) == "4th" && EyePath.ordinal(2) == "2nd",
+          "with no words marked there is no eye path warning")
+    check((try? JSONEncoder().encode(pictureFirst.path)) != nil, "the path can be sent as JSON")
+    check(drawnCheck.path.first?.kind == .accent && drawnCheck.path.map(\.kind).contains(.tag)
+              && drawnCheck.path.allSatisfy { $0.kind == .face || $0.box.x > 960 },
+          "on a drawn design, the path has its runs on the title's side", "\(drawnCheck.path.map { "\($0.kind) \($0.box)" })")
+
     print("\nThumbnails in projects and for agents")
     var subjectItem = subject.item
     let thumbnailer = AppModel(recoveryURL: nil)
@@ -398,6 +433,10 @@ import Foundation
     tryDesign["check"] = true
     let triedCheck = agentResult(await agentCall(thumbnailer, tryDesign))
     let phoneReport = triedCheck["check"] as? [String: Any] ?? [:]
+    let agentPath = phoneReport["path"] as? [[String: Any]] ?? []
+    check(agentPath.first?["step"] as? Int == 1 && agentPath.first?["kind"] as? String == "accent"
+              && (agentPath.first?["box"] as? [String: Any])?["width"] as? Double ?? 0 > 0,
+          "with check, an agent gets the eye path in order, with boxes", "\(agentPath)")
     let phoneFindings = phoneReport["findings"] as? [[String: Any]] ?? []
     check(FileManager.default.fileExists(atPath: triedCheck["path"] as? String ?? "") && phoneReport["reads"] as? Bool == false
               && phoneFindings.contains { $0["kind"] as? String == "face" && ($0["sizes"] as? [String])?.count == 2 && $0["level"] as? String == "weak" }
@@ -496,6 +535,9 @@ import Foundation
     check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("videoTitle") && "\($0)".contains("phrases") } == true
               && manualText.contains("check.gap"),
           "the catalog and the manual give the information gap")
+    check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("eyePath") && "\($0)".contains("path (where the eye goes") } == true
+              && manualText.contains("check.path"),
+          "the catalog and the manual give the eye path")
     check(AgentsManual.brief(ctl: "/x/yamvideoctl").contains("/x/yamvideoctl manual") && AgentsManual.brief(ctl: nil).contains("yamvideo_manual"),
           "the brief for an agent names how to read the manual")
 
