@@ -5,7 +5,7 @@
 (information gap, [PR #55](https://github.com/yamparalarahul27/YamVideoMacApp/pull/55))
 are merged, and so is part 3 (eye path,
 [PR #56](https://github.com/yamparalarahul27/YamVideoMacApp/pull/56)). Part 4 (Test & Compare) is
-built, in its own PR. The owner asked for each part after the one before it.
+built, in [PR #57](https://github.com/yamparalarahul27/YamVideoMacApp/pull/57). The owner asked for each part after the one before it.
 **Source:** the backlog item of 2026-10-18, from "Science Behind Thumbnails That Actually
 Work." by HimanshuG (https://youtu.be/9_7q6vUaRsM). Its rules: a viewer decides in 0.5 s,
 a thumbnail opens a question the title does not answer, the eye goes to the face first and
