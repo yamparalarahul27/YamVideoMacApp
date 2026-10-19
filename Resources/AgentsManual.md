@@ -313,6 +313,17 @@ The owner plans when each video goes out and where, and tells you the plan in wo
   (`state.notes.videoNotes` is its path). Read past Video.md files to match how the
   owner's earlier videos were made. Do not edit Video.md; it is rewritten.
 
+### 4.13 Switch a change off
+
+- The owner can switch the crop, colour, blur areas, zooms or graphics of a recording
+  off in the inspector. Off keeps the change in the project but leaves it out of the
+  player and every export. `state.clips[].switchedOff` lists what is off.
+- To compare, send `setChange {clipID, change, on: false}`, then `on: true` to bring it
+  back. Each is one undo step. Do not delete a change the owner only wants to see
+  without; switch it off.
+- Before an export, check `switchedOff`. If something is off that the owner did not
+  ask for, say so first.
+
 ## 5. Problems
 
 - **`revision_conflict`:** read state again and make a new plan. For a Library command,

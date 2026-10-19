@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 @MainActor
 extension AppModel {
     func moviePlan() throws -> MoviePlan {
-        try MoviePlan(items: items, movieSettings: movieSettings, settings: settings)
+        try MoviePlan(items: items.map(\.effective), movieSettings: movieSettings, settings: settings)
     }
 
     func setMovieMode(_ enabled: Bool) {

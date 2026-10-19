@@ -180,6 +180,11 @@ func run() async throws {
     model.selectedSegmentID = nil; model.selectedShotID = nil; model.selectedRegionID = nil
     model.endPictureEdit()
     await render(window(), size: size, to: output.appendingPathComponent("4-recording.png"))
+    // A change switched off: the zooms stay in the project, out of the video.
+    model.setChange(.zooms, on: false)
+    model.inspectorFocus = .recording
+    await render(window(), size: size, to: output.appendingPathComponent("4b-change-off.png"))
+    model.undo()
     if only == "studio" { return }
 
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),

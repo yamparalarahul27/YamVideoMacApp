@@ -324,6 +324,7 @@ enum ShortExport {
     static func export(_ item: VideoItem, info: MediaInfo, short: Short, settings: ExportSettings, output: URL,
                        drawGraphics: ((GraphicsRender.Job, URL, URL) async throws -> Void)? = nil,
                        onProgress: @escaping @Sendable (Double) -> Void) async throws {
+        let item = item.effective
         let cut = item.shortItem(short)
         // With the screen on top, the layout stage reads the recording's whole picture and
         // draws the 1080×1920 canvas itself, from the Short's window and the screen.

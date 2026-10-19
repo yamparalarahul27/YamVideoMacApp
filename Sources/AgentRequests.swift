@@ -155,6 +155,9 @@ struct WireCommand: Codable, Equatable {
     var timeSpace: String?
     var rect: WireRect?
     var preset: String?
+    /// setChange: which change, and whether it is on.
+    var change: String?
+    var on: Bool?
     var hold: Double?
     var level: Double?
     var target: WirePoint?
@@ -223,7 +226,7 @@ struct WireCommand: Codable, Equatable {
         "addShort", "updateShort", "removeShort",
         "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
         "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
-        "setProjectNotes", "addProjectNote",
+        "setChange", "setProjectNotes", "addProjectNote",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -331,6 +334,8 @@ struct AgentState: Encodable {
         var shorts: [ShortState]
         /// The screen recording shown with it, and the layouts; nil when it has none.
         var screen: ScreenState?
+        /// Changes switched off in the inspector: kept, but out of the player and exports.
+        var switchedOff: [String]
     }
     /// A Short as an agent needs it. Times are edited-recording seconds; `graphics` are the
     /// ones that show in it, in its own time from 0, and `window` is the 9:16 part of the
@@ -824,7 +829,8 @@ extension AppModel {
                 captions: .init(use: document.settings.captionUse(hasFile: clip.subtitles != nil).rawValue,
                                 source: clip.item().captionsSource(document.settings)),
                 shorts: Self.shortStates(clip, settings: document.settings),
-                screen: Self.screenState(clip))
+                screen: Self.screenState(clip),
+                switchedOff: (clip.switchedOff ?? []).map(\.rawValue))
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -1177,6 +1183,12 @@ extension AppModel {
             return .setCrop(clip: try field(wire.clipID, "clipID"), rect: try field(wire.rect, "rect").rect)
         case "setAspect":
             return .setAspect(clip: try field(wire.clipID, "clipID"), preset: try field(wire.preset, "preset"))
+        case "setChange":
+            let name = try field(wire.change, "change")
+            guard let change = SwitchableChange(rawValue: name) else {
+                throw EditError.invalid("Unknown change \"\(name)\". Use one of: \(SwitchableChange.allCases.map(\.rawValue).joined(separator: ", ")).")
+            }
+            return .setChange(clip: try field(wire.clipID, "clipID"), change: change, on: try field(wire.on, "on"))
         case "addBlurArea":
             return .addBlurArea(clip: try field(wire.clipID, "clipID"),
                                 area: BlurRegion(id: wire.areaID ?? UUID(), rect: try field(wire.rect, "rect").rect))
@@ -1632,7 +1644,9 @@ extension AppModel {
             let (clipID, local): (UUID, Double)
             if request.timeSpace == "movie" { (clipID, local) = try movieLocation(time, in: document) }
             else { (clipID, local) = (try require(request.clip, "clip"), time) }
-            guard let clip = document.clips.first(where: { $0.id == clipID }) else { throw EditError.notFound("No recording \(clipID).") }
+            guard let stored = document.clips.first(where: { $0.id == clipID }) else { throw EditError.notFound("No recording \(clipID).") }
+            // The picture as it plays and exports: switched-off changes left out.
+            let clip = ProjectClip(stored.item().effective)
             guard let info = clip.info else { throw EditError(code: .missingMedia, message: "That recording is still loading.") }
             let timeline = clip.timeline
             guard local.isFinite, local >= 0, local <= timeline.duration else {
@@ -2072,7 +2086,8 @@ extension AppModel {
             }
             do {
                 switch work {
-                case .recording(let item, let info):
+                case .recording(let recording, let info):
+                    let item = recording.effective
                     try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,

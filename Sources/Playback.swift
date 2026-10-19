@@ -97,7 +97,7 @@ final class PlaybackController: ObservableObject {
 
     /// `original` shows the recording without its colour stage, for comparison.
     func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool, original: Bool = false) {
-        let clip = showsOriginal ? clip.asRecorded : clip.previewing(hiding: hiddenTracks)
+        let clip = showsOriginal ? clip.asRecorded : clip.effective.previewing(hiding: hiddenTracks)
         let original = original || showsOriginal
         requestedTime = time
         playWhenReady = play
@@ -292,7 +292,7 @@ final class PlaybackController: ObservableObject {
         let regions = clip.blurRegions
         let effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
-                                        toneMapHDR: settings.toneMapHDR, original: original).render
+                                        toneMapHDR: settings.toneMapHDR, original: original || !clip.isOn(.colour)).render
         let motion = picture.motion, stage = picture.stage
         let videoComposition = AVMutableVideoComposition(asset: asset) { request in
             let result = renderFrame(request.sourceImage, info: info, crop: crop,

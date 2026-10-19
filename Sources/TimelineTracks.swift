@@ -191,8 +191,8 @@ extension VideoItem {
     func badges(for segment: TimelineSegment, settings: ExportSettings) -> [SectionBadge] {
         var badges: [SectionBadge] = []
         if segment.speed != 1 { badges.append(.speed(segment.speed)) }
-        if !cropIsFullFrame { badges.append(.crop) }
-        if !blurRegions.isEmpty { badges.append(.blur) }
+        if isOn(.crop), !cropIsFullFrame { badges.append(.crop) }
+        if isOn(.blurAreas), !blurRegions.isEmpty { badges.append(.blur) }
         if colorStage(settings).render != nil { badges.append(.colour) }
         return badges
     }

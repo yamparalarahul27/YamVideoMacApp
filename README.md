@@ -271,7 +271,8 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Blur an area** | Click the blur band on the Effects row (or **Add Area** in the inspector) and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
 | **Zoom in** | Scrub to the moment and press the Zoom tool, or select a zoom and press **Aim** under the picture, then click or drag the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds |
 | **Pick the frame you work against** | Drag the playhead on the timeline's ruler |
-| **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
+| **Inspect what you select** | The inspector on the right follows your selection — a section, a zoom, a blur area, a graphic — with tabs below it, as in Filmora: **Speed** (a section's speed, trims and order; ⌥R), **Video** (frame, blur areas, zooms, screen, graphics, Shorts, effects and markers), **Audio** (captions and loudness) and **Colour** |
+| **Switch a change off** | The Frame, Blur areas, Zooms, Graphics and Colour sections each have a switch and a reset in their header. Off keeps the change in the project but leaves it out of the player and every export, so you can compare; on brings it back as it was. Reset goes back to no change (the whole frame, no blur areas, no zooms, the recorded colour). With nothing selected, **Changes on this video** lists every change with its switch, including ones agents made, and the export's captions and loudness |
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
 | **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest. **Size** (100–150 %) draws cards and panels larger for viewers on a phone: cards grow to the left from the column's right edge, panels grow half as much, and logo badges, the end screen and Shorts keep their sizes. **Kinetic Text** puts big words over the whole picture from the playhead, each on the time it is spoken (from the transcript; one centred line, or one word on each line), and **Section Card** puts a part's title over a seek bar that shows how far into the video it starts. Both sit on near black or a darkened picture; in a Short, captions pause under them |
 | **Move and resize graphics** | In **Preview**, click a graphic on the picture to select it, drag it to move it, or drag a corner to resize it. It snaps to the title-safe area, the centre lines, its own place, and the column or panel; hold ⌥ to place it freely. ⌥ arrow keys nudge it. The inspector has **Across**, **Down**, **Size %** and **Reset Position**. Exports draw it where you put it |
@@ -485,7 +486,7 @@ Sources/
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v17)
+  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v18)
   ColorLUT.swift    .cube parser and trilinear sampling
   ColorAdjustments.swift colour settings, the four adjustments and Auto's inference
   ColorPipeline.swift table store and the colour stage shared by ffmpeg and Core Image
@@ -518,6 +519,7 @@ Sources/
   TimelineView.swift timeline: tool bar, row headers, filmstrip sections, trim handles and zoom blocks
   TimelineTracks.swift the timeline's rows, eye and lock, section badges and filmstrip tiles
   PictureEditing.swift the one player's edits on the frame: crop with Apply, blur areas, zoom aim, Before/After, snapshot
+  ChangeSwitches.swift changes switched off (saved in the project), reset, captions and loudness switches, inspector tabs
   Playback.swift    native video/audio composition and live effects
   ProjectEditing.swift undo history, project files and session recovery
   Movie.swift       movie canvas and multi-source FFmpeg export graph

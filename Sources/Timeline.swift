@@ -149,6 +149,9 @@ struct ProjectClip: Codable, Equatable {
     var shorts: [Short]?
     /// Version 14 onwards. Nil while the recording has no screen recording.
     var screen: ScreenTrack?
+    /// Version 18 onwards. Changes switched off in the inspector, in a fixed order; nil
+    /// while every change is on.
+    var switchedOff: [SwitchableChange]?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -163,6 +166,7 @@ struct ProjectClip: Codable, Equatable {
         transcript = item.transcript
         shorts = item.shorts.isEmpty ? nil : item.shorts
         screen = item.screen
+        switchedOff = item.switchedOff.isEmpty ? nil : item.switchedOff.sorted()
     }
 
     func item() -> VideoItem {
@@ -179,6 +183,7 @@ struct ProjectClip: Codable, Equatable {
         item.transcript = transcript
         item.shorts = shorts ?? []
         item.screen = screen
+        item.switchedOff = Set(switchedOff ?? [])
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -209,10 +214,11 @@ struct VideoProject: Codable, Equatable {
     /// Short's zoom (zoomed out, at the top over a blurred copy). 14: adds a recording's
     /// screen recording and its layouts. 15: adds the project's Why notes and its history
     /// of changes. 16: adds the graphics style's size, for phones. 17: adds the thumbnail
-    /// maker's picture size and its white frost background. Every edited
+    /// maker's picture size and its white frost background. 18: adds the changes a
+    /// recording has switched off in the inspector. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 17
+    static let currentVersion = 18
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -308,6 +314,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 17, clips.contains(where: { $0.publish?.design.map { $0.imageSize != 1 || $0.background == .frost } == true }) {
             try reject("The project claims an older format but contains a thumbnail picture size or the white frost."); return
+        }
+        if version < 18, clips.contains(where: { $0.switchedOff != nil }) {
+            try reject("The project claims an older format but contains changes switched off."); return
         }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }

@@ -1025,10 +1025,19 @@ footer ul { margin: 0; padding-left: 18px; }
       "id": "p2",
       "label": "P2 · Player",
       "date": "19 Oct 2026",
-      "ref": "PR #50, branch studio-player",
+      "ref": "PR #50, merged",
       "img": "img/step2-editor.jpg",
       "note": "One player with a bar under the picture, and the crop in the player with Apply.",
       "alt": "YamVideo Studio after step 2: one player with a player bar under the picture, and no mode controls above it."
+    },
+    {
+      "id": "p3",
+      "label": "P3 · Inspector",
+      "date": "19 Oct 2026",
+      "ref": "PR #51, branch studio-inspector",
+      "img": "img/step3-editor.jpg",
+      "note": "Inspector tabs, a switch and a reset for each change, and the Changes list.",
+      "alt": "YamVideo Studio after step 3: the inspector shows Changes on this video with a switch for each change, and tabs."
     }
   ],
   "steps": [
@@ -1066,8 +1075,8 @@ footer ul { margin: 0; padding-left: 18px; }
     {
       "id": "P2",
       "title": "One player with a player bar, and Crop in the player",
-      "status": "review",
-      "date": "19 Oct 2026",
+      "status": "shipped",
+      "date": "19 Oct 2026, merged",
       "branch": "studio-player",
       "pr": "https://github.com/yamparalarahul27/YamVideoMacApp/pull/50",
       "done": [
@@ -1108,18 +1117,49 @@ footer ul { margin: 0; padding-left: 18px; }
     {
       "id": "P3",
       "title": "Inspector tabs, switches, resets and the Changes list",
-      "status": "next",
-      "done": [],
+      "status": "review",
+      "date": "19 Oct 2026",
+      "branch": "studio-inspector",
+      "pr": "https://github.com/yamparalarahul27/YamVideoMacApp/pull/51",
+      "done": [
+        "Inspector tabs, as in Filmora: Speed (for a section), Video, Audio and Colour. ⌥R opens Speed.",
+        "Frame, Blur areas, Zooms, Graphics and Colour each have an on/off switch and a reset in their header. Captions and Loudness switch the export setting.",
+        "Off keeps the change in the project but leaves it out of the player, the frame, every export, the movie and Shorts.",
+        "The project saves what is off (version 18). Older builds refuse such a file instead of losing what is off.",
+        "Changes on this video: with nothing selected, one list of every change with its switch and reset, and the speed, full-frame blurs, Shorts, captions and loudness.",
+        "Section badges and the timeline rows show when a change is off.",
+        "Agents: the setChange command, switchedOff in state, and a recipe in the Agents Manual.",
+        "Crop in the Player under Frame, and Edit on the Frame under Blur areas.",
+        "34 new checks (./test.sh changes), with real exports with the crop off and on."
+      ],
       "left": [
-        "Video, Audio, Speed and Colour tabs for a section.",
-        "An on/off switch and a reset for each change, saved in the project (new project version).",
-        "The Changes on this video list when nothing is selected."
+        "Graphics has no reset, because deleting every graphic at once is too easy to do by mistake.",
+        "Captions on uploads an SRT; burn-in is chosen in the Captions section.",
+        "Keyframes for each property are not planned: zooms already ease in and out."
+      ],
+      "before": {
+        "img": "img/now-inspector.jpg",
+        "caption": "Before: one long scroll of every section, with no way to turn a change off."
+      },
+      "after": {
+        "img": "img/step3-changes.jpg",
+        "caption": "After P3: Changes on this video, each change with its switch and reset, above the tabs."
+      },
+      "more": [
+        {
+          "img": "img/step3-speed.jpg",
+          "caption": "P3, a section selected: the Speed tab with its speed, trims and order."
+        },
+        {
+          "img": "img/step3-off.jpg",
+          "caption": "P3, zooms switched off: kept in the project, out of the video, and the Zoom row dimmed."
+        }
       ]
     },
     {
       "id": "P4",
       "title": "Media panel, Audio track and Captions track",
-      "status": "planned",
+      "status": "next",
       "done": [],
       "left": [
         "Media, Graphics, Logos and Effects tabs with add and drag.",
@@ -1167,6 +1207,14 @@ footer ul { margin: 0; padding-left: 18px; }
     [
       "19 Oct 2026",
       "The shape switch says Video or Short, because the crop can be any ratio, not only 16:9."
+    ],
+    [
+      "19 Oct 2026",
+      "Step 2 merged (PR #50). Step 3 starts: inspector tabs, switches and the Changes list."
+    ],
+    [
+      "19 Oct 2026",
+      "Graphics get a switch but no reset, so no one deletes every graphic by mistake."
     ]
   ]
 }

@@ -116,7 +116,8 @@ extension PlaybackController {
         let key = Self.picture(clip, info: info, short: nil)
         let crop = key.crop, motion = short == nil ? key.motion : nil
         let shots = clip.zoomShots, regions = clip.blurRegions, effects = clip.blurEffects
-        let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name, toneMapHDR: settings.toneMapHDR, original: original).render
+        let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name, toneMapHDR: settings.toneMapHDR,
+                                        original: original || !clip.isOn(.colour)).render
         let geometry = short.map { LayoutGeometry(short: screen, crop: crop, window: $0.frame(info: info, crop: clip.crop)) }
             ?? LayoutGeometry(track: screen, crop: crop)
         let frameSize = geometry.frame

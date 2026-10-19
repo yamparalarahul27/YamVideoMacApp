@@ -154,7 +154,7 @@ import Foundation
     frostProject.clips[0].publish?.design?.background = .frost; frostProject.clips[0].publish?.design?.imageSize = 1.4
     let frostSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(frostProject))
     var frostAsSixteen = frostSaved; frostAsSixteen.version = 16
-    check(frostSaved == frostProject && frostSaved.version == 17 && (try? frostSaved.validate()) != nil && (try? frostAsSixteen.validate()) == nil,
+    check(frostSaved == frostProject && frostSaved.version >= 17 && (try? frostSaved.validate()) != nil && (try? frostAsSixteen.validate()) == nil,
           "the frost and the picture size survive a version 17 round trip, and a version 16 file with them is refused")
 
     var designPatch = address(thumbnailer)

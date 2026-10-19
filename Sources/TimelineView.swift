@@ -39,6 +39,14 @@ struct TimelineView: View {
     private func folded(_ track: TimelineTrack) -> Bool { track.isEmpty(in: item) }
     private func hidden(_ track: TimelineTrack) -> Bool { model.timelineTracks.hidden.contains(track) }
     private func locked(_ track: TimelineTrack) -> Bool { model.timelineTracks.locked.contains(track) }
+    /// The row's change is switched off in the inspector: kept, but not in the video.
+    private func switchedOff(_ track: TimelineTrack) -> Bool {
+        switch track {
+        case .graphics: return !item.isOn(.graphics)
+        case .zoom: return !item.isOn(.zooms)
+        default: return false
+        }
+    }
 
     private func height(of track: TimelineTrack) -> Double {
         if folded(track) { return Self.foldedHeight }
@@ -96,7 +104,7 @@ struct TimelineView: View {
                             ForEach(tracks) { track in
                                 lane(track, width: width, pixels: pixels)
                                     .frame(width: width, height: height(of: track), alignment: .leading)
-                                    .opacity(hidden(track) ? 0.4 : 1)
+                                    .opacity(hidden(track) || switchedOff(track) ? 0.4 : 1)
                                     .allowsHitTesting(!locked(track))
                             }
                         }
@@ -644,7 +652,9 @@ struct TimelineView: View {
                 let selected = model.inspectorFocus == .blurArea
                 HStack(spacing: 3) {
                     Image(systemName: "camera.filters")
-                    Text(item.blurRegions.count == 1 ? "Blur area · whole video" : "\(item.blurRegions.count) blur areas · whole video")
+                    Text((item.blurRegions.count == 1 ? "Blur area · whole video" : "\(item.blurRegions.count) blur areas · whole video")
+                         + (item.isOn(.blurAreas) ? "" : " · off"))
+                        .strikethrough(!item.isOn(.blurAreas))
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -656,6 +666,7 @@ struct TimelineView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { model.beginBlurAreas() }
                 .help("Blur areas hide their part of the picture for the whole video. Click to edit them on the frame.")
+                .opacity(item.isOn(.blurAreas) ? 1 : 0.45)
                 .offset(x: start, y: Self.effectHeight + 2)
             }
         }

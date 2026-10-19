@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case (33, .option): model.trimToPlayhead(start: true)     // [
                 case (30, .option): model.trimToPlayhead(start: false)    // ]
                 case (8, .option): model.beginCrop()                       // C
+                case (15, .option): model.showSpeedTab()                   // R
                 default: return false
                 }
                 return true

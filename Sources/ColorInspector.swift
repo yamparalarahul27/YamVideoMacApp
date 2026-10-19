@@ -20,7 +20,9 @@ struct ColorInspector: View {
     }
 
     var body: some View {
-        InspectorSection("Colour") {
+        InspectorSection("Colour", isOn: changeSwitch(.colour, item, model),
+                         onReset: item.color.isDefault ? nil : { model.removeColorCorrection() },
+                         resetHelp: "Back to the recording's own colour") {
             Picker("Recorded colour", selection: Binding(get: { color.inputProfile }, set: { model.setInputProfile($0) })) {
                 Text(autoLabel).tag(ColorInputProfile.auto)
                 Text(ColorInputProfile.standard.label).tag(ColorInputProfile.standard)
