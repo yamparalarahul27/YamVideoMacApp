@@ -105,6 +105,16 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(timelineSnapping, forKey: Self.snappingKey) }
     }
     static let snappingKey = "timelineSnapping"
+    /// Light or dark for YamVideo alone, or as the Mac is set. A preference rather than an
+    /// edit: it is remembered, never undone. The app applies it at launch
+    /// (`applyAppearance`), so a test or snapshot model never changes how windows look.
+    @Published var appearance = UserDefaults.standard.string(forKey: AppModel.appearanceKey).flatMap(AppAppearance.init(rawValue:)) ?? .system {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: Self.appearanceKey)
+            applyAppearance()
+        }
+    }
+    static let appearanceKey = "appearance"
     @Published var projectURL: URL?
     @Published var hasUnsavedChanges = false
     @Published var undoEntries: [EditHistory] = []
@@ -939,5 +949,37 @@ final class AppModel: ObservableObject {
         let args = command.filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
         return (["ffmpeg"] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             .joined(separator: " ")
+    }
+}
+
+/// How YamVideo looks: as the Mac is set, or always light or always dark. Only the app's
+/// own windows change; exports, previews of the picture and graphics look the same in all
+/// three.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    /// Nil follows the Mac's own setting.
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
+extension AppModel {
+    /// Shows every window in `appearance`.
+    func applyAppearance() {
+        NSApplication.shared.appearance = appearance.nsAppearance
     }
 }

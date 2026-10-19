@@ -7,6 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lets local Codex/Claude sessions edit the open project; see `LocalAgentServer`.
     private var agentServer: LocalAgentServer?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before the window opens, so it never shows in the other appearance first.
+        MainActor.assumeIsolated { AppModel.shared.applyAppearance() }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { AppModel.shared.loadLibrary(); AppModel.shared.restoreModule() }
         startAgentBridge()
@@ -205,6 +210,10 @@ struct YamVideoApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Reset Crop") { model.resetCrop() }
                     .keyboardShortcut("0", modifiers: [.command, .shift])
+                Divider()
+                Picker("Appearance", selection: $model.appearance) {
+                    ForEach(AppAppearance.allCases) { Text($0.label).tag($0) }
+                }
             }
         }
     }
