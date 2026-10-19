@@ -41,6 +41,8 @@ struct AgentRequest: Codable {
     var design: [String: JSONValue]?
     /// thumbnail: also save the PNG next to the recording.
     var save: Bool?
+    /// thumbnail: also run the phone check (what does not read on a phone in 0.5 s).
+    var check: Bool?
     var scope: String?
     var kind: String?
     var job: UUID?
@@ -2200,21 +2202,37 @@ extension AppModel {
         }
         do {
             let sources = try await thumbnailSources(clip, at: design.time, cutout: design.cutout)
-            let image = try await ThumbnailMaker.render(design, sources: sources, accent: clip.graphics?.style.accent ?? GraphicsStyle().accent)
+            let accent = clip.graphics?.style.accent ?? GraphicsStyle().accent
+            // The check draws the design itself, so it is drawn once.
+            let checked = request.check == true ? try await PhoneCheck.run(design, sources: sources, accent: accent) : nil
+            let image: CGImage
+            if let checked { image = checked.image } else { image = try await ThumbnailMaker.render(design, sources: sources, accent: accent) }
             guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
                 return .failure(.invalid("The thumbnail could not be encoded."))
             }
             let directory = agentArtifactsDirectory
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let file = directory.appendingPathComponent("thumbnail-\(clipID.uuidString.prefix(8))-\(UUID().uuidString.prefix(6)).png")
+            let stem = "thumbnail-\(clipID.uuidString.prefix(8))-\(UUID().uuidString.prefix(6))"
+            let file = directory.appendingPathComponent(stem + ".png")
             try png.write(to: file, options: .atomic)
+            var check: AgentPhoneCheck?
+            if let checked {
+                guard let phone = PhoneCheck.phonePicture(image),
+                      let phonePNG = NSBitmapImageRep(cgImage: phone).representation(using: .png, properties: [:]) else {
+                    return .failure(.invalid("The phone picture could not be drawn."))
+                }
+                let phoneFile = directory.appendingPathComponent(stem + "-phone.png")
+                try phonePNG.write(to: phoneFile, options: .atomic)
+                check = AgentPhoneCheck(checked.check, phone: phoneFile.path)
+            }
             var saved: String?
             if request.save == true { saved = try await saveThumbnail(clip, design: design).path }
             let k = 1920 / Double(sources.frame.width)
             return .success(AgentThumbnail(path: file.path, savedPath: saved, width: image.width, height: image.height, design: design,
                                            speakerFound: sources.cutout != nil,
                                            speaker: sources.cutout.map { WireRect(CGRect(x: $0.box.minX * k, y: $0.box.minY * k,
-                                                                                         width: $0.box.width * k, height: $0.box.height * k)) }))
+                                                                                         width: $0.box.width * k, height: $0.box.height * k)) },
+                                           check: check))
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid("The thumbnail could not be made: \(error.localizedDescription)")) }
     }
@@ -2230,4 +2248,27 @@ struct AgentThumbnail: Encodable {
     var speakerFound: Bool
     /// The speaker's box in design pixels of a 1920×1080 frame.
     var speaker: WireRect?
+    /// With check: what does not read on a phone in 0.5 s.
+    var check: AgentPhoneCheck?
+}
+
+/// The phone check of a thumbnail, for an agent: each finding (kind, level, the phone
+/// sizes, a message), the word count, the title's letter size and the face's box in
+/// design pixels of a 1920×1080 frame, and `phone`, a PNG of the design at both sizes.
+struct AgentPhoneCheck: Encodable {
+    var reads: Bool
+    var findings: [PhoneCheck.Finding]
+    var words: Int
+    var titleSize: Double
+    var face: WireRect?
+    var phone: String
+
+    init(_ check: PhoneCheck, phone: String) {
+        reads = check.reads
+        findings = check.findings
+        words = check.words
+        titleSize = (check.titleSize * 10).rounded() / 10
+        face = check.face.map { WireRect($0.integral) }
+        self.phone = phone
+    }
 }

@@ -1548,6 +1548,76 @@
     });
   }
 
+  /** A computed CSS colour as #RRGGBB; null when it is mostly see-through. */
+  function hexColour(css) {
+    const found = String(css || "").match(/rgba?\(([^)]+)\)/);
+    if (!found) return null;
+    const parts = found[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
+    if (parts.length < 3 || (parts.length > 3 && parts[3] < 0.5)) return null;
+    return "#" + parts.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("").toUpperCase();
+  }
+
+  /** A node's own band of colour (a background colour, or a one-colour gradient, as the highlight draws it), as #RRGGBB. */
+  function bandColour(style) {
+    const solid = hexColour(style.backgroundColor);
+    if (solid) return solid;
+    const image = String(style.backgroundImage || "");
+    return image.indexOf("gradient") >= 0 ? hexColour(image) : null;
+  }
+
+  /**
+   * What the drawn thumbnail shows, in stage pixels (1920×1080), for the app's phone check:
+   * each run of words (the tag, plain title words, accent words) with its boxes (one for
+   * each line), letter size and colours (`background` only when the run has its own band),
+   * the picture's box, the speaker's move (scale about the origin, then shift in x), and
+   * whether the frame shows sharp behind it (not hidden or blurred). Null before
+   * `thumbnail(data)`.
+   */
+  function thumbnailLayout() {
+    const root = document.getElementById("yg-thumb");
+    if (!root) return null;
+    const stage = root.getBoundingClientRect();
+    const k = 1920 / (stage.width || 1920);
+    const box = (r) => ({ x: (r.left - stage.left) * k, y: (r.top - stage.top) * k, w: r.width * k, h: r.height * k });
+    const boxes = (list) => Array.from(list).filter((r) => r.width > 0 && r.height > 0).map(box);
+    const runs = [];
+    const tag = root.querySelector(".yg-thumb-tag");
+    if (tag) {
+      const style = getComputedStyle(tag);
+      const text = style.textTransform === "uppercase" ? tag.textContent.toUpperCase() : tag.textContent;
+      runs.push({ kind: "tag", text, boxes: boxes([tag.getBoundingClientRect()]), size: parseFloat(style.fontSize),
+                  color: hexColour(style.color), background: bandColour(style) });
+    }
+    const title = root.querySelector(".yg-thumb-title");
+    const titleStyle = getComputedStyle(title);
+    const size = parseFloat(titleStyle.fontSize);
+    title.childNodes.forEach((node) => {
+      if (node.nodeType === 3 && node.textContent.trim()) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        runs.push({ kind: "title", text: node.textContent, boxes: boxes(range.getClientRects()), size,
+                    color: hexColour(titleStyle.color), background: null });
+      } else if (node.nodeName === "EM") {
+        const style = getComputedStyle(node);
+        runs.push({ kind: "accent", text: node.textContent, boxes: boxes(node.getClientRects()), size,
+                    color: hexColour(style.color), background: bandColour(style) });
+      }
+    });
+    const image = root.querySelector(".yg-thumb-image");
+    const cut = root.querySelector(".yg-thumb-cut");
+    let speaker = null;
+    if (cut) {
+      const origin = String(cut.style.transformOrigin || "").match(/(-?[\d.]+)px\s+(-?[\d.]+)px/);
+      const scale = String(cut.style.transform || "").match(/scale\((-?[\d.]+)\)/);
+      const shift = String(cut.style.transform || "").match(/translateX\((-?[\d.]+)px\)/);
+      speaker = { scale: scale ? parseFloat(scale[1]) : 1, shift: shift ? parseFloat(shift[1]) : 0,
+                  originX: origin ? parseFloat(origin[1]) : 960, originY: origin ? parseFloat(origin[2]) : 1080 };
+    }
+    const bg = root.querySelector(".yg-thumb-bg");
+    const frame = !!bg && getComputedStyle(bg).display !== "none" && !/blur/.test(getComputedStyle(bg).filter);
+    return { titleSize: size, runs, picture: image ? box(image.getBoundingClientRect()) : null, speaker, frame };
+  }
+
   /** Reads the inline JSON and loads it. Used by page.html. A thumbnail page starts empty
    * and is drawn by `thumbnail(data)`. */
   function boot(options) {
@@ -1562,7 +1632,7 @@
     showCaption(seconds);
   }
 
-  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, endLayout, shortLayout, stageSize, captions,
+  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, thumbnailLayout, endLayout, shortLayout, stageSize, captions,
     smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;

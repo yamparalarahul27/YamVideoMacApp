@@ -9,29 +9,16 @@ import UniformTypeIdentifiers
 
 // MARK: - The sidebar
 
-/// The slim column of modules at the left edge of the window.
+/// The slim column of modules at the left edge of the window. The thumbnail maker sits
+/// under Studio, as a part of it.
 struct ModuleSidebar: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         VStack(spacing: 4) {
             ForEach(AppModule.allCases) { module in
-                Button { model.showModule(module) } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: module.systemImage).font(.system(size: 17))
-                        Text(module.label).font(.caption2)
-                    }
-                    .frame(width: 58, height: 48)
-                    .foregroundStyle(model.module == module ? Color.accentColor : Color.secondary)
-                    .background(model.module == module ? Color.accentColor.opacity(0.14) : .clear,
-                                in: RoundedRectangle(cornerRadius: 7))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(module == .library ? "Your ideas, projects and published videos"
-                      : module == .calendar ? "When each video goes out, and where" : "The editor")
-                .accessibilityLabel(module.label)
-                .accessibilityAddTraits(model.module == module ? [.isSelected, .isButton] : .isButton)
+                moduleButton(module)
+                if module == .studio { thumbnailButton }
             }
             Spacer()
         }
@@ -39,6 +26,47 @@ struct ModuleSidebar: View {
         .padding(.horizontal, 5)
         .frame(width: 68)
         .background(Color(nsColor: .underPageBackgroundColor).opacity(0.5))
+    }
+
+    private func moduleButton(_ module: AppModule) -> some View {
+        Button { model.showModule(module) } label: {
+            VStack(spacing: 3) {
+                Image(systemName: module.systemImage).font(.system(size: 17))
+                Text(module.label).font(.caption2)
+            }
+            .frame(width: 58, height: 48)
+            .foregroundStyle(model.module == module ? Color.accentColor : Color.secondary)
+            .background(model.module == module ? Color.accentColor.opacity(0.14) : .clear,
+                        in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(module == .library ? "Your ideas, projects and published videos"
+              : module == .calendar ? "When each video goes out, and where" : "The editor")
+        .accessibilityLabel(module.label)
+        .accessibilityAddTraits(model.module == module ? [.isSelected, .isButton] : .isButton)
+    }
+
+    /// The thumbnail maker for the selected recording, smaller than a module: it is a part
+    /// of the Studio. Lit while the maker is open; dim without a recording.
+    private var thumbnailButton: some View {
+        let open = model.showingThumbnailMaker
+        return Button { model.openThumbnailMaker() } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "photo.on.rectangle").font(.system(size: 14))
+                Text("Thumbnail").font(.caption2)
+            }
+            .frame(width: 58, height: 40)
+            .foregroundStyle(open ? Color.accentColor : Color.secondary)
+            .background(open ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canMakeThumbnail)
+        .opacity(model.canMakeThumbnail ? 1 : 0.45)
+        .help(model.canMakeThumbnail ? "The thumbnail maker for the selected recording (⇧⌘T)"
+              : "Select a recording in the Studio, in Recording mode, to make its thumbnail")
+        .accessibilityLabel("Thumbnail maker")
     }
 }
 

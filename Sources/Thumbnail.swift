@@ -13,14 +13,14 @@ struct ThumbnailDesign: Codable, Equatable {
     enum Side: String, Codable, CaseIterable, Identifiable {
         case auto, left, right
         var id: String { rawValue }
-        var label: String { self == .auto ? "Away from the speaker" : rawValue.capitalized }
+        var label: String { self == .auto ? "Auto" : rawValue.capitalized }
     }
     /// Where the cut-out speaker goes: where the frame has them, or moved (and made smaller
     /// when it must) to the far side, clear of the title, the tag and the picture.
     enum Place: String, Codable, CaseIterable, Identifiable {
         case frame, clear
         var id: String { rawValue }
-        var label: String { self == .frame ? "As recorded" : "Clear of the title" }
+        var label: String { self == .frame ? "As recorded" : "Clear" }
     }
     enum Background: String, Codable, CaseIterable, Identifiable {
         /// frost: the frame as recorded, moved with the speaker, under a white blurred shade
@@ -303,6 +303,31 @@ enum ThumbnailMaker {
         let data = String(decoding: try pageData(design, media: media, accent: accent, folder: folder), as: UTF8.self)
         return try await GraphicsSnapshot.capture(page: index, folder: folder, size: size,
                                                   script: "await YamGraphics.thumbnail(\(data));")
+    }
+
+    /// The finished 1280×720 picture, what the page measured of it, and `letters`: the same
+    /// picture with the title's letters in pure magenta and without their shadow, so the
+    /// phone check can tell the letters from what is behind them (`LetterMask`). The check
+    /// then samples the finished picture, shadow and all, as the viewer sees it. (Letters
+    /// made see-through do not work: at 2× WebKit leaves out their shadow.)
+    @MainActor
+    static func measure(_ design: ThumbnailDesign, sources: Sources, accent: String) async throws
+        -> (image: CGImage, letters: CGImage, layout: ThumbnailLayout) {
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("YamVideo/Thumbnails/\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let index = try writePage(to: folder)
+        let media = try writeMedia(sources, folder: folder)
+        let data = String(decoding: try pageData(design, media: media, accent: accent, folder: folder), as: UTF8.self)
+        let shots = try await GraphicsSnapshot.capture(page: index, folder: folder, size: size, steps: [
+            "await YamGraphics.thumbnail(\(data));\nreturn JSON.stringify(YamGraphics.thumbnailLayout());",
+            "document.querySelectorAll('.yg-thumb-title, .yg-thumb-title em').forEach((node) => { node.style.color = '#FF00FF'; node.style.textShadow = 'none'; });\nreturn null;",
+        ])
+        guard shots.count == 2, let json = shots[0].result,
+              let layout = try? JSONDecoder().decode(ThumbnailLayout.self, from: Data(json.utf8)) else {
+            throw FFmpegError(message: "The thumbnail could not be measured.")
+        }
+        return (shots[0].image, shots[1].image, layout)
     }
 }
 

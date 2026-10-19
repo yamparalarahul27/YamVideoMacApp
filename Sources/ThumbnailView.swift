@@ -3,8 +3,9 @@ import SwiftUI
 import WebKit
 
 /// The thumbnail maker: choose a frame, write the title and tag, and see the thumbnail as
-/// it will be, large and at YouTube's search size. Saving makes the 1280×720 PNG next to
-/// the recording and uses it as the thumbnail, in one undo step.
+/// it will be, large or at a phone's sizes, with the phone check under it: what does not
+/// read in 0.5 s. Saving makes the 1280×720 PNG next to the recording and uses it as the
+/// thumbnail, in one undo step.
 struct ThumbnailMakerSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -16,6 +17,18 @@ struct ThumbnailMakerSheet: View {
     @State private var problem: String?
     @State private var suggestions: [FrameSuggestion] = []
     @State private var suggesting: Task<Void, Never>?
+    /// The phone check of the design as it was a moment ago, and the picture it checked.
+    @State private var check: PhoneCheck?
+    @State private var checked: CGImage?
+    @State private var checking = false
+    @State private var checkRun = 0
+    @State private var checkProblem: String?
+    /// Apple Vision's finds, kept while the frame and the picture stay the same.
+    @State private var faceFound: (frame: CGImage, face: CGRect?)?
+    @State private var pictureWords: (url: URL, words: [(text: String, box: CGRect)])?
+    @AppStorage("thumbnailOnPhone") private var onPhone = false
+    /// The findings whose advice shows under them.
+    @State private var opened: Set<String> = []
 
     init(item: VideoItem, playhead: Double) {
         self.item = item
@@ -26,6 +39,13 @@ struct ThumbnailMakerSheet: View {
     }
 
     private var accent: String { item.graphics?.style.accent ?? GraphicsStyle().accent }
+    private var publish: PublishInfo { item.publish ?? PublishInfo() }
+
+    /// What the phone check depends on: the design and the frame it was drawn from.
+    private struct CheckInput: Equatable {
+        var design: ThumbnailDesign
+        var frame: Double?
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,21 +59,16 @@ struct ThumbnailMakerSheet: View {
                 ScrollView { controls.padding(18) }.frame(width: 360)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
-                    preview(width: 640)
-                    HStack(alignment: .top, spacing: 14) {
-                        preview(width: 360)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("At YouTube's search size").font(.caption.weight(.semibold))
-                            Text("Most people see it this small. A short title in big letters reads best.")
-                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            if let cut = sources?.cutout, design.cutout {
-                                Text("Speaker found: \(Int(cut.box.width)) × \(Int(cut.box.height)) px.").font(.caption2).foregroundStyle(.tertiary)
-                            } else if sources != nil, design.cutout {
-                                Label("No speaker found in this frame; it is used as it is.", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
+                    Picker("Preview", selection: $onPhone) {
+                        Text("Design").tag(false)
+                        Text("Phone").tag(true)
                     }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    Group {
+                        if onPhone { phoneViews } else { preview(width: 640) }
+                    }
+                    .frame(height: 360, alignment: .topLeading)
+                    checkPanel
                 }
                 .padding(18)
             }
@@ -67,7 +82,7 @@ struct ThumbnailMakerSheet: View {
                 }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save Thumbnail") { save() }
+                Button("Save") { save() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .disabled(working != nil || sources == nil || design.problem != nil)
@@ -75,8 +90,181 @@ struct ThumbnailMakerSheet: View {
             }
             .padding(14)
         }
-        .frame(width: 1060, height: 720)
+        .frame(width: 1200, height: 720)
         .task(id: design.time) { await loadFrame() }
+        .task(id: CheckInput(design: design, frame: loadedTime)) { await runCheck() }
+    }
+
+    // MARK: - On a phone
+
+    /// The checked picture at the phone's sizes, with the title and channel as YouTube's
+    /// app shows them beside it.
+    private var phoneViews: some View {
+        let title = publish.title.isEmpty ? "Your title" : publish.title
+        let channel = publish.channel.isEmpty ? "Your channel" : publish.channel
+        return HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                phoneThumbnail(.homeFeed)
+                HStack(alignment: .top, spacing: 10) {
+                    Circle().fill(Color.accentColor.opacity(0.85)).frame(width: 34, height: 34)
+                        .overlay(Text(String(channel.prefix(1)).uppercased()).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.system(size: 15, weight: .medium)).lineLimit(2)
+                        Text("\(channel) · 0 views · just now").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                phoneSizeLabel(.homeFeed)
+            }
+            .frame(width: PhoneSize.homeFeed.width)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    phoneThumbnail(.searchList)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.system(size: 14, weight: .medium)).lineLimit(3)
+                        Text("\(channel) · 0 views").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                phoneSizeLabel(.searchList)
+            }
+            .frame(width: PhoneSize.homeFeed.width, alignment: .leading)
+        }
+    }
+
+    private func phoneThumbnail(_ size: PhoneSize) -> some View {
+        ZStack {
+            Rectangle().fill(Color.black)
+            if let checked {
+                Image(decorative: checked, scale: 1).resizable().interpolation(.high)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .overlay(alignment: .bottomTrailing) {
+            Text(PublishInfo.timestamp(item.editedDuration)).font(.system(size: size == .homeFeed ? 12 : 10, weight: .semibold))
+                .foregroundStyle(.white).padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
+                .padding(size == .homeFeed ? 6 : 4)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: size == .homeFeed ? 12 : 8))
+        .accessibilityElement()
+        .accessibilityLabel("The thumbnail in the \(size.label.lowercased())")
+    }
+
+    private func phoneSizeLabel(_ size: PhoneSize) -> some View {
+        Text("\(size.label), \(Int(size.width)) × \(Int(size.height)) pt").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .help("The size on an iPhone. Hold the Mac at arm's length to see it about as a phone shows it."
+                  + (size == .searchList ? " Up next, the history and playlists use this size too." : ""))
+    }
+
+    /// What does not read on a phone in 0.5 s, worst first.
+    private var checkPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Phone check").font(.headline)
+                if checking { ProgressView().controlSize(.small) }
+                Spacer()
+                if let check { counts(check.findings) }
+            }
+            if sources != nil, sources?.cutout == nil, design.cutout {
+                Label("No speaker found in this frame.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+            if let checkProblem {
+                Label(checkProblem, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 7) {
+                    if let check {
+                        if check.reads {
+                            Text("Reads at a glance on a phone.").font(.callout).foregroundStyle(.secondary)
+                        }
+                        ForEach(check.findings) { finding in findingRow(finding) }
+                    } else if design.problem == nil {
+                        Text("Checking…").font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// How many findings fail and how many are weak, as icons with numbers.
+    private func counts(_ findings: [PhoneCheck.Finding]) -> some View {
+        let fails = findings.filter { $0.level == .fails }.count, weak = findings.count - fails
+        return HStack(spacing: 10) {
+            if findings.isEmpty {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+            if fails > 0 { Label("\(fails)", systemImage: "xmark.octagon.fill").foregroundStyle(.red) }
+            if weak > 0 { Label("\(weak)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+        }
+        .font(.caption.weight(.semibold).monospacedDigit())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(findings.isEmpty ? "Reads at a glance" : "\(fails) do not work, \(weak) to look at")
+    }
+
+    /// One short line; the advice shows on hover, and under the line after a click.
+    private func findingRow(_ finding: PhoneCheck.Finding) -> some View {
+        let open = opened.contains(finding.id)
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: finding.level == .fails ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(finding.level == .fails ? Color.red : Color.orange)
+                Text(finding.summary).font(.callout).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            if open {
+                Text(finding.message).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.leading, 24)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if open { opened.remove(finding.id) } else { opened.insert(finding.id) } }
+        .help(finding.message)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint(finding.message)
+    }
+
+    /// Checks the design about 0.7 s after the last change: drawn offscreen once as it is
+    /// and once with the title's letters marked, with Apple Vision's face and picture words
+    /// kept between runs.
+    private func runCheck() async {
+        guard let sources, loadedTime != nil, design.problem == nil else { return }
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard !Task.isCancelled else { return }
+        checkRun += 1
+        let run = checkRun
+        checking = true
+        defer { if run == checkRun { checking = false } }
+        let chosen = design, frame = sources.frame
+        let face: CGRect?
+        if let found = faceFound, found.frame === frame { face = found.face } else {
+            face = await Task.detached(priority: .userInitiated) { PhoneCheck.face(in: frame) }.value
+            faceFound = (frame, face)
+        }
+        var words: [(text: String, box: CGRect)] = []
+        if let url = chosen.image {
+            if let found = pictureWords, found.url == url { words = found.words } else {
+                words = await Task.detached(priority: .userInitiated) { PhoneCheck.words(in: url) }.value
+                pictureWords = (url, words)
+            }
+        }
+        do {
+            let drawn = try await ThumbnailMaker.measure(chosen, sources: sources, accent: accent)
+            guard !Task.isCancelled else { return }
+            check = PhoneCheck.make(layout: drawn.layout, image: drawn.image, letters: drawn.letters, face: face,
+                                    frameWidth: frame.width, pictureWords: words)
+            checked = drawn.image
+            checkProblem = nil
+        } catch {
+            if !Task.isCancelled { checkProblem = "The phone check could not run: \(error.localizedDescription)" }
+        }
     }
 
     @ViewBuilder private func preview(width: CGFloat) -> some View {
@@ -105,8 +293,9 @@ struct ThumbnailMakerSheet: View {
                     EmptyView()
                 }
                 .accessibilityLabel("Frame time")
-                Text("Pick a moment with a clear face; the speaker is cut out with Apple Vision. With a screen recording, the speaker's own picture is used at every moment.")
+                Text("Pick a frame with a clear face.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .help("Apple Vision cuts the speaker out. With a screen recording, the speaker's own picture is used at every moment.")
                 HStack {
                     Button(suggesting == nil ? "Suggest Frames" : "Stop") { suggesting == nil ? suggestFrames() : suggesting?.cancel() }
                         .controlSize(.small)
@@ -122,17 +311,20 @@ struct ThumbnailMakerSheet: View {
             InspectorSection("Title") {
                 TextField("Big words, three lines at most", text: $design.title, axis: .vertical)
                     .lineLimit(1...3).textFieldStyle(.roundedBorder)
-                Text("Put words between asterisks to colour them: Edit for the *viewer*.")
+                Text("Put *asterisks* round words to colour them.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Toggle("Highlight the coloured words", isOn: $design.highlight)
+                Toggle("Highlight", isOn: $design.highlight)
+                    .help("The coloured words get a band of the accent colour, in dark text")
                 TextField("Tag, like NEW or 3 RULES", text: $design.tag).textFieldStyle(.roundedBorder)
                 ColorPicker("Accent", selection: Binding(
                     get: { Color(nsColor: NSColor(hex: design.accent ?? accent) ?? .systemYellow) },
                     set: { design.accent = NSColor($0).hexString }), supportsOpacity: false)
             }
             InspectorSection("Speaker") {
-                Toggle("Cut the speaker out", isOn: $design.cutout)
-                Toggle("White outline", isOn: $design.outline).disabled(!design.cutout)
+                Toggle("Cut-out", isOn: $design.cutout)
+                    .help("Apple Vision cuts the speaker out, so the background can change behind them")
+                Toggle("Outline", isOn: $design.outline).disabled(!design.cutout)
+                    .help("A white outline round the cut-out speaker")
                 HStack {
                     Text("Width").font(.caption).foregroundStyle(.secondary)
                     Slider(value: $design.outlineWidth, in: ThumbnailDesign.outlineWidths, step: 1).disabled(!design.cutout || !design.outline)
@@ -149,9 +341,11 @@ struct ThumbnailMakerSheet: View {
                     ForEach(ThumbnailDesign.Place.allCases) { Text($0.label).tag($0) }
                 }
                 .disabled(!design.cutout)
+                .help("Clear: the speaker moves away from the title and the picture, so nothing overlaps")
                 if design.place == .clear {
-                    Text("The speaker moves to the far side, and gets smaller if necessary, so the title and the picture do not overlap them. Use Plain, White or White frost behind: the other backgrounds show the speaker in the old place.")
+                    Text("Use Plain, White or White frost behind.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .help("The speaker moves to the far side, and gets smaller if necessary, so the title and the picture do not overlap them. The other backgrounds show the speaker in the old place.")
                 }
                 Picker("Behind", selection: $design.background) {
                     ForEach(ThumbnailDesign.Background.allCases) { Text($0.label).tag($0) }
@@ -159,8 +353,9 @@ struct ThumbnailMakerSheet: View {
                 Picker("Title side", selection: $design.side) {
                     ForEach(ThumbnailDesign.Side.allCases) { Text($0.label).tag($0) }
                 }
+                .help("Auto: the side away from the speaker")
             }
-            InspectorSection("Picture beside the title") {
+            InspectorSection("Picture") {
                 HStack {
                     Text(design.image?.lastPathComponent ?? "None").font(.caption).lineLimit(1).truncationMode(.middle)
                     Spacer()
@@ -173,7 +368,8 @@ struct ThumbnailMakerSheet: View {
                         .accessibilityLabel("Picture size")
                     Text("\(Int((design.imageSize * 100).rounded())) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                Text("A product photo or an icon; a transparent PNG looks best. A larger picture makes the title smaller.")
+                Text("A transparent PNG looks best.")
+                    .help("A product photo or an icon beside the title. A larger picture makes the title smaller.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let issue = design.problem {

@@ -35,6 +35,11 @@ struct ContentView: View {
         .sheet(isPresented: $publishing) { PublishSheet().environmentObject(model) }
         .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
         .sheet(isPresented: $model.showingAutoEdit) { AutoEditSheet().environmentObject(model) }
+        .sheet(isPresented: $model.showingThumbnailMaker) {
+            if let item = model.selectedItem {
+                ThumbnailMakerSheet(item: item, playhead: model.previewTime).environmentObject(model)
+            }
+        }
         .sheet(isPresented: Binding(get: { model.libraryScan != nil }, set: { if !$0 { model.libraryScan = nil } })) {
             PastVideosSheet().environmentObject(model)
         }

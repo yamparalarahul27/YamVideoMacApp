@@ -138,6 +138,181 @@ import Foundation
           "with the white frost, the speaker and their frame move to the far side, and the title is dark on a white shade",
           "shade \(frostShade), frame \(frostFrame), red \(redShare(frostThumb, xs: 700..<1240)) / \(redShare(frostThumb, xs: 40..<640))")
 
+    print("\nPhone check")
+    check(PhoneSize.homeFeed.points(1920) == 390 && Int(PhoneSize.searchList.height) == 94
+              && Int(PhoneSize.searchList.pixels(PhoneCheck.letterLimits.smallest).rounded(.up)) == 103,
+          "the phone sizes turn design pixels into points, and back")
+    let yellow = Contrast.luminance(hex: "#F5C42C")!
+    check(abs(Contrast.ratio(1, 0) - 21) < 0.01 && Contrast.ratio(yellow, 1) < 2 && Contrast.ratio(Contrast.luminance(hex: "#121417")!, yellow) > 9,
+          "contrast as WCAG measures it: yellow on white is low, dark on yellow is high",
+          String(format: "%.2f, %.2f", Contrast.ratio(yellow, 1), Contrast.ratio(Contrast.luminance(hex: "#121417")!, yellow)))
+    let darkBehind = [Float](repeating: 0.02, count: 100)
+    let busyBehind = [Float](repeating: 0.02, count: 70) + [Float](repeating: 0.9, count: 30)
+    check(Contrast.ratio(text: 1, behind: darkBehind)! > 15 && Contrast.ratio(text: 1, behind: busyBehind)! < 1.2
+              && Contrast.ratio(text: 0.005, behind: busyBehind)! > 1 && Contrast.ratio(text: 1, behind: []) == nil,
+          "light words take the brightest part behind them, so a busy background counts against them")
+    check(Contrast.split([Float](repeating: 0, count: 50) + [Float](repeating: 1, count: 20))! > 15
+              && Contrast.split([Float](repeating: 0.5, count: 30) + [Float](repeating: 0.55, count: 30))! < 1.3,
+          "words of unknown colour: two groups of pixels and their contrast")
+    let halves = LuminanceMap(CGImage.blank(width: 1280, height: 720).drawn { context in
+        context.setFillColor(CGColor(gray: 0, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 640, height: 720))
+        context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(CGRect(x: 640, y: 0, width: 640, height: 720))
+    })
+    let leftSamples = halves.samples(in: CGRect(x: 100, y: 100, width: 600, height: 400))
+    let rightSamples = halves.samples(in: CGRect(x: 1100, y: 100, width: 600, height: 400))
+    check(leftSamples.count > 1000 && leftSamples.allSatisfy { $0 < 0.01 } && rightSamples.allSatisfy { $0 > 0.99 },
+          "a picture's luminance is sampled in design pixels", "\(leftSamples.count) \(leftSamples.max() ?? -1) \(rightSamples.min() ?? -1)")
+    let magentaSquare = CGImage.blank(width: 1280, height: 720).drawn { context in
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 1, alpha: 1)); context.fill(CGRect(x: 200, y: 200, width: 100, height: 100))
+    }
+    let squareMask = LetterMask(magentaSquare)
+    let squareSamples = halves.samples(in: CGRect(x: 0, y: 0, width: 960, height: 1080), outside: squareMask)
+    check(squareMask.values.filter { $0 }.count == 52 * 52 && !squareMask.values[0]
+              && squareSamples.count == 320 * 360 - 52 * 52,
+          "the letters' mask marks magenta and the pixels round it, and samples leave them out",
+          "\(squareMask.values.filter { $0 }.count) \(squareSamples.count)")
+    check(PhoneCheck.wordCount(in: "Edit for the *viewer*") == 4 && PhoneCheck.wordCount(in: "3 RULES") == 2
+              && PhoneCheck.wordCount(in: "SYSTEM\u{00A0}DESIGN — 2") == 3,
+          "words are counted without asterisks and dashes")
+    let moved = ThumbnailLayout.Move(scale: 0.5, shift: -100, originX: 1000, originY: 1000).apply(CGRect(x: 0, y: 0, width: 100, height: 100))
+    equal(moved, CGRect(x: 400, y: 500, width: 50, height: 50), "the speaker's move scales about its origin, then shifts")
+
+    func phoneLayout(title: String = "Edit for the", accent: String = "viewer", size: Double = 170, band: String? = nil) -> ThumbnailLayout {
+        let box = ThumbnailLayout.Box(CGRect(x: 1000, y: 300, width: 700, height: size))
+        return ThumbnailLayout(titleSize: size, runs: [
+            ThumbnailLayout.Run(kind: .title, text: title, boxes: [box], size: size, color: "#FFFFFF", background: nil),
+            ThumbnailLayout.Run(kind: .accent, text: accent, boxes: [box], size: size, color: "#F5C42C", background: band)],
+                               picture: nil, speaker: nil)
+    }
+    let bigFace = CGRect(x: 200, y: 100, width: 300, height: 400)
+    let readable = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 9], face: bigFace)
+    check(readable.reads && readable.words == 4 && readable.titleSize == 170, "big words, few of them, a big face: it reads", "\(readable.findings)")
+    let smallTitle = PhoneCheck.make(layout: phoneLayout(size: 80), contrasts: [12, 9], face: bigFace)
+    check(smallTitle.findings.count == 1 && smallTitle.findings[0].kind == .textSize && smallTitle.findings[0].level == .fails
+              && smallTitle.findings[0].sizes == [.searchList] && smallTitle.findings[0].message.contains("103 px"),
+          "a title of 80 px does not read in the search list, and the check says the size it needs", "\(smallTitle.findings)")
+    let weakTitle = PhoneCheck.make(layout: phoneLayout(size: 110), contrasts: [12, 9], face: bigFace)
+    check(weakTitle.findings.map(\.level) == [.weak] && weakTitle.findings[0].sizes == [.searchList],
+          "a title of 110 px is weak in the search list only", "\(weakTitle.findings)")
+    let tinyTitle = PhoneCheck.make(layout: phoneLayout(size: 30), contrasts: [12, 9], face: bigFace)
+    check(tinyTitle.findings.count == 1 && tinyTitle.findings[0].sizes == PhoneSize.allCases && tinyTitle.findings[0].message.contains("search list"),
+          "a problem at both sizes is one finding, with the smaller size's numbers", "\(tinyTitle.findings)")
+    var tagged = phoneLayout()
+    tagged.runs.insert(ThumbnailLayout.Run(kind: .tag, text: "3 RULES", boxes: [ThumbnailLayout.Box(CGRect(x: 1000, y: 200, width: 200, height: 70))],
+                                           size: 46, color: "#121417", background: "#F5C42C"), at: 0)
+    let taggedCheck = PhoneCheck.make(layout: tagged, contrasts: [11, 12, 9], face: bigFace)
+    check(taggedCheck.findings.count == 2 && taggedCheck.findings[0].kind == .textSize && taggedCheck.findings[0].level == .weak
+              && taggedCheck.findings[0].sizes == PhoneSize.allCases && taggedCheck.findings[0].message.contains("fixed size")
+              && taggedCheck.findings[0].message.contains("“3 RULES” is 4 pt") && taggedCheck.findings[1].kind == .words,
+          "the tag is a small label of fixed size: too small is weak, with advice to keep the words in the title", "\(taggedCheck.findings)")
+    let wordy = PhoneCheck.make(layout: phoneLayout(title: "How I edit my talking head videos on a", accent: "Mac"), contrasts: [12, 9], face: bigFace)
+    let someWords = PhoneCheck.make(layout: phoneLayout(title: "How I edit my", accent: "videos now"), contrasts: [12, 9], face: bigFace)
+    check(wordy.findings.map(\.kind) == [.words] && wordy.findings[0].level == .fails && wordy.words == 10
+              && someWords.findings.map(\.level) == [.weak] && someWords.words == 6,
+          "more than 8 words do not read in 0.5 s, and 6 to 8 are weak", "\(wordy.findings) \(someWords.findings)")
+    let yellowOnWhite = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 1.6], face: bigFace)
+    let lowTitle = PhoneCheck.make(layout: phoneLayout(), contrasts: [3.6, 9], face: bigFace)
+    check(yellowOnWhite.findings.count == 1 && yellowOnWhite.findings[0].kind == .contrast && yellowOnWhite.findings[0].level == .fails
+              && yellowOnWhite.findings[0].message.contains("“viewer”") && yellowOnWhite.findings[0].message.contains("Highlight")
+              && lowTitle.findings.map(\.level) == [.weak],
+          "coloured words with low contrast do not read, and the check says to turn on Highlight", "\(yellowOnWhite.findings)")
+    let banded = PhoneCheck.make(layout: phoneLayout(band: "#F5C42C"), contrasts: [12, 1.6], face: bigFace)
+    check(banded.findings.first?.message.contains("another accent colour") == true, "words on a band of low contrast need another accent", "\(banded.findings)")
+    let smallFace = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 9], face: CGRect(x: 0, y: 0, width: 120, height: 150))
+    let weakFace = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 9], face: CGRect(x: 0, y: 0, width: 160, height: 200))
+    let noFace = PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 9], face: nil)
+    check(smallFace.findings.map(\.level) == [.fails] && smallFace.findings[0].sizes == [.searchList]
+              && weakFace.findings.map(\.level) == [.weak] && noFace.findings.map(\.kind) == [.face] && noFace.findings[0].level == .weak,
+          "a face of 150 px does not read in the search list, 200 px is weak, and no face is weak",
+          "\(smallFace.findings) \(weakFace.findings) \(noFace.findings)")
+    let allFindings = [smallTitle, weakTitle, tinyTitle, taggedCheck, wordy, someWords, yellowOnWhite, lowTitle, banded, smallFace, weakFace, noFace]
+        .flatMap(\.findings)
+    check(allFindings.allSatisfy { $0.summary.count <= 48 && !$0.summary.isEmpty && $0.message.count > $0.summary.count }
+              && smallTitle.findings[0].summary == "Title too small: 7 pt in the search list"
+              && yellowOnWhite.findings[0].summary == "Low contrast: “viewer” 1.6:1" && taggedCheck.findings[0].summary == "Tag too small: 4 pt in the search list",
+          "each finding has one short line for the maker, and the full advice", "\(allFindings.map(\.summary))")
+    let mixed = PhoneCheck.make(layout: phoneLayout(size: 110), contrasts: [12, 1.6], face: nil)
+    check(mixed.findings.map(\.level) == [.fails, .weak, .weak] && mixed.findings.map(\.kind) == [.contrast, .textSize, .face],
+          "the findings come worst first", "\(mixed.findings.map { "\($0.level) \($0.kind)" })")
+
+    // The drawn design: the page measures its words, and a second picture leaves them out.
+    var phoneDesign = thumbnailDesign
+    phoneDesign.background = .solid
+    let measured = try await ThumbnailMaker.measure(phoneDesign, sources: subjectSources, accent: "#F5C42C")
+    let runKinds = measured.layout.runs.map(\.kind)
+    let accentRun = measured.layout.runs.first { $0.kind == .accent }
+    check(runKinds == [.tag, .title, .accent] && (56...170).contains(measured.layout.titleSize)
+              && accentRun?.color == "#F5C42C" && accentRun?.background == nil && accentRun?.text == "viewer"
+              && measured.layout.runs[0].background == "#F5C42C" && measured.layout.runs[1].color == "#FFFFFF"
+              && measured.layout.runs.allSatisfy { !$0.boxes.isEmpty && $0.boxes.allSatisfy { $0.x > 960 } },
+          "the page gives each run of words with its boxes, size and colours", "\(measured.layout)")
+    let titleMask = LetterMask(measured.letters)
+    let maskedTitle = titleMask.values.enumerated().filter { $0.element }.map { $0.offset % titleMask.width }
+    check(measured.image.width == 1280 && maskedTitle.count > 800 && maskedTitle.allSatisfy { $0 > 320 }
+              && LetterMask(measured.image).values.filter { $0 }.isEmpty,
+          "the letters picture marks the title's letters, on the title's side, and the thumbnail has no magenta",
+          "\(maskedTitle.count) \(maskedTitle.min() ?? -1)")
+    let drawnCheck = PhoneCheck.make(layout: measured.layout, image: measured.image, letters: measured.letters, face: nil, frameWidth: 1280, pictureWords: [])
+    check(!drawnCheck.findings.contains { $0.kind == .contrast } && drawnCheck.findings.contains { $0.kind == .face } && drawnCheck.words == 6,
+          "white and yellow words on the dark plain background read; the frame has no face", "\(drawnCheck.findings)")
+    var phoneWhite = phoneDesign; phoneWhite.background = .white; phoneWhite.side = .left; phoneWhite.place = .clear
+    let whiteMeasured = try await ThumbnailMaker.measure(phoneWhite, sources: subjectSources, accent: "#F5C42C")
+    let whiteCheck = PhoneCheck.make(layout: whiteMeasured.layout, image: whiteMeasured.image, letters: whiteMeasured.letters,
+                                     face: CGRect(x: 360, y: 60, width: 120, height: 150), frameWidth: 1280, pictureWords: [])
+    let speakerMove = whiteMeasured.layout.speaker
+    check(whiteCheck.findings.contains { $0.kind == .contrast && $0.level == .fails && $0.message.contains("“viewer”") }
+              && !whiteCheck.findings.contains { $0.kind == .contrast && $0.message.contains("title words") },
+          "yellow words on white do not read; the dark title words do", "\(whiteCheck.findings)")
+    check(speakerMove.map { $0.shift > 100 && $0.scale <= 1 } == true
+              && whiteCheck.face.map { abs($0.minX - (speakerMove!.originX + (540 - speakerMove!.originX) * speakerMove!.scale + speakerMove!.shift)) < 0.5 } == true,
+          "the face moves with the speaker, in design pixels", "\(String(describing: speakerMove)) \(String(describing: whiteCheck.face))")
+    check(whiteMeasured.layout.frame == false && measured.layout.frame == false, "the page says when the frame does not show")
+    var phoneFrameOnly = phoneWhite; phoneFrameOnly.cutout = false
+    let frameOnly = try await ThumbnailMaker.measure(phoneFrameOnly, sources: subjectSources, accent: "#F5C42C")
+    let hiddenFace = PhoneCheck.make(layout: frameOnly.layout, image: frameOnly.image, letters: frameOnly.letters,
+                                     face: CGRect(x: 360, y: 60, width: 120, height: 150), frameWidth: 1280, pictureWords: [])
+    var phoneDim = phoneFrameOnly; phoneDim.background = .dim
+    let dimFrame = try await ThumbnailMaker.measure(phoneDim, sources: subjectSources, accent: "#F5C42C")
+    let dimFace = PhoneCheck.make(layout: dimFrame.layout, image: dimFrame.image, letters: dimFrame.letters,
+                                  face: CGRect(x: 360, y: 60, width: 120, height: 150), frameWidth: 1280, pictureWords: [])
+    check(frameOnly.layout.speaker == nil && hiddenFace.face == nil && hiddenFace.findings.contains { $0.message.hasPrefix("The face does not show") }
+              && dimFrame.layout.frame && dimFace.face == CGRect(x: 540, y: 90, width: 180, height: 225),
+          "without the cut-out, a white background hides the face; a darker frame shows it where it is",
+          "\(hiddenFace.findings) \(String(describing: dimFace.face))")
+    var phoneMarked = phoneWhite; phoneMarked.highlight = true
+    let markedMeasured = try await ThumbnailMaker.measure(phoneMarked, sources: subjectSources, accent: "#F5C42C")
+    let markedCheck = PhoneCheck.make(layout: markedMeasured.layout, image: markedMeasured.image, letters: markedMeasured.letters,
+                                      face: nil, frameWidth: 1280, pictureWords: [])
+    check(markedMeasured.layout.runs.first { $0.kind == .accent }?.background == "#F5C42C" && !markedCheck.findings.contains { $0.kind == .contrast },
+          "with Highlight the yellow band gives the dark words their contrast", "\(markedCheck.findings)")
+
+    // Words in the picture beside the title, read with Apple Vision.
+    let wordsPicture = FileManager.default.temporaryDirectory.appendingPathComponent("thumb-words-\(UUID().uuidString).png")
+    let wordsImage = CGImage.blank(width: 800, height: 300).drawn { context in
+        context.setFillColor(CGColor(gray: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 800, height: 300))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        ("BUILT IN A WEEK" as NSString).draw(at: CGPoint(x: 40, y: 110), withAttributes: [.font: NSFont.systemFont(ofSize: 80, weight: .bold),
+                                                                                       .foregroundColor: NSColor.black])
+        NSGraphicsContext.restoreGraphicsState()
+    }
+    try NSBitmapImageRep(cgImage: wordsImage).representation(using: .png, properties: [:])!.write(to: wordsPicture)
+    defer { try? FileManager.default.removeItem(at: wordsPicture) }
+    let readWords = PhoneCheck.words(in: wordsPicture)
+    check(readWords.count == 1 && readWords[0].text.uppercased() == "BUILT IN A WEEK" && readWords[0].box.minY > 0.3 && readWords[0].box.maxY < 0.75,
+          "Apple Vision reads the words in the picture and where they are", "\(readWords)")
+    var phonePictured = phoneDesign; phonePictured.image = wordsPicture
+    let picturedMeasured = try await ThumbnailMaker.measure(phonePictured, sources: subjectSources, accent: "#F5C42C")
+    let picturedCheck = PhoneCheck.make(layout: picturedMeasured.layout, image: picturedMeasured.image, letters: picturedMeasured.letters,
+                                        face: nil, frameWidth: 1280, pictureWords: readWords)
+    check(picturedMeasured.layout.picture != nil && picturedCheck.words == 10
+              && picturedCheck.findings.contains { $0.kind == .textSize && $0.message.contains("in the picture") }
+              && !picturedCheck.findings.contains { $0.kind == .contrast },
+          "the picture's words count, and their size is checked; black on white reads", "\(picturedCheck.findings)")
+    let phoneSheet = PhoneCheck.phonePicture(measured.image)
+    check(phoneSheet.map { $0.width == 2 * (16 * 3 + 390 + 168) && $0.height > 2 * 219 } == true, "a picture of both phone sizes, at 2 pixels for each point",
+          "\(String(describing: phoneSheet?.width)) × \(String(describing: phoneSheet?.height))")
+
     print("\nThumbnails in projects and for agents")
     var subjectItem = subject.item
     let thumbnailer = AppModel(recoveryURL: nil)
@@ -157,6 +332,16 @@ import Foundation
     check(frostSaved == frostProject && frostSaved.version >= 17 && (try? frostSaved.validate()) != nil && (try? frostAsSixteen.validate()) == nil,
           "the frost and the picture size survive a version 17 round trip, and a version 16 file with them is refused")
 
+    thumbnailer.selection = subjectItem.id
+    thumbnailer.showModule(.library)
+    check(thumbnailer.openThumbnailMaker() && thumbnailer.showingThumbnailMaker && thumbnailer.module == .studio,
+          "Make Thumbnail… opens the maker for the selected recording, from any page, on the Studio page")
+    thumbnailer.showingThumbnailMaker = false
+    thumbnailer.setMovieMode(true)
+    check(!thumbnailer.canMakeThumbnail && !thumbnailer.openThumbnailMaker() && !thumbnailer.showingThumbnailMaker
+              && thumbnailer.statusMessage == "Make Thumbnail works in Recording mode.",
+          "in Movie mode it does not open, and says why")
+    thumbnailer.setMovieMode(false)
     var designPatch = address(thumbnailer)
     designPatch["method"] = "apply"; designPatch["requestID"] = "design-1"; designPatch["client"] = "Claude"
     designPatch["commands"] = [["type": "setPublishInfo", "clipID": subjectItem.id.uuidString, "publish": ["design": ["tag": "New", "zoom": 1.2, "place": "clear"]]]]
@@ -172,6 +357,15 @@ import Foundation
               && (tried["design"] as? [String: Any])?["background"] as? String == "solid" && tried["savedPath"] == nil
               && thumbnailer.items[0].publish?.design?.background == .dim,
           "an agent tries a design and looks at it without changing anything", "\(tried)")
+    tryDesign["check"] = true
+    let triedCheck = agentResult(await agentCall(thumbnailer, tryDesign))
+    let phoneReport = triedCheck["check"] as? [String: Any] ?? [:]
+    let phoneFindings = phoneReport["findings"] as? [[String: Any]] ?? []
+    check(FileManager.default.fileExists(atPath: triedCheck["path"] as? String ?? "") && phoneReport["reads"] as? Bool == false
+              && phoneFindings.contains { $0["kind"] as? String == "face" && ($0["sizes"] as? [String])?.count == 2 && $0["level"] as? String == "weak" }
+              && (phoneReport["titleSize"] as? Double ?? 0) >= 56 && FileManager.default.fileExists(atPath: phoneReport["phone"] as? String ?? ""),
+          "with check, an agent gets the phone check and a picture of both phone sizes", "\(phoneReport)")
+    tryDesign["check"] = nil
     tryDesign["design"] = nil; tryDesign["save"] = true
     let savedThumb = agentResult(await agentCall(thumbnailer, tryDesign))
     let savedThumbPath = savedThumb["savedPath"] as? String ?? ""
@@ -245,6 +439,9 @@ import Foundation
           "the catalog sends agents to the manual first")
     check(manualCatalog.methods.first { $0.method == "analyze" }.map { "\($0)".contains("thumbnailFrames") } == true,
           "the catalog lists thumbnailFrames")
+    check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("\"check\"") && "\($0)".contains("homeFeed") } == true
+              && manualText.contains("check: true"),
+          "the catalog and the manual give the phone check")
     check(AgentsManual.brief(ctl: "/x/yamvideoctl").contains("/x/yamvideoctl manual") && AgentsManual.brief(ctl: nil).contains("yamvideo_manual"),
           "the brief for an agent names how to read the manual")
 
