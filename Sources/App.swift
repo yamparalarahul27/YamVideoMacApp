@@ -163,6 +163,9 @@ struct YamVideoApp: App {
             CommandMenu("Go") {
                 Button("Library") { model.showModule(.library) }.keyboardShortcut("1")
                 Button("Studio") { model.showModule(.studio) }.keyboardShortcut("2")
+                Button("Make Thumbnail…") { model.openThumbnailMaker() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(!model.canMakeThumbnail)
                 Button("Calendar") { model.showModule(.calendar) }.keyboardShortcut("4")
                 Divider()
                 Button("Style…") { model.showingStyle = true }.keyboardShortcut("3")
@@ -195,9 +198,6 @@ struct YamVideoApp: App {
                 Button("Auto Edit…") { model.showingAutoEdit = true }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                 }.disabled(model.module != .studio || model.selectedItem?.info == nil || model.isConverting || model.isMovieMode)
-                Button("Make Thumbnail…") { model.openThumbnailMaker() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-                    .disabled(!model.canMakeThumbnail)
             }
             CommandGroup(after: .newItem) {
                 Button("Add Videos…") { model.promptForFiles() }

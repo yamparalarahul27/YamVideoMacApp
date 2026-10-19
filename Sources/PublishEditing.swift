@@ -147,7 +147,8 @@ extension AppModel {
     var canMakeThumbnail: Bool { selectedItem?.info != nil && !isMovieMode && !isConverting }
 
     /// Opens the thumbnail maker for the selected recording without the Publish window
-    /// (Make Thumbnail…, ⇧⌘T), on the Studio page. False when it cannot open.
+    /// (Thumbnail under Studio in the left bar, or Make Thumbnail…, ⇧⌘T), on the Studio
+    /// page. False when it cannot open.
     @discardableResult
     func openThumbnailMaker() -> Bool {
         guard canMakeThumbnail else {

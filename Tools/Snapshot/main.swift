@@ -47,9 +47,12 @@ func hostingViews(in view: NSView) -> [NSView] {
 /// The thumbnail maker: the first render cuts the speaker out, the second shows it with
 /// the phone check, then the same in the Phone view. Its live preview is a web view, which this
 /// tool cannot capture in a sheet of its own; the phone views are pictures, so they show.
-/// YAMVIDEO_SNAPSHOT_ONLY=thumbnail renders only these.
+/// YAMVIDEO_SNAPSHOT_ONLY=thumbnail renders only these, after the Studio with Thumbnail
+/// under Studio in the left bar.
 @MainActor
 func thumbnailMaker(_ model: AppModel, output: URL) async {
+    await render(ContentView().environmentObject(model).frame(width: 1360, height: 880), size: CGSize(width: 1360, height: 880),
+           to: output.appendingPathComponent("5h-thumbnail-in-studio.png"))
     var made = model.items[0]
     var publish = made.publish ?? PublishInfo()
     if publish.title.isEmpty { publish.title = "How I edit talking-head videos on a Mac" }
