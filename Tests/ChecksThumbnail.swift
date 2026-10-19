@@ -172,8 +172,8 @@ import Foundation
           "the letters' mask marks magenta and the pixels round it, and samples leave them out",
           "\(squareMask.values.filter { $0 }.count) \(squareSamples.count)")
     check(PhoneCheck.wordCount(in: "Edit for the *viewer*") == 4 && PhoneCheck.wordCount(in: "3 RULES") == 2
-              && PhoneCheck.wordCount(in: "SYSTEM\u{00A0}DESIGN — 2") == 3,
-          "words are counted without asterisks and dashes")
+              && PhoneCheck.wordCount(in: "SYSTEM\u{00A0}DESIGN — 2") == 3 && PhoneCheck.wordCount(in: "g Figma I built a 3") == 5,
+          "words are counted without asterisks, dashes and single letters (a logo read as a letter)")
     let moved = ThumbnailLayout.Move(scale: 0.5, shift: -100, originX: 1000, originY: 1000).apply(CGRect(x: 0, y: 0, width: 100, height: 100))
     equal(moved, CGRect(x: 400, y: 500, width: 50, height: 50), "the speaker's move scales about its origin, then shifts")
 
@@ -313,6 +313,44 @@ import Foundation
     check(phoneSheet.map { $0.width == 2 * (16 * 3 + 390 + 168) && $0.height > 2 * 219 } == true, "a picture of both phone sizes, at 2 pixels for each point",
           "\(String(describing: phoneSheet?.width)) × \(String(describing: phoneSheet?.height))")
 
+    print("\nInformation gap")
+    check(InformationGap.tokens("Designers’ stories, Rahul's GLASS").map(\.stem) == ["designer", "story", "rahul", "glass"]
+              && InformationGap.tokens("*10× FASTER*").map(\.text) == ["10", "FASTER"],
+          "words are compared without case, plurals, possessives and asterisks")
+    let agentuxGap = InformationGap.make(thumbnail: ["DESIGN ENGINEERING", "*SYSTEM\u{00A0}DESIGN*\nFOR\u{00A0}DESIGNERS",
+                                                     "HOW I BUILT MY OWN Supabase Claude Figma"],
+                                         title: "System design for designers: how I built my own Mobbin (Part 1)")
+    check(agentuxGap.phrases == ["System design for designers", "how I built my own"] && agentuxGap.repeated == ["design", "System", "designers", "built"]
+              && agentuxGap.added == ["ENGINEERING", "Supabase", "Claude", "Figma"] && agentuxGap.overlap == 0.5
+              && agentuxGap.finding?.level == .weak && agentuxGap.finding?.kind == .title && agentuxGap.finding?.sizes == []
+              && agentuxGap.finding?.message.contains("“System design for designers”") == true,
+          "the AgentUX thumbnail repeats two phrases of its title (a run stops at the colon), and adds four words",
+          "\(agentuxGap)")
+    check(agentuxGap.finding?.summary == "Repeats the video title: “System design for…”", "the gap's short line cuts the phrase after a whole word",
+          agentuxGap.finding?.summary ?? "none")
+    let onlyRepeats = InformationGap.make(thumbnail: ["", "I REBUILT *MOBBIN*"], title: "I rebuilt Mobbin in a week")
+    let addsResult = InformationGap.make(thumbnail: ["", "*10× FASTER*"], title: "I rebuilt Mobbin in a week")
+    check(onlyRepeats.finding?.level == .fails && onlyRepeats.added.isEmpty && onlyRepeats.overlap == 1
+              && addsResult.finding == nil && addsResult.added == ["10", "FASTER"] && addsResult.repeated.isEmpty,
+          "a thumbnail that only repeats the title opens no question; a result the title does not give is fine")
+    let oneWord = InformationGap.make(thumbnail: ["", "Stories"], title: "Three stories about design")
+    let noTitle = InformationGap.make(thumbnail: ["", "Design systems"], title: "")
+    let smallOnly = InformationGap.make(thumbnail: ["", "How I did it"], title: "How I did it")
+    check(oneWord.finding?.level == .weak && noTitle.finding == nil && noTitle.added == ["Design", "systems"] && smallOnly.finding == nil,
+          "one repeated word is weak; with no title or only small words there is nothing to compare")
+    let splitTexts = InformationGap.make(thumbnail: ["SYSTEM", "DESIGN"], title: "System design")
+    check(splitTexts.phrases.isEmpty && splitTexts.finding?.level == .fails, "a run of shared words does not go from the tag to the title")
+    check(InformationGap.make(thumbnail: ["", "", "g Figma"], title: "Figma").added.isEmpty, "a single letter read in a logo is not a word the thumbnail adds")
+    let designGap = InformationGap.make(ThumbnailDesign(time: 0, title: "Edit for the *viewer*"), pictureWords: ["HOW I EDIT", "TALKING HEADS"],
+                                        title: "How I edit talking heads")
+    check(designGap.phrases == ["How I edit talking heads"] && designGap.added == ["viewer"],
+          "a design's words: its tag, its title and the picture's lines as one text", "\(designGap)")
+    let gapped = PhoneCheck.make(layout: phoneLayout(size: 110), contrasts: [12, 9], face: bigFace).adding(onlyRepeats)
+    check(gapped.findings.map(\.kind) == [.title, .textSize] && gapped.findings[0].level == .fails && !gapped.reads
+              && PhoneCheck.make(layout: phoneLayout(), contrasts: [12, 9], face: bigFace).adding(addsResult).reads,
+          "the title's finding joins the phone check's list, worst first")
+    check(picturedCheck.pictureWords.map { $0.uppercased() } == ["BUILT IN A WEEK"], "the check keeps the lines read in the picture")
+
     print("\nThumbnails in projects and for agents")
     var subjectItem = subject.item
     let thumbnailer = AppModel(recoveryURL: nil)
@@ -365,6 +403,19 @@ import Foundation
               && phoneFindings.contains { $0["kind"] as? String == "face" && ($0["sizes"] as? [String])?.count == 2 && $0["level"] as? String == "weak" }
               && (phoneReport["titleSize"] as? Double ?? 0) >= 56 && FileManager.default.fileExists(atPath: phoneReport["phone"] as? String ?? ""),
           "with check, an agent gets the phone check and a picture of both phone sizes", "\(phoneReport)")
+    let storedGap = phoneReport["gap"] as? [String: Any] ?? [:]
+    check(storedGap["title"] as? String == "Subject" && (storedGap["added"] as? [String])?.isEmpty == false
+              && !phoneFindings.contains { $0["kind"] as? String == "title" },
+          "the check compares the thumbnail's words with the stored video title", "\(storedGap)")
+    tryDesign["videoTitle"] = "A big title for new people"
+    let triedTitle = agentResult(await agentCall(thumbnailer, tryDesign))
+    let triedGap = (triedTitle["check"] as? [String: Any])?["gap"] as? [String: Any] ?? [:]
+    let triedFindings = (triedTitle["check"] as? [String: Any])?["findings"] as? [[String: Any]] ?? []
+    check(triedGap["title"] as? String == "A big title for new people" && (triedGap["phrases"] as? [String]) == ["big title"]
+              && triedFindings.contains { $0["kind"] as? String == "title" && $0["level"] as? String == "fails" && ($0["sizes"] as? [String])?.isEmpty == true }
+              && thumbnailer.items[0].publish?.title == "Subject",
+          "an agent tries a video title without storing it, and hears that the thumbnail only repeats it", "\(triedGap) \(triedFindings)")
+    tryDesign["videoTitle"] = nil
     tryDesign["check"] = nil
     tryDesign["design"] = nil; tryDesign["save"] = true
     let savedThumb = agentResult(await agentCall(thumbnailer, tryDesign))
@@ -442,6 +493,9 @@ import Foundation
     check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("\"check\"") && "\($0)".contains("homeFeed") } == true
               && manualText.contains("check: true"),
           "the catalog and the manual give the phone check")
+    check(manualCatalog.methods.first { $0.method == "thumbnail" }.map { "\($0)".contains("videoTitle") && "\($0)".contains("phrases") } == true
+              && manualText.contains("check.gap"),
+          "the catalog and the manual give the information gap")
     check(AgentsManual.brief(ctl: "/x/yamvideoctl").contains("/x/yamvideoctl manual") && AgentsManual.brief(ctl: nil).contains("yamvideo_manual"),
           "the brief for an agent names how to read the manual")
 
