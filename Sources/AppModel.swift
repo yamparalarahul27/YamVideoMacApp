@@ -105,6 +105,17 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(timelineSnapping, forKey: Self.snappingKey) }
     }
     static let snappingKey = "timelineSnapping"
+    /// Taller rows show bigger filmstrip frames and a taller waveform. A preference, like
+    /// snapping: remembered, never undone.
+    @Published var timelineTallTracks = UserDefaults.standard.object(forKey: AppModel.tallTracksKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(timelineTallTracks, forKey: Self.tallTracksKey) }
+    }
+    static let tallTracksKey = "timelineTallTracks"
+    /// Rows hidden in the preview, rows locked on the timeline, and the preview's sound.
+    /// View state: never saved, never undone, never exported.
+    @Published var timelineTracks = TimelineTrackState() {
+        didSet { if timelineTracks != oldValue { applyTrackState() } }
+    }
     /// Light or dark for YamVideo alone, or as the Mac is set. A preference rather than an
     /// edit: it is remembered, never undone. The app applies it at launch
     /// (`applyAppearance`), so a test or snapshot model never changes how windows look.

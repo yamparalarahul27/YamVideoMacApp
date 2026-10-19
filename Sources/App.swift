@@ -60,6 +60,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         model.renamingMarker = true
                     }
                 case (_, .command) where event.charactersIgnoringModifiers?.lowercased() == "a": model.selectAllSegments()
+                // Filmora's keys where YamVideo had none: N for snapping (as Final Cut Pro
+                // and Resolve), ⌥[ and ⌥] trim to the playhead, ⌥C crops.
+                case (_, []) where event.charactersIgnoringModifiers?.lowercased() == "n":
+                    model.timelineSnapping.toggle()
+                    model.statusMessage = model.timelineSnapping ? "Snapping on" : "Snapping off"
+                case (33, .option): model.trimToPlayhead(start: true)     // [
+                case (30, .option): model.trimToPlayhead(start: false)    // ]
+                case (8, .option): model.beginCrop()                       // C
                 default: return false
                 }
                 return true
