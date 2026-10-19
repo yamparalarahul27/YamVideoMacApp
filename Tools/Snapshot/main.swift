@@ -7,7 +7,18 @@
 // Built from every app source except App.swift (the app's entry point) plus this file.
 
 import AppKit
+import AVKit
 import SwiftUI
+
+/// The player whose frame is drawn into its views: AVKit composites video outside the
+/// layer tree, so a render of the layers alone leaves the picture black.
+@MainActor var snapshotPlayer: PlaybackController?
+
+/// The player views in a view tree, however deep.
+@MainActor
+func playerViews(in view: NSView) -> [AVPlayerView] {
+    (view as? AVPlayerView).map { [$0] } ?? view.subviews.flatMap(playerViews)
+}
 
 /// Waits by suspending, so the app's own main-actor work — a preview frame arriving
 /// from ffmpeg — runs meanwhile, and the main run loop at the bottom of this file keeps
@@ -89,6 +100,15 @@ func render<V: View>(_ view: V, size: CGSize, to url: URL, settle: TimeInterval 
             context.restoreGState()
         }
     }
+    // The picture the player shows: the same composed frame, drawn where its view shows it.
+    if let player = snapshotPlayer, player.player.currentItem != nil, let content = window.contentView {
+        let views = playerViews(in: content).filter { !$0.isHiddenOrHasHiddenAncestor && $0.videoBounds.width > 1 }
+        if !views.isEmpty, let picture = try? await player.composedFrame() {
+            for view in views {
+                context.draw(picture, in: view.convert(view.videoBounds, to: frame))
+            }
+        }
+    }
     window.orderOut(nil)
     guard let image = context.makeImage() else { return }
     try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
@@ -105,6 +125,7 @@ func run() async throws {
 
     NSApplication.shared.setActivationPolicy(.accessory)
     let model = AppModel(recoveryURL: nil)
+    snapshotPlayer = model.playback
     let info = try await FFmpeg.probe(url: recording)
     var clip = ProjectClip(VideoItem(url: recording))
     clip.info = info; clip.crop = info.fullFrame
@@ -125,8 +146,10 @@ func run() async throws {
 
     let size = CGSize(width: 1360, height: 880)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
-    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages.
-    if ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"] == "ideas" {
+    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages; =studio only the Studio
+    // pictures up to 4-recording.png, which the redesign tracker uses.
+    let only = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"]
+    if only == "ideas" {
         try await ideas(model, output: output, size: size, minimum: CGSize(width: 1140, height: 800))
         return
     }
@@ -141,17 +164,23 @@ func run() async throws {
     await render(window(), size: size, to: output.appendingPathComponent("1b-sections.png"))
 
     model.agentHighlight = nil
-    model.editorMode = .zoom
+    // The picture's edits: aiming a zoom, the blur areas and the crop, each on the frame.
     model.selectedShotID = model.items[0].zoomShots.first?.id
+    model.beginZoomAim()
     await render(window(), size: size, to: output.appendingPathComponent("2-zoom.png"))
 
-    model.editorMode = .blur
-    model.selectedRegionID = model.items[0].blurRegions.first?.id
+    model.beginBlurAreas()
     await render(window(), size: size, to: output.appendingPathComponent("3-blur-area.png"))
 
-    model.editorMode = .crop
+    model.beginCrop()
+    if let square = AspectPreset.all.first(where: { $0.label == "4:5" }) { model.setCropDraftAspect(square) }
+    await render(window(), size: size, to: output.appendingPathComponent("3c-crop.png"))
+    model.cancelCropDraft()
+
     model.selectedSegmentID = nil; model.selectedShotID = nil; model.selectedRegionID = nil
+    model.endPictureEdit()
     await render(window(), size: size, to: output.appendingPathComponent("4-recording.png"))
+    if only == "studio" { return }
 
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),
            to: output.appendingPathComponent("5-export-sheet.png"))
@@ -274,7 +303,7 @@ func run() async throws {
         await render(window(), size: size, to: output.appendingPathComponent("5s-short-zoom.png"))
         await render(InspectorPane().environmentObject(model).frame(width: 340, height: 1300), size: CGSize(width: 340, height: 1300),
                to: output.appendingPathComponent("5t-short-zoom-inspector.png"))
-        model.setViewer(.frame)
+        model.setViewer(.preview)
         model.undo()
     }
     model.undo(); model.undo(); model.undo(); model.undo(); model.undo()
@@ -335,14 +364,14 @@ func run() async throws {
     await pump(2)
     await render(InspectorPane().environmentObject(model).frame(width: inspector.width, height: inspector.height), size: inspector,
            to: output.appendingPathComponent("10-colour.png"))
-    model.colorComparison = .split
+    model.beginPictureEdit(.colourCompare)
     await pump(3)
     await render(window(), size: size, to: output.appendingPathComponent("11-compare.png"))
     await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
            to: output.appendingPathComponent("12-compare-minimum.png"))
 
     // Effects mode: a blur selected at its hold, with two named markers in the ruler.
-    model.colorComparison = .corrected
+    model.endPictureEdit()
     model.setPreviewFraction(1.0 / max(1, model.items[0].editedDuration))
     model.addMarkerAtPlayhead()
     if let marker = model.selectedMarkerID { model.updateMarker(marker) { $0.label = "Intro ends"; $0.color = .green } }
@@ -350,7 +379,6 @@ func run() async throws {
     model.addMarkerAtPlayhead()
     model.setPreviewFraction(4.0 / max(1, model.items[0].editedDuration))
     model.addBlurEffect()
-    model.editorMode = .effects
     if let effect = model.selectedEffect { model.jumpToEffect(effect) }
     await pump(3)
     await render(window(), size: size, to: output.appendingPathComponent("13-effects.png"))

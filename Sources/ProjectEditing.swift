@@ -172,6 +172,7 @@ extension AppModel {
     func restore(_ snapshot: VideoProject) {
         playback.clear(); showPlayback = false
         showsShort = false; playback.shortID = nil; selectedShortID = nil
+        resetPictureEdit()
         // The history belongs to the document: a different one brings its own, while undo
         // within the same one keeps every step it has seen.
         if snapshot.projectID != projectID { changeLog = snapshot.log ?? [] }

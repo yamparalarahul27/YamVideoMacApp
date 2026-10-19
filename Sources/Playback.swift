@@ -8,6 +8,8 @@ final class PlaybackController: ObservableObject {
     let player = AVPlayer()
     /// Timeline rows hidden with their eye: the preview leaves them out.
     var hiddenTracks: Set<TimelineTrack> = []
+    /// Before/After: the recording as it was, with the same cuts.
+    var showsOriginal = false
     @Published var isPlaying = false
     @Published var isLoading = false
     @Published var error: String?
@@ -95,7 +97,8 @@ final class PlaybackController: ObservableObject {
 
     /// `original` shows the recording without its colour stage, for comparison.
     func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool, original: Bool = false) {
-        let clip = clip.previewing(hiding: hiddenTracks)
+        let clip = showsOriginal ? clip.asRecorded : clip.previewing(hiding: hiddenTracks)
+        let original = original || showsOriginal
         requestedTime = time
         playWhenReady = play
         let record = ProjectClip(clip)

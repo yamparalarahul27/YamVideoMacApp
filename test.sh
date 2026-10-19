@@ -18,6 +18,7 @@ xcrun swiftc \
 	"$ROOT/Sources/Models.swift" \
 	"$ROOT/Sources/Timeline.swift" \
 	"$ROOT/Sources/TimelineTracks.swift" \
+	"$ROOT/Sources/PictureEditing.swift" \
 	"$ROOT/Sources/ColorLUT.swift" \
 	"$ROOT/Sources/ColorAdjustments.swift" \
 	"$ROOT/Sources/ColorPipeline.swift" \

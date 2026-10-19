@@ -48,6 +48,12 @@ struct ColorInspector: View {
                     .disabled(model.items.filter { $0.id != item.id && $0.info != nil }.isEmpty)
             }
             .controlSize(.small)
+            if stage.render != nil {
+                Button { model.beginPictureEdit(.colourCompare) } label: { Label("Compare on the Frame", systemImage: "circle.lefthalf.filled") }
+                    .controlSize(.small)
+                    .disabled(model.pictureEdit == .colourCompare || model.isMovieMode)
+                    .help("Original on the left and corrected on the right, on the frame under the playhead")
+            }
         }
         .sheet(isPresented: $copying) { CopyColorSheet(source: item).environmentObject(model) }
     }

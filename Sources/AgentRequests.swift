@@ -1552,14 +1552,14 @@ extension AppModel {
                 guard let shot = selectedItem?.zoomShots.first(where: { $0.id == zoom }) else {
                     return .failure(.notFound("No zoom \(zoom) on the selected recording."))
                 }
-                editorMode = .zoom; selectedShotID = zoom
+                selectedShotID = zoom
                 scrubToShot(shot)
             }
             if let id = request.effect {
                 guard let effect = selectedItem?.blurEffects.first(where: { $0.id == id }) else {
                     return .failure(.notFound("No blur effect \(id) on the selected recording."))
                 }
-                editorMode = .effects
+                selectedEffectID = id
                 jumpToEffect(effect)
             }
             if let id = request.marker {

@@ -44,7 +44,14 @@ final class AppModel: ObservableObject {
     @Published var graphicsDownload: String?
     @Published var graphicsDownloadError: String?
     @Published var statusMessage: String?
-    @Published var editorMode: EditorMode = .crop
+    /// What the picture area is doing: nil while the one player plays the edit, or a
+    /// short edit on the recording's frame with a bar under the picture to finish it.
+    @Published var pictureEdit: PictureEdit?
+    /// The crop being set in the player, until Apply. Not part of the project.
+    @Published var cropDraft: CropDraft?
+    /// Before/After: the player shows the recording as it was, with no crop, zooms,
+    /// blur, colour or graphics. View state only.
+    @Published var showsBefore = false
     @Published var selectedRegionID: BlurRegion.ID? { didSet { focusInspector(selectedRegionID, .blurArea) } }
     /// The whole-frame effect and the marker the inspector shows, when one is selected.
     @Published var selectedEffectID: VideoBlurEffect.ID? { didSet { focusInspector(selectedEffectID, .effect) } }
@@ -268,6 +275,7 @@ final class AppModel: ObservableObject {
                 self.cancelZoomAnalysis()
                 self.playback.clear()
                 self.showPlayback = false
+                self.resetPictureEdit()
                 self.showsShort = false; self.playback.shortID = nil; self.selectedShortID = nil
                 self.isMovieMode = false
                 self.selectedSegmentID = nil

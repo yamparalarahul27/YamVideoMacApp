@@ -193,9 +193,20 @@ or understand which part of your content matters. Quiet footage may yield no sug
   and export. Movies, waveforms and time labels follow the new duration. Zoom starts stay
   anchored to their source frames; their hold lengths remain in playback seconds and
   may be shortened or removed if they no longer fit.
-- **Play / pause:** press Space or the play button beneath the viewer. Left/Right step one
-  frame. The Preview tab shows the edited movie with crop, blur, zooms, cuts and audio;
-  Edit frame gives you the original frame and draggable editing handles.
+- **The player:** one player shows the edited movie with crop, blur, zooms, colour, cuts,
+  graphics and audio. The bar under the picture has the time, frame back, **Play** (Space)
+  and frame forward (Left/Right), then **Crop** (⌥C), **Before/After**, **Video / Short**,
+  **Safe zones** and **Snapshot**. **Before/After** shows the recording as it was, with the
+  same cuts and no crop, zooms, blur, colour or graphics. **Short** plays the selected Short
+  at 9:16, and **Safe zones** shows faintly where YouTube draws its buttons over it.
+  **Snapshot** saves the frame under the playhead as a PNG, as the edit shows it, without
+  graphics. With a zoom selected, **Aim** opens it on the frame.
+- **Edits on the frame:** the crop, the blur areas, aiming a zoom and the colour
+  comparison open the recording's frame in the player's place, with a bar under it to
+  finish. **Crop** shows the whole frame with the crop box and ratio chips (Free, 16:9,
+  9:16, 1:1, 4:5, 4:3, 2.39:1); nothing changes until **Apply** (Return), and **Cancel**
+  (Esc) leaves the crop as it was. **Blur areas** open from the Effects row's band or
+  **Add Area**; drag on the picture to add one, and press **Done**.
 - **Seek:** click or drag the time ruler, or click inside a video section. The timeline
   magnification slider provides more room for precise cuts; scroll horizontally when zoomed in.
 - **Split:** place the playhead inside a section and press **⌘B**, click **Split** in the
@@ -221,7 +232,7 @@ or understand which part of your content matters. Quiet footage may yield no sug
   those are the frames it can cut at. Hold **⌥** while dragging to place freely. The
   reach is fixed on screen, so zooming in weakens it until it disappears at frame level.
   The setting is remembered.
-- **Arrange zooms:** use Zoom mode to add one at the playhead. Drag a cyan timeline block
+- **Arrange zooms:** use the Zoom tool or the Zoom row's **+** to add one at the playhead. Drag a cyan timeline block
   to move its start; drag its right handle to change the hold duration. Zooms stay inside
   the edited duration and cannot overlap. When cutting or reordering, their start frames
   anchor them to retained footage. Zooms whose start was removed, or which no longer fit,
@@ -246,7 +257,7 @@ or understand which part of your content matters. Quiet footage may yield no sug
 Playback uses AVFoundation and Core Image, so ordinary MP4/MOV recordings preview without
 an intermediate render. Other formats remain available for FFmpeg export but may not play
 natively. Soft blur/pixelation can look slightly different between the native preview and
-FFmpeg export; the Edit frame preview uses the FFmpeg blur graph. Export resolution, encoder
+FFmpeg export; the frame shown for edits uses the FFmpeg blur graph. Export resolution, encoder
 quality and animation frame thinning apply during export. Cuts encode audio to AAC even
 when Copy is selected, to keep the cut boundaries synchronized.
 
@@ -255,11 +266,11 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | | |
 |---|---|
 | **Add clips** | Drop files (or a folder) onto the window, press ⌘O, or open a video with the app from Finder |
-| **Crop** | Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one. Exact pixel values are under **Details** in the inspector |
-| **Lock a shape** | Pick an aspect preset (16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) and resizing keeps that ratio |
-| **Blur an area** | Switch the picture to **Blur** and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
-| **Zoom in** | Switch to **Zoom**, scrub to the moment, then click the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds; drag the marker to re-aim it |
-| **Pick the frame you work against** | Drag the scrubber under the preview |
+| **Crop** | Press **Crop** (⌥C) under the picture or in the timeline's tool bar. Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one, then **Apply**. Exact pixel values are under **Details** in the inspector |
+| **Lock a shape** | Pick a ratio chip (16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) under the picture, or a preset in the inspector, and resizing keeps that ratio |
+| **Blur an area** | Click the blur band on the Effects row (or **Add Area** in the inspector) and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
+| **Zoom in** | Scrub to the moment and press the Zoom tool, or select a zoom and press **Aim** under the picture, then click or drag the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds |
+| **Pick the frame you work against** | Drag the playhead on the timeline's ruler |
 | **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
 | **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest. **Size** (100–150 %) draws cards and panels larger for viewers on a phone: cards grow to the left from the column's right edge, panels grow half as much, and logo badges, the end screen and Shorts keep their sizes. **Kinetic Text** puts big words over the whole picture from the playhead, each on the time it is spoken (from the transcript; one centred line, or one word on each line), and **Section Card** puts a part's title over a seek bar that shows how far into the video it starts. Both sit on near black or a darkened picture; in a Short, captions pause under them |
@@ -274,9 +285,9 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
 | **Correct Pocket 3 D-Log M colour** | In the inspector's **Colour** section set **Recorded colour** to **DJI Pocket 3 D-Log M**. The first time, **Get DJI Conversion** opens DJI's download page and **Import Conversion File…** takes the `.cube` you saved. After that, **Natural Colour** is one click, and one Undo. Auto never assumes D-Log M: a `DJI_` file name only makes it ask |
 | **Adjust the look** | **Brightness**, **Warmth**, **Contrast** and **Colour strength**, each with its own reset. Exact values are under **Details**. A drag is one undo step, and the picture follows it straight away |
-| **Compare before and after** | **Corrected / Original / Compare** under the picture. Compare shows the original on the left half and the corrected picture on the right, at the same frame. It never changes the project or the export |
+| **Compare before and after** | **Before/After** under the picture shows the recording as it was. For colour alone, **Compare on the Frame** in the inspector's Colour section shows the original on the left half and the corrected picture on the right, at the same frame. Neither changes the project or the export |
 | **Copy colour to other recordings** | **Copy Colour…** copies the look. Tick **Also copy the recorded colour and conversion** only for recordings made the same way |
-| **Blur the whole picture for a moment** | **Effects** mode (or **Add Blur Effect** in the inspector) adds a full-frame blur at the playhead that fades in and out, for a transition, a private moment or a backdrop for a title. Drag its block on the Effects lane to move it, or its edges to retime it; it stops at its neighbours. The inspector sets **Amount**, **Mix**, **Fade in/out**, exact times, and **On** to bypass it without deleting it. Effects mode shows the composed Preview so you see the result |
+| **Blur the whole picture for a moment** | The Blur tool (or **Add Blur Effect** in the inspector) adds a full-frame blur at the playhead that fades in and out, for a transition, a private moment or a backdrop for a title. Drag its block on the Effects lane to move it, or its edges to retime it; it stops at its neighbours. The inspector sets **Amount**, **Mix**, **Fade in/out**, exact times, and **On** to bypass it without deleting it. The player shows the result |
 | **Mark a moment** | Press **M** to drop a marker at the playhead; **⇧M** names the selected one; **⇧↑ / ⇧↓** jump between markers. Markers fly in the ruler, follow their footage through cuts, and are snap targets. They are also how you and an agent can point at the same moment |
 | **Export** | **Export…** opens a sheet for the selected recording, all recordings or the movie, with format, quality, audio and destination. ⌘R still exports all recordings (or the movie in Movie). ⌘. stops |
 
@@ -506,6 +517,7 @@ Sources/
   AgentRequests.swift every agent request: state, apply, preview, jobs, save
   TimelineView.swift timeline: tool bar, row headers, filmstrip sections, trim handles and zoom blocks
   TimelineTracks.swift the timeline's rows, eye and lock, section badges and filmstrip tiles
+  PictureEditing.swift the one player's edits on the frame: crop with Apply, blur areas, zoom aim, Before/After, snapshot
   Playback.swift    native video/audio composition and live effects
   ProjectEditing.swift undo history, project files and session recovery
   Movie.swift       movie canvas and multi-source FFmpeg export graph

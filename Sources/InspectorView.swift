@@ -247,7 +247,7 @@ private struct ZoomInspector: View {
                 Text(String(format: "%.1f s", shot.hold))
                     .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Text("Eases in and out over \(String(format: "%.1f", ZoomShot.ease)) s each way. Drag the target on the picture to aim it.")
+            Text("Eases in and out over \(String(format: "%.1f", ZoomShot.ease)) s each way. Press Aim under the picture to aim it on the frame.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -403,7 +403,7 @@ private struct RecordingInspector: View {
     private var blurAreas: some View {
         InspectorSection("Blur areas") {
             Text(item.blurRegions.isEmpty
-                 ? "None. Switch the picture to Blur and drag over anything you want hidden."
+                 ? "None. Press Add Area, then drag over anything you want hidden."
                  : "\(item.blurRegions.count) area\(item.blurRegions.count == 1 ? "" : "s"). Click one on the picture to select it.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -423,7 +423,7 @@ private struct RecordingInspector: View {
             }
             Text("Style and strength apply to every blur area in the project.").font(.caption2).foregroundStyle(.tertiary)
             HStack {
-                Button("Add Area") { model.editorMode = .blur; model.addDefaultRegion() }
+                Button("Add Area") { model.addDefaultRegion(); model.beginBlurAreas(selecting: model.selectedRegionID) }
                 Button("Clear All") { model.clearRegions() }.disabled(item.blurRegions.isEmpty)
             }
             .controlSize(.small)
@@ -433,12 +433,12 @@ private struct RecordingInspector: View {
     private var zooms: some View {
         InspectorSection("Zooms") {
             Text(item.zoomShots.isEmpty
-                 ? "None. Switch the picture to Zoom, scrub to a moment and click where to zoom."
+                 ? "None. Scrub to a moment and press Add at Playhead, or use the Zoom tool on the timeline."
                  : "\(item.zoomShots.count) zoom\(item.zoomShots.count == 1 ? "" : "s"). Select one on the timeline to adjust it.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("Add at Playhead") { model.editorMode = .zoom; model.addZoomAtCentre() }
+                Button("Add at Playhead") { model.addZoomAtCentre() }
                     .help("Add a zoom at the playhead, aimed at the middle of the frame")
                 if model.isAnalyzingZooms {
                     ProgressView().controlSize(.small)

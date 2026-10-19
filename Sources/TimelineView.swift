@@ -201,12 +201,6 @@ struct TimelineView: View {
     /// the selection or at the playhead, then how the timeline looks.
     private var toolbar: some View {
         HStack(spacing: 1) {
-            // Playback stays here until the picture gets a bar of its own.
-            tool("backward.frame", "Previous frame (←)", label: "Previous frame") { model.stepFrame(-1) }
-            tool(playback.isPlaying ? "pause.fill" : "play.fill", "Play / pause (Space)",
-                 label: playback.isPlaying ? "Pause" : "Play") { model.togglePlayback() }
-            tool("forward.frame", "Next frame (→)", label: "Next frame") { model.stepFrame(1) }
-            toolDivider
             tool("arrow.uturn.backward", model.undoTitle + " (⌘Z)", label: "Undo") { model.undoEdit() }
                 .disabled(!model.canUndoInModule)
             tool("arrow.uturn.forward", model.redoTitle + " (⇧⌘Z)", label: "Redo") { model.redoEdit() }
@@ -612,7 +606,7 @@ struct TimelineView: View {
                           snapStart: { snapSpan(shot.id, start: $0, duration: shot.duration, pixels: pixels) },
                           snapEnd: { snap($0, pixels: pixels, excluding: shot.id) },
                           endSnap: endSnap,
-                          onSelect: { model.selectedShotID = shot.id; model.editorMode = .zoom },
+                          onSelect: { model.selectedShotID = shot.id },
                           onMove: { model.setZoomStart(shot.id, $0) },
                           onResize: { model.setZoomHold(shot.id, $0) })
                     .frame(width: max(3, shot.duration * pixels), height: Self.zoomHeight)
@@ -636,7 +630,7 @@ struct TimelineView: View {
                             snapStart: { snapSpan(effect.id, start: $0, duration: effect.duration, pixels: pixels) },
                             snapEdge: { snap($0, pixels: pixels, excluding: effect.id) },
                             endSnap: endSnap,
-                            onSelect: { model.selectedEffectID = effect.id; model.editorMode = .effects },
+                            onSelect: { model.selectedEffectID = effect.id },
                             onMove: { start in model.updateEffect(effect.id) { $0.end = start + $0.duration; $0.start = start } },
                             onTrim: { start, end in
                                 model.updateEffect(effect.id) { if let start { $0.start = start }; if let end { $0.end = end } }
@@ -660,11 +654,7 @@ struct TimelineView: View {
                 .background(Color.orange.opacity(selected ? 0.45 : 0.2), in: RoundedRectangle(cornerRadius: 3))
                 .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.orange.opacity(selected ? 1 : 0.45)))
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    model.editorMode = .blur
-                    model.setViewer(.frame)
-                    model.selectedRegionID = item.blurRegions.first?.id
-                }
+                .onTapGesture { model.beginBlurAreas() }
                 .help("Blur areas hide their part of the picture for the whole video. Click to edit them on the frame.")
                 .offset(x: start, y: Self.effectHeight + 2)
             }

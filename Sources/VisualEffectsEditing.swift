@@ -114,8 +114,8 @@ extension AppModel {
         setPreviewFraction(min(hold, effect.end - 0.000001) / item.editedDuration)
     }
 
-    /// Effects mode shows the composed picture; this keeps it current while an effect
-    /// is being dragged or adjusted.
+    /// The player shows the composed picture; this keeps it current while an effect or a
+    /// colour slider is being dragged or adjusted.
     func refreshComposedPreview() {
         guard showPlayback, let item = selectedItem, !isMovieMode else { return }
         playback.prepare(item, settings: settings, at: previewTime, play: false, original: colorComparison == .original)
