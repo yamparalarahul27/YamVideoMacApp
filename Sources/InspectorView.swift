@@ -75,6 +75,11 @@ struct InspectorPane: View {
                 ScreenZoomInspector(item: item, shot: shot).id(shot.id)
                 Divider()
             }
+        case .caption:
+            if let cue = model.selectedCaption {
+                CaptionInspector(cue: cue).id(cue.id)
+                Divider()
+            }
         case .recording:
             ChangesList(item: item, info: info)
         }
@@ -167,6 +172,48 @@ struct InspectorSection<Content: View>: View {
                 .disabled(off)
                 .opacity(off ? 0.5 : 1)
         }
+    }
+}
+
+/// One caption from the Captions track: its time and its words, which fix the transcript.
+private struct CaptionInspector: View {
+    @EnvironmentObject var model: AppModel
+    let cue: CaptionCue
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        InspectorSection("Caption at \(timelineTime(cue.start))") {
+            Text("\(String(format: "%.2f", cue.end - cue.start)) s · until \(timelineTime(cue.end))")
+                .font(.caption).foregroundStyle(.secondary)
+            if cue.editable {
+                TextField("Words", text: $text, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...5)
+                    .focused($focused)
+                    .onSubmit { model.setCaptionText(cue, to: text) }
+                    .accessibilityLabel("Caption words")
+                HStack {
+                    Button("Change Words") { model.setCaptionText(cue, to: text) }
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines) == cue.text)
+                        .keyboardShortcut(.defaultAction)
+                    Button("Revert") { text = cue.text }
+                        .disabled(text == cue.text)
+                    Spacer()
+                }
+                .controlSize(.small)
+                Text("Fix a word here. The transcript keeps the fix, so the SRT and burned-in captions show it in every export.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(cue.text).font(.callout).textSelection(.enabled)
+                Text("These captions come from a file. Edit the file, or remove it in the Audio tab to use captions from the transcript.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear { text = cue.text }
+        .onChange(of: cue.text) { _, value in if !focused { text = value } }
     }
 }
 

@@ -61,8 +61,8 @@ struct ContentView: View {
     private var studio: some View {
         VStack(spacing: 0) {
             HSplitView {
-                QueueSidebar()
-                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
+                MediaPanel()
+                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 340)
 
                 editorPane
                     .frame(minWidth: 480)

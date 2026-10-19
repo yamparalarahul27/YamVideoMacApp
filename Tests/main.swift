@@ -10,7 +10,7 @@ setbuf(stdout, nil)
 
 /// Every feature's checks, in the order a full run takes them.
 let features: [(name: String, run: @MainActor () async throws -> Void)] = [
-    ("core", coreTests), ("editing", editingTests), ("tracks", tracksTests), ("player", playerTests), ("changes", changesTests), ("agents", agentsTests), ("playback", playbackTests),
+    ("core", coreTests), ("editing", editingTests), ("tracks", tracksTests), ("player", playerTests), ("changes", changesTests), ("media", mediaTests), ("agents", agentsTests), ("playback", playbackTests),
     ("colour", colourTests), ("effects", effectsTests), ("graphics", graphicsTests), ("publish", publishTests),
     ("thumbnail", thumbnailTests), ("endscreen", endscreenTests), ("autoedit", autoeditTests), ("shorts", shortsTests),
     ("screen", screenTests), ("logos", logosTests), ("covers", coversTests), ("library", libraryTests), ("calendar", calendarTests), ("pastvideos", pastVideosTests), ("style", styleTests),

@@ -8,12 +8,12 @@ import Foundation
     var clip = VideoItem(url: landscape)
     clip.info = info
     clip.crop = info.fullFrame
-    equal(TimelineTrack.tracks(for: clip), [.shorts, .graphics, .effects, .zoom, .video, .audio],
+    equal(TimelineTrack.tracks(for: clip), [.shorts, .graphics, .effects, .zoom, .video, .audio, .captions],
           "a recording with no screen recording has no screen rows")
     let order = TimelineTrack.allCases
     check(order.firstIndex(of: .graphics)! < order.firstIndex(of: .video)!, "what draws over the picture sits above it")
     check(order.firstIndex(of: .audio)! > order.firstIndex(of: .video)!, "and its sound sits below it")
-    equal(TimelineTrack.tracks(for: clip).filter { $0.isEmpty(in: clip) }, [.shorts, .graphics, .effects, .zoom],
+    equal(TimelineTrack.tracks(for: clip).filter { $0.isEmpty(in: clip) }, [.shorts, .graphics, .effects, .zoom, .captions],
           "a new recording folds each row it has nothing on")
     clip.zoomShots = [ZoomShot(start: 1, target: CGPoint(x: 100, y: 100))]
     check(!TimelineTrack.zoom.isEmpty(in: clip), "a zoom opens the Zoom row")
