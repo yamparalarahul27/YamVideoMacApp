@@ -85,4 +85,9 @@ import Foundation
     check((video?["plan"] as? [String: Any])?["day"] as? String == "2026-10-26", "the library state shows each video's plan")
     _ = await apply([["type": "unplanRelease", "ideaID": item.id.uuidString, "videoID": shorts[0].id.uuidString]])
     check(row(shorts[0].id).stored?.plan == nil && model.unplannedVideos().count == 1, "unplanRelease puts it back in Not planned")
+
+    let manual = (try? String(contentsOf: URL(fileURLWithPath: repository).appendingPathComponent("Resources/AgentsManual.md"), encoding: .utf8)) ?? ""
+    check(manual.contains("### 4.16 Study new footage and plan the edit") && manual.contains("Files/Plan.md")
+              && manual.contains("### 4.17 Plan the releases") && manual.contains("Plan at least two"),
+          "the Agents Manual has the study-and-plan and release-planning recipes")
 }
