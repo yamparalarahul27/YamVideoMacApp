@@ -526,9 +526,15 @@ extension AppModel {
     }
 
     /// Called when a project is opened or saved: an idea linked to it follows the file to
-    /// where it is now. A fact about the file, not an edit, so there is no undo step.
+    /// where it is now, if the file moved. A fact about the file, not an edit, so there is
+    /// no undo step. While the linked file is still at its old place, the open file is a
+    /// copy (an agent's review copy in a temporary folder, a backup), and the link stays:
+    /// on 20 Oct 2026 two review copies took the link from the real project. Locate… is
+    /// the owner's own choice and always moves the link.
     func noteProjectLocation() {
-        guard let path = projectURL?.path else { return }
+        guard let path = projectURL?.path,
+              let link = library.items.first(where: { $0.project?.projectID == projectID })?.project,
+              link.path != path, !link.exists else { return }
         movedProject(projectID, to: path)
     }
 
