@@ -123,6 +123,15 @@ func ideaImage(_ name: String) throws -> URL {
     model.libraryUndo()
     model.libraryRedo()
     equal(model.library.item(first.id)?.project?.path, moved.path, "and undo and redo keep its new place")
+    let copy = projects.appendingPathComponent("Review copy.yamvideo")
+    try FileManager.default.copyItem(at: moved, to: copy)
+    model.newProject()
+    model.openProject(at: copy)
+    equal(model.library.item(first.id)?.project?.path, moved.path,
+          "a copy opened while the linked file is still there leaves the link")
+    model.newProject()
+    model.openProject(at: moved)
+    try FileManager.default.removeItem(at: copy)
     model.unlinkProject(first.id)
     check(model.library.item(first.id)?.project == nil && model.openProjectIdea == nil, "unlinking leaves only the idea")
 
