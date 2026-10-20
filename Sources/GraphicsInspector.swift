@@ -96,7 +96,7 @@ extension GraphicInspector {
     /// says where its label goes from there.
     var callout: some View {
         let side = graphic.props["side"]?.string ?? "auto"
-        let hidden = item.calloutPlace(graphic, short: nil, ink: false, endScreen: item.graphics?.endScreen?.start).hidden
+        let hidden = item.hiddenCallouts.contains(graphic.id)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Button(model.aimsCallout ? "Cancel" : "Aim") { model.aimsCallout.toggle() }

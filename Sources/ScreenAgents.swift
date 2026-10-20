@@ -50,10 +50,8 @@ extension AppModel {
     }
 
     static func hiddenCallouts(_ item: VideoItem) -> [UUID] {
-        guard let track = item.graphics else { return [] }
-        return track.items.filter { graphic in
-            graphic.kind == .callout && item.calloutPlace(graphic, short: nil, ink: false, endScreen: track.endScreen?.start).hidden
-        }.map(\.id)
+        let hidden = item.hiddenCallouts
+        return (item.graphics?.items ?? []).map(\.id).filter(hidden.contains)
     }
 
     /// Where the speaker's face is, in source pixels, at an edited time; nil when Apple

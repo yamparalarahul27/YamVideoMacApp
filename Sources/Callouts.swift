@@ -300,6 +300,15 @@ extension VideoItem {
         return placed
     }
 
+    /// The recording's callouts whose point never shows on the 16:9 video: over their time
+    /// the layout hides the screen, or a screen zoom leaves the point out.
+    var hiddenCallouts: Set<UUID> {
+        guard let track = graphics else { return [] }
+        return Set(placingCallouts(track, short: nil).items.filter { graphic in
+            graphic.kind == .callout && (graphic.props["place"]?.object?["path"]?.array ?? []).allSatisfy { ($0.array?.last?.number ?? 0) <= 0 }
+        }.map(\.id))
+    }
+
     private static let calloutPlaces = Cache<CalloutPlace>(limit: 256)
     private static func encoded<Value: Encodable>(_ value: Value) -> String {
         let encoder = JSONEncoder()
