@@ -202,7 +202,7 @@ import Foundation
     let catalog = AgentCatalog.current.commands.map(\.type)
     check(catalog.contains("setGap") && catalog.contains("closeGaps"), "the catalog lists setGap and closeGaps")
     let manual = (try? String(contentsOfFile: repository + "/Resources/AgentsManual.md", encoding: .utf8)) ?? ""
-    check(manual.contains("### 4.16 Gaps on the timeline") && manual.contains("gapBefore"), "the Agents Manual explains gaps")
+    check(manual.contains("### 4.18 Gaps on the timeline") && manual.contains("gapBefore"), "the Agents Manual explains gaps")
 }
 
 private func throwsEditError(_ body: () throws -> Any) -> Bool {

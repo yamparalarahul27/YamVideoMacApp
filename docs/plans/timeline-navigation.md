@@ -364,7 +364,7 @@ multi-track video).
 - Close Gaps (above the timeline, Timeline ▸ Close Gaps, ⌥⌘G) joins every section; the ×
   on a gap closes that one. A locked Video row keeps its gaps.
 - Agents: `setGap`, `closeGaps`, and `gapBefore` on each section in the state. An agent's
-  `deleteSection` closes up, as before. Agents Manual 4.16.
+  `deleteSection` closes up, as before. Agents Manual 4.18.
 
 **How:** gaps are only on the timeline. A recording stores the space in front of each
 section (`ProjectClip.gaps`, project version 21); edited time, playback, captions,

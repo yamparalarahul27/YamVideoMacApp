@@ -8,6 +8,7 @@ A rule is added only after the owner says yes. Each rule says where it came from
 - Phones first: most viewers watch on a phone, desktop is rare. Every text on screen (graphics, cards, panels, captions, ink and screen recordings) must be easy to read on a phone. Check frames at phone size (about 640 px wide) before you apply, and make text larger when in doubt. *(owner, AgentUX video, 17 Oct 2026)*
 - Show mock-ups on the owner's own footage before choosing a look. *(Shorts, 15 Oct)*
 - Never post, sign in to or read YouTube, Instagram, X or LinkedIn. The owner publishes by hand. *(16 Oct)*
+- Release rhythm: one long video every Thursday at 7 pm, and three Shorts a week (Saturday, Monday, Wednesday at 7 pm), on YouTube, Instagram, X and LinkedIn the same day. Keep two finished long videos ahead. Plan at least two months ahead. *(owner, release plan for the new footage, 20 Oct 2026)*
 
 ## Talking head
 - Pocket 3 close-up: cut pauses and stumbles; keep the story moments (the Nokia story stayed in full). *(AppStore, 15 Oct)*
