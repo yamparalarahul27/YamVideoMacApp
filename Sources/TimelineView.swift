@@ -19,6 +19,8 @@ struct TimelineView: View {
     @State private var pauses: [ClosedRange<Double>] = []
     /// The captions on the edited timeline, worked out once for each change.
     @State private var cues: [CaptionCue] = []
+    /// The sound levels of each music file, for the bars on the Music row.
+    @State private var musicLevels: [URL: AudioOverview] = [:]
 
     // Row geometry. Every height below derives from these, so adding a row is one entry
     // rather than magic numbers that have to be kept in step.
@@ -39,6 +41,7 @@ struct TimelineView: View {
 
     private var sectionHeight: Double { model.timelineTallTracks ? 64 : 44 }
     private var waveformHeight: Double { model.timelineTallTracks ? 52 : 30 }
+    private var musicHeight: Double { model.timelineTallTracks ? 36 : 24 }
 
     private var tracks: [TimelineTrack] { TimelineTrack.tracks(for: item) }
     private func folded(_ track: TimelineTrack) -> Bool { track.isEmpty(in: item) }
@@ -49,6 +52,7 @@ struct TimelineView: View {
         switch track {
         case .graphics: return !item.isOn(.graphics)
         case .zoom: return !item.isOn(.zooms)
+        case .music: return !item.isOn(.music)
         default: return false
         }
     }
@@ -63,6 +67,7 @@ struct TimelineView: View {
         case .screenLayout: return Self.layoutHeight
         case .video: return sectionHeight
         case .audio: return overview == nil ? 20 : waveformHeight
+        case .music: return musicHeight
         case .captions: return Self.captionsHeight
         }
     }
@@ -167,6 +172,12 @@ struct TimelineView: View {
         }
         .task(id: CaptionsKey(segments: item.timeline.segments, transcript: item.transcript, file: item.subtitles)) {
             cues = item.captionCues()
+        }
+        .task(id: Set(item.music?.pieces.map(\.url) ?? [])) {
+            for url in Set(item.music?.pieces.map(\.url) ?? []) where musicLevels[url] == nil {
+                guard let levels = try? await AudioAnalyzer.analyze(url), !Task.isCancelled else { continue }
+                musicLevels[url] = levels
+            }
         }
         .sheet(isPresented: $reviewingSilence) {
             if let overview {
@@ -378,6 +389,18 @@ struct TimelineView: View {
                         model.toggleTrackMuted()
                     }
                 }
+                if track == .music {
+                    let off = hidden(.music)
+                    headerButton(off ? "speaker.slash" : "speaker.wave.2", on: off,
+                                 help: off ? "Play the music in the preview" : "Mute the music in the preview. The export keeps it.") {
+                        model.toggleMusicMuted()
+                    }
+                    if let add = addAction(.music) {
+                        Button(action: add.action) { Image(systemName: "plus").font(.system(size: 9, weight: .semibold)) }
+                            .help(add.help).accessibilityLabel(add.help)
+                            .disabled(locked(.music))
+                    }
+                }
                 if track.locks {
                     headerButton(locked(track) ? "lock.fill" : "lock.open", on: locked(track),
                                  help: locked(track) ? "Unlock \(track.label.lowercased())" : "Lock \(track.label.lowercased()), so the timeline does not change it") {
@@ -415,6 +438,7 @@ struct TimelineView: View {
         case .screenZoom: return .indigo
         case .video: return .accentColor
         case .audio: return .teal
+        case .music: return .mint
         case .captions: return .yellow
         }
     }
@@ -428,6 +452,9 @@ struct TimelineView: View {
         case .zoom: return ("Add a zoom at the playhead", { model.addZoomFromTimeline() })
         case .screenZoom: return ("Add a screen zoom at the playhead", { model.addScreenZoomAtPlayhead() })
         case .captions: return ("Choose a caption file. Auto Edit makes captions from what is said.", { model.chooseSubtitles() })
+        case .music:
+            guard item.info?.hasAudio == true else { return nil }
+            return ("Add music under the voice, at the playhead", { model.chooseMusicFile() })
         case .screenLayout, .video, .audio: return nil
         }
     }
@@ -450,6 +477,7 @@ struct TimelineView: View {
                 if let screen = item.screen { screenZoomLane(screen, width: width, pixels: pixels) }
             case .video: sectionLane(width: width, pixels: pixels)
             case .audio: audioLane(width: width, pixels: pixels)
+            case .music: musicLane(width: width, pixels: pixels)
             case .captions: captionsLane(width: width, pixels: pixels)
             }
         }
@@ -794,6 +822,59 @@ struct TimelineView: View {
         }
         .frame(width: width, height: Self.graphicsHeight, alignment: .leading)
         .clipped()
+    }
+
+    /// The music under the voice: a bar for each piece, with the waveform of what plays.
+    private func musicLane(width: Double, pixels: Double) -> some View {
+        let viewport = model.viewport
+        let duration = item.editedDuration
+        let pieces = item.music?.pieces ?? []
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
+            ForEach(pieces.filter { viewport.intersects($0.start, $0.end(in: duration)) }) { piece in
+                let end = piece.end(in: duration)
+                MusicBlock(piece: piece, end: end, selected: model.selectedMusicID == piece.id, pixels: pixels,
+                           snapStart: { start in
+                               guard let snapping = snapping() else { showGuide(at: nil); return start }
+                               let landed = snapping.snapSpan(start: start, duration: end - piece.start, pixelsPerSecond: pixels)
+                               showGuide(at: landed.target?.time)
+                               return landed.start
+                           },
+                           snapEdge: { snap($0, pixels: pixels) },
+                           endSnap: endSnap,
+                           onSelect: { model.selectedMusicID = piece.id },
+                           onMove: { model.moveMusic(piece.id, to: $0) },
+                           onStart: { model.setMusicStart(piece.id, to: $0) },
+                           onEnd: { model.setMusicEnd(piece.id, to: $0) })
+                    .frame(width: max(6, (end - piece.start) * pixels), height: musicHeight - 2)
+                    .offset(x: viewport.x(of: piece.start, across: width), y: 1)
+                if let levels = musicLevels[piece.url] {
+                    // Only the part on screen is drawn: a long piece at a close zoom is wider
+                    // than any canvas should be.
+                    let from = max(piece.start, viewport.start), to = min(end, viewport.end)
+                    if to - from > 0.01 {
+                        WaveformView(overview: levels, timeline: Self.playsTimeline(piece, duration: duration).cut(from: from - piece.start, to: to - piece.start))
+                            .frame(width: max(1, (to - from) * pixels), height: max(4, musicHeight - 14))
+                            .opacity(0.55)
+                            .offset(x: viewport.x(of: from, across: width), y: 11)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+        }
+        .frame(width: width, height: musicHeight, alignment: .leading)
+        .clipped()
+        .opacity(hidden(.music) ? 0.5 : 1)
+    }
+
+    /// What a piece plays, as file ranges in its own time from 0: each play up to where the
+    /// next one crosses in.
+    private static func playsTimeline(_ piece: MusicPiece, duration: Double) -> ClipTimeline {
+        let plays = piece.plays(videoDuration: duration)
+        return ClipTimeline(segments: plays.enumerated().map { index, play in
+            let length = index + 1 < plays.count ? plays[index + 1].at - play.at : play.length
+            return TimelineSegment(start: play.from, end: play.from + max(0.001, length))
+        })
     }
 
     private func shortsLane(width: Double, pixels: Double) -> some View {
@@ -1180,6 +1261,66 @@ private struct ZoomBlock: View {
 
     private func movedStart(_ translation: Double) -> Double { snapStart(shot.start + translation / pixels) }
     private func resizedEnd(_ translation: Double) -> Double { snapEnd(shot.end + translation / pixels) }
+}
+
+/// One piece of music on the timeline: drag to move it, drag an edge to trim it.
+private struct MusicBlock: View {
+    let piece: MusicPiece
+    let end: Double
+    let selected: Bool
+    let pixels: Double
+    let snapStart: (Double) -> Double
+    let snapEdge: (Double) -> Double
+    let endSnap: () -> Void
+    let onSelect: () -> Void
+    let onMove: (Double) -> Void
+    let onStart: (Double) -> Void
+    let onEnd: (Double) -> Void
+    @State private var delta = 0.0
+    @State private var trimStart = 0.0
+    @State private var trimEnd = 0.0
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 3) {
+                Image(systemName: piece.loop ? "repeat" : "music.note")
+                Text(piece.name).lineLimit(1)
+                if piece.credit.licence == nil { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 6)
+            .frame(width: max(6, geo.size.width - trimStart + trimEnd), height: geo.size.height, alignment: .top)
+            .padding(.top, 1)
+            .background(Color.mint.opacity(selected ? 0.42 : 0.2), in: RoundedRectangle(cornerRadius: 3))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.mint.opacity(selected ? 1 : 0.5)))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onSelect)
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { value in delta = (snapStart(piece.start + value.translation.width / pixels) - piece.start) * pixels }
+                .onEnded { value in onSelect(); onMove(snapStart(piece.start + value.translation.width / pixels)); delta = 0; endSnap() })
+            .overlay(alignment: .leading) {
+                handle.highPriorityGesture(DragGesture(minimumDistance: 1)
+                    .onChanged { trimStart = (snapEdge(piece.start + $0.translation.width / pixels) - piece.start) * pixels }
+                    .onEnded { value in onSelect(); onStart(snapEdge(piece.start + value.translation.width / pixels)); trimStart = 0; endSnap() })
+                    .help("Drag to change where the music starts")
+            }
+            .overlay(alignment: .trailing) {
+                handle.highPriorityGesture(DragGesture(minimumDistance: 1)
+                    .onChanged { trimEnd = (snapEdge(end + $0.translation.width / pixels) - end) * pixels }
+                    .onEnded { value in onSelect(); onEnd(snapEdge(end + value.translation.width / pixels)); trimEnd = 0; endSnap() })
+                    .help("Drag to change where the music stops. At the end of the video, it plays to the end.")
+            }
+            .offset(x: delta + trimStart)
+            .help("\(piece.name): drag to move it, drag an edge to trim it" + (piece.credit.licence == nil ? ". Set its licence in the inspector." : ""))
+            .accessibilityLabel("Music \(piece.name) at \(timelineTime(piece.start))")
+        }
+    }
+
+    private var handle: some View {
+        RoundedRectangle(cornerRadius: 2).fill(Color.mint).frame(width: 4, height: 12).padding(.horizontal, 2)
+            .contentShape(Rectangle())
+    }
 }
 
 /// One graphic on the timeline: drag to move it, drag its right edge to change its length.

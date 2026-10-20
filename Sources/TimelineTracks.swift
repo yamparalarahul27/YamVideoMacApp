@@ -7,7 +7,7 @@ import Foundation
 /// name and, where it means something, an eye (hide in the preview) and a lock (no edits
 /// from the timeline).
 enum TimelineTrack: String, CaseIterable, Identifiable {
-    case shorts, graphics, effects, zoom, screenLayout, screenZoom, video, audio, captions
+    case shorts, graphics, effects, zoom, screenLayout, screenZoom, video, audio, music, captions
 
     var id: String { rawValue }
 
@@ -21,6 +21,7 @@ enum TimelineTrack: String, CaseIterable, Identifiable {
         case .screenZoom: return "Screen zoom"
         case .video: return "Video"
         case .audio: return "Audio"
+        case .music: return "Music"
         case .captions: return "Captions"
         }
     }
@@ -35,12 +36,15 @@ enum TimelineTrack: String, CaseIterable, Identifiable {
         case .screenZoom: return "macwindow"
         case .video: return "film"
         case .audio: return "waveform"
+        case .music: return "music.note"
         case .captions: return "captions.bubble"
         }
     }
 
     /// The eye: hiding changes only the preview. The export always has everything.
     var hides: Bool { [.graphics, .effects, .zoom, .screenZoom].contains(self) }
+    /// The speaker: muting changes only the preview, as the eye does for a picture row.
+    var mutes: Bool { self == .audio || self == .music }
     /// The lock: the timeline stops taking clicks and drags on the row.
     var locks: Bool { self != .audio }
 
@@ -59,6 +63,7 @@ enum TimelineTrack: String, CaseIterable, Identifiable {
         case .zoom: return item.zoomShots.isEmpty
         case .screenZoom: return item.screen?.zooms.isEmpty ?? true
         case .captions: return item.subtitles == nil && (item.transcript?.words.isEmpty ?? true)
+        case .music: return item.music?.pieces.isEmpty ?? true
         case .screenLayout, .video, .audio: return false
         }
     }
@@ -82,6 +87,7 @@ extension VideoItem {
         if hidden.contains(.effects) { copy.blurEffects = []; copy.blurRegions = [] }
         if hidden.contains(.screenZoom) { copy.screen?.zooms = [] }
         if hidden.contains(.graphics) { copy.graphics = nil }
+        if hidden.contains(.music) { copy.music = nil }
         return copy
     }
 }
@@ -110,6 +116,12 @@ extension AppModel {
         statusMessage = timelineTracks.muted ? "Preview sound off. The export still has sound." : "Preview sound on."
     }
 
+    /// The Music row's speaker: the preview leaves the music out; the export keeps it.
+    func toggleMusicMuted() {
+        if timelineTracks.hidden.contains(.music) { timelineTracks.hidden.remove(.music) } else { timelineTracks.hidden.insert(.music) }
+        statusMessage = timelineTracks.hidden.contains(.music) ? "Music off in the preview. The export still has it." : "Music on in the preview."
+    }
+
     /// Gives the player what the rows say, and shows the change at once.
     func applyTrackState() {
         playback.hiddenTracks = timelineTracks.hidden
@@ -131,6 +143,7 @@ extension AppModel {
         case .layout: return .screenLayout
         case .screenZoom: return .screenZoom
         case .caption: return .captions
+        case .music: return .music
         case .marker, .recording: return nil
         }
     }
@@ -154,6 +167,7 @@ extension AppModel {
         case .short: removeSelectedShort()
         case .layout: removeSelectedLayout()
         case .screenZoom: removeSelectedScreenZoom()
+        case .music: removeSelectedMusic()
         case .caption: statusMessage = "Captions follow what is said. Cut the section to remove a caption, or change its words in the inspector."
         case .recording: statusMessage = "Select something on the timeline to delete it."
         }

@@ -207,6 +207,8 @@ struct VideoItem: Identifiable {
     /// A screen recording synced to this one, and the layouts that show the two. Nil
     /// until one is added.
     var screen: ScreenTrack?
+    /// Background music under the voice, on the edited timeline. Nil until a piece is added.
+    var music: MusicBed?
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

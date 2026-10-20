@@ -335,14 +335,37 @@ The owner plans when each video goes out and where, and tells you the plan in wo
 
 ### 4.13 Switch a change off
 
-- The owner can switch the crop, colour, blur areas, zooms or graphics of a recording
-  off in the inspector. Off keeps the change in the project but leaves it out of the
+- The owner can switch the crop, colour, blur areas, zooms, graphics or music of a
+  recording off in the inspector. Off keeps the change in the project but leaves it out of the
   player and every export. `state.clips[].switchedOff` lists what is off.
 - To compare, send `setChange {clipID, change, on: false}`, then `on: true` to bring it
   back. Each is one undo step. Do not delete a change the owner only wants to see
   without; switch it off.
 - Before an export, check `switchedOff`. If something is off that the owner did not
   ask for, say so first.
+
+### 4.15 Background music
+
+The owner chooses the music for each video. Add music only when the owner asks, and only
+a track the owner gave or named.
+
+1. Ask the owner for the track and its licence. Use only a licence that permits a
+   monetised YouTube video: the YouTube Audio Library, CC0, CC BY (with its credit line),
+   Pixabay, the owner's own music, or a model whose licence permits commercial use. Do not
+   use CC BY-NC, CC BY-ND or CC BY-SA: Export for YouTube refuses them.
+2. Send `addMusic {clipID, path, start?, end?, music: {level?, credit: {licence, title,
+   artist, source, line}}}`. The app measures the file and the voice, so `level` is LU
+   under the voice for any track. -20 (the default) is a quiet bed for an educational
+   video; do not go above -12 under speech.
+3. The music is on the edited timeline. Jump cuts do not cut it, and a piece follows the
+   frame where it starts when the edit changes. `end` null plays to the end of the video.
+   Pieces may touch but not overlap.
+4. Read `state.clips[].music`: each piece with its `gain` (dB) and its `plays` (a loop plays
+   the file again with a 2 s crossfade). `missing: true` means the file moved.
+5. Change a piece with `updateMusic {clipID, musicID, music: {…}}`; only the keys given
+   change. `removeMusic` removes one. `setChange` with `music` switches all of it off.
+6. Exports mix the music under the voice. With Loudness on, the export normalises the mix
+   to -14 LUFS. Export for YouTube writes each credit line at the end of the description.
 
 ## 5. Problems
 

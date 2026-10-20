@@ -7,7 +7,7 @@ import Foundation
 /// Filmora's property panel can. Off leaves it out of the player and every export; on
 /// brings it back exactly as it was. The project saves which are off (version 18).
 enum SwitchableChange: String, CaseIterable, Codable, Identifiable, Comparable {
-    case crop, colour, blurAreas, zooms, graphics
+    case crop, colour, blurAreas, zooms, graphics, music
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum SwitchableChange: String, CaseIterable, Codable, Identifiable, Comparable {
         case .blurAreas: return "Blur areas"
         case .zooms: return "Zooms"
         case .graphics: return "Graphics"
+        case .music: return "Music"
         }
     }
 
@@ -28,6 +29,7 @@ enum SwitchableChange: String, CaseIterable, Codable, Identifiable, Comparable {
         case .blurAreas: return "camera.filters"
         case .zooms: return "plus.magnifyingglass"
         case .graphics: return "rectangle.on.rectangle"
+        case .music: return "music.note"
         }
     }
 
@@ -47,6 +49,7 @@ extension VideoItem {
         case .blurAreas: return !blurRegions.isEmpty
         case .zooms: return !zoomShots.isEmpty
         case .graphics: return !(graphics?.items.isEmpty ?? true)
+        case .music: return !(music?.pieces.isEmpty ?? true)
         }
     }
 
@@ -59,6 +62,7 @@ extension VideoItem {
         if !isOn(.blurAreas) { copy.blurRegions = [] }
         if !isOn(.zooms) { copy.zoomShots = [] }
         if !isOn(.graphics) { copy.graphics = nil }
+        if !isOn(.music) { copy.music = nil }
         return copy
     }
 }
@@ -128,9 +132,10 @@ extension AppModel {
         case .blurAreas: clearRegions()
         case .zooms: clearZooms()
         case .graphics: statusMessage = "Delete graphics one at a time on the timeline, so none goes by mistake."
+        case .music: statusMessage = "Remove music one piece at a time on the timeline, so none goes by mistake."
         }
         // A reset change is on again, so the next one shows at once.
-        if change != .graphics, !item.isOn(change), selectedItem?.has(change) == false {
+        if change != .graphics, change != .music, !item.isOn(change), selectedItem?.has(change) == false {
             _ = perform([.setChange(clip: item.id, change: change, on: true)], label: "Reset \(change.label)")
         }
     }

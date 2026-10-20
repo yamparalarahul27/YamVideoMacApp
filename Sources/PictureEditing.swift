@@ -36,7 +36,7 @@ struct CropDraft: Equatable {
 
 extension VideoItem {
     /// The recording as it was, for Before/After: the same cuts, and no crop, zooms, blur,
-    /// graphics or screen recording. The player adds no colour stage either.
+    /// graphics, screen recording or music. The player adds no colour stage either.
     var asRecorded: VideoItem {
         var copy = self
         if let info { copy.crop = info.fullFrame }
@@ -46,6 +46,7 @@ extension VideoItem {
         copy.blurEffects = []
         copy.graphics = nil
         copy.screen = nil
+        copy.music = nil
         return copy
     }
 }

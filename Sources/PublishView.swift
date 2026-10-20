@@ -36,7 +36,7 @@ private struct PublishContent: View {
 
     private var short: Short? { item.short(target) }
     private var issues: [PublishInfo.Issue] {
-        short.map { item.shortIssues($0) } ?? publish.issues(duration: item.editedDuration, graphics: item.graphics)
+        short.map { item.shortIssues($0) } ?? publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
     }
 
     var body: some View {
@@ -126,7 +126,7 @@ private struct PublishForm: View {
     @State private var makingThumbnail = false
 
     private func issues(_ field: String) -> [PublishInfo.Issue] {
-        publish.issues(duration: item.editedDuration, graphics: item.graphics).filter { $0.field == field }
+        publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music).filter { $0.field == field }
     }
 
     var body: some View {
@@ -142,7 +142,8 @@ private struct PublishForm: View {
                 PublishTextField(placeholder: "What viewers read under the video", value: publish.description, axis: .vertical) { text in
                     model.setPublish(label: "Video Description") { $0.description = text }
                 }
-                counter(publish.fullDescription.count, of: PublishInfo.descriptionLimit, note: "with the chapters")
+                counter(publish.crediting(item.effective.music).fullDescription.count, of: PublishInfo.descriptionLimit,
+                        note: item.effective.music?.creditLines.isEmpty == false ? "with the chapters and music credits" : "with the chapters")
                 issueLines("description")
             }
             InspectorSection("Tags") {
@@ -471,7 +472,8 @@ private struct YouTubePreview: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("0 views  just now").font(.system(size: 14, weight: .semibold))
-                Text(publish.fullDescription.isEmpty ? "Your description" : publish.fullDescription)
+                let description = publish.crediting(item.effective.music).fullDescription
+                Text(description.isEmpty ? "Your description" : description)
                     .font(.system(size: 14)).lineLimit(3)
                 Text("...more").font(.system(size: 14, weight: .semibold))
             }

@@ -260,8 +260,13 @@ struct PublishInfo: Codable, Equatable {
     }
 
     /// Everything YouTube would refuse or ignore, for a recording `duration` seconds long
-    /// with these graphics (for the end screen).
-    func issues(duration: Double, graphics: GraphicsTrack? = nil) -> [Issue] {
+    /// with these graphics (for the end screen) and this music (for its licences and the
+    /// credit lines the description gets).
+    func issues(duration: Double, graphics: GraphicsTrack? = nil, music: MusicBed? = nil) -> [Issue] {
+        if music != nil {
+            let credited = crediting(music)
+            return credited.issues(duration: duration, graphics: graphics) + (music?.issues ?? [])
+        }
         var issues: [Issue] = []
         func add(_ field: String, _ severity: Severity, _ message: String) { issues.append(Issue(field: field, severity: severity, message: message)) }
         let trimmed = title.trimmingCharacters(in: .whitespaces)
@@ -398,10 +403,11 @@ struct PublishInfo: Codable, Equatable {
     /// The text file Export for YouTube writes: everything to paste into YouTube Studio, the
     /// end screen elements to place there by hand, and the Test & Compare thumbnails
     /// (`tests`, file names, A first).
-    func uploadText(files: [String], endScreen plan: EndScreenPlan? = nil, tests: [String] = []) -> String {
+    func uploadText(files: [String], endScreen plan: EndScreenPlan? = nil, tests: [String] = [], music: MusicBed? = nil) -> String {
         var lines = ["TITLE", title, "", "DESCRIPTION", fullDescription, "", "TAGS", tags.joined(separator: ", "), "",
                      "CATEGORY", "\(category.label) (\(category.youtubeID))", "", "LANGUAGE", language]
         if let plan { lines += [""] + plan.uploadLines }
+        if let music { lines += [""] + music.uploadLines }
         if !tests.isEmpty {
             lines += ["", "THUMBNAIL TEST & COMPARE", "In YouTube Studio, open the video's thumbnail, choose Test & compare, and upload these:"]
             lines += tests.enumerated().map { "\(ThumbnailTest.letters[$0.offset]): \($0.element)" }

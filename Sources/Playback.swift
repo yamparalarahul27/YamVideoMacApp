@@ -251,6 +251,12 @@ final class PlaybackController: ObservableObject {
         if let screen = clip.screen, short.map(clip.stacksScreen) ?? true {
             try await insertScreen(screen, segments: clip.timeline.segments, into: composition)
         }
+        // The music under the voice, as the export mixes it. A Short has none.
+        var music: MusicPreviewTracks?
+        if short == nil, audio != nil, let mix = clip.exportMusic(settings) {
+            music = MusicPreviewTracks(composition)
+            try await music?.insert(mix)
+        }
         let item = AVPlayerItem(asset: composition)
         item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original, short: short)
         item.audioTimePitchAlgorithm = .spectral
@@ -261,6 +267,7 @@ final class PlaybackController: ObservableObject {
             parameters.audioTimePitchAlgorithm = .spectral
             // The recording's sound fades out and in at each cut, as the export does.
             if track.trackID == audio?.trackID { Self.fadeJoints(joints, in: parameters) }
+            music?.ramp(parameters)
             return parameters
         }
         item.audioMix = mix
