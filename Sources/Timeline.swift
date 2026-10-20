@@ -424,6 +424,12 @@ struct VideoProject: Codable, Equatable {
             if let problem = clip.music?.problem(duration: duration) {
                 try reject("The project contains invalid music: \(problem)"); return
             }
+            for area in clip.blurRegions {
+                let times = [area.start, area.end].compactMap { $0 }
+                guard times.allSatisfy({ $0.isFinite && $0 >= 0 }), (area.start ?? 0) < (area.end ?? .infinity) else {
+                    try reject("The project contains a blur area with invalid times."); return
+                }
+            }
             for rect in [clip.crop].compactMap({ $0 }) + clip.blurRegions.map(\.rect) {
                 guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,
                       rect.width > 0, rect.height > 0, info.fullFrame.contains(rect) else {

@@ -296,7 +296,7 @@ final class PlaybackController: ObservableObject {
         let picture = picture(clip, info: info, short: short)
         let crop = picture.crop
         let shots = clip.zoomShots
-        let regions = clip.blurRegions
+        let regions = clip.blurBoxes
         let effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
                                         toneMapHDR: settings.toneMapHDR, original: original || !clip.isOn(.colour)).render
@@ -322,12 +322,12 @@ final class PlaybackController: ObservableObject {
 ///
 /// Order follows the shared rendering contract: colour first, on the whole frame, then
 /// area obscuring, crop and zoom. A black area therefore stays black whatever the grade.
-func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurRegion],
+func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurBox],
                  shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil,
                  effects: [VideoBlurEffect] = [], motion: GraphicsMotion? = nil, stage: CGSize? = nil) -> CIImage {
     var image = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
     if let color { image = ColorPipeline.apply(color, to: image, space: source.colorSpace) }
-    for region in regions {
+    for region in regions where region.isOn(at: time) {
         let rect = region.rect.evenClamped(in: info.fullFrame)
         let area = CGRect(x: rect.minX, y: CGFloat(info.height) - rect.maxY, width: rect.width, height: rect.height)
         let patch: CIImage

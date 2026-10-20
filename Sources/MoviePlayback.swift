@@ -68,7 +68,7 @@ final class MovieCompositor: NSObject, AVVideoCompositing {
                 CGAffineTransform(a: t.a, b: -t.b, c: -t.c, d: t.d, tx: 0, ty: 0))
             let crop = (instruction.clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
             let edited = renderFrame(oriented, info: info, crop: crop,
-                                     regions: instruction.clip.blurRegions, shots: instruction.clip.zoomShots,
+                                     regions: instruction.clip.blurBoxes, shots: instruction.clip.zoomShots,
                                      settings: instruction.settings,
                                      time: request.compositionTime.seconds - instruction.timeRange.start.seconds,
                                      color: instruction.color, effects: instruction.clip.blurEffects)

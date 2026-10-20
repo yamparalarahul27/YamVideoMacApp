@@ -269,6 +269,13 @@ func run() async throws {
 
     model.beginBlurAreas()
     await render(window(), size: size, to: output.appendingPathComponent("3-blur-area.png"))
+    // The same area for part of the recording only: its range shows in the inspector.
+    if let area = model.selectedRegionID {
+        model.setRegionTime(area, start: true)
+        await pump(0.5)
+        await render(window(), size: size, to: output.appendingPathComponent("3b-blur-area-timed.png"))
+        model.coverWholeRecording(area)
+    }
 
     model.beginCrop()
     if let square = AspectPreset.all.first(where: { $0.label == "4:5" }) { model.setCropDraftAspect(square) }

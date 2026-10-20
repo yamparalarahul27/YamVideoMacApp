@@ -429,7 +429,8 @@ final class AppModel: ObservableObject {
 
         let seconds = item.timeline.location(at: item.editedDuration * item.previewFraction)?.source ?? 0
         // The blur is baked into the preview, so it has to take part in the cache key.
-        let regions = item.blurRegions.map { $0.rect }
+        // Only the areas that cover this frame: a timed area is off outside its range.
+        let regions = item.blurRegions.filter { $0.covers(source: seconds) }.map { $0.rect }
         let blurKey = regions.isEmpty
             ? "none"
             : "\(settings.blurStyle.rawValue)-\(Int(settings.blurStrength))-"
@@ -563,6 +564,23 @@ final class AppModel: ObservableObject {
             return
         }
         perform([command])
+    }
+
+    /// Starts or ends a blur area at the frame under the playhead. The time is kept in
+    /// source seconds, so later cuts do not move it.
+    func setRegionTime(_ id: BlurRegion.ID, start: Bool) {
+        guard let index = selectedIndex, items[index].blurRegions.contains(where: { $0.id == id }),
+              let source = items[index].timeline.location(at: previewTime)?.source else { return }
+        let times = start ? BlurTimes(start: source) : BlurTimes(end: source)
+        if case .success = perform([.updateBlurArea(clip: items[index].id, area: id, rect: nil, times: times)]) { refreshPreview() }
+    }
+
+    /// Makes a timed blur area cover the whole recording again.
+    func coverWholeRecording(_ id: BlurRegion.ID) {
+        guard let index = selectedIndex, items[index].blurRegions.contains(where: { $0.id == id }) else { return }
+        if case .success = perform([.updateBlurArea(clip: items[index].id, area: id, rect: nil, times: BlurTimes(whole: true))]) {
+            refreshPreview()
+        }
     }
 
     func removeSelectedRegion() {
@@ -767,7 +785,7 @@ final class AppModel: ObservableObject {
                 .setCrop(clip: item.id, rect: crop),
                 .setAspect(clip: item.id, preset: source.aspectLabel),
                 // Fresh ids so each clip owns its own regions and zooms.
-                .replaceBlurAreas(clip: item.id, areas: source.blurRegions.map { BlurRegion(rect: $0.rect) }),
+                .replaceBlurAreas(clip: item.id, areas: source.blurRegions.map { BlurRegion(rect: $0.rect, start: $0.start, end: $0.end) }),
                 .replaceZooms(clip: item.id, zooms: source.zoomShots.filter { $0.end <= item.editedDuration }.map {
                     ZoomShot(start: $0.start, hold: $0.hold, level: $0.level, target: $0.target)
                 }),
@@ -897,7 +915,7 @@ final class AppModel: ObservableObject {
                         output: output,
                         info: info,
                         crop: crop,
-                        regions: item.blurRegions.map { $0.rect },
+                        regions: item.blurBoxes,
                         zoomShots: item.zoomShots,
                         segments: item.segments,
                         settings: exportSettings,
@@ -975,7 +993,7 @@ final class AppModel: ObservableObject {
         let output = FFmpeg.outputURL(for: item.url, settings: settings)
         return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
-            regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
+            regions: item.blurBoxes, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.burnedCaptions(settings),
             color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings),
             screen: item.screen, music: item.effective.exportMusic(settings)

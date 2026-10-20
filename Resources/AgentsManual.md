@@ -380,9 +380,14 @@ of the folder:
    which video or Short it is for. Read it before the first edit of a video.
 6. Tell the owner where each file went. Ask when the topic is not clear.
 
-Before an export, read `Files/Blur notes.md` and hide each Must item: cut it, or add a
-Blur effect (`addBlurEffect`) for its time range. A Blur area (`addBlurArea`) hides one
-rectangle for the whole recording. Show the owner a frame of each one.
+Before an export, read `Files/Blur notes.md` and hide each Must item with a Blur area:
+`addBlurArea {clipID, rect, start, end}` hides the rectangle from `start` to `end`. The
+times are source seconds of the recording, the same times as in the notes, so cuts and
+speed changes do not move them. Without `start` and `end` the area covers the whole
+recording. `updateBlurArea {areaID, start?, end?, whole?}` changes the range. Cut the part
+when the video does not need it. Use a Blur effect (`addBlurEffect`) only when the whole
+picture must go soft. Look at a frame inside each range with `preview --composed`, and
+show the owner one frame of each item.
 
 Do not rename or move a recording that a project uses: the project keeps its full path.
 If a move is necessary, send `relinkMedia` for it.

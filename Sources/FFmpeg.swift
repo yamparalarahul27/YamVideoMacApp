@@ -293,7 +293,7 @@ enum FFmpeg {
 
         let graph = filterGraph(
             head: (toneMap ? [toneMapChain] : []) + color,
-            regions: regions,
+            regions: regions.map { BlurBox(rect: $0) },
             style: style,
             strength: strength,
             tail: tail
@@ -389,7 +389,7 @@ enum FFmpeg {
     /// runs in order, exactly as one chain always did.
     static func filterGraph(
         head: [String] = [],
-        regions: [CGRect],
+        regions: [BlurBox],
         style: BlurStyle,
         strength: Double,
         tail: [String],
@@ -443,7 +443,7 @@ enum FFmpeg {
     }
 
     private static func baseGraph(
-        head: [String], regions: [CGRect], style: BlurStyle, strength: Double, tail: [String]
+        head: [String], regions: [BlurBox], style: BlurStyle, strength: Double, tail: [String]
     ) -> FilterGraph? {
         guard !regions.isEmpty else {
             let chain = head + tail
@@ -455,7 +455,8 @@ enum FFmpeg {
         // A solid fill needs no second copy of the frame — drawbox paints in place.
         if style == .black {
             let boxes = regions.map {
-                "drawbox=\(Int($0.minX)):\(Int($0.minY)):\(Int($0.width)):\(Int($0.height)):color=black:t=fill"
+                "drawbox=\(Int($0.rect.minX)):\(Int($0.rect.minY)):\(Int($0.rect.width)):\(Int($0.rect.height)):color=black:t=fill"
+                    + enable($0.spans)
             }
             return FilterGraph(spec: (head + boxes + tail).joined(separator: ","),
                                isComplex: false, outputLabel: nil)
@@ -469,17 +470,18 @@ enum FFmpeg {
         parts.append("[0:v]\(headChain)split=\(regions.count + 1)[base]"
                      + taps.map { "[\($0)]" }.joined())
 
-        for (index, region) in regions.enumerated() {
+        for (index, box) in regions.enumerated() {
+            let region = box.rect
             let crop = "crop=\(Int(region.width)):\(Int(region.height)):\(Int(region.minX)):\(Int(region.minY))"
             let obscure = obscureFilter(style: style, strength: strength, size: region.size)
             parts.append("[t\(index)]\(crop),\(obscure)[b\(index)]")
         }
 
         var current = "base"
-        for (index, region) in regions.enumerated() {
+        for (index, box) in regions.enumerated() {
             let isLast = index == regions.count - 1
             let label = isLast ? (tail.isEmpty ? "vout" : "ov") : "o\(index)"
-            parts.append("[\(current)][b\(index)]overlay=\(Int(region.minX)):\(Int(region.minY))[\(label)]")
+            parts.append("[\(current)][b\(index)]overlay=\(Int(box.rect.minX)):\(Int(box.rect.minY))\(enable(box.spans))[\(label)]")
             current = label
         }
 
@@ -488,6 +490,14 @@ enum FFmpeg {
         }
 
         return FilterGraph(spec: parts.joined(separator: ";"), isComplex: true, outputLabel: "vout")
+    }
+
+    /// The timeline option that limits a filter to `spans` of the graph's time (edited
+    /// seconds); nothing when it is on all the time.
+    static func enable(_ spans: [ClosedRange<Double>]?) -> String {
+        guard let spans else { return "" }
+        guard !spans.isEmpty else { return ":enable=0" }
+        return ":enable='" + spans.map { "between(t,\(num($0.lowerBound)),\(num($0.upperBound)))" }.joined(separator: "+") + "'"
     }
 
     // MARK: - Zoom
@@ -820,7 +830,7 @@ enum FFmpeg {
     static func editedFilterGraph(
         head: [String] = [],
         segments: [TimelineSegment]?, audio: Bool,
-        regions: [CGRect], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30",
+        regions: [BlurBox], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30",
         effects effectStage: EffectStage? = nil, screen: ScreenLayer? = nil, delivery: [String] = [],
         move: EffectStage? = nil, overlays: EffectStage? = nil, captions: [String] = []
     ) -> FilterGraph? {
@@ -965,7 +975,7 @@ enum FFmpeg {
         output: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -1015,7 +1025,7 @@ enum FFmpeg {
         var graph = editedFilterGraph(
             head: head,
             segments: segments, audio: info.hasAudio && settings.audio != .none && !settings.format.isAnimation,
-            regions: regions.map { $0.evenClamped(in: info.fullFrame) },
+            regions: regions.map { $0.clamped(in: info.fullFrame) },
             style: settings.blurStyle,
             strength: settings.blurStrength,
             tail: stages.geometry, fpsExpression: info.fpsExpression,
@@ -1137,7 +1147,7 @@ enum FFmpeg {
         palette: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -1177,7 +1187,7 @@ enum FFmpeg {
             editedFilterGraph(
                 head: head,
                 segments: segments, audio: false,
-                regions: regions.map { $0.evenClamped(in: info.fullFrame) },
+                regions: regions.map { $0.clamped(in: info.fullFrame) },
                 style: settings.blurStyle,
                 strength: settings.blurStrength,
                 tail: stages.geometry, fpsExpression: info.fpsExpression,
@@ -1262,7 +1272,7 @@ enum FFmpeg {
         output: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -1433,7 +1443,7 @@ enum FFmpeg {
         output: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,

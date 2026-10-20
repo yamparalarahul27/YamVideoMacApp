@@ -40,7 +40,8 @@ enum EditCommand: Equatable {
     /// the crop by itself.
     case setAspect(clip: UUID, preset: String)
     case addBlurArea(clip: UUID, area: BlurRegion)
-    case updateBlurArea(clip: UUID, area: UUID, rect: CGRect)
+    /// A new `rect`, new `times`, or both.
+    case updateBlurArea(clip: UUID, area: UUID, rect: CGRect?, times: BlurTimes? = nil)
     case removeBlurArea(clip: UUID, area: UUID)
     case replaceBlurAreas(clip: UUID, areas: [BlurRegion])
     case addZoom(clip: UUID, zoom: ZoomShot)
@@ -149,7 +150,7 @@ enum EditCommand: Equatable {
         case .setCrop: return "Crop"
         case .setAspect: return "Crop Aspect"
         case .addBlurArea: return "Add Blur"
-        case .updateBlurArea: return "Move Blur"
+        case .updateBlurArea(_, _, let rect, _): return rect == nil ? "Blur Time" : "Move Blur"
         case .removeBlurArea: return "Delete Blur"
         case .replaceBlurAreas: return "Edit Blurs"
         case .addZoom: return "Add Zoom"
@@ -395,17 +396,32 @@ enum ProjectReducer {
                     throw EditError.invalid("A blur area with that ID already exists.")
                 }
                 try requireRect(area.rect, in: info, minimumSide: 1, what: "blur area")
-                record.blurRegions.append(BlurRegion(id: area.id, rect: area.rect.evenClamped(in: info.fullFrame)))
+                try requireTimes(area, in: info)
+                record.blurRegions.append(BlurRegion(id: area.id, rect: area.rect.evenClamped(in: info.fullFrame),
+                                                     start: area.start, end: area.end))
             }
             outcome.createdIDs.append(area.id)
 
-        case .updateBlurArea(let clip, let id, let rect):
+        case .updateBlurArea(let clip, let id, let rect, let times):
             try editClip(clip, in: &outcome) { record, info in
                 guard let index = record.blurRegions.firstIndex(where: { $0.id == id }) else {
                     throw EditError.notFound("No blur area with that ID on this recording.")
                 }
-                try requireRect(rect, in: info, minimumSide: 1, what: "blur area")
-                record.blurRegions[index].rect = rect.evenClamped(in: info.fullFrame)
+                guard rect != nil || times != nil else {
+                    throw EditError.invalid("Give the blur area a new rect, start, end, or whole: true.")
+                }
+                var area = record.blurRegions[index]
+                if let rect {
+                    try requireRect(rect, in: info, minimumSide: 1, what: "blur area")
+                    area.rect = rect.evenClamped(in: info.fullFrame)
+                }
+                if let times {
+                    if times.whole { area.start = nil; area.end = nil }
+                    if let start = times.start { area.start = start }
+                    if let end = times.end { area.end = end }
+                    try requireTimes(area, in: info)
+                }
+                record.blurRegions[index] = area
             }
 
         case .removeBlurArea(let clip, let id):
@@ -418,8 +434,13 @@ enum ProjectReducer {
 
         case .replaceBlurAreas(let clip, let areas):
             try editClip(clip, in: &outcome) { record, info in
-                for area in areas { try requireRect(area.rect, in: info, minimumSide: 1, what: "blur area") }
-                record.blurRegions = areas.map { BlurRegion(id: $0.id, rect: $0.rect.evenClamped(in: info.fullFrame)) }
+                for area in areas {
+                    try requireRect(area.rect, in: info, minimumSide: 1, what: "blur area")
+                    try requireTimes(area, in: info)
+                }
+                record.blurRegions = areas.map {
+                    BlurRegion(id: $0.id, rect: $0.rect.evenClamped(in: info.fullFrame), start: $0.start, end: $0.end)
+                }
             }
 
         case .addZoom(let clip, let zoom):
@@ -1096,6 +1117,18 @@ enum ProjectReducer {
 
     private static func requireFinite(_ value: Double, _ what: String) throws {
         guard value.isFinite else { throw EditError.invalid("The \(what) must be a finite number.") }
+    }
+
+    /// A blur area's times are source seconds inside the recording, the end after the start.
+    private static func requireTimes(_ area: BlurRegion, in info: MediaInfo) throws {
+        for time in [area.start, area.end].compactMap({ $0 }) {
+            guard time.isFinite, time >= 0, time <= info.duration + 0.001 else {
+                throw EditError.invalid("A blur area's start and end are source seconds from 0 to \(String(format: "%.2f", info.duration)).")
+            }
+        }
+        if let start = area.start, let end = area.end, end <= start {
+            throw EditError.invalid("A blur area's end must come after its start.")
+        }
     }
 
     private static func requireRect(_ rect: CGRect, in info: MediaInfo, minimumSide: CGFloat, what: String) throws {

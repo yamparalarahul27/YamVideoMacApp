@@ -99,7 +99,7 @@ extension FFmpeg {
             // stage — before anything mixes it with the others.
             let graph = editedFilterGraph(head: head,
                                           segments: clip.segments, audio: withAudio && info.hasAudio,
-                                          regions: clip.blurRegions.map { $0.rect.evenClamped(in: info.fullFrame) },
+                                          regions: clip.blurBoxes.map { $0.clamped(in: info.fullFrame) },
                                           style: settings.blurStyle, strength: settings.blurStrength, tail: filters,
                                           fpsExpression: info.fpsExpression, effects: effects, delivery: delivery)!
             // Namespace every internal pad so independent per-recording graphs coexist.

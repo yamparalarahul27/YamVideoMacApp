@@ -290,7 +290,7 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | **Add clips** | Drop files (or a folder) onto the window, press ⌘O, or open a video with the app from Finder |
 | **Crop** | Press **Crop** (⌥C) under the picture or in the timeline's tool bar. Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one, then **Apply**. Exact pixel values are under **Details** in the inspector |
 | **Lock a shape** | Pick a ratio chip (16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) under the picture, or a preset in the inspector, and resizing keeps that ratio |
-| **Blur an area** | Click the blur band on the Effects row (or **Add Area** in the inspector) and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
+| **Blur an area** | Click the blur band on the Effects row (or **Add Area** in the inspector) and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw. To hide something for only part of the recording (an ID card on a phone screen), go to its first frame and click **Start Here** in the blur area's inspector, then **End Here** at its last frame. The range is in the recording's own time, so later cuts do not move it |
 | **Zoom in** | Scrub to the moment and press the Zoom tool, or select a zoom and press **Aim** under the picture, then click or drag the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds |
 | **Pick the frame you work against** | Drag the playhead on the timeline's ruler |
 | **Inspect what you select** | The inspector on the right follows your selection — a section, a zoom, a blur area, a graphic — with tabs below it, as in Filmora: **Speed** (a section's speed, trims and order; ⌥R), **Video** (frame, blur areas, zooms, screen, graphics, Shorts, effects and markers), **Audio** (captions and loudness) and **Colour** |
@@ -428,6 +428,11 @@ A few things this handles that are easy to get wrong:
 - **Blur runs before the crop.** Blur areas live in full-frame coordinates, so moving the
   crop doesn't drag them along with it. The preview bakes the blur in using the same graph
   builder the export uses, so preview and output can't drift apart.
+- **A timed blur area keeps source time.** Its `start` and `end` are seconds of the
+  recording. The player and the export both turn them into edited-time spans through the
+  same timeline (`BlurBox.boxes`), widened by 0.1 s on each side, so a frame rounded at a
+  cut never shows what the area hides. The export limits the overlay with
+  `enable='between(t,…)'`.
 - **`-filter_complex` breaks stream selection.** Blurring needs a filter graph rather than a
   simple chain, which silently drops audio unless every stream is mapped explicitly. There's
   a test for exactly that.

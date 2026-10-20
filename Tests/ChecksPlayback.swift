@@ -130,7 +130,7 @@ import Foundation
     combinedClip.segments = [TimelineSegment(start: 1, end: 3), TimelineSegment(start: 0, end: 0.5)]
     let combinedOut = scratch.appendingPathComponent("combined-edit.mp4")
     try await FFmpeg.export(input: markerClip, output: combinedOut, info: markerInfo, crop: combinedClip.crop!,
-        regions: [CGRect(x: 0, y: 0, width: 100, height: 100)], zoomShots: combinedClip.zoomShots,
+        regions: [BlurBox(rect: CGRect(x: 0, y: 0, width: 100, height: 100))], zoomShots: combinedClip.zoomShots,
         segments: combinedClip.segments, settings: ExportSettings()) { _ in }
     equal(try await frameCount(combinedOut), 75, "cuts, complex blur and zoom compose without changing frame count")
     let combinedBox = try await markerBox(combinedOut, at: 1.5, size: CGSize(width: 1000, height: 600))
