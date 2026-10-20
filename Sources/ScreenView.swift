@@ -287,6 +287,7 @@ extension ScreenLayout {
         case .speaker: return .orange
         case .screen: return .blue
         case .split: return .teal
+        case .ink: return .purple
         }
     }
 }

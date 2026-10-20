@@ -172,6 +172,7 @@ extension AppModel {
     func restore(_ snapshot: VideoProject) {
         playback.clear(); showPlayback = false
         showsShort = false; playback.shortID = nil; selectedShortID = nil
+        resetPictureEdit()
         // The history belongs to the document: a different one brings its own, while undo
         // within the same one keeps every step it has seen.
         if snapshot.projectID != projectID { changeLog = snapshot.log ?? [] }
@@ -206,7 +207,7 @@ extension AppModel {
            module != .library || text.undoManager?.canUndo == true {
             text.undoManager?.undo(); return
         }
-        if module == .library { libraryUndo(); return }
+        if module.editsLibrary { libraryUndo(); return }
         undo()
     }
 
@@ -215,7 +216,7 @@ extension AppModel {
            module != .library || text.undoManager?.canRedo == true {
             text.undoManager?.redo(); return
         }
-        if module == .library { libraryRedo(); return }
+        if module.editsLibrary { libraryRedo(); return }
         redo()
     }
 
@@ -240,6 +241,10 @@ extension AppModel {
         panel.allowedContentTypes = [.yamVideoProject]
         panel.nameFieldStringValue = projectURL?.lastPathComponent ?? "Untitled.yamvideo"
         panel.title = "Save YamVideo Project"
+        // A first save goes into the video folder of its recording (docs/footage-layout.md).
+        if projectURL == nil, let folder = items.first.flatMap({ FootageLayout.videoFolder(of: $0.url) }) {
+            panel.directoryURL = folder
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         save(to: url, asCopy: asCopy)
     }
@@ -258,6 +263,7 @@ extension AppModel {
             if projectID != previousID { rotateSession() }
             noteProjectLocation()
             writeVideoNotes()
+            refreshMacs()
             scheduleAutosave()
             let missing = Self.tableHashes(project).filter { !LUTStore.has($0) }
             statusMessage = missing.isEmpty ? "Saved \(destination.lastPathComponent)."

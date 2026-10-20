@@ -254,6 +254,15 @@ extension CGImage {
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         return context.makeImage()!
     }
+
+    /// This picture with `draw` done over it (bottom-left origin).
+    func drawn(_ draw: (CGContext) -> Void) -> CGImage {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(self, in: CGRect(x: 0, y: 0, width: width, height: height))
+        draw(context)
+        return context.makeImage()!
+    }
 }
 
 func rgb(_ image: CGImage, _ x: Int, _ y: Int) -> (Int, Int, Int) {

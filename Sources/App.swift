@@ -7,8 +7,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lets local Codex/Claude sessions edit the open project; see `LocalAgentServer`.
     private var agentServer: LocalAgentServer?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before the window opens, so it never shows in the other appearance first.
+        MainActor.assumeIsolated { AppModel.shared.applyAppearance() }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { AppModel.shared.loadLibrary(); AppModel.shared.restoreModule() }
+        MainActor.assumeIsolated { AppModel.shared.loadLibrary(); AppModel.shared.restoreModule(); AppModel.shared.refreshMacs() }
         startAgentBridge()
         // Keys the timeline answers to. Here rather than as menu shortcuts because a menu
         // shortcut would take ⌘A, ⌘← and ⌘→ from a text field being typed in; this
@@ -55,6 +60,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         model.renamingMarker = true
                     }
                 case (_, .command) where event.charactersIgnoringModifiers?.lowercased() == "a": model.selectAllSegments()
+                // Filmora's keys where YamVideo had none: N for snapping (as Final Cut Pro
+                // and Resolve), ⌥[ and ⌥] trim to the playhead, ⌥C crops.
+                case (_, []) where event.charactersIgnoringModifiers?.lowercased() == "n":
+                    model.timelineSnapping.toggle()
+                    model.statusMessage = model.timelineSnapping ? "Snapping on" : "Snapping off"
+                case (33, .option): model.trimToPlayhead(start: true)     // [
+                case (30, .option): model.trimToPlayhead(start: false)    // ]
+                case (8, .option): model.beginCrop()                       // C
+                case (15, .option): model.showSpeedTab()                   // R
                 default: return false
                 }
                 return true
@@ -149,6 +163,10 @@ struct YamVideoApp: App {
             CommandMenu("Go") {
                 Button("Library") { model.showModule(.library) }.keyboardShortcut("1")
                 Button("Studio") { model.showModule(.studio) }.keyboardShortcut("2")
+                Button("Make Thumbnail…") { model.openThumbnailMaker() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(!model.canMakeThumbnail)
+                Button("Calendar") { model.showModule(.calendar) }.keyboardShortcut("4")
                 Divider()
                 Button("Style…") { model.showingStyle = true }.keyboardShortcut("3")
             }
@@ -204,6 +222,10 @@ struct YamVideoApp: App {
             CommandGroup(after: .toolbar) {
                 Button("Reset Crop") { model.resetCrop() }
                     .keyboardShortcut("0", modifiers: [.command, .shift])
+                Divider()
+                Picker("Appearance", selection: $model.appearance) {
+                    ForEach(AppAppearance.allCases) { Text($0.label).tag($0) }
+                }
             }
         }
     }

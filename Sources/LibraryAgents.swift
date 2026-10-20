@@ -25,6 +25,13 @@ struct LibraryWireCommand: Codable, Equatable {
     /// addPost: where the video is published; left out, it is only marked posted.
     /// removePost: the post to remove; left out, all of them.
     var link: String?
+    /// planRelease: the day it goes out ("2026-10-19"), an optional time of day as
+    /// `clock` ("19:00"; `time` is a number in project commands), the platforms (left
+    /// out, all four), and a platform's own day ({"linkedin": "2026-10-20"}).
+    var day: String?
+    var clock: String?
+    var platforms: [String]?
+    var ownDays: [String: String]?
 
     /// setStyle: Style.md's whole text.
     var text: String?
@@ -36,7 +43,7 @@ struct LibraryWireCommand: Codable, Equatable {
     var source: String?
 
     static let types = ["addIdea", "updateIdea", "removeIdea", "addIdeaImages", "removeIdeaImage", "linkProject", "unlinkProject",
-                        "importVideos", "addPost", "removePost", "setStyle", "addStyleRule", "removeStyleRule"]
+                        "importVideos", "addPost", "removePost", "planRelease", "unplanRelease", "setStyle", "addStyleRule", "removeStyleRule"]
 }
 
 /// The parts of a request only Library methods read, decoded from the same line.
@@ -68,6 +75,8 @@ struct AgentLibrary: Encodable {
         var inProject: Bool
         var exports: [Export]
         var posts: [Post]
+        /// When and where it goes out; nil while it is not planned.
+        var plan: ReleasePlan?
         /// The latest export's files that are still there.
         var video: String?
         var cover: String?
@@ -163,7 +172,7 @@ extension AppModel {
                     .init(id: row.id, short: row.short, title: row.title, length: row.length, recording: row.recording, inProject: row.inProject,
                           exports: row.exports.map { .init(json: $0.json, exported: $0.exported, exists: $0.exists) },
                           posts: row.posts.map { .init(link: $0.link, platform: $0.platform?.rawValue, posted: $0.posted) },
-                          video: row.export?.video, cover: row.export?.cover)
+                          plan: row.stored?.plan, video: row.export?.video, cover: row.export?.cover)
                 })
         }
         return AgentLibrary(revision: library.revision, folder: libraryFolderURL?.path,
@@ -320,6 +329,33 @@ extension AppModel {
             guard let videoID = wire.videoID else { throw EditError(code: .invalidRequest, message: "\(wire.type) needs videoID from the idea's videos[].id.") }
             guard let row = videoRows(item).first(where: { $0.id == videoID }) else { throw EditError.notFound("The idea has no video \(videoID).") }
             let piece = wire.type == "addPost" ? try Self.posting(row, link: wire.link) : try Self.unposting(row, link: wire.link)
+            return [(.putVideo(id: id, video: piece), [])]
+        case "planRelease", "unplanRelease":
+            let id = try idea()
+            guard let item = library.item(id) else { throw EditError.notFound("No idea \(id). Read the Library again.") }
+            guard let videoID = wire.videoID else { throw EditError(code: .invalidRequest, message: "\(wire.type) needs videoID from the idea's videos[].id.") }
+            guard let row = videoRows(item).first(where: { $0.id == videoID }) else { throw EditError.notFound("The idea has no video \(videoID).") }
+            var piece = row.stored ?? VideoPiece(id: row.id, short: row.short, recording: row.recording, title: row.title)
+            if wire.type == "unplanRelease" {
+                guard piece.plan != nil else { throw EditError.invalid("\"\(row.title)\" is not planned.") }
+                piece.plan = nil
+            } else {
+                guard let day = wire.day else {
+                    throw EditError(code: .invalidRequest, message: "planRelease needs day: the date it goes out, like 2026-10-19.")
+                }
+                var platforms = Platform.allCases
+                if let names = wire.platforms {
+                    platforms = try names.map { name in
+                        guard let platform = Platform(rawValue: name.lowercased()) else {
+                            throw EditError.invalid("\(name) is not a platform: youtube, instagram, x or linkedin.")
+                        }
+                        return platform
+                    }
+                }
+                let plan = ReleasePlan(day: day, time: wire.clock, platforms: platforms, ownDays: wire.ownDays)
+                if let problem = plan.problem { throw EditError.invalid(problem) }
+                piece.plan = plan
+            }
             return [(.putVideo(id: id, video: piece), [])]
         default:
             throw EditError(code: .invalidRequest, message: "Unknown Library command \"\(wire.type)\". Commands: \(LibraryWireCommand.types.joined(separator: ", ")).")

@@ -160,6 +160,55 @@ import Foundation
     check(ssWorst.whole < 3 && ssWorst.speaker < 3 && ssWorst.screen < 3,
           "the export draws each layout, held and while it changes, as the preview does")
 
+    print("\nInk layout")
+    let ikHeld = ssGeometry.held(.ink), ikLines = ssGeometry.screenPlace(.ink)!.rect
+    let ikFace = ssGeometry.facePoint(in: ikHeld)
+    check(ikHeld.ink == 1 && ikHeld.speaker.rect.maxX == 1920 && ikHeld.speaker.rect.minY == 0 && ikHeld.speaker.rect.height == 1080
+              && ikHeld.window.size == ikHeld.speaker.rect.size && abs(Double(ikFace.x) - LayoutGeometry.inkFace * 1920) <= 2 && ikHeld.speaker.radius == 0,
+          "Ink moves the speaker right at full size, the face at \(Int(LayoutGeometry.inkFace * 100)) % of the width", "\(ikHeld.speaker.rect) face \(ikFace)")
+    check(ikLines.minX == 40 && ikLines.maxX <= LayoutGeometry.inkWidth * 1920 + 2 && ikLines.minY >= 40 && ikLines.maxY <= 1040 && ssGeometry.screenPlace(.ink)!.radius == 0
+              && abs(Double(ikLines.width / ikLines.height) - 3248.0 / 2008) < 0.01,
+          "Ink puts the whole screen, as large as fits, left of the speaker, with square corners", "\(ikLines)")
+    check(abs(LayoutGeometry.inkShade(at: 10, width: 1920) - 0.91) < 0.0001 && LayoutGeometry.inkShade(at: LayoutGeometry.inkShadeEnd * 1920, width: 1920) == 0
+              && LayoutGeometry.inkShade(at: 1100, width: 1920) > 0 && LayoutGeometry.inkShade(at: 1100, width: 1920) < 0.91
+              && LayoutGeometry.inkShadeEnd * 1920 < Double(ikFace.x) - 40,
+          "the shade is strong on the left and gone before the face")
+    var ikMoves = ssTrack; ikMoves.spans = [LayoutSpan(start: 10, end: 20, layout: .ink)]
+    let ikMid = ikMoves.state(at: 10.2, geometry: ssGeometry, endScreen: nil)
+    check(ikMid.ink > 0.2 && ikMid.ink < 0.8 && ikMoves.state(at: 10.5, geometry: ssGeometry, endScreen: nil).ink == 1
+              && ikMoves.state(at: 20.5, geometry: ssGeometry, endScreen: nil).ink == 0 && ikMoves.usesInk && !ssTrack.usesInk,
+          "a change into Ink eases its look in over 0.4 s, and out again after", "\(ikMid.ink)")
+    let ikShort = LayoutGeometry(short: ssTrack, crop: ssSpeakerInfo.fullFrame, window: ShortFormat.defaultWindow(in: ssSpeakerInfo.fullFrame, info: ssSpeakerInfo))
+    check(ikShort.held(.ink) == ikShort.held(.screen), "in a Short, Ink shows as the Screen layout does: the screen on top")
+
+    // A dark canvas with white lines and a grey box (partly keyed), and a speaker.
+    let ikCanvasURL = try await ssClip("ik-canvas.mov", "color=c=0x1c1c1c:s=960x600:r=30,drawgrid=w=96:h=96:t=4:c=white,"
+                                       + "drawbox=x=120:y=110:w=220:h=150:c=0x9a9a9a:t=fill,drawbox=x=500:y=300:w=180:h=120:c=0x484848:t=fill",
+                                       seconds: 9, audio: false)
+    let ikCanvas = try await FFmpeg.probe(url: ikCanvasURL)
+    var ikLive = ScreenTrack(url: ikCanvasURL, info: ikCanvas, offset: 1)
+    ikLive.spans = [LayoutSpan(start: 1, end: 3, layout: .ink), LayoutSpan(start: 4.5, end: 6, layout: .speaker)]
+    var ikItem = ssItem; ikItem.screen = ikLive
+    let ikExport = scratch.appendingPathComponent("ik-layout.mp4")
+    try await FFmpeg.export(input: ssSpeakerURL, output: ikExport, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: ikLive) { _ in }
+    equal(try await frameCount(ikExport), try await frameCount(ssSpeakerURL), "the export with Ink keeps every frame of the speaker")
+    let ikGeo = LayoutGeometry(track: ikLive, crop: ssSpeakerMedia.fullFrame)
+    var ikWorst = 0.0
+    for frame in [15, 34, 45, 70, 94, 120] {
+        let native = try await nativePicture(ikItem, frame: frame)
+        let exported = try await ffmpegPicture(ikExport, graph: nil, frame: frame, width: 1280, height: 720)
+        ikWorst = max(ikWorst, meanDifference(native, exported, xs: 4..<1276))
+    }
+    print(String(format: "       ink layout parity: whole frame %.2f of 255", ikWorst))
+    check(ikWorst < 3, "the export draws Ink, held and while it changes, as the preview does")
+    let ikFrame = try await nativePicture(ikItem, frame: 70)
+    let ikPlace = ikGeo.screenPlace(.ink)!.rect, ikScale = Double(ikPlace.width) / 960
+    func ikAt(_ x: Double, _ y: Double) -> Double { ikFrame.at(Int(Double(ikPlace.minX) + x * ikScale), Int(Double(ikPlace.minY) + y * ikScale), 1) }
+    let ikCanvasAt = ikAt(48, 48), ikLineAt = ikAt(1, 48), ikDarkBox = ikAt(590, 360), ikGreyBox = ikAt(230, 185)
+    check(ikCanvasAt < 30 && ikDarkBox < 30 && ikLineAt > 180 && ikGreyBox > ikCanvasAt + 25 && ikGreyBox < ikLineAt - 40,
+          "Ink keys out the dark canvas and dark shapes, keeps the white lines, and lets mid greys through in part",
+          String(format: "canvas %.0f, dark box %.0f, line %.0f, grey box %.0f", ikCanvasAt, ikDarkBox, ikLineAt, ikGreyBox))
+
     print("\nShorts with the screen on top")
     let skWindow = ShortFormat.defaultWindow(in: ssSpeakerMedia.fullFrame, info: ssSpeakerMedia)
     let skGeo = LayoutGeometry(short: ssLive, crop: ssSpeakerMedia.fullFrame, window: skWindow)
@@ -179,9 +228,10 @@ import Foundation
     skTimed.zooms = [ZoomShot(start: 2.2, hold: 0.5, level: 2, target: CGPoint(x: 400, y: 300)),
                      ZoomShot(start: 0.1, hold: 0.2, level: 2, target: CGPoint(x: 400, y: 300))]
     let skPart = skTimed.forShort(Short(start: 1, end: 4))
+    let skPartZooms = skPart.zooms.map(\.start).sorted()
     check(skPart.spans.count == 1 && abs(skPart.spans[0].start - 1) < 0.0001 && abs(skPart.spans[0].end - 2.5) < 0.0001
-              && skPart.zooms.count == 1 && abs(skPart.zooms[0].start - 1.2) < 0.0001 && skPart.offset == ssLive.offset,
-          "in a Short's own time the screen's layouts are cut and moved, and only its zooms inside the Short stay")
+              && skPartZooms.count == 2 && abs(skPartZooms[0] + 0.9) < 0.0001 && abs(skPartZooms[1] - 1.2) < 0.0001 && skPart.offset == ssLive.offset,
+          "in a Short's own time the screen's layouts are cut and moved, and every zoom it touches comes along, one that began before it from before 0")
     var skShort = Short(start: 0, end: 6); skShort.screen = .top
     let skCoded = try JSONDecoder().decode(Short.self, from: JSONEncoder().encode(skShort))
     let skPlain = try JSONDecoder().decode(Short.self, from: Data(#"{"start": 0, "end": 2}"#.utf8))
@@ -211,6 +261,39 @@ import Foundation
     }
     print(String(format: "       Short with the screen parity: %.2f of 255", skWorst))
     check(skWorst < 3, "the export draws the Short with the screen as the preview does: stacked, alone and while it changes")
+
+    // A Short that starts inside a zoom keeps it, as the preview shows it: the speaker's zoom
+    // and the screen's, with the screen on top and without it.
+    var szItem = skItem
+    szItem.zoomShots = [ZoomShot(start: 0.5, hold: 2.6, level: 1.5,
+                                 target: CGPoint(x: Double(ssSpeakerMedia.width) / 2, y: Double(ssSpeakerMedia.height) / 2))]
+    szItem.screen?.zooms = [ZoomShot(start: 0.4, hold: 2.8, level: 2, target: CGPoint(x: 400, y: 300))]
+    var szShort = Short(start: 2, end: 5.5); szShort.screen = .top
+    var szOff = szShort; szOff.screen = .off
+    szItem.shorts = [szShort]
+    let szCut = szItem.shortItem(szShort)
+    check(szCut.zoomShots.count == 1 && abs(szCut.zoomShots[0].start + 1.5) < 0.0001
+              && szCut.screen?.zooms.count == 1 && szCut.screen.map { abs($0.zooms[0].start + 1.6) < 0.0001 } == true,
+          "a zoom that began before the Short comes along whole, starting before 0")
+    // The preview plays the whole recording, so its frames count from the recording's start.
+    let szFirst = Int((szShort.start * 30).rounded())
+    // Frame 60 (2 s into the Short) is in both zooms' ease out, where the two renderers differ most.
+    var szWorst = (held: 0.0, easing: 0.0)
+    for (index, short) in [szShort, szOff].enumerated() {
+        var item = szItem; item.shorts = [short]
+        let out = scratch.appendingPathComponent("short-zoom-\(index).mp4")
+        try await ShortExport.export(item, info: ssSpeakerMedia, short: short, settings: ssSettings, output: out) { _ in }
+        for frame in [10, 40, 60, 90] {
+            let native = try await nativePicture(item, frame: szFirst + frame, short: short)
+            // Without the screen the preview draws the window at its own size; the export scales it to 1080×1920.
+            let graph = native.width == 1080 ? nil : "[0:v]scale=\(native.width):\(native.height):flags=lanczos[mvout]"
+            let exported = try await ffmpegPicture(out, graph: graph, frame: frame, width: native.width, height: native.height)
+            let difference = meanDifference(native, exported, xs: 4..<(native.width - 4))
+            if frame == 60 { szWorst.easing = max(szWorst.easing, difference) } else { szWorst.held = max(szWorst.held, difference) }
+        }
+    }
+    print(String(format: "       Short inside a zoom parity: held %.2f, easing %.2f of 255", szWorst.held, szWorst.easing))
+    check(szWorst.held < 3 && szWorst.easing < 6, "the export zooms a Short that starts inside a zoom as the preview does, with the screen and without")
 
     let skAgent = AppModel(recoveryURL: nil)
     var skAgentItem = ssItem; skAgentItem.shorts = []

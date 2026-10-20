@@ -7,10 +7,10 @@ import UniformTypeIdentifiers
 // from it is linked by its identity, so moving the file never breaks the link.
 
 /// Where an item is on its way from an idea to a posted video. Worked out from the item,
-/// never stored: a project makes it in production, an export ready, a post posted. A
-/// later phase adds scheduled.
+/// never stored: a project makes it in production, an export ready, a planned release
+/// scheduled, a post posted.
 enum ContentStage: String, Codable, CaseIterable, Identifiable {
-    case idea, inProduction, ready, posted
+    case idea, inProduction, ready, scheduled, posted
 
     var id: String { rawValue }
     var label: String {
@@ -18,6 +18,7 @@ enum ContentStage: String, Codable, CaseIterable, Identifiable {
         case .idea: return "Idea"
         case .inProduction: return "In production"
         case .ready: return "Ready"
+        case .scheduled: return "Scheduled"
         case .posted: return "Posted"
         }
     }
@@ -85,9 +86,13 @@ struct VideoPiece: Codable, Equatable, Identifiable {
     var title: String
     var exports: [VideoExport] = []
     var posts: [VideoPost] = []
+    /// When and where it goes out (version 3); nil while it is not planned.
+    var plan: ReleasePlan?
 
-    init(id: UUID, short: Bool, recording: UUID? = nil, title: String, exports: [VideoExport] = [], posts: [VideoPost] = []) {
+    init(id: UUID, short: Bool, recording: UUID? = nil, title: String, exports: [VideoExport] = [], posts: [VideoPost] = [],
+         plan: ReleasePlan? = nil) {
         self.id = id; self.short = short; self.recording = recording; self.title = title; self.exports = exports; self.posts = posts
+        self.plan = plan
     }
 
     /// The same video with `other`'s exports and posts added, each once.
@@ -95,6 +100,7 @@ struct VideoPiece: Codable, Equatable, Identifiable {
         var result = self
         if !other.title.isEmpty { result.title = other.title }
         result.recording = result.recording ?? other.recording
+        result.plan = result.plan ?? other.plan
         for export in other.exports where !result.exports.contains(where: { $0.json == export.json }) { result.exports.append(export) }
         result.exports.sort { $0.exported < $1.exported }
         for post in other.posts where !result.posts.contains(where: { $0.link == post.link }) { result.posts.append(post) }
@@ -144,6 +150,7 @@ struct ContentItem: Codable, Equatable, Identifiable {
 
     var stage: ContentStage {
         if videos.contains(where: { !$0.posts.isEmpty }) { return .posted }
+        if videos.contains(where: { $0.plan != nil }) { return .scheduled }
         if videos.contains(where: { !$0.exports.isEmpty }) { return .ready }
         return project == nil ? .idea : .inProduction
     }
@@ -171,8 +178,9 @@ struct ContentItem: Codable, Equatable, Identifiable {
 /// Everything in the Library, as `Library.json` stores it.
 struct Library: Codable, Equatable {
     /// 1: ideas with notes, links, images, a topic and a linked project. 2: adds each
-    /// item's videos: where they were exported and where they are published.
-    static let currentVersion = 2
+    /// item's videos: where they were exported and where they are published. 3: adds each
+    /// video's release plan (an older build refuses the file rather than drop the plans).
+    static let currentVersion = 3
 
     var version = Library.currentVersion
     /// Counts every committed change, undo and redo, and is saved with the file, so an
@@ -273,6 +281,7 @@ extension ContentItem {
             for export in video.exports where !export.json.hasPrefix("/") || !export.json.hasSuffix(".youtube.json") {
                 return "An export is the absolute path to its .youtube.json file."
             }
+            if let problem = video.plan?.problem { return "\"\(video.title)\": \(problem)" }
         }
         return nil
     }

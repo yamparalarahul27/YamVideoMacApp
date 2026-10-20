@@ -324,6 +324,7 @@ enum ShortExport {
     static func export(_ item: VideoItem, info: MediaInfo, short: Short, settings: ExportSettings, output: URL,
                        drawGraphics: ((GraphicsRender.Job, URL, URL) async throws -> Void)? = nil,
                        onProgress: @escaping @Sendable (Double) -> Void) async throws {
+        let item = item.effective
         let cut = item.shortItem(short)
         // With the screen on top, the layout stage reads the recording's whole picture and
         // draws the 1080×1920 canvas itself, from the Short's window and the screen.
@@ -331,7 +332,7 @@ enum ShortExport {
         let crop = stack == nil ? (cut.crop ?? info.fullFrame) : (item.crop ?? info.fullFrame)
         try await FFmpeg.export(input: item.url, output: output, info: info,
                                 crop: crop.evenClamped(in: info.fullFrame),
-                                regions: cut.blurRegions.map(\.rect), zoomShots: cut.zoomShots, segments: cut.segments,
+                                regions: cut.blurBoxes, zoomShots: cut.zoomShots, segments: cut.segments,
                                 settings: settings, subtitles: nil, color: item.colorStage(settings),
                                 effects: cut.blurEffects, graphics: cut.exportGraphics(settings),
                                 canvas: ShortFormat.size, captionsASS: burnedCaptions(item, short: short, settings: settings),
@@ -485,7 +486,7 @@ extension AppModel {
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
         panel.message = "Choose the folder for the Short, its captions, cover and upload text."
-        panel.directoryURL = settings.outputFolder ?? item.url.deletingLastPathComponent()
+        panel.directoryURL = settings.outputFolder ?? FootageLayout.shortsFolder(for: item.url)
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         exportShortForYouTube(short.id, to: folder)
     }

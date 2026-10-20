@@ -133,14 +133,14 @@ import Foundation
         check(!simple.isComplex, "a tail with no regions stays a simple -vf chain")
     }
 
-    if let boxes = FFmpeg.filterGraph(regions: [r1, r2], style: .black, strength: 20, tail: []) {
+    if let boxes = FFmpeg.filterGraph(regions: [BlurBox(rect: r1), BlurBox(rect: r2)], style: .black, strength: 20, tail: []) {
         check(!boxes.isComplex, "black boxes need no filter_complex")
         equal(boxes.spec,
               "drawbox=100:60:200:120:color=black:t=fill,drawbox=700:400:160:160:color=black:t=fill",
               "drawbox chain covers each region")
     }
 
-    if let one = FFmpeg.filterGraph(regions: [r1], style: .blur, strength: 20, tail: []) {
+    if let one = FFmpeg.filterGraph(regions: [BlurBox(rect: r1)], style: .blur, strength: 20, tail: []) {
         check(one.isComplex, "blur needs filter_complex")
         equal(one.outputLabel, "vout", "graph exposes an output pad")
         equal(one.spec,
@@ -148,7 +148,7 @@ import Foundation
               "single-region blur graph")
     }
 
-    if let two = FFmpeg.filterGraph(regions: [r1, r2], style: .blur, strength: 20,
+    if let two = FFmpeg.filterGraph(regions: [BlurBox(rect: r1), BlurBox(rect: r2)], style: .blur, strength: 20,
                                     tail: ["crop=640:360:100:100"]) {
         check(two.spec.contains("split=3[base][t0][t1]"), "splits once per region plus the base")
         check(two.spec.contains("overlay=100:60") && two.spec.contains("overlay=700:400"),
@@ -157,7 +157,7 @@ import Foundation
               "the crop runs last, after the regions are blurred", two.spec)
     }
 
-    if let pix = FFmpeg.filterGraph(regions: [r1], style: .pixelate, strength: 20, tail: []) {
+    if let pix = FFmpeg.filterGraph(regions: [BlurBox(rect: r1)], style: .pixelate, strength: 20, tail: []) {
         // block = 20/2 = 10 -> 200x120 becomes 20x12, then back up with nearest neighbour.
         check(pix.spec.contains("scale=20:12,scale=200:120:flags=neighbor"),
               "pixelate computes exact block dimensions", pix.spec)
@@ -216,6 +216,23 @@ import Foundation
     noSuffix.suffix = ""
     check(FFmpeg.outputURL(for: mp4Source, settings: noSuffix).path != mp4Source.path,
           "never writes over the source file")
+
+    print("\nFootage layout")
+    let video = scratch.appendingPathComponent("2026-10-20 Layout Video")
+    let recordedTake = video.appendingPathComponent("Recorded/take.mp4")
+    let joinedTake = video.appendingPathComponent("Recorded/Joined/joined.mov")
+    try FileManager.default.createDirectory(at: joinedTake.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data().write(to: recordedTake); try Data().write(to: joinedTake)
+    equal(FootageLayout.videoFolder(of: recordedTake)?.lastPathComponent, "2026-10-20 Layout Video", "finds the video folder of a recording")
+    equal(FootageLayout.videoFolder(of: joinedTake)?.lastPathComponent, "2026-10-20 Layout Video", "finds it from Recorded/Joined too")
+    check(FootageLayout.videoFolder(of: landscape) == nil, "a recording outside the layout has no video folder")
+    equal(FFmpeg.outputURL(for: recordedTake, settings: settings).deletingLastPathComponent().path,
+          video.appendingPathComponent("Edited").path, "exports a recording in the layout to Edited/")
+    check(FileManager.default.fileExists(atPath: video.appendingPathComponent("Edited").path), "makes Edited/ when it is not there")
+    equal(FootageLayout.shortsFolder(for: joinedTake).path, video.appendingPathComponent("Edited/Shorts").path, "puts Shorts in Edited/Shorts")
+    equal(FootageLayout.filesFolder(for: recordedTake).path, video.appendingPathComponent("Files").path, "puts thumbnails in Files/")
+    equal(FootageLayout.filesFolder(for: landscape).path, landscape.deletingLastPathComponent().path,
+          "keeps thumbnails beside a recording outside the layout")
 
     // MARK: - Real encodes
 
@@ -292,7 +309,7 @@ import Foundation
     let box = CGRect(x: 200, y: 100, width: 160, height: 120)
     let boxCrop = CGRect(x: 100, y: 50, width: 640, height: 480)
     try await FFmpeg.export(input: landscape, output: blackOut, info: info,
-                            crop: boxCrop, regions: [box], settings: blackSettings) { _ in }
+                            crop: boxCrop, regions: [BlurBox(rect: box)], settings: blackSettings) { _ in }
     let blackInfo = try await FFmpeg.probe(url: blackOut)
     equal(blackInfo.width, 640, "cropped output width with a black box")
 
@@ -327,7 +344,7 @@ import Foundation
     blurSettings.suffix = "-blur"
     let blurOut = FFmpeg.outputURL(for: detailClip, settings: blurSettings)
     try await FFmpeg.export(input: detailClip, output: blurOut, info: detailInfo,
-                            crop: detailInfo.fullFrame, regions: [r1, r2], settings: blurSettings) { _ in }
+                            crop: detailInfo.fullFrame, regions: [BlurBox(rect: r1), BlurBox(rect: r2)], settings: blurSettings) { _ in }
     let blurInfo = try await FFmpeg.probe(url: blurOut)
     equal(blurInfo.width, 1280, "blur alone leaves the frame size alone")
 
@@ -344,7 +361,7 @@ import Foundation
     // -filter_complex disables automatic stream selection: audio must be mapped explicitly.
     let blurredWithAudio = FFmpeg.outputURL(for: landscape, settings: blurSettings)
     try await FFmpeg.export(input: landscape, output: blurredWithAudio, info: info,
-                            crop: info.fullFrame, regions: [r1], settings: blurSettings) { _ in }
+                            crop: info.fullFrame, regions: [BlurBox(rect: r1)], settings: blurSettings) { _ in }
     equal(try await FFmpeg.probe(url: blurredWithAudio).audioCodec, "aac",
           "audio survives a filter_complex blur graph")
 
@@ -353,7 +370,7 @@ import Foundation
     blurNoAudio.suffix = "-blur-silent"
     let silentOut = FFmpeg.outputURL(for: landscape, settings: blurNoAudio)
     try await FFmpeg.export(input: landscape, output: silentOut, info: info,
-                            crop: info.fullFrame, regions: [r1], settings: blurNoAudio) { _ in }
+                            crop: info.fullFrame, regions: [BlurBox(rect: r1)], settings: blurNoAudio) { _ in }
     check(try await FFmpeg.probe(url: silentOut).audioCodec == nil,
           "removing audio still works with a blur graph")
 
@@ -363,7 +380,7 @@ import Foundation
     pixSettings.suffix = "-pixel"
     let pixOut = FFmpeg.outputURL(for: detailClip, settings: pixSettings)
     try await FFmpeg.export(input: detailClip, output: pixOut, info: detailInfo,
-                            crop: detailInfo.fullFrame, regions: [r1], settings: pixSettings) { _ in }
+                            crop: detailInfo.fullFrame, regions: [BlurBox(rect: r1)], settings: pixSettings) { _ in }
     check(try await FFmpeg.probe(url: pixOut).width == 1280, "pixelate encodes cleanly")
     let pixDetail = try await regionDetail(pixOut, r1)
     check(pixDetail < sourceDetail * 0.2, "the pixelated area lost its detail",
@@ -379,7 +396,7 @@ import Foundation
         // Portrait frame is 720x1280; this box only fits in the displayed orientation.
         let portraitBox = CGRect(x: 100, y: 900, width: 300, height: 200)
         try await FFmpeg.export(input: rotated, output: out, info: rotatedInfo,
-                                crop: rotatedInfo.fullFrame, regions: [portraitBox], settings: s) { _ in }
+                                crop: rotatedInfo.fullFrame, regions: [BlurBox(rect: portraitBox)], settings: s) { _ in }
         let px = try await pixel(out, x: 200, y: 1000)
         check(px.0 < 30 && px.1 < 30 && px.2 < 30,
               "blur box lands correctly on rotated footage", "rgb\(px)")
@@ -512,7 +529,7 @@ import Foundation
     let allOut = FFmpeg.outputURL(for: markerClip, settings: allSettings)
     try await FFmpeg.export(input: markerClip, output: allOut, info: markerInfo,
                             crop: CGRect(x: 100, y: 50, width: 1000, height: 600),
-                            regions: [CGRect(x: 200, y: 200, width: 100, height: 100)],
+                            regions: [BlurBox(rect: CGRect(x: 200, y: 200, width: 100, height: 100))],
                             zoomShots: [zoomShot], settings: allSettings) { _ in }
     equal(try await FFmpeg.probe(url: allOut).width, 1000, "blur, crop and zoom compose")
 
@@ -628,7 +645,7 @@ import Foundation
     check(croppedGraph.contains { $0.hasPrefix("[0:v]crop=640:360:0:0[pre];[pre][1:v]paletteuse") },
           "a simple chain is relabelled before paletteuse", croppedGraph.joined(separator: " "))
     let blurredGraph = FFmpeg.exportArguments(input: landscape, output: gifTarget, info: info,
-                                              crop: info.fullFrame, regions: [r1],
+                                              crop: info.fullFrame, regions: [BlurBox(rect: r1)],
                                               settings: sourceRate,
                                               palette: FFmpeg.paletteURL(for: gifTarget))
     check(blurredGraph.contains { $0.contains("[vout][1:v]paletteuse") },
@@ -676,7 +693,7 @@ import Foundation
     let richOut = FFmpeg.outputURL(for: markerClip, settings: richGif)
     try await FFmpeg.export(input: markerClip, output: richOut, info: markerInfo,
                             crop: CGRect(x: 100, y: 50, width: 640, height: 480),
-                            regions: [CGRect(x: 200, y: 100, width: 160, height: 120)],
+                            regions: [BlurBox(rect: CGRect(x: 200, y: 100, width: 160, height: 120))],
                             zoomShots: [zoomShot], settings: richGif) { _ in }
     let richInfo = try await FFmpeg.probe(url: richOut)
     equal(richInfo.width, 640, "crop applies to a GIF")
@@ -935,13 +952,13 @@ import Foundation
         check(false, "a head alone still produces a filter chain")
     }
 
-    if let headed = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [r1],
+    if let headed = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [BlurBox(rect: r1)],
                                        style: .blur, strength: 20, tail: []) {
         check(headed.spec.hasPrefix("[0:v]zscale=t=linear,split=2"),
               "the head runs once, before the split", headed.spec)
     }
 
-    if let headedBoxes = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [r1],
+    if let headedBoxes = FFmpeg.filterGraph(head: ["zscale=t=linear"], regions: [BlurBox(rect: r1)],
                                             style: .black, strength: 20, tail: ["crop=2:2:0:0"]) {
         check(headedBoxes.spec.hasPrefix("zscale=t=linear,drawbox="),
               "black boxes keep the head in front", headedBoxes.spec)

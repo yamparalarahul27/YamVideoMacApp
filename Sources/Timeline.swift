@@ -27,6 +27,31 @@ struct ClipTimeline: Equatable {
     var segments: [TimelineSegment]
     var duration: Double { segments.reduce(0) { $0 + $1.duration } }
 
+    /// How long the sound fades out before a cut and back in after it. A hard cut joins two
+    /// waves wherever they are, so it clicks, and the room's hum steps up or down with it;
+    /// 12 ms is too short to hear as a fade.
+    static let jointFade = 0.012
+
+    /// Whether the sound is cut between section `index - 1` and section `index`: the source
+    /// jumps there. A section split where nothing was taken out plays on as one.
+    static func cut(before index: Int, in segments: [TimelineSegment]) -> Bool {
+        index > 0 && index < segments.count && abs(segments[index - 1].end - segments[index].start) > 0.0005
+    }
+
+    /// The edited times where the sound is cut, each with its fade's length: at most a
+    /// quarter of the shorter section beside it.
+    var audioJoints: [(time: Double, fade: Double)] {
+        var joints: [(time: Double, fade: Double)] = []
+        var time = 0.0
+        for index in segments.indices {
+            if Self.cut(before: index, in: segments) {
+                joints.append((time, min(Self.jointFade, segments[index - 1].duration / 4, segments[index].duration / 4)))
+            }
+            time += segments[index].duration
+        }
+        return joints
+    }
+
     func offset(of id: UUID) -> Double {
         var time = 0.0
         for segment in segments {
@@ -124,6 +149,11 @@ struct ProjectClip: Codable, Equatable {
     var shorts: [Short]?
     /// Version 14 onwards. Nil while the recording has no screen recording.
     var screen: ScreenTrack?
+    /// Version 18 onwards. Changes switched off in the inspector, in a fixed order; nil
+    /// while every change is on.
+    var switchedOff: [SwitchableChange]?
+    /// Version 20 onwards. Nil while the recording has no music.
+    var music: MusicBed?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -138,6 +168,8 @@ struct ProjectClip: Codable, Equatable {
         transcript = item.transcript
         shorts = item.shorts.isEmpty ? nil : item.shorts
         screen = item.screen
+        switchedOff = item.switchedOff.isEmpty ? nil : item.switchedOff.sorted()
+        music = item.music
     }
 
     func item() -> VideoItem {
@@ -154,6 +186,8 @@ struct ProjectClip: Codable, Equatable {
         item.transcript = transcript
         item.shorts = shorts ?? []
         item.screen = screen
+        item.switchedOff = Set(switchedOff ?? [])
+        item.music = music
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -183,10 +217,13 @@ struct VideoProject: Codable, Equatable {
     /// transcript and the captions choice. 12: adds each recording's Shorts. 13: adds a
     /// Short's zoom (zoomed out, at the top over a blurred copy). 14: adds a recording's
     /// screen recording and its layouts. 15: adds the project's Why notes and its history
-    /// of changes. 16: adds the graphics style's size, for phones. Every edited
+    /// of changes. 16: adds the graphics style's size, for phones. 17: adds the thumbnail
+    /// maker's picture size and its white frost background. 18: adds the changes a
+    /// recording has switched off in the inspector. 19: adds the thumbnail's versions for
+    /// YouTube's Test & Compare and the winner. 20: adds a recording's background music. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 16
+    static let currentVersion = 20
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -280,6 +317,18 @@ struct VideoProject: Codable, Equatable {
         if version < 16, clips.contains(where: { $0.graphics?.style.size != nil }) {
             try reject("The project claims an older format but contains a graphics size."); return
         }
+        if version < 17, clips.contains(where: { $0.publish?.design.map { $0.imageSize != 1 || $0.background == .frost } == true }) {
+            try reject("The project claims an older format but contains a thumbnail picture size or the white frost."); return
+        }
+        if version < 18, clips.contains(where: { $0.switchedOff != nil }) {
+            try reject("The project claims an older format but contains changes switched off."); return
+        }
+        if version < 19, clips.contains(where: { $0.publish?.test != nil }) {
+            try reject("The project claims an older format but contains thumbnail versions for Test & Compare."); return
+        }
+        if version < 20, clips.contains(where: { $0.music != nil || $0.switchedOff?.contains(.music) == true }) {
+            try reject("The project claims an older format but contains music."); return
+        }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
@@ -303,7 +352,7 @@ struct VideoProject: Codable, Equatable {
             guard let info = clip.info else {
                 guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
                       clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil, clip.transcript == nil, clip.shorts == nil,
-                      clip.screen == nil else {
+                      clip.screen == nil, clip.music == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -371,6 +420,15 @@ struct VideoProject: Codable, Equatable {
             }
             if let problem = clip.screen?.problem(duration: duration, speaker: info) {
                 try reject("The project contains an invalid screen recording: \(problem)"); return
+            }
+            if let problem = clip.music?.problem(duration: duration) {
+                try reject("The project contains invalid music: \(problem)"); return
+            }
+            for area in clip.blurRegions {
+                let times = [area.start, area.end].compactMap { $0 }
+                guard times.allSatisfy({ $0.isFinite && $0 >= 0 }), (area.start ?? 0) < (area.end ?? .infinity) else {
+                    try reject("The project contains a blur area with invalid times."); return
+                }
             }
             for rect in [clip.crop].compactMap({ $0 }) + clip.blurRegions.map(\.rect) {
                 guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite,

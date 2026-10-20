@@ -7,7 +7,18 @@
 // Built from every app source except App.swift (the app's entry point) plus this file.
 
 import AppKit
+import AVKit
 import SwiftUI
+
+/// The player whose frame is drawn into its views: AVKit composites video outside the
+/// layer tree, so a render of the layers alone leaves the picture black.
+@MainActor var snapshotPlayer: PlaybackController?
+
+/// The player views in a view tree, however deep.
+@MainActor
+func playerViews(in view: NSView) -> [AVPlayerView] {
+    (view as? AVPlayerView).map { [$0] } ?? view.subviews.flatMap(playerViews)
+}
 
 /// Waits by suspending, so the app's own main-actor work — a preview frame arriving
 /// from ffmpeg — runs meanwhile, and the main run loop at the bottom of this file keeps
@@ -31,6 +42,54 @@ func hostingViews(in view: NSView) -> [NSView] {
     view.subviews.flatMap { child -> [NSView] in
         String(describing: type(of: child)).hasPrefix("NSHostingView") ? [child] : hostingViews(in: child)
     }
+}
+
+/// The thumbnail maker: the first render cuts the speaker out, the second shows it with
+/// the check, then the same in the Eye path and Phone views. Its live preview is a web
+/// view, which this tool cannot capture in a sheet of its own; the Eye path and Phone views
+/// are pictures, so they show.
+/// YAMVIDEO_SNAPSHOT_ONLY=thumbnail renders only these, after the Studio with Thumbnail
+/// under Studio in the left bar.
+@MainActor
+func thumbnailMaker(_ model: AppModel, output: URL) async {
+    await render(ContentView().environmentObject(model).frame(width: 1360, height: 880), size: CGSize(width: 1360, height: 880),
+           to: output.appendingPathComponent("5h-thumbnail-in-studio.png"))
+    var made = model.items[0]
+    var publish = made.publish ?? PublishInfo()
+    if publish.title.isEmpty { publish.title = "How I edit talking-head videos on a Mac" }
+    var design = ThumbnailDesign(time: min(1, made.editedDuration / 2), title: "Edit for the *viewer*")
+    design.tag = "3 rules"
+    publish.design = design
+    made.publish = publish
+    let size = CGSize(width: 1200, height: 720)
+    UserDefaults.standard.set("design", forKey: "thumbnailPreview")
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
+    await pump(1)
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-maker.png"), settle: 12)
+    UserDefaults.standard.set("eyePath", forKey: "thumbnailPreview")
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-eye-path.png"), settle: 12)
+    UserDefaults.standard.set("phone", forKey: "thumbnailPreview")
+    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+           to: output.appendingPathComponent("5h-thumbnail-on-phone.png"), settle: 12)
+    // Test & Compare: versions A and B, saved, with B marked the winner, so the header shows
+    // the A | B switch and the Winner menu.
+    var versionB = design
+    versionB.title = "*3 rules* to edit"
+    versionB.background = .white
+    let picture = output.appendingPathComponent("5h-thumbnail-maker.png")
+    var tested = publish
+    tested.test = ThumbnailTest(versions: [versionB], images: [picture, picture], winner: 1)
+    if case .success = model.perform([.setPublishInfo(clip: made.id, info: tested)]) {
+        made.publish = tested
+        UserDefaults.standard.set("eyePath", forKey: "thumbnailPreview")
+        await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: size,
+               to: output.appendingPathComponent("5h-thumbnail-versions.png"), settle: 12)
+        model.undo()
+    }
+    UserDefaults.standard.removeObject(forKey: "thumbnailPreview")
 }
 
 @MainActor
@@ -89,10 +148,49 @@ func render<V: View>(_ view: V, size: CGSize, to url: URL, settle: TimeInterval 
             context.restoreGState()
         }
     }
+    // The picture the player shows: the same composed frame, drawn where its view shows it.
+    if let player = snapshotPlayer, player.player.currentItem != nil, let content = window.contentView {
+        let views = playerViews(in: content).filter { !$0.isHiddenOrHasHiddenAncestor && $0.videoBounds.width > 1 }
+        if !views.isEmpty, let picture = try? await player.composedFrame() {
+            for view in views {
+                context.draw(picture, in: view.convert(view.videoBounds, to: frame))
+            }
+        }
+    }
     window.orderOut(nil)
     guard let image = context.makeImage() else { return }
     try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
     print("wrote \(url.path)")
+}
+
+/// The music under the voice: the Music row with a piece, the piece selected, and its
+/// inspector in the Audio tab. YAMVIDEO_SNAPSHOT_ONLY=music renders only these.
+/// YAMVIDEO_SNAPSHOT_MUSIC names a sound file; without it, ffmpeg makes 60 s of chords.
+@MainActor
+func musicPictures(_ model: AppModel, output: URL, size: CGSize) async {
+    var file = output.appendingPathComponent("Calm Chords.m4a")
+    if let path = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_MUSIC"], !path.isEmpty {
+        file = URL(fileURLWithPath: path)
+    } else {
+        let wave = "0.15*sin(2*PI*220*t)+0.1*sin(2*PI*277.2*t)|0.15*sin(2*PI*329.6*t)+0.1*sin(2*PI*440*t)"
+        _ = try? await Shell.run(FFmpeg.ffmpegPath ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                                                                  "-i", "aevalsrc=\(wave):s=44100:d=60", "-c:a", "aac", file.path])
+    }
+    guard let measured = try? await FFmpeg.measureMusic(file), let voice = try? await FFmpeg.integratedLoudness(of: model.items[0].url) else {
+        print("music: could not measure \(file.path)"); return
+    }
+    let piece = MusicPiece(url: file, duration: measured.duration, loudness: measured.loudness, start: 0, end: nil)
+    if case .failure(let error) = model.perform([.addMusic(clip: model.items[0].id, piece: piece, voice: voice)]) {
+        print("music: \(error.message)"); return
+    }
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    model.selectedSegmentID = nil
+    model.inspectorTab = .audio
+    await render(window(), size: size, to: output.appendingPathComponent("6-music-row.png"))
+    model.selectedMusicID = piece.id
+    await render(window(), size: size, to: output.appendingPathComponent("6b-music-selected.png"))
+    await render(InspectorPane().environmentObject(model).frame(width: 340, height: 900), size: CGSize(width: 340, height: 900),
+                 to: output.appendingPathComponent("6c-music-inspector.png"))
 }
 
 @MainActor
@@ -105,6 +203,7 @@ func run() async throws {
 
     NSApplication.shared.setActivationPolicy(.accessory)
     let model = AppModel(recoveryURL: nil)
+    snapshotPlayer = model.playback
     let info = try await FFmpeg.probe(url: recording)
     var clip = ProjectClip(VideoItem(url: recording))
     clip.info = info; clip.crop = info.fullFrame
@@ -125,9 +224,31 @@ func run() async throws {
 
     let size = CGSize(width: 1360, height: 880)
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
-    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages.
-    if ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"] == "ideas" {
+    // YAMVIDEO_SNAPSHOT_ONLY=ideas renders only the Library pages; =studio only the Studio
+    // pictures up to 4-recording.png, which the redesign tracker uses; =thumbnail only the
+    // thumbnail maker.
+    let only = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_ONLY"]
+    // For the tracker's Studio pictures, captions on the Captions track: an SRT's words
+    // spread over its captions' times, as sample words for the recording.
+    if only == "studio", let path = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_CAPTIONS"],
+       let text = try? String(contentsOfFile: path, encoding: .utf8), let parsed = try? Captions.parse(text) {
+        let sample = parsed.flatMap { caption -> [TranscriptWord] in
+            let parts = caption.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            let step = (caption.end - caption.start) / Double(max(1, parts.count))
+            return parts.enumerated().map { TranscriptWord(text: $1, start: caption.start + Double($0) * step, end: caption.start + Double($0 + 1) * step) }
+        }.filter { $0.end <= info.duration }
+        _ = model.perform([.setTranscript(clip: model.items[0].id, transcript: Transcript(model: "sample", language: "en", words: sample))])
+    }
+    if only == "ideas" {
         try await ideas(model, output: output, size: size, minimum: CGSize(width: 1140, height: 800))
+        return
+    }
+    if only == "thumbnail" {
+        await thumbnailMaker(model, output: output)
+        return
+    }
+    if only == "music" {
+        await musicPictures(model, output: output, size: size)
         return
     }
 
@@ -141,17 +262,46 @@ func run() async throws {
     await render(window(), size: size, to: output.appendingPathComponent("1b-sections.png"))
 
     model.agentHighlight = nil
-    model.editorMode = .zoom
+    // The picture's edits: aiming a zoom, the blur areas and the crop, each on the frame.
     model.selectedShotID = model.items[0].zoomShots.first?.id
+    model.beginZoomAim()
     await render(window(), size: size, to: output.appendingPathComponent("2-zoom.png"))
 
-    model.editorMode = .blur
-    model.selectedRegionID = model.items[0].blurRegions.first?.id
+    model.beginBlurAreas()
     await render(window(), size: size, to: output.appendingPathComponent("3-blur-area.png"))
+    // The same area for part of the recording only: its range shows in the inspector.
+    if let area = model.selectedRegionID {
+        model.setRegionTime(area, start: true)
+        await pump(0.5)
+        await render(window(), size: size, to: output.appendingPathComponent("3b-blur-area-timed.png"))
+        model.coverWholeRecording(area)
+    }
 
-    model.editorMode = .crop
+    model.beginCrop()
+    if let square = AspectPreset.all.first(where: { $0.label == "4:5" }) { model.setCropDraftAspect(square) }
+    await render(window(), size: size, to: output.appendingPathComponent("3c-crop.png"))
+    model.cancelCropDraft()
+
     model.selectedSegmentID = nil; model.selectedShotID = nil; model.selectedRegionID = nil
+    model.endPictureEdit()
     await render(window(), size: size, to: output.appendingPathComponent("4-recording.png"))
+    // A change switched off: the zooms stay in the project, out of the video.
+    model.setChange(.zooms, on: false)
+    model.inspectorFocus = .recording
+    await render(window(), size: size, to: output.appendingPathComponent("4b-change-off.png"))
+    model.undo()
+    if only == "studio" {
+        // The Media panel's Graphics tab, and a caption selected on the Captions track.
+        UserDefaults.standard.set("graphics", forKey: "mediaPanelTab")
+        await render(window(), size: size, to: output.appendingPathComponent("4c-media-graphics.png"))
+        UserDefaults.standard.set("media", forKey: "mediaPanelTab")
+        if model.selectedItem?.transcript != nil {
+            model.selectedCaptionIndex = 3
+            if let cue = model.selectedCaption { model.setPreviewFraction(cue.start / max(1, model.items[0].editedDuration)) }
+            await render(window(), size: size, to: output.appendingPathComponent("4d-caption.png"))
+        }
+        return
+    }
 
     await render(ExportSheet(scope: .selected).environmentObject(model), size: CGSize(width: 520, height: 640),
            to: output.appendingPathComponent("5-export-sheet.png"))
@@ -201,17 +351,7 @@ func run() async throws {
            to: output.appendingPathComponent("5f-publish-watch-page.png"))
     await render(PublishSheet(initialPreview: 1).environmentObject(model), size: CGSize(width: 1080, height: 760),
            to: output.appendingPathComponent("5g-publish-search-result.png"))
-    // The thumbnail maker: the first render cuts the speaker out, the second shows it. Its
-    // live previews are web views, which this tool cannot capture in a sheet of its own.
-    var made = model.items[0]
-    var makerDesign = ThumbnailDesign(time: min(1, length / 2), title: "Edit for the *viewer*")
-    makerDesign.tag = "3 rules"
-    made.publish?.design = makerDesign
-    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
-           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
-    await pump(1)
-    await render(ThumbnailMakerSheet(item: made, playhead: 1).environmentObject(model), size: CGSize(width: 1060, height: 720),
-           to: output.appendingPathComponent("5h-thumbnail-maker.png"))
+    await thumbnailMaker(model, output: output)
     // The end screen: the speaker in a frame beside YouTube's boxes, on the timeline and in
     // the inspector, and the choice of element for each box (from Publish).
     if length >= EndScreen.lengths.lowerBound {
@@ -274,7 +414,7 @@ func run() async throws {
         await render(window(), size: size, to: output.appendingPathComponent("5s-short-zoom.png"))
         await render(InspectorPane().environmentObject(model).frame(width: 340, height: 1300), size: CGSize(width: 340, height: 1300),
                to: output.appendingPathComponent("5t-short-zoom-inspector.png"))
-        model.setViewer(.frame)
+        model.setViewer(.preview)
         model.undo()
     }
     model.undo(); model.undo(); model.undo(); model.undo(); model.undo()
@@ -335,14 +475,14 @@ func run() async throws {
     await pump(2)
     await render(InspectorPane().environmentObject(model).frame(width: inspector.width, height: inspector.height), size: inspector,
            to: output.appendingPathComponent("10-colour.png"))
-    model.colorComparison = .split
+    model.beginPictureEdit(.colourCompare)
     await pump(3)
     await render(window(), size: size, to: output.appendingPathComponent("11-compare.png"))
     await render(ContentView().environmentObject(model).frame(width: minimum.width, height: minimum.height), size: minimum,
            to: output.appendingPathComponent("12-compare-minimum.png"))
 
     // Effects mode: a blur selected at its hold, with two named markers in the ruler.
-    model.colorComparison = .corrected
+    model.endPictureEdit()
     model.setPreviewFraction(1.0 / max(1, model.items[0].editedDuration))
     model.addMarkerAtPlayhead()
     if let marker = model.selectedMarkerID { model.updateMarker(marker) { $0.label = "Intro ends"; $0.color = .green } }
@@ -350,7 +490,6 @@ func run() async throws {
     model.addMarkerAtPlayhead()
     model.setPreviewFraction(4.0 / max(1, model.items[0].editedDuration))
     model.addBlurEffect()
-    model.editorMode = .effects
     if let effect = model.selectedEffect { model.jumpToEffect(effect) }
     await pump(3)
     await render(window(), size: size, to: output.appendingPathComponent("13-effects.png"))
@@ -413,6 +552,20 @@ func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async 
     model.selectedIdeaID = items[0].id
     await pump(1)
     await render(window(), size: size, to: output.appendingPathComponent("16d-idea-in-production.png"))
+    // Macs: an idea whose project is only on the other Mac, and videos only there.
+    let awayID = UUID()
+    let away = ContentItem(title: "Sahi web terminal review", topic: "Trading apps")
+    model.performLibrary([.addIdea(away)])
+    model.performLibrary([.linkProject(id: away.id, link: ProjectLink(projectID: awayID, path: "/Users/rahul/Desktop/Yamparala Media/2026-10-18 Sahi/Sahi.yamvideo"))])
+    model.thisMacList = MacInventory(mac: "Equicom", footage: "~/Desktop/Yamparala Media", updated: Date(), videos: [])
+    model.otherMacs = [MacInventory(mac: "Yamparala", footage: "~/Desktop/Yamparala Media", updated: Date().addingTimeInterval(-7200), videos: [
+        .init(folder: "2026-10-18 Sahi", projects: [awayID], recordings: ["Sahi-Mobile-Headshot.MP4"], exports: 1, bytes: 9_020_000_000),
+        .init(folder: "2026-10-19 Tradl AI First Impression", projects: [], recordings: ["Tradl.MP4", "Tradl.mov"], exports: 0, bytes: 1_000_000_000),
+        .init(folder: "2026-08-11 AgentUX iPad Sketch", projects: [], recordings: ["RPReplay.MP4"], exports: 0, bytes: 612_000_000),
+    ])]
+    model.selectedIdeaID = away.id
+    await pump(1)
+    await render(window(), size: size, to: output.appendingPathComponent("16j-macs.png"))
     model.showModule(.studio)
     await pump(1.5)
     await render(window(), size: size, to: output.appendingPathComponent("16e-studio-with-idea.png"))

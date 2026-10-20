@@ -22,6 +22,7 @@
     panelTitle: "panel", rule: "panel", checklist: "panel",
     endScreen: "screen",
     logoBadge: "speaker",
+    kineticText: "cover", sectionCard: "cover",
   };
   const STAGE = { left: 0, top: 0, width: 1920, height: 1080 };
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
@@ -94,10 +95,11 @@
     const videos = p.videos === 1 ? 1 : 2;
     const side = p.side === "right" ? "right" : "left";
     const card = (y) => ({ x: 1209, y, w: 615, h: 346 });
-    let frame = { x: 96, y: 102, w: 960, h: 540 };
-    let circle = { x: 96, y: 682, w: 296, h: 296 };
-    let text = { x: 432, y: 682, w: 624, h: 296 };
-    let cards = videos === 2 ? [card(170), card(564)] : [card(199)];
+    // The circle ends inside YouTube's element area (bottom 917), so the frame sits high.
+    let frame = { x: 96, y: 56, w: 960, h: 540 };
+    let circle = { x: 96, y: 612, w: 296, h: 296 };
+    let text = { x: 432, y: 612, w: 624, h: 296 };
+    let cards = videos === 2 ? [card(162), card(556)] : [card(153)];
     if (side === "right") {
       const flip = (r) => ({ x: 1920 - r.x - r.w, y: r.y, w: r.w, h: r.h });
       frame = flip(frame); circle = flip(circle); text = flip(text); cards = cards.map(flip);
@@ -434,6 +436,90 @@
       { left: layout.frame.x, top: layout.frame.y, width: layout.frame.w, height: layout.frame.h, opacity: 1, duration: PANEL_SLIDE, ease: smooth }, c.at(0));
     c.pop([circle].concat(cards), PANEL_SLIDE + 0.1, 0.12);
     c.up([k.node, title], PANEL_SLIDE + 0.35, 0.12);
+  };
+
+  /**
+   * Covers fill the whole picture with their own background: near black (solid) or the
+   * picture darkened (dim). In a Short they fill its 1080×1920 canvas.
+   */
+  function coverBackground(inner, p) {
+    append(inner, h("div", { class: "yg-cv-bg " + (p.background === "dim" ? "dim" : "solid") }));
+  }
+
+  /** A kinetic text's words: `words` [{text, at}], or `text` spread evenly near the start. */
+  function kineticWords(p, length) {
+    if (Array.isArray(p.words) && p.words.length) {
+      return p.words.map((w) => ({ text: String((w && w.text) || ""), at: Math.max(0, num(w && w.at, 0)) }))
+        .filter((w) => w.text.trim());
+    }
+    const parts = String(p.text || "").split(/\s+/).filter(Boolean);
+    const span = Math.min(Math.max(0.3 * parts.length, 0.6), Math.max(0.3, length * 0.6));
+    return parts.map((text, i) => ({ text, at: parts.length > 1 ? (span * i) / (parts.length - 1) : 0 }));
+  }
+
+  /**
+   * Kinetic text: big words, each shown on the time it is spoken (`at`, seconds after the
+   * start), over a cover. `layout` line (one centred line that wraps) or stack (one word
+   * on each line). Words between asterisks take the accent colour. Fewer words, bigger type.
+   */
+  KINDS.kineticText = function (inner, p, c) {
+    coverBackground(inner, p);
+    const stack = p.layout === "stack";
+    const words = kineticWords(p, c.length);
+    const n = words.length;
+    const size = stack ? 170 : n <= 4 ? 150 : n <= 8 ? 128 : n <= 14 ? 108 : 92;
+    const box = h("div", { class: "yg-kt" + (stack ? " yg-kt-stack" : "") + (c.short ? " yg-kt-short" : ""),
+      style: "font-size:" + Math.round(size * (c.short ? 0.85 : 1)) + "px;" });
+    const spans = words.map((w) => {
+      const node = h("span", { class: "yg-kt-w" });
+      accented(node, w.text);
+      append(box, node);
+      return { node, at: Math.min(w.at, Math.max(0, c.length - 0.5)) };
+    });
+    append(inner, box);
+    const tl = c.tl;
+    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" }, c.at(0));
+    spans.forEach((s) => tl.fromTo(s.node, { opacity: 0, y: 28, scale: 0.94 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.22, ease: "back.out(2)" }, c.at(s.at)));
+    tl.to(c.host, { opacity: 0, duration: 0.3, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.3)));
+  };
+
+  /**
+   * A section card: the section's title (and a kicker) over a seek bar split at every
+   * section card (`marks`), its fill moving up to where this one starts (`progress`). The
+   * app writes both, from 0 to 1, so they follow the edit.
+   */
+  const SECTION_BAR = { width: 1400, shortWidth: 860, gap: 10 };
+  KINDS.sectionCard = function (inner, p, c) {
+    coverBackground(inner, p);
+    const width = c.short ? SECTION_BAR.shortWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
+    const progress = Math.max(0, Math.min(1, num(p.progress, 0)));
+    const marks = (Array.isArray(p.marks) ? p.marks : []).map((m) => Math.max(0, Math.min(1, num(m, 0))))
+      .filter((m) => m > 0.001 && m < 0.999).sort((a, b) => a - b)
+      .filter((m, i, list) => i === 0 || m - list[i - 1] > 0.002);
+    const edges = [0].concat(marks, [1]);
+    const last = edges.length - 2;
+    const segments = (cls) => edges.slice(0, -1).map((edge, i) => {
+      const left = edge * width + (i > 0 ? gap / 2 : 0);
+      const right = edges[i + 1] * width - (i < last ? gap / 2 : 0);
+      return h("div", { class: cls, style: "left:" + left.toFixed(1) + "px;width:" + Math.max(2, right - left).toFixed(1) + "px;" });
+    });
+    const before = marks.filter((m) => m < progress - 0.001);
+    const from = before.length ? before[before.length - 1] : 0;
+    const fill = h("div", { class: "yg-sc-fill" }, h("div", { class: "yg-sc-fill-in", style: "width:" + width + "px;" }, segments("yg-sc-seg yg-sc-on")));
+    const knob = h("div", { class: "yg-sc-knob" });
+    const bar = h("div", { class: "yg-sc-track", style: "width:" + width + "px;" }, segments("yg-sc-seg"), fill, knob);
+    const k = p.kicker ? h("div", { class: "yg-sc-kicker", text: p.kicker }) : null;
+    const title = h("div", { class: "yg-sc-title", text: p.title });
+    append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") }, k, title, bar));
+    const tl = c.tl;
+    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power2.out" }, c.at(0));
+    c.up([k, title].filter(Boolean), 0.1, 0.08);
+    tl.fromTo(bar, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, c.at(0.2));
+    const move = Math.min(0.9, Math.max(0.3, c.length - 1));
+    tl.fromTo(fill, { width: from * width }, { width: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
+    tl.fromTo(knob, { left: from * width }, { left: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
+    tl.to(c.host, { opacity: 0, duration: 0.35, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.35)));
   };
 
   /**
@@ -791,10 +877,12 @@
     let y = inkHeading(k, c, p, x, 110, 0.2);
     if (p.subtitle) { write(c, k.text(p.subtitle, x, y - 6, "yg-sub"), num(p.subtitleAt, 0.7)); y += 60; }
     const demo = p.demo && INK_DEMOS[p.demo.type] ? p.demo : null;
-    const layout = demo ? INK_DEMOS[demo.type](k, demo, c, x, Math.max(y + 20, 290)) : { points: { x, y: Math.max(y + 30, 300), width: 760 } };
+    // Without a demo the points have the panel to themselves, so they are large enough to
+    // read on a phone (yg-ink-point); beside a demo they keep the demo's narrow column.
+    const layout = demo ? INK_DEMOS[demo.type](k, demo, c, x, Math.max(y + 20, 290)) : { points: { x, y: Math.max(y + 30, 300), width: 760, gap: 140 } };
     if (layout && layout.points) {
       (p.points || []).forEach((pt, i) => {
-        const node = k.text("→ " + pt.text, layout.points.x, layout.points.y + i * (layout.points.gap || 130), "yg-p", layout.points.width);
+        const node = k.text("→ " + pt.text, layout.points.x, layout.points.y + i * (layout.points.gap || 130), demo ? "yg-p" : "yg-p yg-ink-point", layout.points.width);
         write(c, node, num(pt.at, 1), 0.9);
       });
     }
@@ -1103,13 +1191,14 @@
     for (const graphic of items) {
       const zone = zoneOf(graphic.kind);
       if (short && zone === "screen") continue;   // Shorts have no end screen
-      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
+      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : zone === "cover" ? (short ? SHORT_STAGE : STAGE)
+        : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
       let scaled = null;
       if (zone === "speaker") {
         // A point on the canvas, the Short's as well: the badge's own size comes from its chips.
         const spot = logoSpot(graphic.props, short);
         rect = { left: spot.x, top: spot.y, width: 0, height: 0 };
-      } else if (short) {
+      } else if (short && zone !== "cover") {
         // The template's zone, scaled into the Short's own zone for it.
         const z = zone === "column" ? short.column : short.panel;
         const size = zone === "column" ? COLUMN : PANEL_MOVE;
@@ -1356,7 +1445,7 @@
    * possible toward the far side, and gets smaller (never past `zoom`, growing from the
    * bottom of their box) when the head would leave the picture. Returns the scale.
    */
-  function placeClear(root, cut, column, speaker, head, bands, zoom, textOnLeft) {
+  function placeClear(root, cut, column, speaker, head, bands, zoom, textOnLeft, smallest) {
     const stage = root.getBoundingClientRect();
     const k = 1920 / (stage.width || 1920);
     const text = [];
@@ -1393,11 +1482,24 @@
       return textOnLeft ? { low: need, high: 1920 - margin - h.x1 } : { low: margin - h.x0, high: need };
     };
     let s = zoom, found = limits(s);
-    for (let next = zoom; next >= 0.4 && found.low > found.high; next -= 0.02) { s = next; found = limits(s); }
+    for (let next = zoom; next >= (smallest || 0.4) && found.low > found.high; next -= 0.02) { s = next; found = limits(s); }
     let tx = textOnLeft ? Math.max(found.low, Math.min(0, found.high)) : Math.min(found.high, Math.max(0, found.low));
     if (!isFinite(tx)) tx = 0;
     cut.style.transform = "translateX(" + tx.toFixed(1) + "px) scale(" + s.toFixed(4) + ")";
     return s;
+  }
+
+  /**
+   * Draws the picture beside the title `imageSize` (1 to 1.6) times its usual size: at
+   * most 520×340 and never larger than the file. The title then fits what is left.
+   */
+  function sizePicture(img, imageSize) {
+    const k = Math.max(1, Math.min(1.6, num(imageSize, 1)));
+    if (!img || k === 1 || !img.naturalWidth || !img.naturalHeight) return;
+    const f = k * Math.min(1, 520 / img.naturalWidth, 340 / img.naturalHeight);
+    img.style.maxWidth = "none"; img.style.maxHeight = "none";
+    img.style.width = (img.naturalWidth * f).toFixed(1) + "px";
+    img.style.height = (img.naturalHeight * f).toFixed(1) + "px";
   }
 
   /**
@@ -1418,6 +1520,13 @@
     const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
     append(root, outlineFilter(d.outlineWidth));
     if (d.frame) append(root, picture(d.frame, "yg-thumb-bg"));
+    const frost = d.background === "frost" && d.frame;
+    // The white frost: a blurred copy of the frame under a white wash, faded out toward the speaker.
+    if (frost) {
+      const layer = h("div", { class: "yg-thumb-frost" });
+      append(layer, picture(d.frame, "yg-thumb-frost-bg"));
+      append(root, layer);
+    }
     append(root, h("div", { class: "yg-thumb-scrim" }));
     if (d.cutout) {
       const cut = picture(d.cutout, "yg-thumb-cut" + (d.outline ? " outlined" : ""));
@@ -1437,14 +1546,92 @@
     append(document.getElementById("stage") || document.body, root);
     const loaded = pictures.map((img) => (img.decode ? img.decode().catch(() => null) : Promise.resolve()));
     return Promise.all(loaded).then(() => document.fonts.ready).then(() => {
+      sizePicture(root.querySelector(".yg-thumb-image"), d.imageSize);
       const size = fitTitle(title, column);
       const cut = root.querySelector(".yg-thumb-cut");
       if (d.place === "clear" && cut) {
         const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
-        placeClear(root, cut, column, d.speaker || { x: 0, y: 0, w: 1920, h: 1080 }, d.head, d.bands, zoom, d.side === "left");
+        // Under the frost the frame moves with the speaker, so it may not get smaller than the picture.
+        placeClear(root, cut, column, d.speaker || { x: 0, y: 0, w: 1920, h: 1080 }, d.head, d.bands, zoom, d.side === "left", frost ? 1 : 0.4);
+      }
+      if (frost && cut) {
+        root.querySelectorAll(".yg-thumb-bg, .yg-thumb-frost-bg").forEach((img) => {
+          img.style.transformOrigin = cut.style.transformOrigin;
+          img.style.transform = cut.style.transform;
+        });
       }
       return size;
     });
+  }
+
+  /** A computed CSS colour as #RRGGBB; null when it is mostly see-through. */
+  function hexColour(css) {
+    const found = String(css || "").match(/rgba?\(([^)]+)\)/);
+    if (!found) return null;
+    const parts = found[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
+    if (parts.length < 3 || (parts.length > 3 && parts[3] < 0.5)) return null;
+    return "#" + parts.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("").toUpperCase();
+  }
+
+  /** A node's own band of colour (a background colour, or a one-colour gradient, as the highlight draws it), as #RRGGBB. */
+  function bandColour(style) {
+    const solid = hexColour(style.backgroundColor);
+    if (solid) return solid;
+    const image = String(style.backgroundImage || "");
+    return image.indexOf("gradient") >= 0 ? hexColour(image) : null;
+  }
+
+  /**
+   * What the drawn thumbnail shows, in stage pixels (1920×1080), for the app's phone check:
+   * each run of words (the tag, plain title words, accent words) with its boxes (one for
+   * each line), letter size and colours (`background` only when the run has its own band),
+   * the picture's box, the speaker's move (scale about the origin, then shift in x), and
+   * whether the frame shows sharp behind it (not hidden or blurred). Null before
+   * `thumbnail(data)`.
+   */
+  function thumbnailLayout() {
+    const root = document.getElementById("yg-thumb");
+    if (!root) return null;
+    const stage = root.getBoundingClientRect();
+    const k = 1920 / (stage.width || 1920);
+    const box = (r) => ({ x: (r.left - stage.left) * k, y: (r.top - stage.top) * k, w: r.width * k, h: r.height * k });
+    const boxes = (list) => Array.from(list).filter((r) => r.width > 0 && r.height > 0).map(box);
+    const runs = [];
+    const tag = root.querySelector(".yg-thumb-tag");
+    if (tag) {
+      const style = getComputedStyle(tag);
+      const text = style.textTransform === "uppercase" ? tag.textContent.toUpperCase() : tag.textContent;
+      runs.push({ kind: "tag", text, boxes: boxes([tag.getBoundingClientRect()]), size: parseFloat(style.fontSize),
+                  color: hexColour(style.color), background: bandColour(style) });
+    }
+    const title = root.querySelector(".yg-thumb-title");
+    const titleStyle = getComputedStyle(title);
+    const size = parseFloat(titleStyle.fontSize);
+    title.childNodes.forEach((node) => {
+      if (node.nodeType === 3 && node.textContent.trim()) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        runs.push({ kind: "title", text: node.textContent, boxes: boxes(range.getClientRects()), size,
+                    color: hexColour(titleStyle.color), background: null });
+      } else if (node.nodeName === "EM") {
+        const style = getComputedStyle(node);
+        runs.push({ kind: "accent", text: node.textContent, boxes: boxes(node.getClientRects()), size,
+                    color: hexColour(style.color), background: bandColour(style) });
+      }
+    });
+    const image = root.querySelector(".yg-thumb-image");
+    const cut = root.querySelector(".yg-thumb-cut");
+    let speaker = null;
+    if (cut) {
+      const origin = String(cut.style.transformOrigin || "").match(/(-?[\d.]+)px\s+(-?[\d.]+)px/);
+      const scale = String(cut.style.transform || "").match(/scale\((-?[\d.]+)\)/);
+      const shift = String(cut.style.transform || "").match(/translateX\((-?[\d.]+)px\)/);
+      speaker = { scale: scale ? parseFloat(scale[1]) : 1, shift: shift ? parseFloat(shift[1]) : 0,
+                  originX: origin ? parseFloat(origin[1]) : 960, originY: origin ? parseFloat(origin[2]) : 1080 };
+    }
+    const bg = root.querySelector(".yg-thumb-bg");
+    const frame = !!bg && getComputedStyle(bg).display !== "none" && !/blur/.test(getComputedStyle(bg).filter);
+    return { titleSize: size, runs, picture: image ? box(image.getBoundingClientRect()) : null, speaker, frame };
   }
 
   /** Reads the inline JSON and loads it. Used by page.html. A thumbnail page starts empty
@@ -1461,7 +1648,7 @@
     showCaption(seconds);
   }
 
-  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, endLayout, shortLayout, stageSize, captions,
+  const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, thumbnailLayout, endLayout, shortLayout, stageSize, captions,
     smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;

@@ -42,9 +42,10 @@ extension JSONValue {
 // MARK: - Graphics
 
 /// Where a kind sits: the right-hand column over the video, the side panel, the whole
-/// screen (the end screen, which moves the picture into a frame of its own), or next to
-/// the speaker, wherever the layout puts them (`LogoSpot`).
-enum GraphicZone: String, Codable { case column, panel, screen, speaker }
+/// screen (the end screen, which moves the picture into a frame of its own), next to
+/// the speaker, wherever the layout puts them (`LogoSpot`), or over the whole picture
+/// (`cover`: kinetic text and section cards, see CoverGraphics.swift).
+enum GraphicZone: String, Codable { case column, panel, screen, speaker, cover }
 
 /// The template kinds of graphics engine version 1. See docs/plans/graphics-track.md.
 enum GraphicKind: String, Codable, CaseIterable, Identifiable {
@@ -52,6 +53,7 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
     case panelTitle, rule, checklist
     case endScreen
     case logoBadge
+    case kineticText, sectionCard
 
     var id: String { rawValue }
     var zone: GraphicZone {
@@ -59,14 +61,15 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
         case .panelTitle, .rule, .checklist: return .panel
         case .endScreen: return .screen
         case .logoBadge: return .speaker
+        case .kineticText, .sectionCard: return .cover
         default: return .column
         }
     }
     /// Kinds the engine can write in ink. The others always use glass cards.
     var hasInk: Bool { zone == .panel }
     /// Whether the owner may move and resize it on the picture. The end screen's boxes sit
-    /// where YouTube puts its elements, so it stays where it is.
-    var isPlaceable: Bool { self != .endScreen }
+    /// where YouTube puts its elements, and a cover fills the picture, so they stay put.
+    var isPlaceable: Bool { self != .endScreen && zone != .cover }
     var label: String {
         switch self {
         case .namePlate: return "Name plate"
@@ -81,6 +84,8 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
         case .checklist: return "Checklist"
         case .endScreen: return "End screen"
         case .logoBadge: return "Logo badge"
+        case .kineticText: return "Kinetic text"
+        case .sectionCard: return "Section card"
         }
     }
 }
@@ -301,6 +306,13 @@ struct GraphicsTrack: Codable, Equatable {
                 if let problem = EndScreenLayout.problem(props: graphic.props) { return problem }
             }
             if graphic.kind == .logoBadge, let problem = LogoBadge.problem(props: graphic.props, length: graphic.length) { return problem }
+            if graphic.kind.zone == .cover {
+                guard graphic.transform == nil else {
+                    return "The \(name) covers the whole picture, so it cannot be moved or resized on it."
+                }
+                if let problem = graphic.kind == .kineticText ? KineticText.problem(props: graphic.props, length: graphic.length)
+                    : SectionCard.problem(props: graphic.props, length: graphic.length) { return problem }
+            }
             let props = JSONValue.object(graphic.props)
             if let data = try? JSONEncoder().encode(props), data.count > Self.maximumPropsBytes {
                 return "The \(name) has too much text or data."
@@ -326,6 +338,16 @@ struct GraphicsTrack: Codable, Equatable {
             let ordered = items.filter { $0.kind.zone == zone }.sorted { $0.start < $1.start }
             for (a, b) in zip(ordered, ordered.dropFirst()) where b.start < a.end - 0.001 {
                 return "The \(a.kind.label.lowercased()) and the \(b.kind.label.lowercased()) overlap in the same place."
+            }
+        }
+        // A cover hides the picture and everything on it, so nothing else shows with it;
+        // a panel must have slid away first.
+        for cover in items where cover.kind.zone == .cover {
+            for other in items where other.id != cover.id {
+                let otherEnd = other.end + (other.kind.zone == .panel ? Self.slide : 0)
+                guard other.start < cover.end - 0.001, cover.start < otherEnd - 0.001 else { continue }
+                return "The \(cover.kind.label.lowercased()) covers the whole picture, so it may not show with the \(other.kind.label.lowercased())"
+                    + (other.kind.zone == .panel ? String(format: " (a panel slides away for %.1f s after it ends).", Self.slide) : ".")
             }
         }
         return endScreenProblem(duration: duration)

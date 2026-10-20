@@ -68,7 +68,7 @@ final class MovieCompositor: NSObject, AVVideoCompositing {
                 CGAffineTransform(a: t.a, b: -t.b, c: -t.c, d: t.d, tx: 0, ty: 0))
             let crop = (instruction.clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
             let edited = renderFrame(oriented, info: info, crop: crop,
-                                     regions: instruction.clip.blurRegions, shots: instruction.clip.zoomShots,
+                                     regions: instruction.clip.blurBoxes, shots: instruction.clip.zoomShots,
                                      settings: instruction.settings,
                                      time: request.compositionTime.seconds - instruction.timeRange.start.seconds,
                                      color: instruction.color, effects: instruction.clip.blurEffects)
@@ -96,6 +96,10 @@ extension PlaybackController {
         let composition = AVMutableComposition()
         var instructions: [MovieInstruction] = []
         var position = CMTime.zero
+        /// Each recording's audio track: where it starts in the movie and where its sound is cut.
+        var joints: [CMPersistentTrackID: (offset: Double, joints: [(time: Double, fade: Double)])] = [:]
+        /// Each recording's music, from where the recording starts in the movie.
+        var music: MusicPreviewTracks?
         for clip in plan.clips {
             try Task.checkCancellation()
             let source = AVURLAsset(url: clip.url)
@@ -109,6 +113,7 @@ extension PlaybackController {
                 ? composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) : nil
             let audioRange = try await sourceAudio?.load(.timeRange)
             let beginning = position
+            if let audio { joints[audio.trackID] = (beginning.seconds, clip.timeline.audioJoints) }
             for segment in clip.timeline.segments {
                 let range = CMTimeRange(start: CMTime(seconds: segment.start, preferredTimescale: 600000),
                                         duration: CMTime(seconds: segment.sourceDuration, preferredTimescale: 600000))
@@ -133,6 +138,10 @@ extension PlaybackController {
                 }
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
             }
+            if audio != nil, let mix = clip.exportMusic(settings) {
+                if music == nil { music = MusicPreviewTracks(composition) }
+                try await music?.insert(mix, offset: beginning.seconds)
+            }
             instructions.append(MovieInstruction(range: CMTimeRange(start: beginning, duration: position - beginning),
                                                   trackID: video.trackID, clip: clip, transform: transform,
                                                   settings: settings, canvas: plan.size))
@@ -152,6 +161,11 @@ extension PlaybackController {
         mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
             let parameters = AVMutableAudioMixInputParameters(track: track)
             parameters.audioTimePitchAlgorithm = .spectral
+            // Each recording's sound fades out and in at its cuts, as its export does.
+            if let clipJoints = joints[track.trackID] {
+                PlaybackController.fadeJoints(clipJoints.joints, offset: clipJoints.offset, in: parameters)
+            }
+            music?.ramp(parameters)
             return parameters
         }
         item.audioMix = mix

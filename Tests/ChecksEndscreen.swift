@@ -8,16 +8,23 @@ import Foundation
 
     print("\nEnd screen layout")
     let twoLeft = EndScreenLayout(videos: 2, side: .left)
-    check(twoLeft.frame == CGRect(x: 96, y: 102, width: 960, height: 540) && twoLeft.scale == 0.5 && twoLeft.cards.count == 2
+    check(twoLeft.frame == CGRect(x: 96, y: 56, width: 960, height: 540) && twoLeft.scale == 0.5 && twoLeft.cards.count == 2
               && twoLeft.cards.allSatisfy { $0.minX > 1100 },
           "two video cards sit on the right, the speaker at half size on the left", "\(twoLeft)")
     let allBoxes = [twoLeft.frame, twoLeft.circle, twoLeft.text] + twoLeft.cards
-    check(allBoxes.allSatisfy { CGRect(x: 0, y: 0, width: 1920, height: 1080).insetBy(dx: 80, dy: 80).contains($0.insetBy(dx: -EndScreen.margin, dy: -EndScreen.margin)) }
+    check(allBoxes.allSatisfy { CGRect(x: 0, y: 0, width: 1920, height: 1080).insetBy(dx: 80, dy: 40).contains($0.insetBy(dx: -EndScreen.margin, dy: -EndScreen.margin)) }
               && !allBoxes.enumerated().contains { i, a in allBoxes.enumerated().contains { j, b in i < j && a.insetBy(dx: -EndScreen.margin, dy: -EndScreen.margin).intersects(b) } },
           "the frame, the boxes and the text stay inside the picture and clear of each other")
     check(abs(twoLeft.cards[0].width / twoLeft.cards[0].height - 16.0 / 9) < 0.01 && twoLeft.circle.width == twoLeft.circle.height
               && twoLeft.cards[0].width == 615 && twoLeft.circle.width == 296,
           "the boxes are YouTube's elements: a 16:9 video card about 615 px wide and a 296 px circle")
+    // Studio pushes an element that reaches past its element area back inside, off its box.
+    let elementBoxes = [(2, EndScreenLayout.Side.left), (1, .left), (2, .right), (1, .right)].flatMap { videos, side -> [CGRect] in
+        let layout = EndScreenLayout(videos: videos, side: side)
+        return [layout.circle] + layout.cards
+    }
+    check(elementBoxes.allSatisfy { EndScreen.elementArea.insetBy(dx: 8, dy: 8).contains($0) },
+          "every element box is inside YouTube's element area, with room to spare", "\(elementBoxes.filter { !EndScreen.elementArea.insetBy(dx: 8, dy: 8).contains($0) })")
     let oneRight = EndScreenLayout(props: ["videos": .number(1), "side": .string("right")])
     check(oneRight.cards.count == 1 && oneRight.cards[0].maxX < 800 && oneRight.frame.minX == 864 && oneRight.circle.maxX == 1824,
           "one video card, mirrored when the speaker sits on the right", "\(oneRight)")
@@ -81,7 +88,7 @@ import Foundation
     check(screenMotion?.screenProgress(at: 39.9) == 0 && abs((screenMotion?.screenProgress(at: 40.4) ?? 0) - 0.5) < 0.0001
               && screenMotion?.screenProgress(at: 40.8) == 1 && screenMotion?.screenProgress(at: 59.99) == 1 && screenMotion?.spans.isEmpty == true,
           "the speaker moves into the frame over 0.8 s and stays, whatever the panel style")
-    check(screenMotion.map { $0.screenPlacement(amount: 1, size: CGSize(width: 1280, height: 720)) == (64, 68, 640, 360)
+    check(screenMotion.map { $0.screenPlacement(amount: 1, size: CGSize(width: 1280, height: 720)) == (64, 37, 640, 360)
                              && $0.screenPlacement(amount: 0, size: CGSize(width: 1280, height: 720)) == (0, 0, 1280, 720) } == true,
           "in whole pixels: the end screen's frame, scaled to the picture")
 
@@ -162,7 +169,7 @@ import Foundation
           "a light border frames the speaker, and the picture inside stays clear", "\(borderPixel) \(insidePixel) \(blankPixel)")
     check(cardEdge.0 > 70, "the video card's box is marked", "\(cardEdge)")
     let screenBox = drawnScreen.boxes[screenGraphic.id]
-    check(screenBox.map { $0.maxX > (1209 + 615) * k720 && $0.minY < 175 * k720 && $0.maxY > 978 * k720 } == true,
+    check(screenBox.map { $0.maxX > (1209 + 615) * k720 && $0.minY < 175 * k720 && $0.maxY > 908 * k720 } == true,
           "the composed drawing reports the end screen's boxes", "\(String(describing: screenBox))")
     let earlyScreen = try await GraphicsSnapshot.draw(GraphicsTrack(items: [screenGraphic]), duration: 60, fps: "30", time: 39.5, over: blackFrame)
     check(earlyScreen.boxes[screenGraphic.id] == nil, "nothing shows before it starts")

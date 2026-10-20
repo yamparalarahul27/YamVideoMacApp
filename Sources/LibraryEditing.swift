@@ -7,24 +7,28 @@ import UniformTypeIdentifiers
 // project made from it. See Library.swift for the data and its rules.
 
 /// The parts of the window, in the sidebar. The Library holds ideas, projects and
-/// published videos; Studio is the editor. Later phases add Calendar, Results and
-/// Platforms.
+/// published videos; the Calendar shows when each goes out, and where; Studio is the
+/// editor. Later phases add Results and Platforms.
 enum AppModule: String, CaseIterable, Identifiable {
-    case library, studio
+    case library, calendar, studio
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .library: return "Library"
+        case .calendar: return "Calendar"
         case .studio: return "Studio"
         }
     }
     var systemImage: String {
         switch self {
         case .library: return "books.vertical"
+        case .calendar: return "calendar"
         case .studio: return "film"
         }
     }
+    /// The Library and the Calendar edit the Library, with its own undo.
+    var editsLibrary: Bool { self != .studio }
 }
 
 /// One Library undo step: the ideas as they were before it, and who made it.
@@ -295,10 +299,10 @@ extension AppModel {
 
     // MARK: The Edit menu, whichever module is showing
 
-    var menuUndoTitle: String { module == .library ? libraryUndoTitle : undoTitle }
-    var menuRedoTitle: String { module == .library ? libraryRedoTitle : redoTitle }
-    var canUndoInModule: Bool { module == .library ? !libraryUndoEntries.isEmpty : !undoEntries.isEmpty && !isConverting }
-    var canRedoInModule: Bool { module == .library ? !libraryRedoEntries.isEmpty : !redoEntries.isEmpty && !isConverting }
+    var menuUndoTitle: String { module.editsLibrary ? libraryUndoTitle : undoTitle }
+    var menuRedoTitle: String { module.editsLibrary ? libraryRedoTitle : redoTitle }
+    var canUndoInModule: Bool { module.editsLibrary ? !libraryUndoEntries.isEmpty : !undoEntries.isEmpty && !isConverting }
+    var canRedoInModule: Bool { module.editsLibrary ? !libraryRedoEntries.isEmpty : !redoEntries.isEmpty && !isConverting }
 
     // MARK: The owner's actions
 
@@ -522,9 +526,15 @@ extension AppModel {
     }
 
     /// Called when a project is opened or saved: an idea linked to it follows the file to
-    /// where it is now. A fact about the file, not an edit, so there is no undo step.
+    /// where it is now, if the file moved. A fact about the file, not an edit, so there is
+    /// no undo step. While the linked file is still at its old place, the open file is a
+    /// copy (an agent's review copy in a temporary folder, a backup), and the link stays:
+    /// on 20 Oct 2026 two review copies took the link from the real project. Locate… is
+    /// the owner's own choice and always moves the link.
     func noteProjectLocation() {
-        guard let path = projectURL?.path else { return }
+        guard let path = projectURL?.path,
+              let link = library.items.first(where: { $0.project?.projectID == projectID })?.project,
+              link.path != path, !link.exists else { return }
         movedProject(projectID, to: path)
     }
 

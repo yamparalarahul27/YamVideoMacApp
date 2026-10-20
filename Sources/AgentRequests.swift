@@ -41,6 +41,13 @@ struct AgentRequest: Codable {
     var design: [String: JSONValue]?
     /// thumbnail: also save the PNG next to the recording.
     var save: Bool?
+    /// thumbnail: also run the phone check (what does not read on a phone in 0.5 s) and
+    /// compare the thumbnail's words with the video's title.
+    var check: Bool?
+    /// thumbnail with check: a video title to compare with, in place of the stored one; not stored.
+    var videoTitle: String?
+    /// thumbnail: which version of a Test & Compare to draw: A (the design, the default), B or C.
+    var version: String?
     var scope: String?
     var kind: String?
     var job: UUID?
@@ -98,6 +105,9 @@ struct WireSection: Codable, Equatable {
 struct WireArea: Codable, Equatable {
     var id: UUID?
     var rect: WireRect
+    /// Source seconds; without them the area covers the whole recording.
+    var start: Double?
+    var end: Double?
 }
 
 struct WireZoom: Codable, Equatable {
@@ -155,6 +165,11 @@ struct WireCommand: Codable, Equatable {
     var timeSpace: String?
     var rect: WireRect?
     var preset: String?
+    /// setChange: which change, and whether it is on.
+    var change: String?
+    var on: Bool?
+    /// updateBlurArea: true removes the area's start and end.
+    var whole: Bool?
     var hold: Double?
     var level: Double?
     var target: WirePoint?
@@ -209,6 +224,11 @@ struct WireCommand: Codable, Equatable {
     var notes: String?
     /// addProjectNote: one line added to the Why notes, with who and when.
     var note: String?
+    /// updateMusic and removeMusic: the piece; addMusic: the new piece's id, when you choose it.
+    var musicID: UUID?
+    /// addMusic and updateMusic: the piece's keys to set: start, end (null: to the end), from,
+    /// level, fadeIn, fadeOut, loop, credit, and path (updateMusic: another file).
+    var music: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -223,7 +243,8 @@ struct WireCommand: Codable, Equatable {
         "addShort", "updateShort", "removeShort",
         "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
         "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
-        "setProjectNotes", "addProjectNote",
+        "setChange", "setProjectNotes", "addProjectNote",
+        "addMusic", "updateMusic", "removeMusic",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -231,6 +252,15 @@ struct WireCommand: Codable, Equatable {
         switch type {
         case "addMedia": return paths ?? []
         case "relinkMedia", "setScreen": return path.map { [$0] } ?? []
+        default: return []
+        }
+    }
+
+    /// Music files that must be measured (length and loudness) before this command can be resolved.
+    var musicPaths: [String] {
+        switch type {
+        case "addMusic": return path.map { [$0] } ?? []
+        case "updateMusic": return music?["path"]?.string.map { [$0] } ?? []
         default: return []
         }
     }
@@ -292,7 +322,7 @@ struct AgentState: Encodable {
     struct Section: Encodable {
         var id: UUID, start: Double, end: Double, speed: Double, editedStart: Double, editedDuration: Double
     }
-    struct Area: Encodable { var id: UUID; var rect: WireRect }
+    struct Area: Encodable { var id: UUID; var rect: WireRect; var start: Double?; var end: Double? }
     struct Zoom: Encodable {
         var id: UUID, start: Double, hold: Double, level: Double, end: Double
         var target: WirePoint
@@ -331,6 +361,10 @@ struct AgentState: Encodable {
         var shorts: [ShortState]
         /// The screen recording shown with it, and the layouts; nil when it has none.
         var screen: ScreenState?
+        /// The music under its voice; nil when it has none.
+        var music: MusicState?
+        /// Changes switched off in the inspector: kept, but out of the player and exports.
+        var switchedOff: [String]
     }
     /// A Short as an agent needs it. Times are edited-recording seconds; `graphics` are the
     /// ones that show in it, in its own time from 0, and `window` is the 9:16 part of the
@@ -802,7 +836,7 @@ extension AppModel {
                                              fpsExpression: $0.fpsExpression, hasAudio: $0.hasAudio, hdr: $0.hdrLabel) },
                 editedDuration: clip.timeline.duration, includedInMovie: clip.includedInMovie ?? true,
                 crop: clip.crop.map(WireRect.init), aspect: clip.aspectLabel, subtitles: clip.subtitles?.path,
-                sections: sections, blurAreas: clip.blurRegions.map { .init(id: $0.id, rect: WireRect($0.rect)) },
+                sections: sections, blurAreas: clip.blurRegions.map { .init(id: $0.id, rect: WireRect($0.rect), start: $0.start, end: $0.end) },
                 zooms: clip.zoomShots.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end,
                                                   target: WirePoint($0.target)) },
                 color: clip.info.map { colorState(clip, info: $0, settings: document.settings) },
@@ -814,7 +848,8 @@ extension AppModel {
                 graphics: clip.graphics,
                 publish: clip.publish,
                 publishIssues: clip.info == nil ? [] : (clip.publish ?? PublishInfo()).issues(duration: clip.timeline.duration,
-                                                                                               graphics: clip.graphics),
+                                                                                               graphics: clip.graphics,
+                                                                                               music: clip.isOn(.music) ? clip.music : nil),
                 suggestedChapters: clip.info == nil ? [] : PublishInfo.suggestedChapters(markers: clip.markers ?? [], graphics: clip.graphics,
                                                                                          duration: clip.timeline.duration),
                 endScreen: EndScreenPlan(graphics: clip.graphics, publish: clip.publish, duration: clip.timeline.duration)?.json,
@@ -824,7 +859,9 @@ extension AppModel {
                 captions: .init(use: document.settings.captionUse(hasFile: clip.subtitles != nil).rawValue,
                                 source: clip.item().captionsSource(document.settings)),
                 shorts: Self.shortStates(clip, settings: document.settings),
-                screen: Self.screenState(clip))
+                screen: Self.screenState(clip),
+                music: Self.musicState(clip),
+                switchedOff: (clip.switchedOff ?? []).map(\.rawValue))
         }
         var movieOffset = 0.0
         var movieClips: [AgentState.MovieEntry] = []
@@ -956,6 +993,23 @@ extension AppModel {
                 }
             }
             let document = committedProject
+            // Music is measured the same way: each file's length and loudness, and the voice of
+            // a recording that has no music yet.
+            var music: [String: (duration: Double, loudness: Double)] = [:]
+            for path in Set(wire.flatMap(\.musicPaths)) {
+                let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                do { music[path] = try await FFmpeg.measureMusic(url) } catch {
+                    throw EditError(code: .missingMedia, message: error.localizedDescription)
+                }
+            }
+            var voices: [UUID: Double] = [:]
+            for command in wire where command.type == "addMusic" {
+                guard let id = command.clipID, voices[id] == nil,
+                      let clip = document.clips.first(where: { $0.id == id }), clip.music == nil, clip.info?.hasAudio == true else { continue }
+                do { voices[id] = try await FFmpeg.integratedLoudness(of: clip.url) } catch {
+                    throw EditError(code: .missingMedia, message: error.localizedDescription)
+                }
+            }
             // A Short asked to be centred on the speaker is looked at with Vision first.
             var speakers: [Int: CGRect] = [:]
             for (index, command) in wire.enumerated() where command.short?["window"] == .string("speaker") {
@@ -971,7 +1025,7 @@ extension AppModel {
             }
             let commands = try wire.enumerated().map { index, command in
                 try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index], face: faces[index],
-                            border: borders[index], origin: agentOrigin(request))
+                            border: borders[index], music: music, voices: voices, origin: agentOrigin(request))
             }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
@@ -989,7 +1043,8 @@ extension AppModel {
     /// One wire command as an `EditCommand`, against the committed document.
     private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
                          tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil, face: CGPoint? = nil,
-                         border: CGRect? = nil, origin: EditOrigin = .human) throws -> EditCommand {
+                         border: CGRect? = nil, music: [String: (duration: Double, loudness: Double)] = [:],
+                         voices: [UUID: Double] = [:], origin: EditOrigin = .human) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -1067,6 +1122,22 @@ extension AppModel {
             }
             return result
         }
+        /// A kinetic text with words "transcript" gets the words spoken over its time, each
+        /// at its edited time.
+        func spokenWords(_ graphic: Graphic, on clipID: UUID) throws -> Graphic {
+            guard graphic.kind == .kineticText, graphic.props["words"]?.string == "transcript" else { return graphic }
+            let clip = try record(clipID)
+            guard clip.transcript != nil else {
+                throw EditError.invalid("words \"transcript\" needs the recording's transcript; transcribe it first, or give the words.")
+            }
+            let words = KineticText.words(clip.transcript, timeline: clip.timeline, from: graphic.start, to: graphic.end)
+            guard !words.isEmpty else {
+                throw EditError.invalid(String(format: "No words are spoken from %.2f to %.2f s; move the kinetic text, or give the words.", graphic.start, graphic.end))
+            }
+            var filled = graphic
+            filled.props["words"] = .array(words)
+            return filled
+        }
         func checkedImages(_ graphic: Graphic) throws -> Graphic {
             var missing: String?
             JSONValue.object(graphic.props).visit { key, value in
@@ -1095,7 +1166,7 @@ extension AppModel {
             }
         }
         func mergedPublish(_ changes: [String: JSONValue], onto info: PublishInfo) throws -> PublishInfo {
-            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design", "endScreen"]
+            let known: Set<String> = ["title", "description", "tags", "category", "chapters", "thumbnail", "language", "channel", "design", "endScreen", "test"]
             if let unknown = changes.keys.sorted().first(where: { !known.contains($0) }) {
                 throw EditError.invalid("Unknown publish key \"\(unknown)\". Keys: \(known.sorted().joined(separator: ", ")).")
             }
@@ -1112,15 +1183,18 @@ extension AppModel {
             guard case .object(var merged) = try JSONValue.from(info) else { return info }
             for (key, value) in changes {
                 if value == .null { merged.removeValue(forKey: key) }
-                else if key == "design" || key == "endScreen", case .object(let patch) = value {
-                    // The design's and the end screen's keys merge too: only those given change.
+                else if key == "design" || key == "endScreen" || key == "test", case .object(let patch) = value {
+                    // The design's, the end screen's and the test's keys merge too: only those given change.
                     var object = merged[key]?.object ?? [:]
                     for (name, part) in patch { if part == .null { object.removeValue(forKey: name) } else { object[name] = part } }
                     merged[key] = .object(object)
                 } else { merged[key] = value }
             }
             do {
-                return try AgentProtocol.decoder.decode(PublishInfo.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+                var decoded = try AgentProtocol.decoder.decode(PublishInfo.self, from: AgentProtocol.encoder.encode(JSONValue.object(merged)))
+                // The winner of a Test & Compare becomes the thumbnail, unless the thumbnail is given too.
+                if case .number? = changes["test"]?.object?["winner"], changes["thumbnail"] == nil { decoded.markWinner(decoded.test?.winner) }
+                return decoded
             } catch {
                 throw EditError.invalid("publish: title, description, language and channel are text; tags is a list of text; "
                     + "category is one of \(YouTubeCategory.allCases.map(\.rawValue).joined(separator: ", ")); chapters is a list of "
@@ -1129,7 +1203,8 @@ extension AppModel {
                     + "(\(ThumbnailDesign.Background.allCases.map(\.rawValue).joined(separator: ", "))), zoom and place "
                     + "(\(ThumbnailDesign.Place.allCases.map(\.rawValue).joined(separator: ", "))); endScreen has circle "
                     + "(\(EndScreenElements.Circle.allCases.map(\.rawValue).joined(separator: ", "))), channel, message and videos, a list of "
-                    + "{kind (\(EndScreenElements.Kind.allCases.map(\.rawValue).joined(separator: ", "))), link, title}.")
+                    + "{kind (\(EndScreenElements.Kind.allCases.map(\.rawValue).joined(separator: ", "))), link, title}; "
+                    + "test has versions (B and C: designs), images (paths, A first) and winner (0 is A).")
             }
         }
         func zoom(_ value: WireZoom) -> ZoomShot {
@@ -1161,17 +1236,27 @@ extension AppModel {
             return .setCrop(clip: try field(wire.clipID, "clipID"), rect: try field(wire.rect, "rect").rect)
         case "setAspect":
             return .setAspect(clip: try field(wire.clipID, "clipID"), preset: try field(wire.preset, "preset"))
+        case "setChange":
+            let name = try field(wire.change, "change")
+            guard let change = SwitchableChange(rawValue: name) else {
+                throw EditError.invalid("Unknown change \"\(name)\". Use one of: \(SwitchableChange.allCases.map(\.rawValue).joined(separator: ", ")).")
+            }
+            return .setChange(clip: try field(wire.clipID, "clipID"), change: change, on: try field(wire.on, "on"))
         case "addBlurArea":
+            // A blur area's start and end are source seconds of the recording, whatever the timeSpace.
             return .addBlurArea(clip: try field(wire.clipID, "clipID"),
-                                area: BlurRegion(id: wire.areaID ?? UUID(), rect: try field(wire.rect, "rect").rect))
+                                area: BlurRegion(id: wire.areaID ?? UUID(), rect: try field(wire.rect, "rect").rect,
+                                                 start: wire.start, end: wire.end))
         case "updateBlurArea":
+            let timed = wire.start != nil || wire.end != nil || wire.whole == true
             return .updateBlurArea(clip: try field(wire.clipID, "clipID"), area: try field(wire.areaID, "areaID"),
-                                   rect: try field(wire.rect, "rect").rect)
+                                   rect: wire.rect?.rect,
+                                   times: timed ? BlurTimes(start: wire.start, end: wire.end, whole: wire.whole ?? false) : nil)
         case "removeBlurArea":
             return .removeBlurArea(clip: try field(wire.clipID, "clipID"), area: try field(wire.areaID, "areaID"))
         case "replaceBlurAreas":
             return .replaceBlurAreas(clip: try field(wire.clipID, "clipID"), areas: try field(wire.areas, "areas").map {
-                BlurRegion(id: $0.id ?? UUID(), rect: $0.rect.rect)
+                BlurRegion(id: $0.id ?? UUID(), rect: $0.rect.rect, start: $0.start, end: $0.end)
             })
         case "addZoom":
             let (clip, start) = try placed(try field(wire.start, "start"))
@@ -1299,7 +1384,7 @@ extension AppModel {
             if value.id == nil { value.id = wire.graphicID }
             let clip = wire.timeSpace == "movie" ? try placed(try field(value.start, "graphic.start")).0
                 : try field(wire.clipID, "clipID")
-            return .addGraphic(clip: clip, graphic: try checkedImages(try graphic(value)))
+            return .addGraphic(clip: clip, graphic: try spokenWords(try checkedImages(try graphic(value)), on: clip))
         case "updateGraphic":
             let clipID = try field(wire.clipID, "clipID")
             let value = try field(wire.graphic, "graphic")
@@ -1307,12 +1392,12 @@ extension AppModel {
             guard let old = try record(clipID).graphics?.items.first(where: { $0.id == graphicID }) else {
                 throw EditError.notFound("No graphic \(graphicID) on recording \(clipID).")
             }
-            return .updateGraphic(clip: clipID, graphic: try checkedImages(try graphic(value, keeping: old)))
+            return .updateGraphic(clip: clipID, graphic: try spokenWords(try checkedImages(try graphic(value, keeping: old)), on: clipID))
         case "removeGraphic":
             return .removeGraphic(clip: try field(wire.clipID, "clipID"), graphic: try field(wire.graphicID, "graphicID"))
         case "replaceGraphics":
             let clipID = try field(wire.clipID, "clipID")
-            let graphics = try field(wire.graphics, "graphics").map { try checkedImages(try graphic($0)) }
+            let graphics = try field(wire.graphics, "graphics").map { try spokenWords(try checkedImages(try graphic($0)), on: clipID) }
             let style = try wire.graphicsStyle.map { try mergedStyle($0, onto: try record(clipID).graphics?.style ?? GraphicsStyle()) }
             return .replaceGraphics(clip: clipID, graphics: graphics, style: style)
         case "setGraphicsStyle":
@@ -1371,6 +1456,8 @@ extension AppModel {
         case "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
              "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms":
             return try Self.resolveScreen(wire, in: document, probed: probed, face: face, border: border)
+        case "addMusic", "updateMusic", "removeMusic":
+            return try Self.resolveMusic(wire, in: document, measured: music, voices: voices)
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
@@ -1536,14 +1623,14 @@ extension AppModel {
                 guard let shot = selectedItem?.zoomShots.first(where: { $0.id == zoom }) else {
                     return .failure(.notFound("No zoom \(zoom) on the selected recording."))
                 }
-                editorMode = .zoom; selectedShotID = zoom
+                selectedShotID = zoom
                 scrubToShot(shot)
             }
             if let id = request.effect {
                 guard let effect = selectedItem?.blurEffects.first(where: { $0.id == id }) else {
                     return .failure(.notFound("No blur effect \(id) on the selected recording."))
                 }
-                editorMode = .effects
+                selectedEffectID = id
                 jumpToEffect(effect)
             }
             if let id = request.marker {
@@ -1616,7 +1703,9 @@ extension AppModel {
             let (clipID, local): (UUID, Double)
             if request.timeSpace == "movie" { (clipID, local) = try movieLocation(time, in: document) }
             else { (clipID, local) = (try require(request.clip, "clip"), time) }
-            guard let clip = document.clips.first(where: { $0.id == clipID }) else { throw EditError.notFound("No recording \(clipID).") }
+            guard let stored = document.clips.first(where: { $0.id == clipID }) else { throw EditError.notFound("No recording \(clipID).") }
+            // The picture as it plays and exports: switched-off changes left out.
+            let clip = ProjectClip(stored.item().effective)
             guard let info = clip.info else { throw EditError(code: .missingMedia, message: "That recording is still loading.") }
             let timeline = clip.timeline
             guard local.isFinite, local >= 0, local <= timeline.duration else {
@@ -1634,7 +1723,7 @@ extension AppModel {
                 return .success(preview)
             }
             let data = try await FFmpeg.thumbnail(
-                url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.map(\.rect),
+                url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.filter { $0.covers(source: source) }.map(\.rect),
                 style: settings.blurStyle, strength: settings.blurStrength, toneMap: info.isHDR && settings.toneMapHDR,
                 color: clip.item().colorFilters(settings, original: request.original ?? false),
                 subtitles: clip.item().burnedCaptions(settings), subtitleStyle: settings.subtitleForceStyle,
@@ -2056,13 +2145,15 @@ extension AppModel {
             }
             do {
                 switch work {
-                case .recording(let item, let info):
+                case .recording(let recording, let info):
+                    let item = recording.effective
                     try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
-                                            regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
+                                            regions: item.blurBoxes, zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.burnedCaptions(exportSettings),
                                             color: item.colorStage(exportSettings), effects: item.blurEffects,
-                                            graphics: item.exportGraphics(exportSettings), screen: item.screen, onProgress: progress)
+                                            graphics: item.exportGraphics(exportSettings), screen: item.screen,
+                                            music: item.exportMusic(exportSettings), onProgress: progress)
                 case .movie(let plan):
                     try await FFmpeg.exportMovie(plan: plan, settings: exportSettings, output: temporary, onProgress: progress)
                 }
@@ -2101,7 +2192,8 @@ extension AppModel {
             return .failure(EditError(code: .missingMedia, message: "A YouTube export needs a loaded recording in clip whose source is present."))
         }
         let publish = item.publish ?? PublishInfo()
-        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
+            .first(where: { $0.severity == .blocking }) {
             return .failure(.invalid(blocking.message + " (state.clips[].publishIssues lists everything; setPublishInfo changes it.)"))
         }
         let files = YouTubeExport.files(in: folder, publish: publish, fallback: item.url.deletingPathExtension().lastPathComponent,
@@ -2141,6 +2233,7 @@ extension AppModel {
                                                "text": .string(files.text.path), "json": .string(files.json.path)]
             if let captions = files.captions, FileManager.default.fileExists(atPath: captions.path) { result["captions"] = .string(captions.path) }
             if let thumbnail = files.thumbnail { result["thumbnail"] = .string(thumbnail.path) }
+            if !files.tests.isEmpty { result["thumbnailTest"] = .array(files.tests.map { .string($0.path) }) }
             return .object(result)
         }
         return .success(job)
@@ -2156,6 +2249,15 @@ extension AppModel {
         guard clip.info != nil else { return .failure(EditError(code: .missingMedia, message: "That recording is still loading.")) }
         var publish = clip.publish ?? PublishInfo()
         if publish.design == nil { publish.design = ThumbnailDesign(time: 0, title: publish.title) }
+        // A version of a Test & Compare: B or C stands in for the design.
+        let letter = request.version?.uppercased() ?? "A"
+        guard let versionIndex = ThumbnailTest.letters.firstIndex(of: letter) else { return .failure(.invalid("version is A, B or C.")) }
+        if versionIndex > 0 {
+            guard let versions = publish.test?.versions, versions.count >= versionIndex else {
+                return .failure(.invalid("The recording has no version \(letter). Add it with setPublishInfo: {test: {versions: [B, C]}}."))
+            }
+            publish.design = versions[versionIndex - 1]
+        }
         if let changes = request.design {
             guard case .object(var merged)? = try? JSONValue.from(publish.design!) else { return .failure(.invalid("Could not read the design.")) }
             for (name, value) in changes { if value == .null { merged.removeValue(forKey: name) } else { merged[name] = value } }
@@ -2169,21 +2271,39 @@ extension AppModel {
         }
         do {
             let sources = try await thumbnailSources(clip, at: design.time, cutout: design.cutout)
-            let image = try await ThumbnailMaker.render(design, sources: sources, accent: clip.graphics?.style.accent ?? GraphicsStyle().accent)
+            let accent = clip.graphics?.style.accent ?? GraphicsStyle().accent
+            // The check draws the design itself, so it is drawn once.
+            let checked = request.check == true ? try await PhoneCheck.run(design, sources: sources, accent: accent) : nil
+            let image: CGImage
+            if let checked { image = checked.image } else { image = try await ThumbnailMaker.render(design, sources: sources, accent: accent) }
             guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
                 return .failure(.invalid("The thumbnail could not be encoded."))
             }
             let directory = agentArtifactsDirectory
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let file = directory.appendingPathComponent("thumbnail-\(clipID.uuidString.prefix(8))-\(UUID().uuidString.prefix(6)).png")
+            let stem = "thumbnail-\(clipID.uuidString.prefix(8))-\(UUID().uuidString.prefix(6))"
+            let file = directory.appendingPathComponent(stem + ".png")
             try png.write(to: file, options: .atomic)
+            var check: AgentPhoneCheck?
+            if let checked {
+                guard let phone = PhoneCheck.phonePicture(image),
+                      let phonePNG = NSBitmapImageRep(cgImage: phone).representation(using: .png, properties: [:]) else {
+                    return .failure(.invalid("The phone picture could not be drawn."))
+                }
+                let phoneFile = directory.appendingPathComponent(stem + "-phone.png")
+                try phonePNG.write(to: phoneFile, options: .atomic)
+                let title = request.videoTitle ?? publish.title
+                let gap = InformationGap.make(design, pictureWords: checked.check.pictureWords, title: title)
+                check = AgentPhoneCheck(checked.check.adding(gap), gap: AgentGap(title: title, gap), phone: phoneFile.path)
+            }
             var saved: String?
-            if request.save == true { saved = try await saveThumbnail(clip, design: design).path }
+            if request.save == true { saved = try await saveThumbnail(clip, design: design, version: request.version == nil ? nil : letter).path }
             let k = 1920 / Double(sources.frame.width)
-            return .success(AgentThumbnail(path: file.path, savedPath: saved, width: image.width, height: image.height, design: design,
+            return .success(AgentThumbnail(path: file.path, savedPath: saved, width: image.width, height: image.height, design: design, version: letter,
                                            speakerFound: sources.cutout != nil,
                                            speaker: sources.cutout.map { WireRect(CGRect(x: $0.box.minX * k, y: $0.box.minY * k,
-                                                                                         width: $0.box.width * k, height: $0.box.height * k)) }))
+                                                                                         width: $0.box.width * k, height: $0.box.height * k)) },
+                                           check: check))
         } catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid("The thumbnail could not be made: \(error.localizedDescription)")) }
     }
@@ -2196,7 +2316,73 @@ struct AgentThumbnail: Encodable {
     var width: Int
     var height: Int
     var design: ThumbnailDesign
+    /// A, B or C: the version drawn.
+    var version: String
     var speakerFound: Bool
     /// The speaker's box in design pixels of a 1920×1080 frame.
     var speaker: WireRect?
+    /// With check: what does not read on a phone in 0.5 s.
+    var check: AgentPhoneCheck?
+}
+
+/// The check of a thumbnail, for an agent: each finding (kind, level, the phone sizes, a
+/// message), the word count, the title's letter size and the face's box in design pixels
+/// of a 1920×1080 frame, `gap` (the thumbnail's words against the video's title), `path`
+/// (the eye path), and `phone`, a PNG of the design at both sizes.
+struct AgentPhoneCheck: Encodable {
+    var reads: Bool
+    var findings: [PhoneCheck.Finding]
+    var words: Int
+    var titleSize: Double
+    var face: WireRect?
+    var gap: AgentGap
+    /// Where the eye goes, in order: the face, then the words by size, clarity and colour.
+    var path: [AgentEyeStop]
+    var phone: String
+
+    init(_ check: PhoneCheck, gap: AgentGap, phone: String) {
+        reads = check.reads
+        findings = check.findings
+        words = check.words
+        titleSize = (check.titleSize * 10).rounded() / 10
+        face = check.face.map { WireRect($0.integral) }
+        self.gap = gap
+        path = check.path.enumerated().map { AgentEyeStop(step: $0.offset + 1, $0.element) }
+        self.phone = phone
+    }
+}
+
+/// One stop of the eye path, for an agent: its place on the path, what it is (face,
+/// accent, title, tag, picture), its words, and its box in design pixels of 1920×1080.
+struct AgentEyeStop: Encodable {
+    var step: Int
+    var kind: EyeStop.Kind
+    var text: String
+    var box: WireRect
+
+    init(step: Int, _ stop: EyeStop) {
+        self.step = step
+        kind = stop.kind
+        text = stop.text
+        box = WireRect(stop.box.rect.integral)
+    }
+}
+
+/// The information gap, for an agent: the video title compared, the thumbnail's words it
+/// repeats, the runs of words both have, the words the thumbnail adds, and the share of
+/// the thumbnail's important words that the title has (0 to 1).
+struct AgentGap: Encodable {
+    var title: String
+    var repeated: [String]
+    var phrases: [String]
+    var added: [String]
+    var overlap: Double
+
+    init(title: String, _ gap: InformationGap) {
+        self.title = title
+        repeated = gap.repeated
+        phrases = gap.phrases
+        added = gap.added
+        overlap = (gap.overlap * 100).rounded() / 100
+    }
 }

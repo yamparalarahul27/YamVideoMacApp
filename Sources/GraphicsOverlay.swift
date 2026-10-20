@@ -224,10 +224,16 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
     /// Loads `index` offscreen at `size` pixels with the stage fitted to it, runs `script`
     /// (which may await) and returns the picture.
     static func capture(page index: URL, folder: URL, size: CGSize, script: String) async throws -> CGImage {
-        try await GraphicsSnapshot().capture(page: index, folder: folder, size: size, script: script)
+        try await GraphicsSnapshot().capture(page: index, folder: folder, size: size, steps: [script + "\nreturn null;"])[0].image
     }
 
-    private func capture(page index: URL, folder: URL, size: CGSize, script: String) async throws -> CGImage {
+    /// Loads `index` offscreen once and, for each of `steps` in turn, runs it (it may await
+    /// and return a string) and takes a picture: one page, several looks at it.
+    static func capture(page index: URL, folder: URL, size: CGSize, steps: [String]) async throws -> [(image: CGImage, result: String?)] {
+        try await GraphicsSnapshot().capture(page: index, folder: folder, size: size, steps: steps)
+    }
+
+    private func capture(page index: URL, folder: URL, size: CGSize, steps: [String]) async throws -> [(image: CGImage, result: String?)] {
         let backing = NSScreen.main?.backingScaleFactor ?? 2
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: size.width / backing, height: size.height / backing),
                              configuration: WKWebViewConfiguration())
@@ -243,22 +249,26 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
             stage.style.transformOrigin = '0 0';
             stage.style.transform = 'scale(' + (window.innerWidth / 1920) + ')';
             await document.fonts.ready;
-            \(script)
             return true;
             """, arguments: [:], contentWorld: .page)
-        let configuration = WKSnapshotConfiguration()
-        configuration.rect = view.bounds
-        configuration.afterScreenUpdates = true
-        let snapshot = try await view.takeSnapshot(configuration: configuration)
-        guard let picture = snapshot.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            throw FFmpegError(message: "The picture could not be drawn.")
+        var shots: [(image: CGImage, result: String?)] = []
+        for step in steps {
+            let result = try await view.callAsyncJavaScript(step, arguments: [:], contentWorld: .page) as? String
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = view.bounds
+            configuration.afterScreenUpdates = true
+            let snapshot = try await view.takeSnapshot(configuration: configuration)
+            guard let picture = snapshot.cgImage(forProposedRect: nil, context: nil, hints: nil),
+                  let context = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw FFmpegError(message: "The picture could not be drawn.")
+            }
+            context.interpolationQuality = .high
+            context.draw(picture, in: CGRect(origin: .zero, size: size))
+            guard let image = context.makeImage() else { throw FFmpegError(message: "The picture could not be drawn.") }
+            shots.append((image, result))
         }
-        context.interpolationQuality = .high
-        context.draw(picture, in: CGRect(origin: .zero, size: size))
-        guard let image = context.makeImage() else { throw FFmpegError(message: "The picture could not be drawn.") }
-        return image
+        return shots
     }
 
     /// Each graphic's box once fully in, unmoved, as the Preview measures it.

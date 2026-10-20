@@ -17,6 +17,10 @@ xcrun swiftc \
 	-o "$BIN" \
 	"$ROOT/Sources/Models.swift" \
 	"$ROOT/Sources/Timeline.swift" \
+	"$ROOT/Sources/TimelineTracks.swift" \
+	"$ROOT/Sources/PictureEditing.swift" \
+	"$ROOT/Sources/ChangeSwitches.swift" \
+	"$ROOT/Sources/MediaLibrary.swift" \
 	"$ROOT/Sources/ColorLUT.swift" \
 	"$ROOT/Sources/ColorAdjustments.swift" \
 	"$ROOT/Sources/ColorPipeline.swift" \
@@ -38,8 +42,13 @@ xcrun swiftc \
 	"$ROOT/Sources/ScreenExport.swift" \
 	"$ROOT/Sources/ScreenEditing.swift" \
 	"$ROOT/Sources/ScreenAgents.swift" \
+	"$ROOT/Sources/Music.swift" \
+	"$ROOT/Sources/MusicExport.swift" \
+	"$ROOT/Sources/MusicEditing.swift" \
+	"$ROOT/Sources/MusicAgents.swift" \
 	"$ROOT/Sources/Graphics.swift" \
 	"$ROOT/Sources/Logos.swift" \
+	"$ROOT/Sources/CoverGraphics.swift" \
 	"$ROOT/Sources/Shorts.swift" \
 	"$ROOT/Sources/ShortsEditing.swift" \
 	"$ROOT/Sources/ShortsAgents.swift" \
@@ -50,16 +59,21 @@ xcrun swiftc \
 	"$ROOT/Sources/Captions.swift" \
 	"$ROOT/Sources/PublishEditing.swift" \
 	"$ROOT/Sources/Thumbnail.swift" \
+	"$ROOT/Sources/ThumbnailCheck.swift" \
+	"$ROOT/Sources/ThumbnailGap.swift" \
+	"$ROOT/Sources/ThumbnailEyePath.swift" \
 	"$ROOT/Sources/FrameSuggestions.swift" \
 	"$ROOT/Sources/AgentsManual.swift" \
 	"$ROOT/Sources/GraphicsEditing.swift" \
 	"$ROOT/Sources/GraphicsOverlay.swift" \
 	"$ROOT/Sources/GraphicsPlacement.swift" \
 	"$ROOT/Sources/Library.swift" \
+	"$ROOT/Sources/ReleaseCalendar.swift" \
 	"$ROOT/Sources/LibraryEditing.swift" \
 	"$ROOT/Sources/LibraryAgents.swift" \
 	"$ROOT/Sources/LibraryScan.swift" \
 	"$ROOT/Sources/LibraryVideos.swift" \
+	"$ROOT/Sources/CalendarEditing.swift" \
 	"$ROOT/Sources/Style.swift" \
 	"$ROOT/Sources/ProjectNotes.swift" \
 	"$ROOT/Sources/AppModel.swift" \
@@ -72,6 +86,8 @@ xcrun swiftc \
 	"$ROOT/Sources/AgentActivityView.swift" \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
+	"$ROOT/Sources/FootageLayout.swift" \
+	"$ROOT/Sources/MacInventory.swift" \
 	"$ROOT/Sources/CropEditor.swift" \
 	"$ROOT"/Tests/*.swift
 

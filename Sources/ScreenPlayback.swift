@@ -115,8 +115,9 @@ extension PlaybackController {
         guard tracks.count >= 2 else { return nil }
         let key = Self.picture(clip, info: info, short: nil)
         let crop = key.crop, motion = short == nil ? key.motion : nil
-        let shots = clip.zoomShots, regions = clip.blurRegions, effects = clip.blurEffects
-        let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name, toneMapHDR: settings.toneMapHDR, original: original).render
+        let shots = clip.zoomShots, regions = clip.blurBoxes, effects = clip.blurEffects
+        let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name, toneMapHDR: settings.toneMapHDR,
+                                        original: original || !clip.isOn(.colour)).render
         let geometry = short.map { LayoutGeometry(short: screen, crop: crop, window: $0.frame(info: info, crop: clip.crop)) }
             ?? LayoutGeometry(track: screen, crop: crop)
         let frameSize = geometry.frame
@@ -196,26 +197,84 @@ func composeLayout(speaker: CIImage, screen: CIImage?, track: ScreenTrack, state
         .transformed(by: CGAffineTransform(scaleX: cover, y: cover))
         .transformed(by: CGAffineTransform(translationX: -(crop.width * cover - frame.width) / 2, y: -(crop.height * cover - frame.height) / 2))
         .cropped(to: bounds)
-    var result = movedPictureFill(covered, frame: bounds, amount: 1)
-    result = placed(picture, size: crop.size, in: screenPlace, frame: frame).composited(over: result)
-    result = placed(cut, size: window.size, in: state.speaker, frame: frame).composited(over: result)
+    let fill = movedPictureFill(covered, frame: bounds, amount: 1)
+    let speakerPicture = placed(cut, size: window.size, in: state.speaker, frame: frame)
+    var result = fill
+    if state.ink < 1 {
+        result = placed(picture, size: crop.size, in: screenPlace, frame: frame).composited(over: result)
+        result = speakerPicture.composited(over: result)
+    }
+    if state.ink > 0 {
+        // Ink: the speaker over a fill made from its own picture, so the room goes on where
+        // the picture moved away, then the shade, then only the screen's bright lines.
+        let speakerSoft = placed(cut, size: window.size, in: state.speaker, frame: frame, feather: LayoutGeometry.inkFeather * frame.width)
+        var inked = speakerSoft.composited(over: movedPictureFill(face, frame: bounds, amount: 1))
+        inked = inkShade(frame: frame).composited(over: inked)
+        inked = inkLines(placed(picture, size: crop.size, in: LayoutPlace(rect: screenPlace.rect, radius: 0), frame: frame)).composited(over: inked)
+        result = state.ink >= 1 ? inked : result.applyingFilter("CIDissolveTransition", parameters: [
+            kCIInputTargetImageKey: inked, kCIInputTimeKey: state.ink,
+        ])
+    }
     return (result.matchedToWorkingSpace(from: space) ?? result).cropped(to: bounds)
+}
+
+/// Ink: black, as opaque as `LayoutGeometry.inkShade` says across the frame, the same at
+/// every height. One row of exact values, as the export's mask has.
+private func inkShade(frame: CGSize) -> CIImage {
+    let w = Double(frame.width)
+    return alphaRow(width: Int(frame.width), white: false) { LayoutGeometry.inkShade(at: $0, width: w) }
+        .clampedToExtent().cropped(to: CGRect(origin: .zero, size: frame))
+}
+
+/// One row `width` pixels wide, black or white, with `alpha` at each pixel's centre as its
+/// opacity (premultiplied), at the origin.
+private func alphaRow(width: Int, white: Bool, alpha: (Double) -> Double) -> CIImage {
+    var values = [Float](repeating: 0, count: width * 4)
+    for x in 0..<width {
+        let a = Float(alpha(Double(x) + 0.5))
+        values[x * 4 + 3] = a
+        if white { values[x * 4] = a; values[x * 4 + 1] = a; values[x * 4 + 2] = a }
+    }
+    let data = values.withUnsafeBufferPointer { Data(buffer: $0) }
+    return CIImage(bitmapData: data, bytesPerRow: width * 16, size: CGSize(width: width, height: 1), format: .RGBAf, colorSpace: nil)
+}
+
+/// Ink: `image` with an alpha from its Rec.709 luma, clear at `inkKeyLow` and solid from
+/// `inkKeyHigh`, as the export's key does on Y.
+private func inkLines(_ image: CIImage) -> CIImage {
+    let low = LayoutGeometry.inkKeyLow, gain = 1 / (LayoutGeometry.inkKeyHigh - LayoutGeometry.inkKeyLow)
+    return image.applyingFilter("CIColorMatrix", parameters: [
+        "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
+        "inputBVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+        "inputAVector": CIVector(x: 0.2126 * gain, y: 0.7152 * gain, z: 0.0722 * gain, w: 0),
+        "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: -low * gain),
+    ]).applyingFilter("CIColorClamp", parameters: [
+        "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0), "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
+    ])
 }
 
 /// `image` (`size`, at the origin) scaled with Lanczos into `place`, with its corners
 /// rounded. Edges repeat their outermost pixels, so the scaled picture has no soft border.
-private func placed(_ image: CIImage, size: CGSize, in place: LayoutPlace, frame: CGSize) -> CIImage {
+/// A `feather` above 0 fades its left edge in over that many pixels (`LayoutGeometry.inkEdge`).
+private func placed(_ image: CIImage, size: CGSize, in place: LayoutPlace, frame: CGSize, feather: Double = 0) -> CIImage {
     let rect = place.rect
     let across = rect.width / size.width, down = rect.height / size.height
     let piece = CGRect(x: 0, y: 0, width: rect.width, height: rect.height)
-    let moved = image.clampedToExtent()
+    var moved = image.clampedToExtent()
         .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: down, kCIInputAspectRatioKey: across / down])
         .cropped(to: piece)
         .transformed(by: CGAffineTransform(translationX: rect.minX, y: frame.height - rect.maxY))
-    guard place.radius >= 0.5 else { return moved }
     let shape = CGRect(x: rect.minX, y: frame.height - rect.maxY, width: rect.width, height: rect.height)
-    let mask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
-        "inputExtent": CIVector(cgRect: shape), "inputRadius": place.radius, "inputColor": CIColor.white,
-    ])!.outputImage!
-    return moved.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: mask])
+    if place.radius >= 0.5 {
+        let mask = CIFilter(name: "CIRoundedRectangleGenerator", parameters: [
+            "inputExtent": CIVector(cgRect: shape), "inputRadius": place.radius, "inputColor": CIColor.white,
+        ])!.outputImage!
+        moved = moved.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: mask])
+    }
+    if feather >= 0.5 {
+        let ramp = alphaRow(width: Int(rect.width), white: true) { min(1, max(0, $0 / feather)) }
+            .transformed(by: CGAffineTransform(translationX: rect.minX, y: 0)).clampedToExtent().cropped(to: shape)
+        moved = moved.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: ramp])
+    }
+    return moved
 }

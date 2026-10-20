@@ -16,8 +16,10 @@ enum YouTubeExport {
         var thumbnail: URL?
         var text: URL
         var json: URL
+        /// The Test & Compare versions' thumbnails, A first, when they are saved.
+        var tests: [URL] = []
 
-        var all: [URL] { [video, captions, thumbnail, text, json].compactMap { $0 } }
+        var all: [URL] { [video, captions, thumbnail, text, json].compactMap { $0 } + tests }
     }
 
     /// The names for a recording in `folder`, from its title. With `unique`, a number is
@@ -29,7 +31,8 @@ enum YouTubeExport {
                   captions: captions ? folder.appendingPathComponent("\(stem).\(publish.language).srt") : nil,
                   thumbnail: publish.thumbnail == nil ? nil : folder.appendingPathComponent(stem + " thumbnail.jpg"),
                   text: folder.appendingPathComponent(stem + " YouTube.txt"),
-                  json: folder.appendingPathComponent(stem + ".youtube.json"))
+                  json: folder.appendingPathComponent(stem + ".youtube.json"),
+                  tests: (publish.test?.images ?? []).indices.map { folder.appendingPathComponent("\(stem) thumbnail \(ThumbnailTest.letters[$0]).jpg") })
         }
         var files = named(stem)
         var counter = 2
@@ -79,7 +82,7 @@ enum YouTubeExport {
     /// The structured version of the text file, for an agent filling in YouTube Studio.
     /// `project` and `recording` say what it was made from, so the Library can find it.
     static func json(_ publish: PublishInfo, files: Files, endScreen plan: EndScreenPlan? = nil,
-                     project: UUID? = nil, recording: UUID? = nil) throws -> Data {
+                     project: UUID? = nil, recording: UUID? = nil, music: MusicBed? = nil) throws -> Data {
         let chapters: [JSONValue] = publish.chapters.sorted { $0.time < $1.time }.map {
             .object(["time": .number($0.time), "timestamp": .string(PublishInfo.timestamp($0.time)), "title": .string($0.title)])
         }
@@ -87,6 +90,14 @@ enum YouTubeExport {
                                               "text": .string(files.text.lastPathComponent)]
         if let captions = files.captions { fileNames["captions"] = .string(captions.lastPathComponent) }
         if let thumbnail = files.thumbnail { fileNames["thumbnail"] = .string(thumbnail.lastPathComponent) }
+        var test: JSONValue?
+        if let tested = publish.test, !files.tests.isEmpty {
+            var object: [String: JSONValue] = ["versions": .array(files.tests.enumerated().map {
+                .object(["version": .string(ThumbnailTest.letters[$0.offset]), "file": .string($0.element.lastPathComponent)])
+            })]
+            if let winner = tested.winner { object["winner"] = .string(ThumbnailTest.letters[winner]) }
+            test = .object(object)
+        }
         var root: [String: JSONValue] = [
             "title": .string(publish.title), "description": .string(publish.fullDescription),
             "tags": .array(publish.tags.map(JSONValue.string)),
@@ -94,6 +105,8 @@ enum YouTubeExport {
             "language": .string(publish.language), "chapters": .array(chapters), "files": .object(fileNames),
         ]
         if let plan { root["endScreen"] = plan.json }
+        if let test { root["thumbnailTest"] = test }
+        if let music { root["music"] = music.json }
         if let project { root["projectID"] = .string(project.uuidString) }
         if let recording { root["recordingID"] = .string(recording.uuidString) }
         let encoder = JSONEncoder()
@@ -107,9 +120,12 @@ enum YouTubeExport {
     /// so a cancelled export leaves no half-written video.
     static func run(_ item: VideoItem, info: MediaInfo, publish: PublishInfo, settings: ExportSettings, files: Files,
                     project: UUID? = nil, onProgress: @escaping @Sendable (Double) -> Void) async throws {
-        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
+        let item = item.effective
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.music).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }
+        // The music's credit lines go at the end of the description.
+        let publish = publish.crediting(item.music)
         var videoSettings = settings
         videoSettings.format = .mp4
         let folder = files.video.deletingLastPathComponent()
@@ -117,9 +133,10 @@ enum YouTubeExport {
         defer { try? FileManager.default.removeItem(at: temporary) }
         try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                 crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
-                                regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots, segments: item.segments,
+                                regions: item.blurBoxes, zoomShots: item.zoomShots, segments: item.segments,
                                 settings: videoSettings, subtitles: item.burnedCaptions(videoSettings), color: item.colorStage(videoSettings),
-                                effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), screen: item.screen, onProgress: onProgress)
+                                effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), screen: item.screen,
+                                music: item.exportMusic(videoSettings), onProgress: onProgress)
         try Task.checkCancellation()
         let manager = FileManager.default
         if manager.fileExists(atPath: files.video.path) { _ = try manager.replaceItemAt(files.video, withItemAt: temporary) }
@@ -130,10 +147,13 @@ enum YouTubeExport {
         if let thumbnail = files.thumbnail, let source = publish.thumbnail {
             try writeThumbnail(source, to: thumbnail)
         }
+        for (target, source) in zip(files.tests, publish.test?.images ?? []) { try writeThumbnail(source, to: target) }
         let names = files.all.filter { $0 != files.text && ($0 == files.json || manager.fileExists(atPath: $0.path)) }.map(\.lastPathComponent)
         let plan = EndScreenPlan(graphics: item.graphics, publish: publish, duration: item.editedDuration)
-        try Data(publish.uploadText(files: names, endScreen: plan).utf8).write(to: files.text, options: .atomic)
-        try json(publish, files: files, endScreen: plan, project: project, recording: item.id).write(to: files.json, options: .atomic)
+        try Data(publish.uploadText(files: names, endScreen: plan, tests: files.tests.map(\.lastPathComponent), music: item.music).utf8)
+            .write(to: files.text, options: .atomic)
+        try json(publish, files: files, endScreen: plan, project: project, recording: item.id, music: item.music)
+            .write(to: files.json, options: .atomic)
     }
 }
 
@@ -141,6 +161,39 @@ enum YouTubeExport {
 
 extension AppModel {
     var selectedPublish: PublishInfo { selectedItem?.publish ?? PublishInfo() }
+
+    /// Marks the version that won YouTube's Test & Compare: its picture becomes the
+    /// thumbnail, as one undo step. The project's idea in the Library gets a line in its
+    /// notes (a Library step), so later videos can learn from it. Nil clears the mark.
+    func markThumbnailWinner(_ index: Int?) {
+        guard let test = selectedPublish.test else { return }
+        setPublish(label: "Thumbnail Winner") { $0.markWinner(index) }
+        guard let index, selectedPublish.test?.winner == index, let idea = openProjectIdea else { return }
+        let words = selectedPublish.versions[index].title.replacingOccurrences(of: "*", with: "")
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = .current
+        let line = "Thumbnail test, \(formatter.string(from: Date())): \(ThumbnailTest.letters[index]) won of \(test.count) (“\(words)”)."
+        editIdea(idea.id, notes: idea.notes.isEmpty ? line : idea.notes + "\n" + line)
+    }
+
+    /// A loaded recording is selected, in Recording mode, and nothing is exporting.
+    var canMakeThumbnail: Bool { selectedItem?.info != nil && !isMovieMode && !isConverting }
+
+    /// Opens the thumbnail maker for the selected recording without the Publish window
+    /// (Thumbnail under Studio in the left bar, or Make Thumbnail…, ⇧⌘T), on the Studio
+    /// page. False when it cannot open.
+    @discardableResult
+    func openThumbnailMaker() -> Bool {
+        guard canMakeThumbnail else {
+            statusMessage = isMovieMode ? "Make Thumbnail works in Recording mode." : "Select a recording to make its thumbnail."
+            return false
+        }
+        showModule(.studio)
+        showingThumbnailMaker = true
+        return true
+    }
 
     /// Changes what YouTube gets for the selected recording, as one undo step.
     func setPublish(label: String = "Publish Details", _ change: (inout PublishInfo) -> Void) {
@@ -176,8 +229,8 @@ extension AppModel {
         setPublish(label: "Choose Thumbnail") { $0.thumbnail = url }
     }
 
-    /// Saves the picture at the playhead, graphics and all, as the thumbnail: a PNG next to
-    /// the recording.
+    /// Saves the picture at the playhead, graphics and all, as the thumbnail: a PNG in the
+    /// video's Files/ folder, or next to the recording outside the footage layout.
     func useFrameAsThumbnail() {
         guard let index = selectedIndex, items[index].info != nil else { return }
         let clip = ProjectClip(items[index])
@@ -185,7 +238,7 @@ extension AppModel {
         Task {
             do {
                 let frame = try await composedFrame(clip, at: time, settings: settings, guides: false).image
-                let folder = clip.url.deletingLastPathComponent()
+                let folder = FootageLayout.filesFolder(for: clip.url)
                 let stem = clip.url.deletingPathExtension().lastPathComponent + " thumbnail"
                 var target = folder.appendingPathComponent(stem + ".png")
                 var counter = 2
@@ -207,7 +260,7 @@ extension AppModel {
     /// Asks for a folder, then writes the video, captions, thumbnail and upload text there.
     func promptForYouTubeExport() {
         guard let item = selectedItem, item.info != nil else { return }
-        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics)
+        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
             .first(where: { $0.severity == .blocking }) {
             statusMessage = blocking.message
             return
@@ -218,7 +271,7 @@ extension AppModel {
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
         panel.message = "Choose the folder for the video, its captions, thumbnail and upload text."
-        panel.directoryURL = settings.outputFolder ?? item.url.deletingLastPathComponent()
+        panel.directoryURL = settings.outputFolder ?? FootageLayout.editedFolder(for: item.url)
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         exportForYouTube(to: folder)
     }

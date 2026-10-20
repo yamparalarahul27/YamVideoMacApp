@@ -73,7 +73,7 @@ extension FFmpeg {
                             rate: Double, rateExpression: String, input: Int, tags: FrameTags, endScreen: Double?,
                             stack: CGRect? = nil) -> ScreenLayer {
         let geometry = stack.map { LayoutGeometry(short: screen, crop: crop, window: $0) } ?? LayoutGeometry(track: screen, crop: crop)
-        let size = streamSize(screen, place: geometry.screenPlace(.screen)?.rect.size ?? crop.size)
+        let size = streamSize(screen, place: geometry.largestScreenPlace(screen.usesInk ? [.screen, .ink] : [.screen]) ?? crop.size)
         let duration = segments.map { ClipTimeline(segments: $0).duration } ?? info.duration
         let first = (segments?.map(\.start).min() ?? 0) + screen.offset - 2
         let seek = first > 2 ? max(0, (min(first, screen.info.duration - 3) * 1000).rounded(.down) / 1000) : 0
@@ -126,7 +126,7 @@ extension FFmpeg {
     static func layoutStage(_ screen: ScreenTrack, geometry: LayoutGeometry, duration: Double, rate: Double, rateExpression: String,
                             sourceRate: Double, tags: FrameTags, endScreen: Double?, stream: CGSize? = nil, name: String = "ly") -> EffectStage {
         let w = Int(geometry.frame.width), h = Int(geometry.frame.height)
-        let full = geometry.screenPlace(.screen)?.rect.size ?? geometry.frame
+        let full = geometry.largestScreenPlace(screen.usesInk ? [.screen, .ink] : [.screen]) ?? geometry.frame
         let fps = max(1, rate)
         let total = max(1, Int((duration * fps).rounded()))
         var runs: [(first: Int, end: Int?, state: LayoutState)] = []
@@ -189,19 +189,25 @@ extension FFmpeg {
                 continue
             }
             let p = "\(name)\(index)_"
+            // Ink below 1 draws the screen under the speaker; above 0, its lines over them.
+            let ink = run.state.ink, plain = ink < 1, inked = ink > 0, both = plain && inked
             // The fill: the screen grown to cover the frame, centred, blurred and darkened.
             let cover = max(Double(w) / Double(full.width), Double(h) / Double(full.height))
             let coverWidth = max(w, Int((Double(full.width) * cover).rounded(.up))), coverHeight = max(h, Int((Double(full.height) * cover).rounded(.up)))
-            parts.append("[\(name)c\(index)]\(trim),split=2[\(p)a][\(p)b]")
-            parts.append("[\(p)b]scale=\(coverWidth):\(coverHeight):flags=bilinear,crop=\(w):\(h),"
-                         + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim, tags: .rec709) + "[\(p)f]")
-            var screenChain = "[\(p)a]"
-            if place.rect.size != full { screenChain += "scale=\(Int(place.rect.width)):\(Int(place.rect.height)):\(lanczos)," }
-            screenChain += "format=yuv444p10le,setsar=1"
-            parts += masked(screenChain, place: place, frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)p]", name: "\(p)m")
-            parts.append("[\(p)f][\(p)p]overlay=x=\(Int(place.rect.minX)):y=\(Int(place.rect.minY)):format=yuv444p10:eof_action=pass[\(p)g]")
+            let screenCopies = (plain ? ["[\(p)a]", "[\(p)b]"] : []) + (inked ? ["[\(p)i]"] : [])
+            parts.append("[\(name)c\(index)]\(trim)" + (screenCopies.count > 1 ? ",split=\(screenCopies.count)" : "") + screenCopies.joined())
+            if plain {
+                parts.append("[\(p)b]scale=\(coverWidth):\(coverHeight):flags=bilinear,crop=\(w):\(h),"
+                             + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim, tags: .rec709) + "[\(p)f]")
+            }
             let window = run.state.window, speaker = run.state.speaker
             var speakerChain = "[\(name)s\(index)]\(trim)"
+            if inked {
+                // Ink's fill is the speaker's own picture, so the room goes on where it moved away.
+                parts.append(speakerChain + ",split=2[\(p)r][\(p)t]")
+                parts.append("[\(p)t]" + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim, tags: .rec709) + "[\(p)F]")
+                speakerChain = "[\(p)r]null"
+            }
             if window != CGRect(origin: .zero, size: geometry.picture) {
                 speakerChain += ",crop=\(Int(window.width)):\(Int(window.height)):\(Int(window.minX)):\(Int(window.minY))"
             }
@@ -209,8 +215,42 @@ extension FFmpeg {
                 speakerChain += ",scale=\(Int(speaker.rect.width)):\(Int(speaker.rect.height)):\(lanczos)"
             }
             speakerChain += ",setsar=1"
-            parts += masked(speakerChain, place: speaker, frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)q]", name: "\(p)k")
-            parts.append("[\(p)g][\(p)q]overlay=x=\(Int(speaker.rect.minX)):y=\(Int(speaker.rect.minY)):format=yuv444p10:shortest=1\(output)")
+            if both {
+                parts.append(speakerChain + ",split=2[\(p)u][\(p)v]")
+                speakerChain = "[\(p)u]null"
+            }
+            if plain {
+                parts += masked(speakerChain, place: speaker, frames: frames, rate: fps, rateExpression: rateExpression,
+                                output: "[\(p)q]", name: "\(p)k")
+            }
+            if inked {
+                // Ink's speaker fades in at its left edge, so it meets its fill without a line.
+                parts += masked(both ? "[\(p)v]null" : speakerChain, place: speaker, feather: LayoutGeometry.inkFeather * Double(w),
+                                frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)Q]", name: "\(p)K")
+            }
+            let speakerAt = "x=\(Int(speaker.rect.minX)):y=\(Int(speaker.rect.minY))"
+            if plain {
+                var screenChain = "[\(p)a]"
+                if place.rect.size != full { screenChain += "scale=\(Int(place.rect.width)):\(Int(place.rect.height)):\(lanczos)," }
+                screenChain += "format=yuv444p10le,setsar=1"
+                parts += masked(screenChain, place: place, frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)p]", name: "\(p)m")
+                parts.append("[\(p)f][\(p)p]overlay=x=\(Int(place.rect.minX)):y=\(Int(place.rect.minY)):format=yuv444p10:eof_action=pass[\(p)g]")
+                parts.append("[\(p)g][\(p)q]overlay=\(speakerAt):format=yuv444p10:shortest=1" + (both ? "[\(p)A]" : output))
+            }
+            if inked {
+                // Ink: the speaker on the fill, the shade, then only the screen's bright lines.
+                parts.append("[\(p)F][\(p)Q]overlay=\(speakerAt):format=yuv444p10:shortest=1[\(p)h]")
+                parts += inkShade(width: w, height: h, frames: frames, rate: fps, rateExpression: rateExpression, output: "[\(p)d]", name: "\(p)d")
+                parts.append("[\(p)h][\(p)d]overlay=0:0:format=yuv444p10:shortest=1[\(p)j]")
+                var lines = "[\(p)i]"
+                if place.rect.size != full { lines += "scale=\(Int(place.rect.width)):\(Int(place.rect.height)):\(lanczos)," }
+                parts.append(lines + "format=yuv444p10le,setsar=1,split=2[\(p)l][\(p)y]")
+                parts.append("[\(p)y]extractplanes=y,lut=c0='\(inkKey)'[\(p)n]")
+                parts.append("[\(p)l][\(p)n]\(withAlpha)[\(p)e]")
+                parts.append("[\(p)j][\(p)e]overlay=x=\(Int(place.rect.minX)):y=\(Int(place.rect.minY)):format=yuv444p10:eof_action=pass"
+                             + (both ? "[\(p)B]" : output))
+            }
+            if both { parts.append("[\(p)A][\(p)B]blend=all_expr='A+(B-A)*\(num(ink))'\(output)") }
         }
         for index in before..<parts.count { parts[index] = FFmpeg.oneThreadScalers(parts[index]) }
         // concat times a run by its frames' mean spacing, so a one-frame run adds no time at
@@ -223,17 +263,48 @@ extension FFmpeg {
     /// `chain` with its corners rounded to `place`'s radius: a still mask in the alpha
     /// plane, repeated for every frame. Each pixel's cover of the shape, as Core Image's
     /// rounded rectangle draws it. No mask below half a pixel of radius.
-    private static func masked(_ chain: String, place: LayoutPlace, frames: Int, rate: Double, rateExpression: String,
+    /// A `feather` above 0 also fades the left edge in over that many pixels, as
+    /// `LayoutGeometry.inkEdge` does.
+    private static func masked(_ chain: String, place: LayoutPlace, feather: Double = 0, frames: Int, rate: Double, rateExpression: String,
                                output: String, name: String) -> [String] {
-        guard place.radius >= 0.5 else { return [chain + output] }
+        guard place.radius >= 0.5 || feather >= 0.5 else { return [chain + output] }
         let w = Double(place.rect.width), h = Double(place.rect.height), r = place.radius
-        let distance = "hypot(max(abs(X+0.5-\(num(w / 2)))-\(num(w / 2 - r)),0),max(abs(Y+0.5-\(num(h / 2)))-\(num(h / 2 - r)),0))"
-        let alpha = "mergeplanes=map0s=0:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2:map3s=1:map3p=0:format=yuva444p10le"
+        var cover: [String] = []
+        if r >= 0.5 {
+            let distance = "hypot(max(abs(X+0.5-\(num(w / 2)))-\(num(w / 2 - r)),0),max(abs(Y+0.5-\(num(h / 2)))-\(num(h / 2 - r)),0))"
+            cover.append("clip(\(num(r + 0.5))-\(distance),0,1)")
+        }
+        if feather >= 0.5 { cover.append("min(1,max(0,(X+0.5)/\(num(feather))))") }
         return [
             chain + "[\(name)p]",
             "color=c=black:s=\(Int(w))x\(Int(h)):r=\(rateExpression):d=\(num(0.5 / rate)),format=yuv444p10le,"
-                + "geq=lum='1023*clip(\(num(r + 0.5))-\(distance),0,1)':cb=512:cr=512,\(FrameTags.rec709.filter),loop=loop=\(frames):size=1[\(name)m]",
-            "[\(name)p][\(name)m]\(alpha)\(output)",
+                + "geq=lum='1023*\(cover.joined(separator: "*"))':cb=512:cr=512,\(FrameTags.rec709.filter),loop=loop=\(frames):size=1[\(name)m]",
+            "[\(name)p][\(name)m]\(withAlpha)\(output)",
+        ]
+    }
+
+    /// Takes the first input's picture and the second's first plane as its alpha.
+    private static let withAlpha = "mergeplanes=map0s=0:map0p=0:map1s=0:map1p=1:map2s=0:map2p=2:map3s=1:map3p=0:format=yuva444p10le"
+
+    /// Ink's key on 10-bit limited-range Y (lut's own `clip` is not the usual one, so
+    /// min and max): clear at `inkKeyLow` of the luma, solid from `inkKeyHigh`.
+    private static var inkKey: String {
+        let low = LayoutGeometry.inkKeyLow, span = LayoutGeometry.inkKeyHigh - LayoutGeometry.inkKeyLow
+        return "1023*min(1,max(0,((val-64)/876-\(num(low)))/\(num(span))))"
+    }
+
+    /// Ink's shade: a still black picture whose alpha is `LayoutGeometry.inkShade` at each
+    /// pixel's centre across the frame, repeated for every frame of the run.
+    private static func inkShade(width w: Int, height h: Int, frames: Int, rate: Double, rateExpression: String,
+                                 output: String, name: String) -> [String] {
+        let end = LayoutGeometry.inkShadeEnd * Double(w), span = (LayoutGeometry.inkShadeEnd - LayoutGeometry.inkShadeFull) * Double(w)
+        // The S-curve: t·t·(3 − 2t) of the straight fade t, as `LayoutGeometry.inkShade`.
+        let t = "min(1,max(0,(\(num(end))-(X+0.5))/\(num(span))))"
+        let opacity = "\(num(LayoutGeometry.inkShade))*\(t)*\(t)*(3-2*\(t))"
+        return [
+            "color=c=black:s=\(w)x\(h):r=\(rateExpression):d=\(num(0.5 / rate)),format=yuv444p10le,\(FrameTags.rec709.filter),split=2[\(name)c][\(name)g]",
+            "[\(name)g]geq=lum='1023*\(opacity)':cb=512:cr=512[\(name)a]",
+            "[\(name)c][\(name)a]\(withAlpha),loop=loop=\(frames):size=1\(output)",
         ]
     }
 }

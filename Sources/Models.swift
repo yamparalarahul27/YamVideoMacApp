@@ -75,13 +75,83 @@ struct MediaInfo: Equatable, Codable {
 
 /// A rectangle to obscure, in source pixels against the *displayed* (rotation-applied)
 /// frame — the same coordinate space as the crop rectangle.
+///
+/// `start` and `end` limit it to part of the recording; without them it covers all of it.
+/// They are source seconds, because what it hides is in the footage (a PAN card on a
+/// phone screen from 124 s): a cut or a speed change never moves the blur off it, and a
+/// time read from the recording file can be used as it is.
 struct BlurRegion: Identifiable, Equatable, Codable {
     let id: UUID
     var rect: CGRect
+    var start: Double?
+    var end: Double?
 
-    init(id: UUID = UUID(), rect: CGRect) {
+    init(id: UUID = UUID(), rect: CGRect, start: Double? = nil, end: Double? = nil) {
         self.id = id
         self.rect = rect
+        self.start = start
+        self.end = end
+    }
+
+    var isTimed: Bool { start != nil || end != nil }
+
+    /// Extra time on each side of a timed area, so a frame rounded at a cut or at the edge
+    /// of the range never shows what it hides.
+    static let margin = 0.1
+
+    /// Whether it covers the frame at `source` seconds.
+    func covers(source: Double) -> Bool {
+        (start.map { source >= $0 - Self.margin } ?? true) && (end.map { source <= $0 + Self.margin } ?? true)
+    }
+
+    /// The edited times it covers on `timeline`, each widened by the margin; nil when it
+    /// covers the whole recording, empty when the cuts removed all of its range.
+    func editedSpans(on timeline: ClipTimeline) -> [ClosedRange<Double>]? {
+        guard isTimed else { return nil }
+        let from = start ?? 0, to = end ?? .infinity
+        var spans: [ClosedRange<Double>] = []
+        var offset = 0.0
+        for segment in timeline.segments {
+            let a = max(from, segment.start), b = min(to, segment.end)
+            if b > a {
+                let span = max(0, offset + (a - segment.start) / segment.speed - Self.margin)
+                    ... (offset + (b - segment.start) / segment.speed + Self.margin)
+                if let last = spans.last, span.lowerBound <= last.upperBound {
+                    spans[spans.count - 1] = last.lowerBound...max(last.upperBound, span.upperBound)
+                } else {
+                    spans.append(span)
+                }
+            }
+            offset += segment.duration
+        }
+        return spans
+    }
+}
+
+/// A change to a blur area's time range (`updateBlurArea`): a new `start` or `end` in
+/// source seconds, or `whole` to cover the whole recording again.
+struct BlurTimes: Equatable {
+    var start: Double?
+    var end: Double?
+    var whole = false
+}
+
+/// A blur area as the player and the export draw it: its rectangle, and the edited times
+/// it is on (nil: all the time). Both build it with `boxes`, so they agree on every frame.
+struct BlurBox: Equatable {
+    var rect: CGRect
+    var spans: [ClosedRange<Double>]? = nil
+
+    func isOn(at time: Double) -> Bool { spans.map { $0.contains { $0.contains(time) } } ?? true }
+
+    func clamped(in frame: CGRect) -> BlurBox { BlurBox(rect: rect.evenClamped(in: frame), spans: spans) }
+
+    /// The boxes of `regions` on `timeline`. An area whose whole range was cut out is left out.
+    static func boxes(_ regions: [BlurRegion], on timeline: ClipTimeline) -> [BlurBox] {
+        regions.compactMap { region in
+            guard let spans = region.editedSpans(on: timeline) else { return BlurBox(rect: region.rect) }
+            return spans.isEmpty ? nil : BlurBox(rect: region.rect, spans: spans)
+        }
     }
 }
 
@@ -202,13 +272,19 @@ struct VideoItem: Identifiable {
     var blurEffects: [VideoBlurEffect] = []
     /// Named points on the edited timeline, sorted by time.
     var markers: [TimelineMarker] = []
+    /// Changes switched off in the inspector: kept, but left out of the player and exports.
+    var switchedOff: Set<SwitchableChange> = []
     /// A screen recording synced to this one, and the layouts that show the two. Nil
     /// until one is added.
     var screen: ScreenTrack?
+    /// Background music under the voice, on the edited timeline. Nil until a piece is added.
+    var music: MusicBed?
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?
     var timeline: ClipTimeline { ClipTimeline(segments: segments ?? [TimelineSegment(id: id, start: 0, end: info?.duration ?? 0)]) }
+    /// The blur areas as the player and the export draw them on this timeline.
+    var blurBoxes: [BlurBox] { BlurBox.boxes(blurRegions, on: timeline) }
     var editedDuration: Double { timeline.duration }
     var status: Status = .probing
     /// Preview scrub position, 0...1.

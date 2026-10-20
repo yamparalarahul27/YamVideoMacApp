@@ -64,6 +64,15 @@ extension FFmpeg {
         for clip in plan.clips { arguments += ["-i", clip.url.path] }
         if let palette { arguments += ["-i", palette.path] }
         let withAudio = settings.audio != .none && settings.format == .mp4 && !palettePass
+        // Each recording's music comes after the palette, and mixes under its own voice.
+        var music: [Int: (mix: MusicMix, input: Int)] = [:]
+        if withAudio {
+            for (i, clip) in plan.clips.enumerated() {
+                guard let mix = clip.exportMusic(settings) else { continue }
+                music[i] = (mix, arguments.filter { $0 == "-i" }.count)
+                arguments += musicInputs(mix)
+            }
+        }
         var graphs: [String] = []
         for (i, clip) in plan.clips.enumerated() {
             let info = clip.info!
@@ -90,7 +99,7 @@ extension FFmpeg {
             // stage — before anything mixes it with the others.
             let graph = editedFilterGraph(head: head,
                                           segments: clip.segments, audio: withAudio && info.hasAudio,
-                                          regions: clip.blurRegions.map { $0.rect.evenClamped(in: info.fullFrame) },
+                                          regions: clip.blurBoxes.map { $0.clamped(in: info.fullFrame) },
                                           style: settings.blurStyle, strength: settings.blurStrength, tail: filters,
                                           fpsExpression: info.fpsExpression, effects: effects, delivery: delivery)!
             // Namespace every internal pad so independent per-recording graphs coexist.
@@ -111,7 +120,11 @@ extension FFmpeg {
                 let duration = String(format: "%.6f", clip.editedDuration)
                 if info.hasAudio {
                     let audioLabel = clip.segments == nil ? "\(i):a:0" : "c\(i)_timelinea"
-                    graphs.append("[\(audioLabel)]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=duration=\(duration),asetpts=PTS-STARTPTS[ma\(i)]")
+                    let voice = music[i] == nil ? "ma\(i)" : "mv\(i)voice"
+                    graphs.append("[\(audioLabel)]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=duration=\(duration),asetpts=PTS-STARTPTS[\(voice)]")
+                    if let (mix, input) = music[i] {
+                        graphs += musicGraph(mix, firstInput: input, voice: voice, output: "ma\(i)", prefix: "m\(i)_")
+                    }
                 } else {
                     graphs.append("anullsrc=r=48000:cl=stereo,atrim=duration=\(duration),asetpts=PTS-STARTPTS[ma\(i)]")
                 }

@@ -551,9 +551,12 @@ from docs/plans/graphics-track.md".
   (`endScreen`: circle subscribe or channel, and per video box best for viewer, most
   recent upload, a chosen video or a playlist, with its link and title).
 - **Layout** (`EndScreenLayout`, and `endLayout` in the engine with the same numbers): the
-  speaker's frame at half size (960×540 at 96, 102), the circle below it, the kicker and
+  speaker's frame at half size (960×540 at 96, 56), the circle below it, the kicker and
   title beside the circle, and the video cards in the other column (two stacked, or one),
-  mirrored when the speaker sits on the right.
+  mirrored when the speaker sits on the right. Every element box stays inside the area
+  where YouTube Studio lets elements go (`EndScreen.elementArea`, x 41–1879, y 139–917,
+  measured in the End screen editor on 17 Oct 2026); Studio pushes an element past it
+  back inside, off its box.
 - **The move is native**, like the move aside: over 0.8 s (smoothstep) the picture shrinks
   about its top-left corner into the frame, over the move aside's blurred, darker fill, and
   stays there to the end. Core Image scales with Lanczos; the export cuts the end screen's
@@ -632,7 +635,9 @@ from docs/plans/graphics-track.md".
   words ("I think we, I think we"), and a broken-off word ("wh-").
 - **Cuts** (`CutPlanner`): quiet stretches and stumbles that touch become one cut, so
   "videos. [pause] Um, [pause] the" loses the pause, the um and the pause after it in one
-  go. Where a cut meets quiet, the rule's padding stays (0.11 s each side for Tight);
+  go. Where a cut meets quiet, the rule's padding stays (0.11 s each side for Tight;
+  since 2026-10-18 0.20 s after a full stop and 0.15 s after a comma, from the
+  transcript, and every cut's sound fades out and in over 12 ms);
   where it meets speech it ends at the quietest 50 ms in the 0.3 s before the next word,
   the one nearest 0.08 s before whisper's time, because those times run late. Without
   stumbles it is exactly the silence review's cut list (the review now uses it). Every cut
@@ -934,3 +939,25 @@ the limits (3:00, the window inside the picture and 9:16, no overlap).
   Checking the overlay against a screenshot of YouTube's app on the owner's phone.
   Hands-on dragging in the Short viewer. Custom Shorts covers depend on YouTube's rollout to the channel. Movie mode has
   no Shorts.
+
+## 18. Covers: kinetic text and section cards (2026-10-17)
+
+For design videos in the style of "I Redesigned VLC" (Juxtopposed), where big words and
+section titles carry the structure. Both kinds sit in a new zone, `cover`: the whole
+1920×1080 picture (a Short's 1080×1920 canvas), over a background of their own, `solid`
+(near black) or `dim` (the picture darkened). Nothing else may show with a cover (a panel
+must have slid away first), and a cover cannot be moved on the picture.
+
+- **`kineticText`**: big words, each popping in on the time it is spoken. `words`
+  [{text, at}], 1–24, in order; an agent may send `"transcript"` and the app fills in the
+  words said over the graphic's time (`KineticText.words`, from the transcript and the
+  timeline). Or `text`, spread evenly near the start. `layout` line (one centred line that
+  wraps) or stack (one word on each line); fewer words get bigger type (170 px stacked,
+  150 px for up to 4 words, down to 92 px); `*words*` take the accent colour.
+- **`sectionCard`**: a title (and a kicker) over a seek bar split at every section card,
+  its fill moving from the section before up to this one. The app writes `progress` and
+  `marks` (0–1) when it draws (`placingSections`, next to `placingLogos`), so they follow
+  cuts and work out a Short's own place; render units carry them, so the cache knows.
+- **Shorts**: captions pause under a cover, whatever the Short's caption option.
+- **App**: the inspector's **Kinetic Text** (from the playhead, 3 s of what is said) and
+  **Section Card** (2.5 s); **Words from the Transcript** fills a kinetic text again.

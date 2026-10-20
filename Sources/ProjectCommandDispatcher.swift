@@ -176,17 +176,14 @@ extension AppModel {
         hasUnsavedChanges = project.withoutLog != savedProject?.withoutLog
         let wasPlaying = playback.isPlaying
         playback.pause()
-        if showPlayback {
+        if showPlayback, let item = selectedItem {
             // The Short viewer stays up and keeps playing through edits, so its options can
-            // be tried while it plays; the 16:9 Preview goes back to the edit frame.
-            if showsShort, let item = selectedItem, item.short(playback.shortID) != nil {
+            // be tried while it plays. The one player stays up too and shows the change.
+            if showsShort, item.short(playback.shortID) != nil {
                 playback.prepare(item, settings: settings, at: previewTime, play: wasPlaying)
-            } else if !showsShort, let item = selectedItem, item.screen != nil {
-                // Only the Preview shows a screen's layouts and zooms, so it stays up.
-                playback.prepare(item, settings: settings, at: previewTime, play: false)
             } else {
-                showPlayback = false; showsShort = false; playback.shortID = nil
-                refreshPreview()
+                if showsShort { showsShort = false; playback.shortID = nil }
+                playback.prepare(item, settings: settings, at: previewTime, play: false)
             }
         }
         if isMovieMode { prepareMovie(play: false) }
@@ -283,7 +280,6 @@ extension AppModel {
         if editSession.gesture == nil {
             editSession.gesture = OpenGesture(key: key, base: project, history: historyEntry(label), lastUpdate: Date())
             playback.pause()
-            if showPlayback, !keepPreview, !showsShort { showPlayback = false }
         }
         guard let base = editSession.gesture?.base else { return nil }
         do {
@@ -471,6 +467,7 @@ extension AppModel {
         if let id = selectedMarkerID, selectedItem?.markers.contains(where: { $0.id == id }) != true { selectedMarkerID = nil }
         if let id = selectedLayoutID, selectedItem?.screen?.spans.contains(where: { $0.id == id }) != true { selectedLayoutID = nil }
         if let id = selectedScreenZoomID, selectedItem?.screen?.zooms.contains(where: { $0.id == id }) != true { selectedScreenZoomID = nil }
+        if let id = selectedMusicID, selectedItem?.music?.pieces.contains(where: { $0.id == id }) != true { selectedMusicID = nil }
 
         let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.init), movieSettings, settings)
         if movieBefore != movieAfter { movieOutput = nil }

@@ -72,6 +72,8 @@ edit, and each edit becomes one undo step with your name on it.
    loudness.
 2. Run `yamvideoctl autoedit --clip ID`. It transcribes if necessary, cuts pauses (and
    stumbles for the tight style), and sets captions and loudness in one undo step.
+   Tight keeps a longer breath where the transcript ends a sentence (0.40 s) or a
+   clause (0.30 s), so transcribe before you cut. Every cut's sound fades over 12 ms.
    With the review style, it cuts nothing and gives the proposed cuts to show the owner.
 3. If whisper is not on the Mac, transcribe another way and use `importTranscript` with
    `{model, language, words: [{text, start, end}]}` in source seconds.
@@ -112,6 +114,11 @@ edit, and each edit becomes one undo step with your name on it.
    outro, `split` (side by side) where the speaker explains without the screen, and
    the base `screen` layout where the screen shows the point. Apply with
    `replaceLayouts`.
+   - `ink` is for a drawing recorded on a dark canvas (for example YamDraw on an iPad):
+     the speaker moves to the right at full size, and only the drawing's bright lines
+     show on the left, over a dark shade. Set the screen's `crop` to the part of the
+     canvas where the lines are, so they show large. Check a frame with
+     `preview --composed`: the lines must be clear, and the face must not be under them.
 5. Screen zooms: `analyze --kind screenZooms`, keep the ones where the text on the
    screen matters, aim others by hand at that text, and apply with
    `replaceScreenZooms`. A level of 1.4 to 2 makes browser text sharp.
@@ -129,6 +136,14 @@ edit, and each edit becomes one undo step with your name on it.
   scale graphics one by one. Cards grow to the left and panels grow half as much, so
   check that no card covers the speaker's face. Read the owner's Style.md too: it can
   have a rule about this.
+- Two graphics cover the whole picture, for design videos that move from part to part:
+  - `kineticText`: a short phrase in big words, each on the time it is spoken. Give
+    `words: "transcript"` and the app takes the words said over its time. Keep it to
+    a phrase of 1–8 words that carries the point, and 1.5–4 s.
+  - `sectionCard`: the title of the next part over a seek bar that shows how far into
+    the video it starts. Put one at each part's first sentence, for 2–3 s, and use the
+    chapter's words for the title.
+  Nothing else may show with them; leave gaps round them for other graphics.
 
 ### 4.6 Title, description, chapters and tags
 
@@ -157,17 +172,40 @@ edit, and each edit becomes one undo step with your name on it.
    - `time`: a suggested frame.
    - `title`: up to 3 lines; put the key words between asterisks.
    - `highlight: true`: the words between asterisks get a band of the accent colour.
-   - `background`: `white`, `solid` (dark), `dim`, `blur` or `frame`.
+   - `background`: `white`, `solid` (dark), `dim`, `blur`, `frame` or `frost` (the
+     whole frame, with a white blurred shade on the title side, as in the Ink layout).
    - `place: "clear"`: the speaker moves clear of the title and the picture, so nothing
-     overlaps. Use it with the `white` or `solid` background.
+     overlaps. Use it with the `white`, `solid` or `frost` background.
    - `outlineWidth`: the white outline round the speaker, 2 to 16 (3 is thin).
    - `image`: a picture under the title, for example logos or icons. Make it a
      transparent PNG.
+   - `imageSize`: the picture's size, 1 to 1.6 times its usual size (at most 520×340
+     pixels of the 1920×1080 frame). A larger picture makes the title smaller.
    - `zoom`: the speaker's size, 1 to 1.6.
-3. Look at each result. Make sure the face is clear, nothing overlaps, and the words
-   read at YouTube's small search size.
-4. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
-   `setPublishInfo` with `{thumbnail: savedPath, design: …}`.
+3. Look at each result. Make sure the face is clear and nothing overlaps. Then add
+   `check: true` (or `--check`) to see it on a phone: `check.findings` says what does
+   not read in 0.5 s at the size of the home feed and of the search list (letters too
+   small, too many words, low contrast, a face too small), and `check.phone` is a PNG of
+   both sizes. Fix each finding with level `fails` before you show the owner.
+4. Make the thumbnail and the title work together. The title says what the video is; the
+   thumbnail adds what the title does not say: the result, a number, a surprise or a
+   question. A finding of kind `title` says the thumbnail repeats the title;
+   `check.gap` gives the repeated words and phrases and the words the thumbnail adds. To
+   try a new video title without storing it, add `videoTitle` (`--video-title`).
+5. Check the eye path: `check.path` lists where the eye goes, in order (the face, then
+   the words by size, contrast and colour). The words between asterisks must be 1st or
+   2nd; a finding of kind `eyePath` says when they are not. Make them bigger or clearer
+   (`highlight: true`), or make the other words smaller.
+6. Show the owner two or three versions. After a yes, save it: `thumbnail --save`, then
+   `setPublishInfo` with `{thumbnail: savedPath, design: …}` (and `title`, if it changed).
+7. For YouTube's Test & Compare (two or three thumbnails YouTube tries on viewers): set
+   versions B and C with `setPublishInfo` `{test: {versions: [B, C]}}` (A is `design`).
+   Save each with `thumbnail --version A --save` (then B, C), and store the paths with
+   `{test: {images: [A, B, C]}}`. Export for YouTube then writes "… thumbnail A.jpg" and
+   the others, and the text file says where to upload them. When the owner knows the
+   result, `{test: {winner: 1}}` marks B: its image becomes the thumbnail. Write the result
+   into the project's idea in the Library (`libraryApply`, the idea's notes), so later
+   videos can learn from it.
 
 ### 4.8 Shorts
 
@@ -182,7 +220,7 @@ edit, and each edit becomes one undo step with your name on it.
   video uploads an SRT. Do not change the long video's `captions` for a Short.
 - Check each Short with `preview --short` at a few times, and show the owner frames
   before you export. Export it with `export --short` (with `--youtube` for the upload
-  files).
+  files). In the footage folder, the `--path` is the video's `Edited/Shorts/` (4.14).
 
 ### 4.9 Brand logos
 
@@ -238,7 +276,8 @@ The owner can do the same in the app: Graphics section → Find Brands.
 ### 4.10 Export for YouTube
 
 - Ask the owner first. Then `export --youtube --path FOLDER --clip ID`. It writes the
-  MP4, the captions as an SRT, a 1280×720 thumbnail, the upload text and a JSON.
+  MP4, the captions as an SRT, a 1280×720 thumbnail, the upload text and a JSON. In the
+  footage folder, FOLDER is the video's `Edited/` (4.14).
 - YouTube's upload API cannot set end screen elements. The export says which element
   goes in which box, for YouTube Studio.
 
@@ -278,6 +317,21 @@ copied.
 4. A video's export (`videos[].exports[].json`) has the title, description and tags it
    went up with. Read them when you write for a new post, to keep the owner's voice.
 
+### 4.11b The release calendar
+
+The owner plans when each video goes out and where, and tells you the plan in words
+("Part 1's Shorts: one every two days from Monday, all four platforms, 7 pm").
+
+1. Read the Library and find the idea and each video's `videos[].id`.
+2. For each video, `planRelease {ideaID, videoID, day: "2026-10-19", clock: "19:00",
+   platforms: [...]}`. Left out, `platforms` is all four (youtube, instagram, x,
+   linkedin) and `clock` is any time that day. Give `ownDays {"linkedin": "2026-10-20"}`
+   when one platform goes out on another day. Send one command per video in one
+   `libraryApply`, so it is one undo step.
+3. `unplanRelease` puts a video back in *Not planned*. Planning never posts anything:
+   the owner posts by hand and gives you the links for `addPost`.
+4. `library` shows each video's `plan`; the owner sees it on the Calendar (⌘4).
+
 ### 4.12 Style.md, project notes and Video.md
 
 - **Style.md** holds the channel's taste as rules, by kind of video. When the owner
@@ -291,6 +345,91 @@ copied.
   video is, the edit, each Short, the Why notes and the history of changes
   (`state.notes.videoNotes` is its path). Read past Video.md files to match how the
   owner's earlier videos were made. Do not edit Video.md; it is rewritten.
+
+### 4.13 Switch a change off
+
+- The owner can switch the crop, colour, blur areas, zooms, graphics or music of a
+  recording off in the inspector. Off keeps the change in the project but leaves it out of the
+  player and every export. `state.clips[].switchedOff` lists what is off.
+- To compare, send `setChange {clipID, change, on: false}`, then `on: true` to bring it
+  back. Each is one undo step. Do not delete a change the owner only wants to see
+  without; switch it off.
+- Before an export, check `switchedOff`. If something is off that the owner did not
+  ask for, say so first.
+
+### 4.14 The footage folder
+
+All footage is in `~/Desktop/Yamparala Media`, one folder for each video
+(`docs/footage-layout.md` in the YamVideo source has the full rule):
+
+```
+YYYY-MM-DD Title/          the date of the first recording
+  Name.yamvideo            the project, and "Name Video.md" next to it
+  Recorded/                recordings as recorded (Recorded/Joined/ for joined takes)
+  Edited/                  Export for YouTube files; Shorts in Edited/Shorts/
+  Files/                   thumbnails, saved frames, graphics images, work files
+```
+
+`Inbox/` is for new recordings, `Shared Assets/` for images that more than one video uses,
+and `Other/` for recordings that are not for a video. With no output folder set, the app
+suggests `Edited/` for exports and saves thumbnails in `Files/`.
+
+When the owner says "I added a recording", sort each new file in `Inbox/` or at the top
+of the folder:
+
+1. Find its date (`ffprobe`, `format_tags=creation_time`) and its topic (look at 3 or 4
+   frames).
+2. Move it into `Recorded/` of the video folder with the same topic and day. If there is
+   none, make `YYYY-MM-DD Title/` with `Recorded/`, `Edited/` and `Files/`. Keep the file
+   name. A YamDraw export (`recording.mp4`, `frame-NN.png`, `session.json`) goes together
+   into `Recorded/YamDraw <topic>/`, so the next export cannot replace it.
+3. Move DJI `.LRF` files (camera previews) to the Trash. Never use `rm`.
+4. Look for personal information in each screen recording and screenshot (names, PAN,
+   Aadhaar, signatures, email addresses, phone numbers, bank details, home area). Sample a
+   frame every few seconds. Write each item with its time range in `Files/Blur notes.md`:
+   **Must** for ID numbers, signatures and contact details, Ask for the rest.
+5. Add one line for each file to `Files/Recordings.md`: day, length, what it shows, and
+   which video or Short it is for. Read it before the first edit of a video.
+6. Tell the owner where each file went. Ask when the topic is not clear.
+
+Before an export, read `Files/Blur notes.md` and hide each Must item with a Blur area:
+`addBlurArea {clipID, rect, start, end}` hides the rectangle from `start` to `end`. The
+times are source seconds of the recording, the same times as in the notes, so cuts and
+speed changes do not move them. Without `start` and `end` the area covers the whole
+recording. `updateBlurArea {areaID, start?, end?, whole?}` changes the range. Cut the part
+when the video does not need it. Use a Blur effect (`addBlurEffect`) only when the whole
+picture must go soft. Look at a frame inside each range with `preview --composed`, and
+show the owner one frame of each item.
+
+Do not rename or move a recording that a project uses: the project keeps its full path.
+If a move is necessary, send `relinkMedia` for it.
+
+Each Mac keeps a list of its video folders in the YamVideo source, `docs/channel/macs/<Mac>.json`
+(this Mac's name is in the Library's Macs menu). Read the other lists to tell the owner
+which Mac has a video that is not here. The app writes these files; do not edit them.
+
+### 4.15 Background music
+
+The owner chooses the music for each video. Add music only when the owner asks, and only
+a track the owner gave or named.
+
+1. Ask the owner for the track and its licence. Use only a licence that permits a
+   monetised YouTube video: the YouTube Audio Library, CC0, CC BY (with its credit line),
+   Pixabay, the owner's own music, or a model whose licence permits commercial use. Do not
+   use CC BY-NC, CC BY-ND or CC BY-SA: Export for YouTube refuses them.
+2. Send `addMusic {clipID, path, start?, end?, music: {level?, credit: {licence, title,
+   artist, source, line}}}`. The app measures the file and the voice, so `level` is LU
+   under the voice for any track. -20 (the default) is a quiet bed for an educational
+   video; do not go above -12 under speech.
+3. The music is on the edited timeline. Jump cuts do not cut it, and a piece follows the
+   frame where it starts when the edit changes. `end` null plays to the end of the video.
+   Pieces may touch but not overlap.
+4. Read `state.clips[].music`: each piece with its `gain` (dB) and its `plays` (a loop plays
+   the file again with a 2 s crossfade). `missing: true` means the file moved.
+5. Change a piece with `updateMusic {clipID, musicID, music: {…}}`; only the keys given
+   change. `removeMusic` removes one. `setChange` with `music` switches all of it off.
+6. Exports mix the music under the voice. With Loudness on, the export normalises the mix
+   to -14 LUFS. Export for YouTube writes each credit line at the end of the description.
 
 ## 5. Problems
 

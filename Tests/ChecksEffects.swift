@@ -317,7 +317,7 @@ import Foundation
     check(holdDetail >= 0 && holdDetail < 0.5 * clearDetail,
           "and shows the effect where it runs and not where it does not", String(format: "%.3f vs %.3f", holdDetail, clearDetail))
     _ = await agentCall(fxAgent, ["method": "reveal", "clip": fxClipID, "effect": fxEffectID.uuidString])
-    check(fxAgent.selectedEffectID == fxEffectID && fxAgent.editorMode == .effects, "reveal shows the owner an effect")
+    check(fxAgent.selectedEffectID == fxEffectID && fxAgent.pictureEdit == nil, "reveal shows the owner an effect, in the player")
 
     print("\nBlur effects in exports")
     var fxExportItem = fxAgent.items[0]

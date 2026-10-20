@@ -293,7 +293,7 @@ enum FFmpeg {
 
         let graph = filterGraph(
             head: (toneMap ? [toneMapChain] : []) + color,
-            regions: regions,
+            regions: regions.map { BlurBox(rect: $0) },
             style: style,
             strength: strength,
             tail: tail
@@ -389,7 +389,7 @@ enum FFmpeg {
     /// runs in order, exactly as one chain always did.
     static func filterGraph(
         head: [String] = [],
-        regions: [CGRect],
+        regions: [BlurBox],
         style: BlurStyle,
         strength: Double,
         tail: [String],
@@ -443,7 +443,7 @@ enum FFmpeg {
     }
 
     private static func baseGraph(
-        head: [String], regions: [CGRect], style: BlurStyle, strength: Double, tail: [String]
+        head: [String], regions: [BlurBox], style: BlurStyle, strength: Double, tail: [String]
     ) -> FilterGraph? {
         guard !regions.isEmpty else {
             let chain = head + tail
@@ -455,7 +455,8 @@ enum FFmpeg {
         // A solid fill needs no second copy of the frame — drawbox paints in place.
         if style == .black {
             let boxes = regions.map {
-                "drawbox=\(Int($0.minX)):\(Int($0.minY)):\(Int($0.width)):\(Int($0.height)):color=black:t=fill"
+                "drawbox=\(Int($0.rect.minX)):\(Int($0.rect.minY)):\(Int($0.rect.width)):\(Int($0.rect.height)):color=black:t=fill"
+                    + enable($0.spans)
             }
             return FilterGraph(spec: (head + boxes + tail).joined(separator: ","),
                                isComplex: false, outputLabel: nil)
@@ -469,17 +470,18 @@ enum FFmpeg {
         parts.append("[0:v]\(headChain)split=\(regions.count + 1)[base]"
                      + taps.map { "[\($0)]" }.joined())
 
-        for (index, region) in regions.enumerated() {
+        for (index, box) in regions.enumerated() {
+            let region = box.rect
             let crop = "crop=\(Int(region.width)):\(Int(region.height)):\(Int(region.minX)):\(Int(region.minY))"
             let obscure = obscureFilter(style: style, strength: strength, size: region.size)
             parts.append("[t\(index)]\(crop),\(obscure)[b\(index)]")
         }
 
         var current = "base"
-        for (index, region) in regions.enumerated() {
+        for (index, box) in regions.enumerated() {
             let isLast = index == regions.count - 1
             let label = isLast ? (tail.isEmpty ? "vout" : "ov") : "o\(index)"
-            parts.append("[\(current)][b\(index)]overlay=\(Int(region.minX)):\(Int(region.minY))[\(label)]")
+            parts.append("[\(current)][b\(index)]overlay=\(Int(box.rect.minX)):\(Int(box.rect.minY))\(enable(box.spans))[\(label)]")
             current = label
         }
 
@@ -488,6 +490,14 @@ enum FFmpeg {
         }
 
         return FilterGraph(spec: parts.joined(separator: ";"), isComplex: true, outputLabel: "vout")
+    }
+
+    /// The timeline option that limits a filter to `spans` of the graph's time (edited
+    /// seconds); nothing when it is on all the time.
+    static func enable(_ spans: [ClosedRange<Double>]?) -> String {
+        guard let spans else { return "" }
+        guard !spans.isEmpty else { return ":enable=0" }
+        return ":enable='" + spans.map { "between(t,\(num($0.lowerBound)),\(num($0.upperBound)))" }.joined(separator: "+") + "'"
     }
 
     // MARK: - Zoom
@@ -502,8 +512,9 @@ enum FFmpeg {
         let t1 = t0 + ease
         let t2 = t1 + shot.hold
         let t3 = t2 + ease
-        let up = "(3*pow((in_time-\(num(t0)))/\(num(ease)),2)-2*pow((in_time-\(num(t0)))/\(num(ease)),3))"
-        let down = "(3*pow((\(num(t3))-in_time)/\(num(ease)),2)-2*pow((\(num(t3))-in_time)/\(num(ease)),3))"
+        // Times in brackets: a Short's zoom that began before the Short has a start below 0.
+        let up = "(3*pow((in_time-(\(num(t0))))/\(num(ease)),2)-2*pow((in_time-(\(num(t0))))/\(num(ease)),3))"
+        let down = "(3*pow(((\(num(t3)))-in_time)/\(num(ease)),2)-2*pow(((\(num(t3)))-in_time)/\(num(ease)),3))"
         return "if(lt(in_time,\(num(t0))),0,"
             + "if(lt(in_time,\(num(t1))),\(up),"
             + "if(lt(in_time,\(num(t2))),1,"
@@ -819,7 +830,7 @@ enum FFmpeg {
     static func editedFilterGraph(
         head: [String] = [],
         segments: [TimelineSegment]?, audio: Bool,
-        regions: [CGRect], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30",
+        regions: [BlurBox], style: BlurStyle, strength: Double, tail: [String], fpsExpression: String = "30",
         effects effectStage: EffectStage? = nil, screen: ScreenLayer? = nil, delivery: [String] = [],
         move: EffectStage? = nil, overlays: EffectStage? = nil, captions: [String] = []
     ) -> FilterGraph? {
@@ -848,18 +859,12 @@ enum FFmpeg {
         if audio {
             parts.append("[0:a:0]aresample=async=1:first_pts=0,apad,asplit=\(count)" + segments.indices.map { "[sa\($0)]" }.joined())
         }
+        let cuts = sectionCuts(segments, fpsExpression: fpsExpression)
         let hasSpeedEdits = segments.contains { $0.speed != 1 }
         let rate = parseRate(fpsExpression) ?? 30
-        var elapsed = 0.0
-        var previousFrames = 0
         for (i, segment) in segments.enumerated() {
-            // Round cumulative boundaries, not each duration independently. Otherwise
-            // dozens of fractional-frame speed edits can accumulate noticeable drift.
-            elapsed += segment.duration
-            let endFrames = Int((elapsed * rate).rounded())
-            let frames = max(1, endFrames - previousFrames)
-            previousFrames += frames
-            let outputDuration = Double(frames) / rate
+            let cut = cuts[i]
+            let frames = cut.frames, outputDuration = cut.outputDuration
             guard hasSpeedEdits else {
                 // Each section is exactly its frames long, in picture and in sound: from its
                 // first frame, `frames` frames, and the audio from that frame for as long.
@@ -867,20 +872,14 @@ enum FFmpeg {
                 // not, so each cut left a gap of part of a frame in the picture; a layout
                 // stage times frames by their number, and 152 cuts put the picture 0.3 s
                 // ahead of the sound.
-                let from = (segment.start * rate - 0.001).rounded(.up) / rate
-                parts.append("[sv\(i)]trim=start=\(num(max(0, from - 0.25 / rate))),setpts=PTS-STARTPTS,"
+                parts.append("[sv\(i)]trim=start=\(num(max(0, cut.from - 0.25 / rate))),setpts=PTS-STARTPTS,"
                              + "tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames)[tv\(i)]")
-                if audio {
-                    parts.append("[sa\(i)]atrim=start=\(String(format: "%.6f", from)):duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS[ta\(i)]")
-                }
+                if audio { parts.append(sectionAudio(i, segments, cut, speedEdits: false)) }
                 continue
             }
             let retime = "setpts=(PTS-STARTPTS)/\(num(segment.speed)),fps=\(fpsExpression),tpad=stop_mode=clone:stop_duration=\(num(outputDuration + 1 / rate)),trim=end_frame=\(frames),setpts=PTS-STARTPTS"
             parts.append("[sv\(i)]trim=start=\(num(segment.start)):end=\(num(segment.end)),\(retime)[tv\(i)]")
-            if audio {
-                let tempo = "," + tempoFilters(segment.speed) + ",apad,atrim=duration=\(String(format: "%.8f", outputDuration)),asetpts=PTS-STARTPTS"
-                parts.append("[sa\(i)]atrim=start=\(num(segment.start)):end=\(num(segment.end)),asetpts=PTS-STARTPTS\(tempo)[ta\(i)]")
-            }
+            if audio { parts.append(sectionAudio(i, segments, cut, speedEdits: true)) }
         }
         let inputs = segments.indices.map { audio ? "[tv\($0)][ta\($0)]" : "[tv\($0)]" }.joined()
         parts.append(inputs + "concat=n=\(count):v=1:a=\(audio ? 1 : 0)[\(screen == nil ? "timelinev" : "timelinestk")]" + (audio ? "[timelinea]" : ""))
@@ -903,6 +902,62 @@ enum FFmpeg {
         return FilterGraph(spec: parts.joined(separator: ";"), isComplex: true, outputLabel: label)
     }
 
+    /// Where each section's picture and sound start and how long they are, in whole frames:
+    /// from its first frame, `frames` frames.
+    struct SectionCut: Equatable {
+        var frames: Int
+        var outputDuration: Double
+        /// The time of its first frame in the source.
+        var from: Double
+    }
+
+    static func sectionCuts(_ segments: [TimelineSegment], fpsExpression: String) -> [SectionCut] {
+        let rate = parseRate(fpsExpression) ?? 30
+        var elapsed = 0.0
+        var previousFrames = 0
+        return segments.map { segment in
+            // Round cumulative boundaries, not each duration independently. Otherwise
+            // dozens of fractional-frame speed edits can accumulate noticeable drift.
+            elapsed += segment.duration
+            let endFrames = Int((elapsed * rate).rounded())
+            let frames = max(1, endFrames - previousFrames)
+            previousFrames += frames
+            return SectionCut(frames: frames, outputDuration: Double(frames) / rate,
+                              from: (segment.start * rate - 0.001).rounded(.up) / rate)
+        }
+    }
+
+    /// One section's sound, `[sa{i}]` to `[ta{i}]`, with a short fade out and in where the
+    /// sound is cut, so a joint never clicks.
+    static func sectionAudio(_ i: Int, _ segments: [TimelineSegment], _ cut: SectionCut, speedEdits: Bool) -> String {
+        let duration = cut.outputDuration
+        var fades = ""
+        if ClipTimeline.cut(before: i, in: segments) {
+            fades += ",afade=t=in:d=\(num(min(ClipTimeline.jointFade, duration / 4, segments[i - 1].duration / 4)))"
+        }
+        if ClipTimeline.cut(before: i + 1, in: segments) {
+            let fade = min(ClipTimeline.jointFade, duration / 4, segments[i + 1].duration / 4)
+            fades += ",afade=t=out:st=\(num(max(0, duration - fade))):d=\(num(fade))"
+        }
+        let segment = segments[i]
+        guard speedEdits else {
+            return "[sa\(i)]atrim=start=\(String(format: "%.6f", cut.from)):duration=\(String(format: "%.8f", duration)),asetpts=PTS-STARTPTS"
+                + fades + "[ta\(i)]"
+        }
+        let tempo = "," + tempoFilters(segment.speed) + ",apad,atrim=duration=\(String(format: "%.8f", duration)),asetpts=PTS-STARTPTS"
+        return "[sa\(i)]atrim=start=\(num(segment.start)):end=\(num(segment.end)),asetpts=PTS-STARTPTS\(tempo)" + fades + "[ta\(i)]"
+    }
+
+    /// The sound of the edited timeline alone, cut as the export cuts it, to `[timelinea]`.
+    static func timelineAudioGraph(segments: [TimelineSegment], fpsExpression: String) -> [String] {
+        let cuts = sectionCuts(segments, fpsExpression: fpsExpression)
+        let speedEdits = segments.contains { $0.speed != 1 }
+        var parts = ["[0:a:0]aresample=async=1:first_pts=0,apad,asplit=\(segments.count)" + segments.indices.map { "[sa\($0)]" }.joined()]
+        parts += segments.indices.map { sectionAudio($0, segments, cuts[$0], speedEdits: speedEdits) }
+        parts.append(segments.indices.map { "[ta\($0)]" }.joined() + "concat=n=\(segments.count):v=0:a=1[timelinea]")
+        return parts
+    }
+
     static func tempoFilters(_ speed: Double) -> String {
         var rate = speed, filters: [String] = []
         while rate > 2 { filters.append("atempo=2"); rate /= 2 }
@@ -920,7 +975,7 @@ enum FFmpeg {
         output: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -934,9 +989,15 @@ enum FFmpeg {
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
         screen: ScreenTrack? = nil,
-        stack: CGRect? = nil
+        stack: CGRect? = nil,
+        music: MusicMix? = nil
     ) -> [String] {
         let cropRect = crop.evenClamped(in: info.fullFrame)
+        let withSound = info.hasAudio && settings.audio != .none && !settings.format.isAnimation
+        let music = withSound ? music.flatMap { $0.isEmpty ? nil : $0 } : nil
+        // The music mixes with the cut voice, so a recording with music always goes through
+        // the cut graph, as one section when it has no cuts.
+        let segments = segments ?? (music == nil ? nil : [TimelineSegment(start: 0, end: info.duration)])
         let head = videoHead(info: info, settings: settings, color: color)
         let stacked = canvas != nil && stack != nil && screen != nil
         let stages = videoStages(info: info, crop: cropRect, zoomShots: zoomShots,
@@ -956,13 +1017,15 @@ enum FFmpeg {
         var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let palette { args += ["-i", palette.path] }
         if let screen, let layer { args += layer.input(screen.url) }
-        // The graphics come after the palette and the screen.
+        // The graphics come after the palette and the screen, and the music after them.
         args += graphicsInputs(drawn.jobs)
+        let musicInput = args.filter { $0 == "-i" }.count
+        if let music { args += musicInputs(music) }
 
         var graph = editedFilterGraph(
             head: head,
             segments: segments, audio: info.hasAudio && settings.audio != .none && !settings.format.isAnimation,
-            regions: regions.map { $0.evenClamped(in: info.fullFrame) },
+            regions: regions.map { $0.clamped(in: info.fullFrame) },
             style: settings.blurStyle,
             strength: settings.blurStrength,
             tail: stages.geometry, fpsExpression: info.fpsExpression,
@@ -977,8 +1040,13 @@ enum FFmpeg {
         // Cut audio leaves -filter_complex as [timelinea], and ffmpeg refuses -af on a
         // stream that a complex graph feeds. The loudness filter joins the graph instead.
         var audioLabel = segments == nil ? "0:a:0" : "[timelinea]"
-        if let filter = loudnessFilter, var edited = graph, edited.isComplex, edited.spec.contains("[timelinea]") {
-            edited.spec += ";[timelinea]\(filter)[normala]"
+        if let music, var edited = graph, edited.isComplex, edited.spec.contains("[timelinea]") {
+            edited.spec += ";" + musicGraph(music, firstInput: musicInput, voice: "timelinea", output: "mixa").joined(separator: ";")
+            graph = edited
+            audioLabel = "[mixa]"
+        }
+        if let filter = loudnessFilter, var edited = graph, edited.isComplex, edited.spec.contains(audioLabel) {
+            edited.spec += ";\(audioLabel)\(filter)[normala]"
             graph = edited
             audioLabel = "[normala]"
             loudnessFilter = nil
@@ -1079,7 +1147,7 @@ enum FFmpeg {
         palette: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -1119,7 +1187,7 @@ enum FFmpeg {
             editedFilterGraph(
                 head: head,
                 segments: segments, audio: false,
-                regions: regions.map { $0.evenClamped(in: info.fullFrame) },
+                regions: regions.map { $0.clamped(in: info.fullFrame) },
                 style: settings.blurStyle,
                 strength: settings.blurStrength,
                 tail: stages.geometry, fpsExpression: info.fpsExpression,
@@ -1204,7 +1272,7 @@ enum FFmpeg {
         output: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -1215,12 +1283,18 @@ enum FFmpeg {
         canvas: CGSize? = nil,
         captionsASS: URL? = nil,
         screen: ScreenTrack? = nil,
-        stack: CGRect? = nil
+        stack: CGRect? = nil,
+        music: MusicMix? = nil
     ) -> [[String]] {
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         var commands: [[String]] = []
         if needsLoudnessPass(info: info, settings: settings) {
-            commands.append(loudnessArguments(input: input))
+            if let music, !music.isEmpty {
+                commands.append(loudnessArguments(input: input, segments: segments ?? [TimelineSegment(start: 0, end: info.duration)],
+                                                  fpsExpression: info.fpsExpression, music: music))
+            } else {
+                commands.append(loudnessArguments(input: input))
+            }
         }
         if let palette {
             commands.append(paletteArguments(input: input, palette: palette, info: info,
@@ -1233,7 +1307,8 @@ enum FFmpeg {
                                         regions: regions, zoomShots: zoomShots,
                                         segments: segments, settings: settings,
                                         subtitles: subtitles, palette: palette, color: color, effects: effects,
-                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack))
+                                        graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack,
+                                        music: music))
         return commands
     }
 
@@ -1368,7 +1443,7 @@ enum FFmpeg {
         output: URL,
         info: MediaInfo,
         crop: CGRect,
-        regions: [CGRect] = [],
+        regions: [BlurBox] = [],
         zoomShots: [ZoomShot] = [],
         segments: [TimelineSegment]? = nil,
         settings: ExportSettings,
@@ -1380,6 +1455,7 @@ enum FFmpeg {
         captionsASS: URL? = nil,
         screen: ScreenTrack? = nil,
         stack: CGRect? = nil,
+        music: MusicMix? = nil,
         drawGraphics: ((GraphicsRender.Job, _ page: URL, _ frames: URL) async throws -> Void)? = nil,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
@@ -1470,7 +1546,8 @@ enum FFmpeg {
         let commands = exportCommands(input: input, output: output, info: info, crop: crop,
                                       regions: regions, zoomShots: zoomShots, segments: segments,
                                       settings: settings, subtitles: subtitles, color: color, effects: effects,
-                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack)
+                                      graphics: graphics, canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack,
+                                      music: music)
         let measuring = needsLoudnessPass(info: info, settings: settings)
         // Progress is reported against what the export actually writes, which is the
         // edited timeline rather than the whole source.
@@ -1502,7 +1579,7 @@ enum FFmpeg {
                     subtitles: subtitles,
                     palette: settings.format == .gif ? paletteURL(for: output) : nil,
                     loudness: measurement, color: color, effects: effects, graphics: graphics,
-                    canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack
+                    canvas: canvas, captionsASS: captionsASS, screen: screen, stack: stack, music: music
                 )
             }
 
@@ -1571,7 +1648,7 @@ enum FFmpeg {
 
     /// A non-colliding path for the given source file, in the chosen output format.
     static func outputURL(for input: URL, settings: ExportSettings) -> URL {
-        let folder = settings.outputFolder ?? input.deletingLastPathComponent()
+        let folder = settings.outputFolder ?? FootageLayout.editedFolder(for: input)
         let stem = input.deletingPathExtension().lastPathComponent
         let suffix = settings.suffix
         let ext = settings.format.fileExtension

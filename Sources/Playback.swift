@@ -6,6 +6,10 @@ import SwiftUI
 @MainActor
 final class PlaybackController: ObservableObject {
     let player = AVPlayer()
+    /// Timeline rows hidden with their eye: the preview leaves them out.
+    var hiddenTracks: Set<TimelineTrack> = []
+    /// Before/After: the recording as it was, with the same cuts.
+    var showsOriginal = false
     @Published var isPlaying = false
     @Published var isLoading = false
     @Published var error: String?
@@ -93,6 +97,8 @@ final class PlaybackController: ObservableObject {
 
     /// `original` shows the recording without its colour stage, for comparison.
     func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool, original: Bool = false) {
+        let clip = showsOriginal ? clip.asRecorded : clip.effective.previewing(hiding: hiddenTracks)
+        let original = original || showsOriginal
         requestedTime = time
         playWhenReady = play
         let record = ProjectClip(clip)
@@ -245,17 +251,37 @@ final class PlaybackController: ObservableObject {
         if let screen = clip.screen, short.map(clip.stacksScreen) ?? true {
             try await insertScreen(screen, segments: clip.timeline.segments, into: composition)
         }
+        // The music under the voice, as the export mixes it. A Short has none.
+        var music: MusicPreviewTracks?
+        if short == nil, audio != nil, let mix = clip.exportMusic(settings) {
+            music = MusicPreviewTracks(composition)
+            try await music?.insert(mix)
+        }
         let item = AVPlayerItem(asset: composition)
         item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original, short: short)
         item.audioTimePitchAlgorithm = .spectral
         let mix = AVMutableAudioMix()
+        let joints = clip.timeline.audioJoints
         mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
             let parameters = AVMutableAudioMixInputParameters(track: track)
             parameters.audioTimePitchAlgorithm = .spectral
+            // The recording's sound fades out and in at each cut, as the export does.
+            if track.trackID == audio?.trackID { Self.fadeJoints(joints, in: parameters) }
+            music?.ramp(parameters)
             return parameters
         }
         item.audioMix = mix
         return item
+    }
+
+    /// Volume ramps for the fade out and in at each cut, at edited times from `offset`.
+    static func fadeJoints(_ joints: [(time: Double, fade: Double)], offset: Double = 0, in parameters: AVMutableAudioMixInputParameters) {
+        for joint in joints where joint.fade > 0 {
+            let at = CMTime(seconds: offset + joint.time, preferredTimescale: 600_000)
+            let length = CMTime(seconds: joint.fade, preferredTimescale: 600_000)
+            parameters.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0, timeRange: CMTimeRange(start: at - length, duration: length))
+            parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1, timeRange: CMTimeRange(start: at, duration: length))
+        }
     }
 
     /// Everything drawn on top of the assembled sections. A colour stage that cannot be
@@ -270,10 +296,10 @@ final class PlaybackController: ObservableObject {
         let picture = picture(clip, info: info, short: short)
         let crop = picture.crop
         let shots = clip.zoomShots
-        let regions = clip.blurRegions
+        let regions = clip.blurBoxes
         let effects = clip.blurEffects
         let color = ColorPipeline.stage(clip.color, info: info, fileName: clip.name,
-                                        toneMapHDR: settings.toneMapHDR, original: original).render
+                                        toneMapHDR: settings.toneMapHDR, original: original || !clip.isOn(.colour)).render
         let motion = picture.motion, stage = picture.stage
         let videoComposition = AVMutableVideoComposition(asset: asset) { request in
             let result = renderFrame(request.sourceImage, info: info, crop: crop,
@@ -296,12 +322,12 @@ final class PlaybackController: ObservableObject {
 ///
 /// Order follows the shared rendering contract: colour first, on the whole frame, then
 /// area obscuring, crop and zoom. A black area therefore stays black whatever the grade.
-func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurRegion],
+func renderFrame(_ source: CIImage, info: MediaInfo, crop: CGRect, regions: [BlurBox],
                  shots: [ZoomShot], settings: ExportSettings, time: Double, color: ColorRender? = nil,
                  effects: [VideoBlurEffect] = [], motion: GraphicsMotion? = nil, stage: CGSize? = nil) -> CIImage {
     var image = source.transformed(by: CGAffineTransform(translationX: -source.extent.minX, y: -source.extent.minY))
     if let color { image = ColorPipeline.apply(color, to: image, space: source.colorSpace) }
-    for region in regions {
+    for region in regions where region.isOn(at: time) {
         let rect = region.rect.evenClamped(in: info.fullFrame)
         let area = CGRect(x: rect.minX, y: CGFloat(info.height) - rect.maxY, width: rect.width, height: rect.height)
         let patch: CIImage

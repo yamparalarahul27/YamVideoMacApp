@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom
+    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom, caption, music
 }
 
 @MainActor
@@ -44,7 +44,14 @@ final class AppModel: ObservableObject {
     @Published var graphicsDownload: String?
     @Published var graphicsDownloadError: String?
     @Published var statusMessage: String?
-    @Published var editorMode: EditorMode = .crop
+    /// What the picture area is doing: nil while the one player plays the edit, or a
+    /// short edit on the recording's frame with a bar under the picture to finish it.
+    @Published var pictureEdit: PictureEdit?
+    /// The crop being set in the player, until Apply. Not part of the project.
+    @Published var cropDraft: CropDraft?
+    /// Before/After: the player shows the recording as it was, with no crop, zooms,
+    /// blur, colour or graphics. View state only.
+    @Published var showsBefore = false
     @Published var selectedRegionID: BlurRegion.ID? { didSet { focusInspector(selectedRegionID, .blurArea) } }
     /// The whole-frame effect and the marker the inspector shows, when one is selected.
     @Published var selectedEffectID: VideoBlurEffect.ID? { didSet { focusInspector(selectedEffectID, .effect) } }
@@ -53,6 +60,15 @@ final class AppModel: ObservableObject {
     @Published var renamingMarker = false
     /// What the inspector shows: whatever was selected last, or the recording.
     @Published var inspectorFocus: InspectorFocus = .recording
+    /// The inspector tab picked last; nil until one is picked.
+    @Published var inspectorTab: InspectorTab?
+    /// The caption selected on the Captions track, by its place in `captionCues()`.
+    @Published var selectedCaptionIndex: Int? {
+        didSet {
+            if selectedCaptionIndex != nil { if inspectorFocus != .caption { inspectorFocus = .caption } }
+            else if inspectorFocus == .caption { inspectorFocus = .recording }
+        }
+    }
 
     let playback = PlaybackController()
     @Published var showPlayback = false
@@ -61,6 +77,9 @@ final class AppModel: ObservableObject {
     /// The project's auto edit answers; nil until saved once. See `autoEditOptions`.
     @Published var autoEdit: AutoEditOptions?
     @Published var showingAutoEdit = false
+    /// The thumbnail maker, opened from the left bar (Thumbnail, under Studio) or the Go
+    /// menu (Make Thumbnail…, ⇧⌘T).
+    @Published var showingThumbnailMaker = false
     /// What the owner's auto edit is doing while it runs: transcribing, finding cuts.
     @Published var autoEditRun: AutoEditRun?
     /// Cuts waiting for the owner when the cut style is Review each cut.
@@ -105,6 +124,27 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(timelineSnapping, forKey: Self.snappingKey) }
     }
     static let snappingKey = "timelineSnapping"
+    /// Taller rows show bigger filmstrip frames and a taller waveform. A preference, like
+    /// snapping: remembered, never undone.
+    @Published var timelineTallTracks = UserDefaults.standard.object(forKey: AppModel.tallTracksKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(timelineTallTracks, forKey: Self.tallTracksKey) }
+    }
+    static let tallTracksKey = "timelineTallTracks"
+    /// Rows hidden in the preview, rows locked on the timeline, and the preview's sound.
+    /// View state: never saved, never undone, never exported.
+    @Published var timelineTracks = TimelineTrackState() {
+        didSet { if timelineTracks != oldValue { applyTrackState() } }
+    }
+    /// Light or dark for YamVideo alone, or as the Mac is set. A preference rather than an
+    /// edit: it is remembered, never undone. The app applies it at launch
+    /// (`applyAppearance`), so a test or snapshot model never changes how windows look.
+    @Published var appearance = UserDefaults.standard.string(forKey: AppModel.appearanceKey).flatMap(AppAppearance.init(rawValue:)) ?? .system {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: Self.appearanceKey)
+            applyAppearance()
+        }
+    }
+    static let appearanceKey = "appearance"
     @Published var projectURL: URL?
     @Published var hasUnsavedChanges = false
     @Published var undoEntries: [EditHistory] = []
@@ -144,6 +184,9 @@ final class AppModel: ObservableObject {
     static let moduleKey = "module"
     /// The owner's ideas, and later their posts; see Library.swift and LibraryEditing.swift.
     @Published var library = Library()
+    /// This Mac's footage list and the other Macs' lists (MacInventory.swift).
+    @Published var thisMacList: MacInventory?
+    @Published var otherMacs: [MacInventory] = []
     @Published var libraryUndoEntries: [LibraryHistory] = []
     @Published var libraryRedoEntries: [LibraryHistory] = []
     /// Where the Library is read and written; nil until `loadLibrary`, so nothing is written before.
@@ -247,6 +290,7 @@ final class AppModel: ObservableObject {
                 self.cancelZoomAnalysis()
                 self.playback.clear()
                 self.showPlayback = false
+                self.resetPictureEdit()
                 self.showsShort = false; self.playback.shortID = nil; self.selectedShortID = nil
                 self.isMovieMode = false
                 self.selectedSegmentID = nil
@@ -376,7 +420,7 @@ final class AppModel: ObservableObject {
 
     func refreshPreview() {
         previewTask?.cancel()
-        guard let item = selectedItem, let info = item.info, info.duration >= 0 else {
+        guard let item = selectedItem?.effective, let info = item.info, info.duration >= 0 else {
             previewImage = nil
             previewOriginalImage = nil
             previewIsLoading = false
@@ -385,7 +429,8 @@ final class AppModel: ObservableObject {
 
         let seconds = item.timeline.location(at: item.editedDuration * item.previewFraction)?.source ?? 0
         // The blur is baked into the preview, so it has to take part in the cache key.
-        let regions = item.blurRegions.map { $0.rect }
+        // Only the areas that cover this frame: a timed area is off outside its range.
+        let regions = item.blurRegions.filter { $0.covers(source: seconds) }.map { $0.rect }
         let blurKey = regions.isEmpty
             ? "none"
             : "\(settings.blurStyle.rawValue)-\(Int(settings.blurStrength))-"
@@ -521,6 +566,23 @@ final class AppModel: ObservableObject {
         perform([command])
     }
 
+    /// Starts or ends a blur area at the frame under the playhead. The time is kept in
+    /// source seconds, so later cuts do not move it.
+    func setRegionTime(_ id: BlurRegion.ID, start: Bool) {
+        guard let index = selectedIndex, items[index].blurRegions.contains(where: { $0.id == id }),
+              let source = items[index].timeline.location(at: previewTime)?.source else { return }
+        let times = start ? BlurTimes(start: source) : BlurTimes(end: source)
+        if case .success = perform([.updateBlurArea(clip: items[index].id, area: id, rect: nil, times: times)]) { refreshPreview() }
+    }
+
+    /// Makes a timed blur area cover the whole recording again.
+    func coverWholeRecording(_ id: BlurRegion.ID) {
+        guard let index = selectedIndex, items[index].blurRegions.contains(where: { $0.id == id }) else { return }
+        if case .success = perform([.updateBlurArea(clip: items[index].id, area: id, rect: nil, times: BlurTimes(whole: true))]) {
+            refreshPreview()
+        }
+    }
+
     func removeSelectedRegion() {
         guard let index = selectedIndex, let id = selectedRegionID else { return }
         let clip = items[index].id
@@ -556,6 +618,8 @@ final class AppModel: ObservableObject {
     @Published var selectedLayoutID: UUID? { didSet { focusInspector(selectedLayoutID, .layout) } }
     /// The screen zoom the inspector shows; a click on the screen in the Preview aims it.
     @Published var selectedScreenZoomID: UUID? { didSet { focusInspector(selectedScreenZoomID, .screenZoom) } }
+    /// The piece of music the inspector shows, when one is selected on the Music row.
+    @Published var selectedMusicID: UUID? { didSet { focusInspector(selectedMusicID, .music) } }
     /// The viewer shows the selected Short, 9:16, with its graphics and captions.
     @Published var showsShort = false
     /// Faint marks where YouTube draws its buttons over a Short. A preference, never undone.
@@ -721,7 +785,7 @@ final class AppModel: ObservableObject {
                 .setCrop(clip: item.id, rect: crop),
                 .setAspect(clip: item.id, preset: source.aspectLabel),
                 // Fresh ids so each clip owns its own regions and zooms.
-                .replaceBlurAreas(clip: item.id, areas: source.blurRegions.map { BlurRegion(rect: $0.rect) }),
+                .replaceBlurAreas(clip: item.id, areas: source.blurRegions.map { BlurRegion(rect: $0.rect, start: $0.start, end: $0.end) }),
                 .replaceZooms(clip: item.id, zooms: source.zoomShots.filter { $0.end <= item.editedDuration }.map {
                     ZoomShot(start: $0.start, hold: $0.hold, level: $0.level, target: $0.target)
                 }),
@@ -839,7 +903,7 @@ final class AppModel: ObservableObject {
                 if Task.isCancelled { break }
                 guard let index = items.firstIndex(where: { $0.id == id }),
                       let info = items[index].info else { continue }
-                let item = items[index]
+                let item = items[index].effective
                 let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
                 let output = FFmpeg.outputURL(for: item.url, settings: exportSettings)
 
@@ -851,7 +915,7 @@ final class AppModel: ObservableObject {
                         output: output,
                         info: info,
                         crop: crop,
-                        regions: item.blurRegions.map { $0.rect },
+                        regions: item.blurBoxes,
                         zoomShots: item.zoomShots,
                         segments: item.segments,
                         settings: exportSettings,
@@ -859,7 +923,8 @@ final class AppModel: ObservableObject {
                         color: item.colorStage(exportSettings),
                         effects: item.blurEffects,
                         graphics: item.exportGraphics(exportSettings),
-                        screen: item.screen
+                        screen: item.screen,
+                        music: item.exportMusic(exportSettings)
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -913,7 +978,7 @@ final class AppModel: ObservableObject {
     var previewCommand: String? {
         if isMovieMode {
             guard let plan = try? moviePlan() else { return nil }
-            let output = (settings.outputFolder ?? plan.clips[0].url.deletingLastPathComponent())
+            let output = (settings.outputFolder ?? FootageLayout.editedFolder(for: plan.clips[0].url))
                 .appendingPathComponent("YamVideo-Movie.\(settings.format.fileExtension)")
             let commands: [[String]]
             if settings.format == .gif {
@@ -928,10 +993,10 @@ final class AppModel: ObservableObject {
         let output = FFmpeg.outputURL(for: item.url, settings: settings)
         return FFmpeg.exportCommands(
             input: item.url, output: output, info: info, crop: crop,
-            regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
+            regions: item.blurBoxes, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.burnedCaptions(settings),
             color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings),
-            screen: item.screen
+            screen: item.screen, music: item.effective.exportMusic(settings)
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 
@@ -939,5 +1004,37 @@ final class AppModel: ObservableObject {
         let args = command.filter { $0 != "-progress" && $0 != "pipe:1" && $0 != "-nostats" }
         return (["ffmpeg"] + args).map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             .joined(separator: " ")
+    }
+}
+
+/// How YamVideo looks: as the Mac is set, or always light or always dark. Only the app's
+/// own windows change; exports, previews of the picture and graphics look the same in all
+/// three.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    /// Nil follows the Mac's own setting.
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
+extension AppModel {
+    /// Shows every window in `appearance`.
+    func applyAppearance() {
+        NSApplication.shared.appearance = appearance.nsAppearance
     }
 }

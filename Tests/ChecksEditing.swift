@@ -229,6 +229,21 @@ import Foundation
     equal(AppModel(recoveryURL: nil).timelineSnapping, false, "by the next window too")
     snappingModel.timelineSnapping = savedSnapping
 
+    print("\nAppearance")
+    let appearanceModel = AppModel(recoveryURL: nil)
+    let savedAppearance = appearanceModel.appearance
+    let savedWindows = NSApplication.shared.appearance
+    appearanceModel.appearance = .light
+    check(NSApplication.shared.appearance?.name == .aqua, "Light shows every window light")
+    appearanceModel.appearance = .dark
+    check(NSApplication.shared.appearance?.name == .darkAqua, "Dark shows every window dark")
+    equal(UserDefaults.standard.string(forKey: AppModel.appearanceKey), "dark", "and the choice is remembered")
+    equal(AppModel(recoveryURL: nil).appearance, .dark, "by the next window too")
+    appearanceModel.appearance = .system
+    check(NSApplication.shared.appearance == nil, "System follows the Mac's own setting")
+    appearanceModel.appearance = savedAppearance
+    NSApplication.shared.appearance = savedWindows
+
     print("\nTimeline and projects")
     let wholeTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 10)])
     var splitTimeline = wholeTimeline

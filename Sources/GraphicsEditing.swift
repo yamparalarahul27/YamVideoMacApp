@@ -140,6 +140,46 @@ extension AppModel {
         }
     }
 
+    /// A kinetic text from the playhead: the next 3 s of what is said, each word on the
+    /// time it is spoken. Without a transcript it starts with words to replace.
+    func addKineticText() {
+        guard let index = selectedIndex, items[index].info != nil else { statusMessage = "Select a recording first."; return }
+        let item = items[index]
+        let start = min(max(0, previewTime), max(0, item.editedDuration - 1))
+        let end = min(item.editedDuration, start + 3)
+        let words = KineticText.words(item.transcript, timeline: item.timeline, from: start, to: end)
+        let props: [String: JSONValue] = words.isEmpty ? ["text": .string("Your *big* words"), "layout": .string("line")]
+            : ["words": .array(words), "layout": .string("line")]
+        addCover(Graphic(kind: .kineticText, start: start, end: end, props: props), to: item, label: "Add Kinetic Text")
+    }
+
+    /// A section card at the playhead, for 2.5 s; its bar shows how far into the video it is.
+    func addSectionCard() {
+        guard let index = selectedIndex, items[index].info != nil else { statusMessage = "Select a recording first."; return }
+        let item = items[index]
+        let start = min(max(0, previewTime), max(0, item.editedDuration - 2.5))
+        let graphic = Graphic(kind: .sectionCard, start: start, end: min(item.editedDuration, start + 2.5), props: ["title": .string("Section")])
+        addCover(graphic, to: item, label: "Add Section Card")
+    }
+
+    private func addCover(_ graphic: Graphic, to item: VideoItem, label: String) {
+        switch perform([.addGraphic(clip: item.id, graphic: graphic)], label: label) {
+        case .success: selectedGraphicID = graphic.id
+        case .failure(let error): statusMessage = error.message
+        }
+    }
+
+    /// A kinetic text's words again from what is said over its time.
+    func fillKineticWords(_ id: UUID) {
+        guard let item = selectedItem else { return }
+        mutateGraphic(id, label: "Kinetic Text Words") { graphic in
+            let words = KineticText.words(item.transcript, timeline: item.timeline, from: graphic.start, to: graphic.end)
+            guard !words.isEmpty else { return }
+            graphic.props["words"] = .array(words)
+            graphic.props["text"] = nil
+        }
+    }
+
     func setGraphicProp(_ id: UUID, at path: [GraphicPropPath], to value: JSONValue) {
         mutateGraphic(id, label: "Edit Graphic Text") { graphic in
             graphic.props = JSONValue.object(graphic.props).setting(value, at: path).object ?? graphic.props

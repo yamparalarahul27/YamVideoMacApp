@@ -46,12 +46,22 @@ struct GraphicInspector: View {
             if graphic.kind == .endScreen {
                 endScreen
             } else {
-                placement
+                if graphic.kind.isPlaceable { placement }
+                if graphic.kind == .kineticText {
+                    Button("Words from the Transcript") { model.fillKineticWords(graphic.id) }
+                        .controlSize(.small)
+                        .disabled(item.transcript == nil)
+                        .help("Show the words said over this time, each on the time it is spoken")
+                }
+                if graphic.kind.zone == .cover {
+                    Text("It covers the whole picture. background: solid (near black) or dim. Words between asterisks take the accent colour.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 Text("Times inside the graphic are seconds after it starts.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             GraphicPropsEditor(graphicID: graphic.id, value: .object(graphic.props), path: [], depth: 0,
-                               hidden: graphic.kind == .endScreen ? ["videos", "side", "guides"] : [])
+                               hidden: graphic.kind == .endScreen ? ["videos", "side", "guides"] : graphic.kind == .sectionCard ? ["progress", "marks"] : [])
         }
     }
 }
@@ -117,7 +127,7 @@ struct GraphicsSection: View {
     private var style: GraphicsStyle { item.graphics?.style ?? GraphicsStyle() }
 
     var body: some View {
-        InspectorSection("Graphics") {
+        InspectorSection("Graphics", isOn: changeSwitch(.graphics, item, model)) {
             let count = item.graphics?.items.count ?? 0
             Text(count == 0
                  ? "None. Import a graphics file to add titles, cards and ink notes over the video."
@@ -135,6 +145,14 @@ struct GraphicsSection: View {
                     model.perform([.replaceGraphics(clip: item.id, graphics: [], style: nil)], label: "Clear Graphics")
                 }
                 .disabled(count == 0)
+            }
+            .controlSize(.small)
+            HStack {
+                Button("Kinetic Text") { model.addKineticText() }
+                    .help("Big words over the whole picture, each on the time it is spoken, from the playhead")
+                Button("Section Card") { model.addSectionCard() }
+                    .help("A section's title over a seek bar that shows how far into the video it starts, at the playhead")
+                Spacer()
             }
             .controlSize(.small)
             BrandFinderView(item: item)

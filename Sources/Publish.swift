@@ -66,6 +66,66 @@ struct Chapter: Codable, Equatable, Identifiable {
     }
 }
 
+/// YouTube's Test & Compare (docs/plans/thumbnail-science.md, part 4): YouTube shows two or
+/// three thumbnails to viewers and keeps the one that gets watched most. Version A is the
+/// publish details' `design`; this holds versions B and C, each version's saved picture,
+/// and the version that won.
+struct ThumbnailTest: Codable, Equatable {
+    /// Versions B and C: one or two designs.
+    var versions: [ThumbnailDesign]
+    /// Each version's saved PNG, A first; empty until the versions are saved.
+    var images: [URL] = []
+    /// The version that won YouTube's test (0 is A); nil until the owner marks it.
+    var winner: Int?
+
+    static let letters = ["A", "B", "C"]
+    static let most = 3
+
+    init(versions: [ThumbnailDesign], images: [URL] = [], winner: Int? = nil) {
+        self.versions = versions; self.images = images; self.winner = winner
+    }
+
+    /// All the versions, A first.
+    var count: Int { versions.count + 1 }
+
+    private enum CodingKeys: String, CodingKey { case versions, images, winner }
+
+    /// `images` are plain paths, as for the thumbnail.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        versions = try c.decodeIfPresent([ThumbnailDesign].self, forKey: .versions) ?? []
+        images = (try c.decodeIfPresent([String].self, forKey: .images) ?? []).map { text in
+            text.hasPrefix("file:") ? (URL(string: text) ?? URL(fileURLWithPath: text))
+                : URL(fileURLWithPath: (text as NSString).expandingTildeInPath)
+        }
+        winner = try c.decodeIfPresent(Int.self, forKey: .winner)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(versions, forKey: .versions)
+        try c.encode(images.map(\.path), forKey: .images)
+        try c.encodeIfPresent(winner, forKey: .winner)
+    }
+
+    /// The first thing that cannot be stored, saying what is allowed; nil when all is well.
+    var problem: String? {
+        guard (1...(Self.most - 1)).contains(versions.count) else {
+            return "A Test & Compare has 2 or 3 versions: A is the design, and versions holds B and C."
+        }
+        for version in versions { if let problem = version.problem { return problem } }
+        guard images.isEmpty || images.count == count else {
+            return "The versions' images are one for each version, A first (\(count)), or none before a save."
+        }
+        guard images.allSatisfy(\.isFileURL) else { return "The versions' images must be local files." }
+        if let winner {
+            guard (0..<count).contains(winner) else { return "The winner is a version: 0 is A, up to \(count - 1)." }
+            guard !images.isEmpty else { return "Save the versions' images before you mark a winner." }
+        }
+        return nil
+    }
+}
+
 /// What YouTube needs for one recording. Missing keys keep their defaults, so a partial
 /// object from an agent is complete.
 struct PublishInfo: Codable, Equatable {
@@ -85,11 +145,14 @@ struct PublishInfo: Codable, Equatable {
     var design: ThumbnailDesign?
     /// Which YouTube element goes in each box of the end screen. Nil keeps the defaults.
     var endScreen: EndScreenElements?
+    /// More versions of the thumbnail for YouTube's Test & Compare, and the winner (version
+    /// 19). Nil with one version.
+    var test: ThumbnailTest?
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case title, description, tags, category, chapters, thumbnail, language, channel, design, endScreen
+        case title, description, tags, category, chapters, thumbnail, language, channel, design, endScreen, test
     }
 
     init(from decoder: Decoder) throws {
@@ -109,6 +172,7 @@ struct PublishInfo: Codable, Equatable {
         channel = try c.decodeIfPresent(String.self, forKey: .channel) ?? defaults.channel
         design = try c.decodeIfPresent(ThumbnailDesign.self, forKey: .design)
         endScreen = try c.decodeIfPresent(EndScreenElements.self, forKey: .endScreen)
+        test = try c.decodeIfPresent(ThumbnailTest.self, forKey: .test)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -123,6 +187,18 @@ struct PublishInfo: Codable, Equatable {
         try c.encode(channel, forKey: .channel)
         try c.encodeIfPresent(design, forKey: .design)
         try c.encodeIfPresent(endScreen, forKey: .endScreen)
+        try c.encodeIfPresent(test, forKey: .test)
+    }
+
+    /// Every version of the thumbnail's design, A first: the design, then the test's.
+    var versions: [ThumbnailDesign] { (design.map { [$0] } ?? []) + (test?.versions ?? []) }
+
+    /// Marks the version that won YouTube's test: its picture becomes the thumbnail. Nil
+    /// clears the mark and leaves the thumbnail.
+    mutating func markWinner(_ index: Int?) {
+        guard test != nil else { return }
+        test?.winner = index
+        if let index, let images = test?.images, images.indices.contains(index) { thumbnail = images[index] }
     }
 
     var isEmpty: Bool { self == PublishInfo() }
@@ -167,6 +243,10 @@ struct PublishInfo: Codable, Equatable {
         if let thumbnail, !thumbnail.isFileURL { return "The thumbnail must be a local image." }
         if let problem = design?.problem { return problem }
         if let problem = endScreen?.problem { return problem }
+        if let test {
+            guard design != nil else { return "A Test & Compare needs version A: the design." }
+            if let problem = test.problem { return problem }
+        }
         return nil
     }
 
@@ -180,8 +260,13 @@ struct PublishInfo: Codable, Equatable {
     }
 
     /// Everything YouTube would refuse or ignore, for a recording `duration` seconds long
-    /// with these graphics (for the end screen).
-    func issues(duration: Double, graphics: GraphicsTrack? = nil) -> [Issue] {
+    /// with these graphics (for the end screen) and this music (for its licences and the
+    /// credit lines the description gets).
+    func issues(duration: Double, graphics: GraphicsTrack? = nil, music: MusicBed? = nil) -> [Issue] {
+        if music != nil {
+            let credited = crediting(music)
+            return credited.issues(duration: duration, graphics: graphics) + (music?.issues ?? [])
+        }
         var issues: [Issue] = []
         func add(_ field: String, _ severity: Severity, _ message: String) { issues.append(Issue(field: field, severity: severity, message: message)) }
         let trimmed = title.trimmingCharacters(in: .whitespaces)
@@ -200,6 +285,14 @@ struct PublishInfo: Codable, Equatable {
             add("thumbnail", .warning, "No thumbnail: YouTube will pick a frame.")
         } else if let thumbnail, !FileManager.default.fileExists(atPath: thumbnail.path) {
             add("thumbnail", .blocking, "The thumbnail \(thumbnail.lastPathComponent) is no longer there.")
+        }
+        if let test {
+            if test.images.isEmpty {
+                add("thumbnail", .warning, "The Test & Compare versions are not saved: Export for YouTube writes only the thumbnail.")
+            }
+            for (index, image) in test.images.enumerated() where !FileManager.default.fileExists(atPath: image.path) {
+                add("thumbnail", .blocking, "Version \(ThumbnailTest.letters[index])'s thumbnail \(image.lastPathComponent) is no longer there.")
+            }
         }
         if let screen = graphics?.endScreen {
             if duration < EndScreen.minimumVideo {
@@ -307,12 +400,19 @@ struct PublishInfo: Codable, Equatable {
         return stem.isEmpty ? fallback : stem
     }
 
-    /// The text file Export for YouTube writes: everything to paste into YouTube Studio, and
-    /// the end screen elements to place there by hand.
-    func uploadText(files: [String], endScreen plan: EndScreenPlan? = nil) -> String {
+    /// The text file Export for YouTube writes: everything to paste into YouTube Studio, the
+    /// end screen elements to place there by hand, and the Test & Compare thumbnails
+    /// (`tests`, file names, A first).
+    func uploadText(files: [String], endScreen plan: EndScreenPlan? = nil, tests: [String] = [], music: MusicBed? = nil) -> String {
         var lines = ["TITLE", title, "", "DESCRIPTION", fullDescription, "", "TAGS", tags.joined(separator: ", "), "",
                      "CATEGORY", "\(category.label) (\(category.youtubeID))", "", "LANGUAGE", language]
         if let plan { lines += [""] + plan.uploadLines }
+        if let music { lines += [""] + music.uploadLines }
+        if !tests.isEmpty {
+            lines += ["", "THUMBNAIL TEST & COMPARE", "In YouTube Studio, open the video's thumbnail, choose Test & compare, and upload these:"]
+            lines += tests.enumerated().map { "\(ThumbnailTest.letters[$0.offset]): \($0.element)" }
+            if let winner = test?.winner { lines.append("Winner: \(ThumbnailTest.letters[winner])") }
+        }
         if !files.isEmpty { lines += ["", "FILES"] + files }
         return lines.joined(separator: "\n") + "\n"
     }

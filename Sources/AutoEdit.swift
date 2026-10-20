@@ -54,7 +54,8 @@ enum TranscriptModel: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 /// How much a recording is cut. The numbers are the ones asked about before the first
-/// video: Tight takes pauses of 0.42 s or more down to about 0.22 s and cuts stumbles;
+/// video: Tight takes pauses of 0.42 s or more down to about 0.22 s (0.30 s after a comma,
+/// 0.40 s after a sentence) and cuts stumbles;
 /// Natural is the silence review's own defaults.
 enum CutStyle: String, Codable, CaseIterable, Identifiable, Sendable {
     case tight, natural, review
@@ -69,7 +70,7 @@ enum CutStyle: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     var detail: String {
         switch self {
-        case .tight: return "Pauses of 0.42 s or more become about 0.22 s, and repeated words, restarts and “um”s from the transcript go."
+        case .tight: return "Pauses of 0.42 s or more become about 0.22 s, 0.30 s after a comma and 0.40 s after a sentence, and repeated words, restarts and “um”s from the transcript go."
         case .natural: return "Pauses of 0.8 s or more become 0.3 s, as the silence review does by default. Stumbles stay."
         case .review: return "The same cuts as Tight, listed for you to listen to and choose before anything is cut."
         }
@@ -86,9 +87,25 @@ struct PauseRule: Equatable, Sendable {
     var minimum: Double
     /// Kept at each end of a cut pause, so speech is never clipped and a breath remains.
     var padding: Double
+    /// Kept at each end of a pause after a sentence's end (. ? !) or after a comma (, ; :),
+    /// when the transcript says which; nil keeps `padding` there too. A listener needs a
+    /// longer breath between sentences than inside one: cut to the same short gap
+    /// everywhere, the next sentence comes in too soon.
+    var sentencePadding: Double? = nil
+    var commaPadding: Double? = nil
 
-    static let tight = PauseRule(threshold: -40, minimum: 0.42, padding: 0.11)
+    /// About 0.22 s inside a sentence, 0.30 s after a comma and 0.40 s after a full stop.
+    static let tight = PauseRule(threshold: -40, minimum: 0.42, padding: 0.11, sentencePadding: 0.20, commaPadding: 0.15)
     static let natural = PauseRule(threshold: -40, minimum: 0.8, padding: 0.15)
+
+    /// What stays at each end of a pause after a word ending in `mark`.
+    func padding(after mark: Character?) -> Double {
+        switch mark {
+        case ".", "?", "!": return max(padding, sentencePadding ?? 0)
+        case ",", ";", ":": return max(padding, commaPadding ?? 0)
+        default: return padding
+        }
+    }
 }
 
 /// What the edit does with captions.
@@ -390,13 +407,25 @@ enum StumbleFinder {
 ///
 /// Quiet stretches and stumbles that touch are one cut, so "videos. [pause] Um, [pause]
 /// the" loses the pause, the "um" and the pause after it in one go. Where a cut meets
-/// quiet, `padding` of the quiet stays (so 0.11 s each side leaves about 0.22 s); where it
+/// quiet, `padding` of the quiet stays (so 0.11 s each side leaves about 0.22 s, more after
+/// a comma or a sentence when `words` say so); where it
 /// meets speech directly it ends at the quietest moment before the next word. Stumble
 /// edges are moved to that quiet moment because whisper's word times run late. Without
 /// stumbles this is exactly the silence review's own cut list.
 enum CutPlanner {
     static func cuts(levels overview: AudioOverview, timeline: ClipTimeline, fps: Double,
-                     rule: PauseRule, stumbles: [Stumble] = []) -> [SilenceCut] {
+                     rule: PauseRule, stumbles: [Stumble] = [], words: [TranscriptWord] = []) -> [SilenceCut] {
+        // The mark that ends the last word said before a pause. Whisper's times run late,
+        // so a word that starts a moment after the pause begins still counts.
+        let spoken = words.sorted { $0.start < $1.start }
+        func mark(before time: Double) -> Character? {
+            var low = 0, high = spoken.count
+            while low < high {
+                let middle = (low + high) / 2
+                if spoken[middle].start < time + 0.05 { low = middle + 1 } else { high = middle }
+            }
+            return low > 0 ? spoken[low - 1].text.trimmingCharacters(in: .whitespacesAndNewlines).last : nil
+        }
         let quiet = overview.quietRanges(threshold: rule.threshold)
         struct Piece { var start: Double; var end: Double; var stumble: Stumble? }
         var pieces = quiet.map { Piece(start: $0.0, end: $0.1, stumble: nil) }
@@ -437,8 +466,9 @@ enum CutPlanner {
         for span in spans {
             let stumbling = !span.stumbles.isEmpty
             guard stumbling || span.longestQuiet >= rule.minimum else { continue }
-            let from = span.start + (span.quietStart ? rule.padding : 0)
-            let to = span.end - (span.quietEnd ? rule.padding : 0)
+            let padding = spoken.isEmpty ? rule.padding : rule.padding(after: mark(before: span.start))
+            let from = span.start + (span.quietStart ? padding : 0)
+            let to = span.end - (span.quietEnd ? padding : 0)
             for segment in timeline.segments {
                 let lower = max(segment.start, ceil(from * fps - 0.000001) / fps)
                 let upper = min(segment.end, floor(to * fps + 0.000001) / fps)

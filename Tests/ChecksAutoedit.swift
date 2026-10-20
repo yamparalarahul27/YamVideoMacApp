@@ -16,7 +16,8 @@ import Foundation
     autoOptions.model = .largeV3Turbo; autoOptions.language = "xx"
     check(autoOptions.problem?.contains("whisper language code") == true, "an unknown language is refused with what is allowed")
     check(["auto", "en", "hi", "te", "ta", "yue"].allSatisfy(AutoEditOptions.languages.contains), "every whisper language can be chosen, and auto")
-    equal(PauseRule.tight, PauseRule(threshold: -40, minimum: 0.42, padding: 0.11), "Tight cuts pauses of 0.42 s or more down to about 0.22 s")
+    equal(PauseRule.tight, PauseRule(threshold: -40, minimum: 0.42, padding: 0.11, sentencePadding: 0.20, commaPadding: 0.15),
+          "Tight cuts pauses of 0.42 s or more down to about 0.22 s, 0.30 s after a comma and 0.40 s after a sentence")
     equal(CutStyle.natural.pauses, PauseRule(threshold: -40, minimum: 0.8, padding: 0.15), "Natural is the silence review's defaults")
 
     print("\nStumbles")
@@ -64,6 +65,62 @@ import Foundation
     check(pauseOnly.isEmpty, "a 0.3 s pause is left alone by Tight")
     check(CutPlanner.cuts(levels: talkLevels, timeline: tightTimeline, fps: 30, rule: .tight, stumbles: StumbleFinder.stumbles(in: talkWords)).isEmpty,
           "planning again on the cut recording finds nothing more to cut")
+
+    print("\nLonger breaths between sentences")
+    // Speech, then a 0.8 s pause after "done.", after "well," and after "and". Cuts land on
+    // frames inside the pause, so each pause can keep up to a frame more at each end.
+    let breathLevels = syntheticLevels([(0, 1), (1.8, 3), (3.8, 5), (5.8, 7)], until: 7)
+    let breathWords = spokenWords([("It's", 0.1), ("done.", 0.5), ("Then", 1.9), ("well,", 2.5), ("and", 4.6), ("more.", 5.9)], end: 7)
+    let breathTimeline = ClipTimeline(segments: [TimelineSegment(start: 0, end: 7)])
+    let breathCuts = CutPlanner.cuts(levels: breathLevels, timeline: breathTimeline, fps: 30, rule: .tight, words: breathWords)
+    let pauses: [(Double, Double)] = [(1, 1.8), (3, 3.8), (5, 5.8)]
+    let heard = zip(breathCuts, pauses).map { cut, pause in (cut.start - pause.0) + (pause.1 - cut.end) }
+    check(breathCuts.count == 3 && abs(heard[0] - 0.40) < 0.07 && abs(heard[1] - 0.30) < 0.07 && abs(heard[2] - 0.22) < 0.07
+              && heard[0] > heard[1] && heard[1] > heard[2],
+          "Tight leaves 0.40 s after a sentence, 0.30 s after a comma and 0.22 s inside a sentence", "\(heard)")
+    let plainCuts = CutPlanner.cuts(levels: breathLevels, timeline: breathTimeline, fps: 30, rule: .tight)
+    let plainHeard = zip(plainCuts, pauses).map { cut, pause in (cut.start - pause.0) + (pause.1 - cut.end) }
+    check(plainCuts.count == 3 && plainHeard.allSatisfy { abs($0 - 0.22) < 0.07 } && PauseRule.natural.padding(after: ".") == 0.15,
+          "without the transcript every pause keeps about 0.22 s; Natural keeps its own 0.15 s each side", "\(plainHeard)")
+    check(CutPlanner.cuts(levels: syntheticLevels([(0, 1), (1.45, 2)], until: 2), timeline: ClipTimeline(segments: [TimelineSegment(start: 0, end: 2)]),
+                          fps: 30, rule: .tight, words: spokenWords([("done.", 0.5), ("Next", 1.5)], end: 2)).isEmpty,
+          "a 0.45 s pause after a sentence is already about right, so it stays")
+
+    print("\nSmooth joints")
+    // The fixture is a 440 Hz tone: a hard cut joins the wave at another point and clicks.
+    let jointSegments = [TimelineSegment(start: 0, end: 1.0), TimelineSegment(start: 1.2731, end: 2.0)]
+    let joined = ClipTimeline(segments: jointSegments)
+    check(joined.audioJoints.count == 1 && abs(joined.audioJoints[0].time - 1.0) < 0.0001 && joined.audioJoints[0].fade == ClipTimeline.jointFade
+              && ClipTimeline(segments: [TimelineSegment(start: 0, end: 1.0), TimelineSegment(start: 1.0, end: 2.0)]).audioJoints.isEmpty,
+          "the sound is cut where the source jumps, not where a section is only split")
+    func samples(_ url: URL) async throws -> [Double] {
+        let raw = try await Shell.run(ffmpeg, ["-v", "error", "-i", url.path, "-vn", "-ac", "1", "-ar", "48000", "-f", "s16le", "-"]).stdout
+        return raw.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }.map { Double($0) / 32768 }
+    }
+    func rms(_ x: [Double], _ from: Double, _ to: Double) -> Double {
+        let part = x[Int(from * 48000)..<Int(to * 48000)]
+        return (part.map { $0 * $0 }.reduce(0, +) / Double(part.count)).squareRoot()
+    }
+    func step(_ x: [Double], _ from: Double, _ to: Double) -> Double {
+        (Int(from * 48000)..<Int(to * 48000)).map { abs(x[$0] - x[$0 - 1]) }.max() ?? 0
+    }
+    let cutOut = scratch.appendingPathComponent("joint-cut.mp4"), splitOut = scratch.appendingPathComponent("joint-split.mp4")
+    try await FFmpeg.export(input: landscape, output: cutOut, info: info, crop: info.fullFrame, segments: jointSegments, settings: ExportSettings()) { _ in }
+    try await FFmpeg.export(input: landscape, output: splitOut, info: info, crop: info.fullFrame,
+                            segments: [TimelineSegment(start: 0, end: 1.0), TimelineSegment(start: 1.0, end: 2.0)], settings: ExportSettings()) { _ in }
+    let cutSound = try await samples(cutOut), splitSound = try await samples(splitOut)
+    let steady = rms(cutSound, 0.5, 0.6)
+    check(rms(cutSound, 0.997, 1.003) < steady * 0.6 && step(cutSound, 0.995, 1.005) < step(cutSound, 0.5, 0.6) * 1.5,
+          "the export fades out and in at a cut: the sound dips for a moment and does not click",
+          String(format: "joint %.3f of %.3f, step %.3f of %.3f", rms(cutSound, 0.997, 1.003), steady, step(cutSound, 0.995, 1.005), step(cutSound, 0.5, 0.6)))
+    check(rms(splitSound, 0.997, 1.003) > rms(splitSound, 0.5, 0.6) * 0.85, "a split with nothing taken out plays on without a dip")
+    var jointItem = VideoItem(url: landscape); jointItem.info = info; jointItem.segments = jointSegments
+    let jointPlayer = try await PlaybackController.makeItem(jointItem, settings: ExportSettings())
+    var startVolume: Float = -1, endVolume: Float = -1, rampRange = CMTimeRange.zero
+    let ramped = (jointPlayer.audioMix?.inputParameters.first)?.getVolumeRamp(for: CMTime(seconds: 0.995, preferredTimescale: 600_000),
+                                                                             startVolume: &startVolume, endVolume: &endVolume, timeRange: &rampRange) ?? false
+    check(ramped && startVolume == 1 && endVolume == 0 && abs(rampRange.end.seconds - 1.0) < 0.0005,
+          "the preview fades the sound the same way", "\(ramped) \(startVolume)→\(endVolume) \(rampRange.start.seconds)–\(rampRange.end.seconds)")
 
     print("\nCaptions from the transcript")
     let talkCaptions = Captions.edited(talkTranscript.captions(timeline: tightTimeline), timeline: tightTimeline)

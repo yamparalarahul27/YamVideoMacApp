@@ -10,13 +10,13 @@ setbuf(stdout, nil)
 
 /// Every feature's checks, in the order a full run takes them.
 let features: [(name: String, run: @MainActor () async throws -> Void)] = [
-    ("core", coreTests), ("editing", editingTests), ("agents", agentsTests), ("playback", playbackTests),
+    ("core", coreTests), ("editing", editingTests), ("tracks", tracksTests), ("player", playerTests), ("changes", changesTests), ("media", mediaTests), ("agents", agentsTests), ("playback", playbackTests),
     ("colour", colourTests), ("effects", effectsTests), ("graphics", graphicsTests), ("publish", publishTests),
     ("thumbnail", thumbnailTests), ("endscreen", endscreenTests), ("autoedit", autoeditTests), ("shorts", shortsTests),
-    ("screen", screenTests), ("logos", logosTests), ("library", libraryTests), ("pastvideos", pastVideosTests), ("style", styleTests),
+    ("screen", screenTests), ("logos", logosTests), ("covers", coversTests), ("music", musicTests), ("library", libraryTests), ("calendar", calendarTests), ("pastvideos", pastVideosTests), ("style", styleTests), ("macs", macsTests), ("blur", blurTests),
 ]
 /// Features that start from what another feature makes: its checks run first.
-let prerequisites: [String: [String]] = ["agents": ["editing"], "playback": ["editing"], "style": ["editing"]]
+let prerequisites: [String: [String]] = ["blur": ["editing"], "agents": ["editing"], "tracks": ["editing"], "player": ["editing"], "changes": ["editing"], "playback": ["editing"], "style": ["editing"]]
 let asked = Array(CommandLine.arguments.dropFirst())
 if asked.contains("--list") { print(features.map(\.name).joined(separator: "\n")); exit(0) }
 if let unknown = asked.first(where: { name in !features.contains { $0.name == name } }) {

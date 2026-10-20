@@ -68,11 +68,18 @@ palettes, preview/export parity, and preserving existing exports on cancellation
 
 ## Library: ideas and past videos
 
-The sidebar on the left switches between **Library** and **Studio** (⌘1, ⌘2). Studio is
+The sidebar on the left switches between **Library**, **Calendar** and **Studio** (⌘1, ⌘4, ⌘2). Studio is
 the editor. The Library keeps what you plan to make and what you made, apart from any project: each idea has a
 title, notes, a topic, links and images (dropped, pasted or chosen; they are copied in).
-The list groups items by stage (*Idea*, *In production*, *Ready*, *Posted*) and filters
-them by topic.
+The list groups items by stage (*Idea*, *In production*, *Ready*, *Scheduled*, *Posted*) and filters
+them by topic. The **Calendar** shows when each video goes out and where: a month or a
+week, the long video in purple, Shorts in blue, and a mark for each platform (YouTube,
+Instagram, X, LinkedIn), filled once it is posted. Drag a video to another day, or from
+*Not planned* onto a day; click one to choose its day, time, platforms (all four unless
+you untick one) and any platform's own day, or to mark it posted. An idea's page shows
+its **Release plan**: the long video with a branch to each Short, each with its day and
+platforms, and **Plan All Shorts…** spreads them one every few days. Nothing is ever
+posted for you.
 
 **Start a Project from This Idea…** saves a new project named after the idea, links it,
 and opens Studio to add the recordings. **Link the Open Project** links one you already
@@ -94,13 +101,25 @@ before it edits and adds a rule only after you say yes; edit it in the app or an
 editor. **Project Notes…** (⇧⌘N) says why a video is edited the way it is, and projects
 now keep a history of every change and who made it. At every save and export YamVideo
 writes `<project> Video.md` beside the project: the edit, each Short, the notes and the
-history, for you and any agent to read.
+history, for you and any agent to read. `docs/channel` keeps a copy of Style.md, each
+Video.md and a recipe for each series in Git: run `docs/channel/sync.sh` after a video,
+then commit.
 
 Everything stays on this Mac, in `~/Library/Application Support/YamVideo/Library`
 (`YAMVIDEO_LIBRARY_PATH` moves it, for a test instance). YamVideo never posts to or reads
 from YouTube, Instagram, X or LinkedIn: you publish by hand. Agents read and change ideas
 with `yamvideoctl library` (the `yamvideo_*_library` MCP tools). See the
 [distribution plan](docs/plans/distribution.md).
+
+## Footage folder
+
+Keep all footage in `~/Desktop/Yamparala Media`, one folder for each video: the project
+at the top, the recordings in `Recorded/`, the exports in `Edited/` (Shorts in
+`Edited/Shorts/`) and thumbnails and other made files in `Files/`. Drop new recordings in
+`Inbox/`, and an agent sorts them. With no output folder set, YamVideo suggests `Edited/`
+for exports and saves thumbnails in `Files/`. Each Mac writes a list of its video folders
+to `docs/channel/macs/`, and the Library says which videos are only on another Mac. The
+full rule is in [docs/footage-layout.md](docs/footage-layout.md).
 
 ## Building a movie
 
@@ -128,8 +147,11 @@ pictures, and each cut cuts the screen at the same moment.
    moment of a click you name). Use **−1 fr** and **+1 fr** to make it exact.
 2. Choose the base **Layout**: **Speaker** (you fill the frame), **Screen** (the screen
    fills the frame, you in a bubble: a **Circle** or a **Rounded square** with soft corners
-   you can set) or **Side by side** (you in a tall panel on the
-   left, the screen on the right).
+   you can set), **Side by side** (you in a tall panel on the
+   left, the screen on the right) or **Ink** (you on the right at full size, and on the
+   left, over a dark shade, only the bright lines of a drawing recorded on a dark canvas,
+   such as YamDraw: its background is keyed out by brightness). For Ink, crop the screen
+   to the part of the canvas where you draw, so the lines show large.
 3. Use **Add Layout** to give part of the video another layout. Layouts show on the
    Layout lane; drag them, or drag an edge. A change of layout eases over 0.4 s.
 
@@ -164,21 +186,56 @@ or understand which part of your content matters. Quiet footage may yield no sug
   speeds; the minimum-pause setting measures the original recording. One Undo restores
   all removed sections. Low volume is not necessarily silence, so review quiet speech
   and intentional pauses before applying.
+- **Media panel:** the left panel has tabs, as in Filmora. **Media** lists the recordings
+  and adds a screen recording. **Graphics** adds a name plate, a title card, kinetic
+  text, a section card or the end screen, or imports a graphics file. **Logos** shows the
+  logo library (the one Find Brands fills) and adds a logo badge. **Effects** adds a blur
+  area, a full-frame blur, a zoom, a screen zoom or a marker. Click **+** to add at the
+  playhead, or drag an item onto the timeline to add it where you let go.
+- **Audio and Captions rows:** the Audio row is linked to the sections: a click selects
+  the section with its picture, the selected section's sound is outlined, the cuts show
+  as lines, and yellow marks the pauses still in the edit. The Captions row shows the
+  captions as the export shows them. Click one to fix its words in the inspector: the
+  transcript keeps the fix, so the SRT and burned-in captions take it. Captions from a
+  file show as they are.
+- **Timeline layout:** the tool bar above the timeline has the edit tools: Undo, Redo,
+  Delete, Split, Crop (⌥C), Speed, Zoom, Blur and Marker, then Auto Edit and Review Silence,
+  then Snapping, Tall rows and the timeline zoom. Each row has a header at the left:
+  Shorts, Graphics, Effects, Zoom (and Layout and Screen zoom with a screen recording),
+  Video, Audio and Captions. An empty row folds to a thin row; its **+** adds the first item at the
+  playhead. The **eye** hides a row in the Preview only, and the export keeps it. The
+  **lock** stops the timeline from changing a row. On Audio, the speaker mutes the
+  Preview. These are view settings, not saved in the project. Each video section shows
+  frames from the recording, its number, and badges for its speed, the crop, blur areas
+  and colour correction. Blur areas show as a band on the Effects row. **Tall rows**
+  makes the frames and the waveform bigger, and the setting is remembered.
 - **Change speed:** select a video section and choose **Speed**, from **0.25× to 4×**.
   With several sections selected, one choice sets them all as a single undo step; if any
   is too short for that speed, none change. Split a section first to retime only part of it. Audio preserves pitch in native playback
   and export. Movies, waveforms and time labels follow the new duration. Zoom starts stay
   anchored to their source frames; their hold lengths remain in playback seconds and
   may be shortened or removed if they no longer fit.
-- **Play / pause:** press Space or the play button beneath the viewer. Left/Right step one
-  frame. The Preview tab shows the edited movie with crop, blur, zooms, cuts and audio;
-  Edit frame gives you the original frame and draggable editing handles.
+- **The player:** one player shows the edited movie with crop, blur, zooms, colour, cuts,
+  graphics and audio. The bar under the picture has the time, frame back, **Play** (Space)
+  and frame forward (Left/Right), then **Crop** (⌥C), **Before/After**, **Video / Short**,
+  **Safe zones** and **Snapshot**. **Before/After** shows the recording as it was, with the
+  same cuts and no crop, zooms, blur, colour or graphics. **Short** plays the selected Short
+  at 9:16, and **Safe zones** shows faintly where YouTube draws its buttons over it.
+  **Snapshot** saves the frame under the playhead as a PNG, as the edit shows it, without
+  graphics. With a zoom selected, **Aim** opens it on the frame.
+- **Edits on the frame:** the crop, the blur areas, aiming a zoom and the colour
+  comparison open the recording's frame in the player's place, with a bar under it to
+  finish. **Crop** shows the whole frame with the crop box and ratio chips (Free, 16:9,
+  9:16, 1:1, 4:5, 4:3, 2.39:1); nothing changes until **Apply** (Return), and **Cancel**
+  (Esc) leaves the crop as it was. **Blur areas** open from the Effects row's band or
+  **Add Area**; drag on the picture to add one, and press **Done**.
 - **Seek:** click or drag the time ruler, or click inside a video section. The timeline
   magnification slider provides more room for precise cuts; scroll horizontally when zoomed in.
-- **Split:** place the playhead inside a section and press **⌘B** or click **Split**.
+- **Split:** place the playhead inside a section and press **⌘B**, click **Split** in the
+  tool bar, or click the scissors that show on the playhead while the pointer is over the timeline.
 - **Trim:** drag a section's left/right handle, or select it and enter source seconds in
-  **In / Out**. Changes snap to source frames. **⌘⇧[ / ⌘⇧]** trim the current section's
-  start/end to the playhead. Hidden footage can be restored up to neighboring retained ranges.
+  **In / Out**. Changes snap to source frames. **⌘⇧[ / ⌘⇧]** (or **⌥[ / ⌥]**, as in Filmora)
+  trim the current section's start/end to the playhead. Hidden footage can be restored up to neighboring retained ranges.
 - **Select several sections:** **⇧-click** selects every section from the last one clicked
   to this one, in the order they play. **⌘-click** adds or removes one, and **⌘A** selects
   them all. Neither moves the playhead. **⌘← / ⌘→** select the previous or next section,
@@ -189,7 +246,7 @@ or understand which part of your content matters. Quiet footage may yield no sug
   Several go as one undo step. The gap closes automatically. At least one section stays;
   remove the sidebar item to discard a recording.
 - **Reorder:** drag a section onto another, or use the earlier/later arrow buttons.
-- **Snapping:** with **Snapping** on (the button above the timeline, or Timeline ▸
+- **Snapping:** with **Snapping** on (the button above the timeline, **N**, or Timeline ▸
   Snapping), dragged edges line up with the playhead, section boundaries, zoom edges and
   the start and end of the timeline once they come within 8 points of one. An accent
   line shows what an edge is holding to. It applies to trims, moving and resizing zooms,
@@ -197,7 +254,7 @@ or understand which part of your content matters. Quiet footage may yield no sug
   those are the frames it can cut at. Hold **⌥** while dragging to place freely. The
   reach is fixed on screen, so zooming in weakens it until it disappears at frame level.
   The setting is remembered.
-- **Arrange zooms:** use Zoom mode to add one at the playhead. Drag a cyan timeline block
+- **Arrange zooms:** use the Zoom tool or the Zoom row's **+** to add one at the playhead. Drag a cyan timeline block
   to move its start; drag its right handle to change the hold duration. Zooms stay inside
   the edited duration and cannot overlap. When cutting or reordering, their start frames
   anchor them to retained footage. Zooms whose start was removed, or which no longer fit,
@@ -222,7 +279,7 @@ or understand which part of your content matters. Quiet footage may yield no sug
 Playback uses AVFoundation and Core Image, so ordinary MP4/MOV recordings preview without
 an intermediate render. Other formats remain available for FFmpeg export but may not play
 natively. Soft blur/pixelation can look slightly different between the native preview and
-FFmpeg export; the Edit frame preview uses the FFmpeg blur graph. Export resolution, encoder
+FFmpeg export; the frame shown for edits uses the FFmpeg blur graph. Export resolution, encoder
 quality and animation frame thinning apply during export. Cuts encode audio to AAC even
 when Copy is selected, to keep the cut boundaries synchronized.
 
@@ -231,28 +288,29 @@ when Copy is selected, to keep the cut boundaries synchronized.
 | | |
 |---|---|
 | **Add clips** | Drop files (or a folder) onto the window, press ⌘O, or open a video with the app from Finder |
-| **Crop** | Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one. Exact pixel values are under **Details** in the inspector |
-| **Lock a shape** | Pick an aspect preset (16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) and resizing keeps that ratio |
-| **Blur an area** | Switch the picture to **Blur** and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw |
-| **Zoom in** | Switch to **Zoom**, scrub to the moment, then click the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds; drag the marker to re-aim it |
-| **Pick the frame you work against** | Drag the scrubber under the preview |
-| **Inspect what you select** | The inspector on the right follows your selection — a section's speed, trims and order, a zoom's level and hold, a blur area — above the recording's frame, blur, zoom and caption settings |
+| **Crop** | Press **Crop** (⌥C) under the picture or in the timeline's tool bar. Drag inside the rectangle to move it, drag any of the 8 handles to resize, or drag on the dimmed area to draw a new one, then **Apply**. Exact pixel values are under **Details** in the inspector |
+| **Lock a shape** | Pick a ratio chip (16:9, 9:16, 1:1, 4:5, 4:3, 2.39:1) under the picture, or a preset in the inspector, and resizing keeps that ratio |
+| **Blur an area** | Click the blur band on the Effects row (or **Add Area** in the inspector) and drag over anything you want hidden — a face, a name, a URL. Add as many areas as you like; drag or resize them the same way as the crop. **Add Area** drops one in the middle if you'd rather not draw. To hide something for only part of the recording (an ID card on a phone screen), go to its first frame and click **Start Here** in the blur area's inspector, then **End Here** at its last frame. The range is in the recording's own time, so later cuts do not move it |
+| **Zoom in** | Scrub to the moment and press the Zoom tool, or select a zoom and press **Aim** under the picture, then click or drag the spot. The video eases in, holds still, and eases back out. Pick 1.5×/2×/3× and how long it holds |
+| **Pick the frame you work against** | Drag the playhead on the timeline's ruler |
+| **Inspect what you select** | The inspector on the right follows your selection — a section, a zoom, a blur area, a graphic — with tabs below it, as in Filmora: **Speed** (a section's speed, trims and order; ⌥R), **Video** (frame, blur areas, zooms, screen, graphics, Shorts, effects and markers), **Audio** (captions and loudness) and **Colour** |
+| **Switch a change off** | The Frame, Blur areas, Zooms, Graphics and Colour sections each have a switch and a reset in their header. Off keeps the change in the project but leaves it out of the player and every export, so you can compare; on brings it back as it was. Reset goes back to no change (the whole frame, no blur areas, no zooms, the recorded colour). With nothing selected, **Changes on this video** lists every change with its switch, including ones agents made, and the export's captions and loudness |
 | **Reuse your work** | **Use on All Recordings** copies the crop, blur areas *and* zooms to every other queued clip with the same dimensions |
-| **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest. **Size** (100–150 %) draws cards and panels larger for viewers on a phone: cards grow to the left from the column's right edge, panels grow half as much, and logo badges, the end screen and Shorts keep their sizes |
+| **Add graphics** | In the inspector under **Graphics**, **Import…** a graphics file (graphics.json). The graphics show over the video in **Preview**, in the Graphics lane under the timeline, and in the inspector when you select one: drag a block to move it, drag its right edge to change its length, and change its text, times and images. **Look** chooses glass cards, ink, or ink for panels and cards for the rest. **Size** (100–150 %) draws cards and panels larger for viewers on a phone: cards grow to the left from the column's right edge, panels grow half as much, and logo badges, the end screen and Shorts keep their sizes. **Kinetic Text** puts big words over the whole picture from the playhead, each on the time it is spoken (from the transcript; one centred line, or one word on each line), and **Section Card** puts a part's title over a seek bar that shows how far into the video it starts. Both sit on near black or a darkened picture; in a Short, captions pause under them |
 | **Move and resize graphics** | In **Preview**, click a graphic on the picture to select it, drag it to move it, or drag a corner to resize it. It snaps to the title-safe area, the centre lines, its own place, and the column or panel; hold ⌥ to place it freely. ⌥ arrow keys nudge it. The inspector has **Across**, **Down**, **Size %** and **Reset Position**. Exports draw it where you put it |
 | **Export with graphics** | Export draws a recording's graphics into the video, with the picture sliding aside under each panel exactly as **Preview** shows it. The first time, the Export sheet's **Graphics** section offers **Download HyperFrames…** (a free renderer and the browser it draws with, about 220 MB, once). Each graphic is drawn once and reused until it changes, so later exports are quicker. Untick **Draw graphics into the video** to export without them. Movies leave graphics out for now |
 | **Publish to YouTube** | **Publish…** in the toolbar keeps the title, description, tags, category, chapters and thumbnail with the recording, counts them against YouTube's limits as you type, and previews the watch page and a search result. **Suggest from Markers and Graphics** makes chapters from named markers and panel graphics; they follow their footage when you cut. **Export for YouTube…** writes the MP4, the captions as an SRT timed on the edited video, a 1280×720 thumbnail under 2 MB, and a text file with everything to paste into YouTube Studio |
-| **Shorts with the screen** | For a recording with a screen recording, a Short's **Screen: On top** puts the screen across the top of the 1080×1920 Short and you below, with the captions between the two. Where the video shows only you, the Short shows only you, full height. The Short follows the screen's zooms, and the change between the two eases as in the video. Your face is kept in YouTube's clear area (an issue says when it cannot be), and `preview --short --furniture` shows agents YouTube's player over a frame. **Captions in Shorts** is a setting of its own: by default Shorts burn their captions in whenever the video has captions, also when the long video only uploads an SRT |
-| **Make a thumbnail** | In **Publish…**, **Make Thumbnail…** takes a frame, cuts you out with Apple Vision and puts a big title (words between asterisks in the accent colour, or on a band of it with **Highlight**), a tag and an optional picture beside you, with a white outline of the width you choose and a darker, blurred, plain or white background. **Suggest Frames** finds the moments where you smile, look at the camera and have your eyes open; click one to use it. **Place: Clear of the title** moves you to the far side so nothing overlaps. With a screen recording, the maker uses your own picture at every moment. The live preview shows it large and at YouTube's search size; **Save Thumbnail** makes the 1280×720 PNG next to the recording and uses it for the video |
+| **Shorts with the screen** | For a recording with a screen recording, a Short's **Screen: On top** puts the screen across the top of the 1080×1920 Short and you below, with the captions between the two. Where the video shows only you, the Short shows only you, full height. The Short follows the screen's zooms and yours, also one that began before the Short or ends after it, and the change between the two eases as in the video. Your face is kept in YouTube's clear area (an issue says when it cannot be), and `preview --short --furniture` shows agents YouTube's player over a frame. **Captions in Shorts** is a setting of its own: by default Shorts burn their captions in whenever the video has captions, also when the long video only uploads an SRT |
+| **Make a thumbnail** | **Thumbnail** under **Studio** in the left bar (or **Go → Make Thumbnail…**, ⇧⌘T, or **Make Thumbnail…** in **Publish…**) takes a frame, cuts you out with Apple Vision and puts a big title (words between asterisks in the accent colour, or on a band of it with **Highlight**), a tag and an optional picture beside you, with a white outline of the width you choose and a darker, blurred, plain or white background, or **White frost**: the whole frame moves with you to the far side and a white blurred shade holds the title, as in the Ink layout. The picture's **Size** goes up to 160 %, and the title gets smaller to make room. **Suggest Frames** finds the moments where you smile, look at the camera and have your eyes open; click one to use it. **Place: Clear** moves you to the far side so nothing overlaps. With a screen recording, the maker uses your own picture at every moment, at full size also under the end screen. The live preview shows it large, and **Phone** shows it at the size of an iPhone's YouTube home feed and search list. **Eye path** shows where the eye goes, in order: the face, then the words by size, contrast and colour. The **Thumbnail check** under it says what does not read in 0.5 s there: letters too small, too many words, low contrast or a face too small. Write the **Video title** beside the thumbnail's words: the maker says when the thumbnail only repeats the title, and which words it adds, so the two open a question together. **Save** makes the 1280×720 PNG next to the recording, uses it for the video and keeps the title. For YouTube's **Test & Compare**, **+ Version** adds version B or C (a copy to change); **Save** makes a PNG of each, **Export for YouTube** writes them as "… thumbnail A.jpg" and the others, and after the test the **Winner** menu makes the winning version the thumbnail and notes the result in the project's idea in the Library |
 | **End screen for YouTube** | In the inspector's **Graphics** section (or **Publish…**), **End Screen** keeps the last 5–20 seconds for YouTube's end screen: you move into a half-size frame over a blurred copy of the picture, and empty, marked boxes stay where YouTube puts its Subscribe circle and one or two video cards, so nothing covers them. Drag its block on the timeline to choose where it starts; it always runs to the end. In **Publish…**, choose what goes in each box (Subscribe or another channel; Best for viewer, Most recent upload, a chosen video or a playlist). YouTube's upload cannot place these, so **Export for YouTube…** writes each element and its box into the upload text for YouTube Studio's End screen editor |
-| **Auto edit a talking head** | **Auto Edit…** in the toolbar (⇧⌘E) keeps your answers with the project: the transcript model (Large v3 Turbo, or Base for English) and language, how tight to cut, what to do with captions, and whether to normalise loudness to -14 LUFS. **Auto Edit** transcribes the recording on this Mac with whisper.cpp (`brew install whisper-cpp`; the model downloads once, when you click), cuts pauses and, with **Tight**, the “um”s, repeated words and restarts found in the transcript, and sets captions and loudness, all as one undo step. **Review each cut** lists the cuts to listen to and choose first. Agents read and follow the same answers |
+| **Auto edit a talking head** | **Auto Edit…** in the toolbar (⇧⌘E) keeps your answers with the project: the transcript model (Large v3 Turbo, or Base for English) and language, how tight to cut, what to do with captions, and whether to normalise loudness to -14 LUFS. **Auto Edit** transcribes the recording on this Mac with whisper.cpp (`brew install whisper-cpp`; the model downloads once, when you click), cuts pauses and, with **Tight**, the “um”s, repeated words and restarts found in the transcript, and sets captions and loudness, all as one undo step. **Tight** leaves about 0.22 s inside a sentence, 0.30 s after a comma and 0.40 s after a full stop, so each new sentence does not come in too soon. At every cut the sound fades out and back in over 12 ms, in the preview and in exports, so a joint never clicks and the room's hum does not jump. **Review each cut** lists the cuts to listen to and choose first. Agents read and follow the same answers |
 | **Captions** | Drop an `.srt`, `.vtt` or `.ass` next to the video under the same name and it is picked up automatically, or pick one under **Captions** in the inspector; a transcribed recording gets captions from what is said, without the words you cut. **Use** chooses **SRT for upload** (they go up beside the video with Export for YouTube), **Burn in and SRT**, or **None**. Choose where burned-in captions sit and how big they are. SRT, VTT and transcript captions follow cuts and speed changes |
 | **Make a GIF or WebP** | Pick the format in the Export sheet. Everything else — crop, blur, zoom — works exactly the same |
 | **Correct Pocket 3 D-Log M colour** | In the inspector's **Colour** section set **Recorded colour** to **DJI Pocket 3 D-Log M**. The first time, **Get DJI Conversion** opens DJI's download page and **Import Conversion File…** takes the `.cube` you saved. After that, **Natural Colour** is one click, and one Undo. Auto never assumes D-Log M: a `DJI_` file name only makes it ask |
 | **Adjust the look** | **Brightness**, **Warmth**, **Contrast** and **Colour strength**, each with its own reset. Exact values are under **Details**. A drag is one undo step, and the picture follows it straight away |
-| **Compare before and after** | **Corrected / Original / Compare** under the picture. Compare shows the original on the left half and the corrected picture on the right, at the same frame. It never changes the project or the export |
+| **Compare before and after** | **Before/After** under the picture shows the recording as it was. For colour alone, **Compare on the Frame** in the inspector's Colour section shows the original on the left half and the corrected picture on the right, at the same frame. Neither changes the project or the export |
 | **Copy colour to other recordings** | **Copy Colour…** copies the look. Tick **Also copy the recorded colour and conversion** only for recordings made the same way |
-| **Blur the whole picture for a moment** | **Effects** mode (or **Add Blur Effect** in the inspector) adds a full-frame blur at the playhead that fades in and out, for a transition, a private moment or a backdrop for a title. Drag its block on the Effects lane to move it, or its edges to retime it; it stops at its neighbours. The inspector sets **Amount**, **Mix**, **Fade in/out**, exact times, and **On** to bypass it without deleting it. Effects mode shows the composed Preview so you see the result |
+| **Blur the whole picture for a moment** | The Blur tool (or **Add Blur Effect** in the inspector) adds a full-frame blur at the playhead that fades in and out, for a transition, a private moment or a backdrop for a title. Drag its block on the Effects lane to move it, or its edges to retime it; it stops at its neighbours. The inspector sets **Amount**, **Mix**, **Fade in/out**, exact times, and **On** to bypass it without deleting it. The player shows the result |
 | **Mark a moment** | Press **M** to drop a marker at the playhead; **⇧M** names the selected one; **⇧↑ / ⇧↓** jump between markers. Markers fly in the ruler, follow their footage through cuts, and are snap targets. They are also how you and an agent can point at the same moment |
 | **Export** | **Export…** opens a sheet for the selected recording, all recordings or the movie, with format, quality, audio and destination. ⌘R still exports all recordings (or the movie in Movie). ⌘. stops |
 
@@ -370,6 +428,11 @@ A few things this handles that are easy to get wrong:
 - **Blur runs before the crop.** Blur areas live in full-frame coordinates, so moving the
   crop doesn't drag them along with it. The preview bakes the blur in using the same graph
   builder the export uses, so preview and output can't drift apart.
+- **A timed blur area keeps source time.** Its `start` and `end` are seconds of the
+  recording. The player and the export both turn them into edited-time spans through the
+  same timeline (`BlurBox.boxes`), widened by 0.1 s on each side, so a frame rounded at a
+  cut never shows what the area hides. The export limits the overlay with
+  `enable='between(t,…)'`.
 - **`-filter_complex` breaks stream selection.** Blurring needs a filter graph rather than a
   simple chain, which silently drops audio unless every stream is mapped explicitly. There's
   a test for exactly that.
@@ -437,7 +500,8 @@ selects something to show it to you.
 Sources/
   App.swift         @main, menu commands, Finder open-file handling
   AppModel.swift    queue, selection, preview, conversion driver
-  ContentView.swift window layout: the module sidebar; in Studio, media list, picture and inspector over a full-width timeline
+  ContentView.swift window layout: the module sidebar; in Studio, the Media panel, picture and inspector over a full-width timeline
+  MediaPanel.swift / MediaLibrary.swift the Media panel's tabs, what it adds or drops on the timeline, caption cues and audio pauses
   Library.swift     the Library: ideas, their rules, stages and links to projects, the Library commands and reducer
   LibraryEditing.swift / LibraryView.swift loading and saving the Library, its undo, the owner's actions, the sidebar and the Library page
   LibraryAgents.swift the Library for agents: library, libraryApply, libraryUndo, libraryRedo and scanFolder
@@ -450,7 +514,7 @@ Sources/
   CropEditor.swift  crop/blur/zoom overlays, handle/resize maths, pixel fields
   FFmpeg.swift      locating the binaries, probing, thumbnails, export
   Models.swift      media info, export settings, geometry helpers
-  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v16)
+  Timeline.swift    ordered source ranges, snapping, selection and project serialization (schema v18)
   ColorLUT.swift    .cube parser and trilinear sampling
   ColorAdjustments.swift colour settings, the four adjustments and Auto's inference
   ColorPipeline.swift table store and the colour stage shared by ffmpeg and Core Image
@@ -475,12 +539,18 @@ Sources/
   AgentCatalog.swift every agent command described for agents, served by `catalog`
   AgentsManual.swift the Agents Manual (Resources/AgentsManual.md), served by `manual`, and the brief for an agent
   FrameSuggestions.swift Suggest Frames: Apple Vision smile, face and eye scores for thumbnail moments
+  ThumbnailCheck.swift  the phone check: a thumbnail at a phone's sizes, and what does not read in 0.5 s
+  ThumbnailGap.swift    the information gap: the thumbnail's words against the video's title
+  ThumbnailEyePath.swift the eye path: where a viewer looks first on a thumbnail
   EditCommands.swift typed edit commands and the pure, all-or-nothing reducer
   ProjectCommandDispatcher.swift revisions, gestures, shared undo, sessions, change feed
   AgentProtocol.swift wire types and socket helpers shared with yamvideoctl
   LocalAgentServer.swift private Unix-socket listener and discovery record
   AgentRequests.swift every agent request: state, apply, preview, jobs, save
-  TimelineView.swift timeline, section trim handles and zoom blocks
+  TimelineView.swift timeline: tool bar, row headers, filmstrip sections, trim handles and zoom blocks
+  TimelineTracks.swift the timeline's rows, eye and lock, section badges and filmstrip tiles
+  PictureEditing.swift the one player's edits on the frame: crop with Apply, blur areas, zoom aim, Before/After, snapshot
+  ChangeSwitches.swift changes switched off (saved in the project), reset, captions and loudness switches, inspector tabs
   Playback.swift    native video/audio composition and live effects
   ProjectEditing.swift undo history, project files and session recovery
   Movie.swift       movie canvas and multi-source FFmpeg export graph
@@ -513,7 +583,7 @@ local socket and `yamvideoctl`) are implemented; the remaining phases describe p
 work, not features available in this build.
 
 The [screen + speaker plan](docs/plans/screen-speaker.md) puts a screen recording with
-the speaker's recording, synced by one offset, in Speaker, Screen or Side by side layouts.
+the speaker's recording, synced by one offset, in Speaker, Screen, Side by side or Ink layouts.
 Part 1 is implemented; section 10 lists part 2.
 
 The [graphics track plan](docs/plans/graphics-track.md) is the layer design that the

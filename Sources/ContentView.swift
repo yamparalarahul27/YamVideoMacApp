@@ -16,6 +16,7 @@ struct ContentView: View {
                 Divider()
                 switch model.module {
                 case .library: LibraryPage()
+                case .calendar: CalendarView()
                 case .studio: studio
                 }
             }
@@ -26,7 +27,7 @@ struct ContentView: View {
         .frame(minWidth: 1140, minHeight: 800)
         .toolbar {
             switch model.module {
-            case .library: libraryToolbar
+            case .library, .calendar: libraryToolbar
             case .studio: studioToolbar
             }
         }
@@ -34,6 +35,11 @@ struct ContentView: View {
         .sheet(isPresented: $publishing) { PublishSheet().environmentObject(model) }
         .sheet(isPresented: $model.showingZoomSuggestions) { ZoomSuggestionsView().environmentObject(model) }
         .sheet(isPresented: $model.showingAutoEdit) { AutoEditSheet().environmentObject(model) }
+        .sheet(isPresented: $model.showingThumbnailMaker) {
+            if let item = model.selectedItem {
+                ThumbnailMakerSheet(item: item, playhead: model.previewTime).environmentObject(model)
+            }
+        }
         .sheet(isPresented: Binding(get: { model.libraryScan != nil }, set: { if !$0 { model.libraryScan = nil } })) {
             PastVideosSheet().environmentObject(model)
         }
@@ -60,8 +66,8 @@ struct ContentView: View {
     private var studio: some View {
         VStack(spacing: 0) {
             HSplitView {
-                QueueSidebar()
-                    .frame(minWidth: 200, idealWidth: 230, maxWidth: 320)
+                MediaPanel()
+                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 340)
 
                 editorPane
                     .frame(minWidth: 480)
@@ -258,7 +264,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("→ alongside originals")
+                Text(model.selectedItem.flatMap { FootageLayout.videoFolder(of: $0.url) } == nil ? "→ alongside originals" : "→ Edited")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -419,47 +425,64 @@ struct QueueRow: View {
     }
 }
 
-// MARK: - Crop editor pane
+// MARK: - Picture pane
 
+/// The one player. It plays the edit, and the selection decides what the handles on the
+/// picture do. The Crop tool, the blur areas, aiming a zoom and the colour comparison open
+/// the recording's frame in its place, with a bar under it to finish the edit.
 struct CropEditorPane: View {
     @EnvironmentObject var model: AppModel
     let item: VideoItem
     let info: MediaInfo
     let crop: CGRect
 
+    /// What decides whether the player has to come back.
+    private struct PictureKey: Equatable {
+        let item: VideoItem.ID
+        let playing: Bool
+        let edit: PictureEdit?
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
+            picture
+                .frame(maxHeight: .infinity)
+                .overlay(alignment: .top) { beforeBadge }
+            Divider()
+            if let edit = model.pictureEdit { editBar(edit) } else { playerBar }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .task(id: PictureKey(item: item.id, playing: model.showPlayback, edit: model.pictureEdit)) {
+            // One player: whatever hid it without opening an edit on the frame, it comes back.
+            if model.pictureEdit == nil, !model.showPlayback, !model.isConverting { model.setPlaybackVisible(true) }
+        }
+        .onDeleteCommand {
+            // A selected section goes with the Timeline menu's ⌫; everything else here.
+            guard !model.isConverting, model.inspectorFocus != .section else { return }
+            model.deleteSelection()
+        }
+    }
 
-            if model.showPlayback, model.showsShort, let short = item.short(model.playback.shortID) {
-                PlaybackCanvas(playback: model.playback, graphics: model.shortOverlay(item, info: info, short: short),
-                               editsGraphics: !model.isConverting, short: short.id, furniture: model.shortFurniture,
-                               onGraphicBounds: { model.shortGraphicBounds = $0 })
-                    .frame(maxHeight: .infinity)
-            } else if model.showPlayback {
-                PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay, editsGraphics: !model.isConverting,
-                               onGraphicBounds: { model.graphicBounds = $0 })
-                    .overlay {
-                        if item.screen != nil, model.selectedScreenZoom != nil, !model.isConverting {
-                            ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
-                        }
-                    }
-                    .frame(maxHeight: .infinity)
-            } else {
+    // MARK: The picture
+
+    @ViewBuilder
+    private var picture: some View {
+        if let edit = model.pictureEdit {
             CropCanvas(
                 image: model.previewImage,
                 info: info,
-                crop: crop,
-                ratio: item.aspectLock,
+                crop: edit == .crop ? (model.cropDraft?.rect ?? crop) : crop,
+                ratio: edit == .crop ? model.cropDraft?.ratio : item.aspectLock,
                 originalImage: model.previewOriginalImage,
                 isLoading: model.previewIsLoading,
-                mode: model.editorMode,
+                mode: edit.mode,
                 regions: item.blurRegions,
                 selectedRegionID: model.selectedRegionID,
                 shots: item.zoomShots,
                 selectedShotID: model.selectedShotID,
-                onChange: { model.updateCrop($0, live: $1) },
+                onChange: { rect, _ in model.updateCropDraft(rect) },
                 onSelectRegion: { model.selectedRegionID = $0 },
                 onChangeRegion: { model.updateRegion($0, rect: $1, live: $2) },
                 onAddRegion: { model.addRegion($0); model.refreshPreview() },
@@ -468,32 +491,27 @@ struct CropEditorPane: View {
                 onMoveShotEnded: { model.endGesture() },
                 onAddShot: { model.addZoom(at: $0) }
             )
-            .frame(maxHeight: .infinity)
-
-            }
-        }
-        .overlay(alignment: .bottom) { comparison }
-        .background(Color(nsColor: .windowBackgroundColor))
-        // Effects can only be judged in the composed picture, so Effects mode shows it.
-        .onChange(of: model.editorMode) { _, mode in model.setPlaybackVisible(mode == .effects) }
-        .onDeleteCommand {
-            guard !model.isConverting else { return }
-            if model.inspectorFocus == .graphic { model.removeSelectedGraphic(); return }
-            if model.inspectorFocus == .short { model.removeSelectedShort(); return }
-            if model.inspectorFocus == .layout { model.removeSelectedLayout(); return }
-            if model.inspectorFocus == .screenZoom { model.removeSelectedScreenZoom(); return }
-            switch model.editorMode {
-            case .blur: model.removeSelectedRegion()
-            case .zoom: model.removeSelectedZoom()
-            case .effects: model.removeSelectedEffect()
-            case .crop: break
-            }
+        } else if model.showsShort, let short = item.short(model.playback.shortID) {
+            PlaybackCanvas(playback: model.playback,
+                           graphics: model.timelineTracks.hidden.contains(.graphics) || !item.isOn(.graphics) ? nil : model.shortOverlay(item, info: info, short: short),
+                           editsGraphics: !model.isConverting, short: short.id, furniture: model.shortFurniture,
+                           onGraphicBounds: { model.shortGraphicBounds = $0 })
+        } else {
+            PlaybackCanvas(playback: model.playback, graphics: graphicsOverlay,
+                           editsGraphics: !model.isConverting && !model.showsBefore,
+                           onGraphicBounds: { model.graphicBounds = $0 })
+                .overlay {
+                    if item.screen != nil, model.selectedScreenZoom != nil, !model.isConverting, !model.showsBefore {
+                        ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
+                    }
+                }
         }
     }
 
     /// Graphics are drawn at the 1920×1080 design size on a 16:9 picture. Other shapes wait
     /// for the vertical layouts of a later phase.
     private var graphicsOverlay: GraphicsOverlayInput? {
+        guard !model.timelineTracks.hidden.contains(.graphics), !model.showsBefore, item.isOn(.graphics) else { return nil }
         guard let track = item.placedGraphics, !track.items.isEmpty else { return nil }
         let frame = crop.size
         guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
@@ -501,53 +519,23 @@ struct CropEditorPane: View {
                                     fps: info.fpsExpression, frame: frame, time: model.previewTime)
     }
 
-    /// Original / Corrected / Compare, under the picture while the recording has a colour
-    /// stage to compare. Playback can show either version but not both halves.
     @ViewBuilder
-    private var comparison: some View {
-        if item.colorStage(model.settings).render != nil {
-            Picker("Colour", selection: $model.colorComparison) {
-                ForEach(model.showPlayback ? [ColorComparison.corrected, .original] : ColorComparison.allCases) {
-                    Text($0.label).tag($0)
-                }
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .controlSize(.small)
-            .padding(4)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
-            .padding(.bottom, 8)
-            .help("Original shows the recording without colour correction; Compare shows both halves of the same frame.")
-            .accessibilityLabel("Colour comparison")
+    private var beforeBadge: some View {
+        if model.showsBefore, model.pictureEdit == nil {
+            Text("Before: the recording as it was")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.top, 10)
+                .allowsHitTesting(false)
         }
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $model.editorMode) {
-                ForEach(EditorMode.allCases) { mode in
-                    Text(mode == .blur && !item.blurRegions.isEmpty
-                         ? "\(mode.label) (\(item.blurRegions.count))"
-                         : mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 230)
-
-            Picker("Viewer", selection: Binding(get: { model.viewer }, set: { model.setViewer($0) })) {
-                Text("Edit frame").tag(AppModel.Viewer.frame)
-                Text("Preview").tag(AppModel.Viewer.preview)
-                Text("Short").tag(AppModel.Viewer.short)
-            }.pickerStyle(.segmented).frame(width: 220).labelsHidden()
-                .help("Edit frame shows the frame to crop and mark; Preview plays the edit; Short plays the selected Short, 9:16")
-            if model.viewer == .short {
-                Toggle(isOn: $model.shortFurniture) { Label("YouTube's buttons", systemImage: "rectangle.portrait.inset.filled") }
-                    .toggleStyle(.button).labelStyle(.iconOnly).controlSize(.small)
-                    .accessibilityLabel("Show YouTube's buttons over the Short")
-                    .help("Show faintly where YouTube draws its icons, buttons, channel and title over a Short")
-            }
+        HStack(spacing: 8) {
             Text(item.name).font(.headline).lineLimit(1).truncationMode(.middle)
-                .help("\(info.width)×\(info.height) · \(info.videoCodec.uppercased()) · \(formatDuration(info.duration))")
+            Text(verbatim: "\(info.width)×\(info.height) · \(info.fps > 0 ? String(format: "%.0f fps · ", info.fps) : "")\(formatDuration(info.duration))")
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 0)
             if case .done(let url) = item.status {
                 Button("Show in Finder") { model.reveal(url) }
@@ -555,6 +543,175 @@ struct CropEditorPane: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: The player bar
+
+    /// Under the picture, as in Filmora: where the playhead is, playback, then the tools
+    /// for the picture.
+    private var playerBar: some View {
+        HStack(spacing: 2) {
+            Text("\(timelineTime(model.previewTime)) / \(timelineTime(item.editedDuration))")
+                .font(.system(.callout, design: .monospaced)).monospacedDigit()
+                .lineLimit(1)
+                .frame(minWidth: 150, alignment: .leading)
+            Spacer(minLength: 8)
+            barButton("backward.frame", "Previous frame (←)", label: "Previous frame") { model.stepFrame(-1) }
+            Button { model.togglePlayback() } label: {
+                Image(systemName: model.playback.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 14))
+                    .frame(width: 32, height: 26)
+            }
+            .help("Play / pause (Space)")
+            .accessibilityLabel(model.playback.isPlaying ? "Pause" : "Play")
+            barButton("forward.frame", "Next frame (→)", label: "Next frame") { model.stepFrame(1) }
+            Spacer(minLength: 8)
+            if model.inspectorFocus == .zoom, model.selectedShot != nil, !model.showsShort {
+                barButton("scope", "Aim the selected zoom on the picture", label: "Aim zoom") { model.beginZoomAim() }
+            }
+            barButton("crop", "Crop the frame (⌥C)", label: "Crop") { model.beginCrop() }
+                .disabled(model.showsShort)
+            Toggle(isOn: Binding(get: { model.showsBefore }, set: { model.setBefore($0) })) {
+                Label("Before/After", systemImage: "rectangle.split.2x1")
+            }
+            .toggleStyle(.button).labelStyle(.iconOnly)
+            .disabled(model.showsShort)
+            .help(model.showsBefore
+                  ? "Showing Before: the recording as it was. Click to show the edit."
+                  : "Before/After: show the recording as it was, with the same cuts and no crop, zooms, blur, colour or graphics")
+            .accessibilityLabel("Before/After")
+            Picker("Shape", selection: Binding(get: { model.showsShort }, set: { model.setPictureTall($0) })) {
+                Text("Video").tag(false)
+                Text("Short").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help(item.shorts.isEmpty ? "Short plays a 9:16 Short. Add one with the + on the Shorts row." : "Video plays the edit; Short plays the selected Short at 9:16")
+            .accessibilityLabel("Video or Short")
+            if model.showsShort {
+                Toggle(isOn: $model.shortFurniture) {
+                    Label("Safe zones", systemImage: "rectangle.portrait.inset.filled")
+                }
+                .toggleStyle(.button).labelStyle(.iconOnly)
+                .help("Safe zones: show faintly where YouTube draws its buttons, channel and title over the Short")
+                .accessibilityLabel("Safe zones")
+            }
+            barButton("camera", "Snapshot: save this frame as a PNG", label: "Snapshot") { model.saveSnapshot() }
+                .disabled(!model.showPlayback || model.showsBefore)
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+    }
+
+    private func barButton(_ symbol: String, _ help: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(width: 26, height: 22) }
+            .help(help)
+            .accessibilityLabel(label)
+    }
+
+    // MARK: The edit bars
+
+    private func editBar(_ edit: PictureEdit) -> some View {
+        HStack(spacing: 6) {
+            switch edit {
+            case .crop: cropBar
+            case .blurAreas: blurBar
+            case .zoomAim: zoomBar
+            case .colourCompare: compareBar
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(Color.accentColor.opacity(0.12))
+    }
+
+    private func barTitle(_ title: String, _ symbol: String) -> some View {
+        Label(title, systemImage: symbol).labelStyle(.titleAndIcon).font(.callout.weight(.semibold)).fixedSize()
+    }
+
+    @ViewBuilder
+    private var cropBar: some View {
+        barTitle("Crop", "crop")
+        // The ratios side by side where they fit, as a menu where the picture is narrow.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ratioPicker.pickerStyle(.segmented)
+                cropSize
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 6) {
+                ratioPicker.pickerStyle(.segmented)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 6) {
+                ratioPicker.pickerStyle(.menu)
+                cropSize
+                Spacer(minLength: 0)
+            }
+        }
+        Button { model.resetCropDraft() } label: { Image(systemName: "arrow.counterclockwise") }
+            .help("Reset: the whole frame, with a free ratio")
+            .accessibilityLabel("Reset the crop")
+        Button("Cancel") { model.cancelCropDraft() }
+            .keyboardShortcut(.cancelAction)
+        Button("Apply") { model.applyCropDraft() }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+    }
+
+    private var ratioPicker: some View {
+        Picker("Ratio", selection: Binding(get: { model.cropDraft?.preset ?? "Free" },
+                                           set: { label in AspectPreset.all.first { $0.label == label }.map(model.setCropDraftAspect) })) {
+            ForEach(AspectPreset.all) { Text($0.label).tag($0.label) }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .help("The crop's ratio. Free lets the corners move freely.")
+        .accessibilityLabel("Crop ratio")
+    }
+
+    private var cropSize: some View {
+        Text(model.cropDraft?.size ?? "")
+            .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+            .fixedSize()
+            .accessibilityLabel("Crop size \(model.cropDraft?.size ?? "")")
+    }
+
+    @ViewBuilder
+    private var blurBar: some View {
+        barTitle("Blur areas", "camera.filters")
+        Text("Drag on the picture to add an area. Drag an area to move it or change its size.")
+            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Spacer(minLength: 6)
+        Button("Delete Area") { model.removeSelectedRegion() }
+            .disabled(model.selectedRegionID == nil)
+        Button("Done") { model.endPictureEdit() }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+    }
+
+    @ViewBuilder
+    private var zoomBar: some View {
+        barTitle(model.selectedShot.map { "Zoom \($0.levelLabel) at \(timelineTime($0.start))" } ?? "Zoom", "plus.magnifyingglass")
+        Text("Drag the box to aim the zoom. Click the picture to add a zoom there.")
+            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Spacer(minLength: 6)
+        Button("Done") { model.endPictureEdit() }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
+    }
+
+    @ViewBuilder
+    private var compareBar: some View {
+        barTitle("Colour", "circle.lefthalf.filled")
+        Text("Original on the left, corrected on the right, on the same frame.")
+            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Spacer(minLength: 6)
+        Button("Done") { model.endPictureEdit() }
+            .keyboardShortcut(.defaultAction)
+            .buttonStyle(.borderedProminent)
     }
 }

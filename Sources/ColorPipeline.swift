@@ -271,7 +271,8 @@ extension VideoItem {
     /// This recording's colour stage under `settings`; `.none` until it is probed.
     func colorStage(_ settings: ExportSettings, original: Bool = false) -> ColorStage {
         guard let info else { return .none }
-        return ColorPipeline.stage(color, info: info, fileName: name, toneMapHDR: settings.toneMapHDR, original: original)
+        return ColorPipeline.stage(color, info: info, fileName: name, toneMapHDR: settings.toneMapHDR,
+                                   original: original || !isOn(.colour))
     }
 
     /// The stage as ffmpeg filters, or none when it cannot be applied — for previews,

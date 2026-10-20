@@ -20,7 +20,10 @@ Reading
                                                  (--furniture: YouTube's Shorts player over it, the clear area dashed)
   yamvideoctl preview --clip ID --time SECONDS --draft GRAPHICS.json [--short ID]
                                                  also draw graphics that are not stored, to show the owner a plan
-  yamvideoctl thumbnail --clip ID [--save]        the thumbnail from the stored design, as a PNG
+  yamvideoctl thumbnail --clip ID [--version A|B|C] [--save] [--check [--video-title TEXT]]
+                                                 the thumbnail from the stored design, as a PNG
+                                                 (--check: also what does not read on a phone in 0.5 s,
+                                                 and whether it repeats the video title, or TEXT)
   yamvideoctl transcript --clip ID                words with source and edited times, captions, stumbles
   yamvideoctl logos                              the owner's logo library: each brand, its words and its image
   yamvideoctl job JOB [--wait]
@@ -79,7 +82,7 @@ struct Arguments {
     var flags: Set<String> = []
     var positional: [String] = []
 
-    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "save", "pretty", "wait", "help", "furniture"]
+    static let booleans: Set<String> = ["dry-run", "cropped", "original", "composed", "movie", "overwrite", "youtube", "save", "pretty", "wait", "help", "furniture", "check"]
 
     init(_ raw: [String]) throws {
         var index = 0
@@ -288,6 +291,9 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         request["method"] = "thumbnail"
         request["clip"] = try value("clip")
         if arguments.flags.contains("save") { request["save"] = true }
+        if arguments.flags.contains("check") { request["check"] = true }
+        if let title = arguments.values["video-title"] { request["videoTitle"] = title }
+        if let version = arguments.values["version"] { request["version"] = version }
     case "analyze":
         request["method"] = "analyze"
         request["kind"] = try value("kind")
