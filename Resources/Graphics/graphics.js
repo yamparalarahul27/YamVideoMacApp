@@ -523,33 +523,49 @@
   };
 
   /**
-   * Where a logo badge goes: `spot` {x, y, alignX, alignY, compact}, the point its alignX
-   * and alignY edges (start, middle or end) go to. The app works it out from where the
-   * layout puts the speaker (LogoSpot in Sources/Logos.swift). Without one: the top right.
+   * Where a logo badge goes: `spot` {x, y, alignX, alignY, compact, vertical, widths}, the
+   * point its alignX and alignY edges (start, middle or end) go to. The app works it out
+   * from where the layout puts the speaker (LogoSpot in Sources/Logos.swift). Without one:
+   * the top right.
    */
   const EDGE_SHIFT = { start: 0, middle: -50, end: -100 };
   function logoSpot(p, short) {
     const s = (p && p.spot) || {};
     const edge = (value, fallback) => (EDGE_SHIFT[value] !== undefined ? value : fallback);
+    const widths = Array.isArray(s.widths) ? s.widths : [];
     if (typeof s.x === "number" && isFinite(s.x) && typeof s.y === "number" && isFinite(s.y)) {
-      return { x: s.x, y: s.y, alignX: edge(s.alignX, "start"), alignY: edge(s.alignY, "start"), compact: !!s.compact, vertical: !!s.vertical };
+      return { x: s.x, y: s.y, alignX: edge(s.alignX, "start"), alignY: edge(s.alignY, "start"), compact: !!s.compact, vertical: !!s.vertical, widths };
     }
-    return short ? { x: 888, y: 240, alignX: "end", alignY: "start", compact: true }
-      : { x: 1824, y: 54, alignX: "end", alignY: "start", compact: false };
+    return short ? { x: 888, y: 240, alignX: "end", alignY: "start", compact: true, widths }
+      : { x: 1824, y: 54, alignX: "end", alignY: "start", compact: false, widths };
+  }
+
+  /**
+   * A logo's width in a chip. A logo is 100 px tall (96 in compact chips) and as wide as
+   * the app says in `spot.widths` (from the image's own size, LogoBadge.logoWidths in
+   * Sources/Logos.swift): from square to three times as wide as tall. Square without one.
+   */
+  const LOGO_WIDEST = 3;
+  function logoHeight(spot) { return spot.compact ? 96 : 100; }
+  function logoWidth(spot, index) {
+    const height = logoHeight(spot);
+    return Math.max(height, Math.min(height * LOGO_WIDEST, num(spot.widths[index], height)));
   }
 
   /** A brand's logo next to the speaker: a row of chips, each a logo and its name, each
-   * popping in at its own `at`; one above the other when `spot.vertical`. A Short's compact
-   * chips show the logo alone. */
+   * popping in at its own `at`; one above the other when `spot.vertical`. A wide logo (a
+   * wordmark) makes its chip wider. A Short's compact chips show the logo alone. */
   KINDS.logoBadge = function (inner, p, c) {
     const spot = logoSpot(p, c.short);
     const row = h("div", { class: "yg-lb-row" + (spot.compact ? " yg-lb-compact" : "") + (p.tone === "dark" ? " yg-lb-dark" : "")
         + (spot.vertical ? " yg-lb-column yg-lb-x-" + spot.alignX : ""),
       style: "transform:translate(" + EDGE_SHIFT[spot.alignX] + "%," + EDGE_SHIFT[spot.alignY] + "%);" });
-    const chips = (p.logos || []).slice(0, 3).map((logo) => {
+    const chips = (p.logos || []).slice(0, 3).map((logo, index) => {
       const label = !spot.compact && logo.label ? h("span", { text: logo.label }) : null;
+      const width = logoWidth(spot, index);
+      const image = h("img", { src: logo.image, alt: "", style: width > logoHeight(spot) ? "width:" + width + "px;" : null });
       return { at: Math.max(0, num(logo.at, 0)),
-        node: h("div", { class: "yg-lb-chip" + (label ? "" : " yg-lb-bare") }, h("img", { src: logo.image, alt: "" }), label) };
+        node: h("div", { class: "yg-lb-chip" + (label ? "" : " yg-lb-bare") }, image, label) };
     });
     append(row, chips.map((x) => x.node));
     append(inner, row);

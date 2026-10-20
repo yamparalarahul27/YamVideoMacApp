@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 
 // Logo badges: a brand's logo next to the speaker when the speaker says the brand, in the
 // long video and in its Shorts. The app finds the names in the transcript (`BrandFinder`),
@@ -54,21 +55,96 @@ enum LogoBadge {
     }
 
     /// The badge's size in design pixels, as graphics.css draws it: a row of chips 20 px
-    /// apart (or, `vertical`, one above the other); a chip is 16 px of padding, the 100 px
-    /// logo, then 20 px and the label (46 px Inter Bold, about 0.6 em a character) and
-    /// 36 px; without a label, 132 px square. Compact chips (a Short's) are the 96 px logo
-    /// alone, 120 px square, 14 px apart.
-    static func size(_ props: [String: JSONValue], compact: Bool, vertical: Bool = false) -> CGSize {
+    /// apart (or, `vertical`, one above the other); a chip is 16 px of padding, the logo
+    /// (`widths`, default `logoWidths`), then 20 px and the label (46 px Inter Bold, about
+    /// 0.6 em a character) and 36 px; without a label, 16 px each side. A chip is 132 px
+    /// tall. Compact chips (a Short's) are the logo alone with 12 px each side, 120 px tall
+    /// and 14 px apart. With square logos, a chip without a label is square.
+    static func size(_ props: [String: JSONValue], compact: Bool, vertical: Bool = false, widths: [Double]? = nil) -> CGSize {
         let logos = logos(props)
         guard !logos.isEmpty else { return .zero }
-        let widths = logos.map { logo -> Double in
-            if compact { return 120 }
-            guard let label = logo.label, !label.isEmpty else { return 132 }
-            return 16 + 100 + 20 + Double(label.count) * 27.6 + 36
+        let images = widths ?? logoWidths(props, compact: compact)
+        let chips = logos.indices.map { index -> Double in
+            let image = index < images.count ? images[index] : logoHeight(compact: compact)
+            if compact { return 12 + image + 12 }
+            guard let label = logos[index].label, !label.isEmpty else { return 16 + image + 16 }
+            return 16 + image + 20 + Double(label.count) * 27.6 + 36
         }
-        let height = compact ? 120.0 : 132.0, gap = compact ? 14.0 : 20.0, count = Double(widths.count)
-        if vertical { return CGSize(width: widths.max() ?? 0, height: height * count + gap * (count - 1)) }
-        return CGSize(width: widths.reduce(0, +) + gap * (count - 1), height: height)
+        let height = compact ? 120.0 : 132.0, gap = compact ? 14.0 : 20.0, count = Double(chips.count)
+        if vertical { return CGSize(width: chips.max() ?? 0, height: height * count + gap * (count - 1)) }
+        return CGSize(width: chips.reduce(0, +) + gap * (count - 1), height: height)
+    }
+
+    // MARK: Wide logos
+
+    /// A logo is drawn up to this many times as wide as it is tall: a wordmark (CoinDCX's
+    /// 496×149) gets a 300 px wide logo in a 16:9 chip, 288 px in a Short's.
+    static let widest = 3.0
+
+    /// How tall a logo is drawn: 100 px, 96 px in a compact chip.
+    static func logoHeight(compact: Bool) -> Double { compact ? 96 : 100 }
+
+    /// How wide a logo with `aspect` (width over height) is drawn: as its aspect asks, from
+    /// square (a tall logo keeps the square box) to `widest` times its height.
+    static func logoWidth(aspect: Double, compact: Bool) -> Double {
+        let height = logoHeight(compact: compact)
+        return (height * min(widest, max(1, aspect.isFinite ? aspect : 1))).rounded()
+    }
+
+    /// The width of each logo of a badge, in order, from each image's own size. The engine
+    /// draws the same widths (`LogoSpot.widths`). A logo that cannot be read is square.
+    static func logoWidths(_ props: [String: JSONValue], compact: Bool) -> [Double] {
+        logos(props).map { logoWidth(aspect: aspect(of: $0.image), compact: compact) }
+    }
+
+    private static let aspects = Cache<Double>(limit: 64)
+
+    /// An image's width over its height, from its pixel size (an SVG's from its width and
+    /// height, or its viewBox), as a web page draws it; 1 when it cannot be read. Kept by
+    /// path, size and date, so a replaced logo is read again.
+    static func aspect(of path: String) -> Double {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        let bytes = (attributes?[.size] as? NSNumber)?.intValue ?? -1
+        let date = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let key = "\(path) \(bytes) \(date)"
+        if let known = aspects.value(key) { return known }
+        let url = URL(fileURLWithPath: path)
+        var aspect = 1.0
+        if url.pathExtension.lowercased() == "svg" {
+            if let data = try? Data(contentsOf: url), let read = svgAspect(String(decoding: data, as: UTF8.self)) { aspect = read }
+        } else if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+                  let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue, width > 0, height > 0 {
+            // EXIF orientations 5 to 8 turn the picture a quarter, as the page shows it.
+            let turned = ((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1) >= 5
+            aspect = turned ? height / width : width / height
+        }
+        aspects.store(key, aspect)
+        return aspect
+    }
+
+    /// An SVG's width over its height: from the root's width and height (plain numbers or
+    /// px), else from its viewBox. Nil when it has neither.
+    static func svgAspect(_ text: String) -> Double? {
+        guard let open = text.range(of: "<svg", options: .caseInsensitive),
+              let close = text.range(of: ">", range: open.upperBound..<text.endIndex) else { return nil }
+        let tag = String(text[open.upperBound..<close.lowerBound])
+        func attribute(_ name: String) -> String? {
+            guard let pattern = try? NSRegularExpression(pattern: "(?:^|\\s)\(name)\\s*=\\s*[\"']([^\"']*)[\"']"),
+                  let match = pattern.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
+                  let range = Range(match.range(at: 1), in: tag) else { return nil }
+            return tag[range].trimmingCharacters(in: .whitespaces)
+        }
+        func length(_ value: String?) -> Double? {
+            guard var value else { return nil }
+            if value.hasSuffix("px") { value.removeLast(2) }
+            return Double(value).flatMap { $0 > 0 ? $0 : nil }
+        }
+        if let width = length(attribute("width")), let height = length(attribute("height")) { return width / height }
+        let box = (attribute("viewBox") ?? "").split(whereSeparator: { $0 == " " || $0 == "," }).compactMap { Double($0) }
+        guard box.count == 4, box[2] > 0, box[3] > 0 else { return nil }
+        return box[2] / box[3]
     }
 }
 
@@ -84,8 +160,12 @@ struct LogoSpot: Equatable {
     var alignY: Edge
     /// Logos only, without their labels: on a Short, where the captions say the name.
     var compact: Bool
-    /// The logos one above the other: side by side, when a row is wider than the panel.
+    /// The logos one above the other: side by side, when a row is wider than the panel,
+    /// and anywhere a row is wider than the clear area.
     var vertical = false
+    /// Each logo's width in design pixels (`LogoBadge.logoWidths`), when one is wider than
+    /// tall; empty when all are square, as the engine draws them without it.
+    var widths: [Double] = []
 
     /// How far the badge's near edge stays from the middle of the speaker's face, in the
     /// speaker's source pixels: about half a head, and a gap.
@@ -94,20 +174,24 @@ struct LogoSpot: Equatable {
     static let boxGap = 24.0
 
     var json: JSONValue {
-        .object(["x": .number(x.rounded()), "y": .number(y.rounded()), "alignX": .string(alignX.rawValue),
-                 "alignY": .string(alignY.rawValue), "compact": .bool(compact), "vertical": .bool(vertical)])
+        var object: [String: JSONValue] = ["x": .number(x.rounded()), "y": .number(y.rounded()), "alignX": .string(alignX.rawValue),
+                                           "alignY": .string(alignY.rawValue), "compact": .bool(compact), "vertical": .bool(vertical)]
+        if !widths.isEmpty { object["widths"] = .array(widths.map { .number($0) }) }
+        return .object(object)
     }
 
     /// Next to the speaker, inside `clear`. `speaker` is the speaker's place on the canvas,
     /// `face` the face's middle (nil when not known) and `scale` design pixels for one of
     /// the speaker's source pixels. When the speaker fills the width, the badge goes beside
     /// the face, on the side with room; beside a small picture (the bubble), on the side
-    /// towards the middle of the frame; in a tall panel (side by side), at its foot, the
-    /// logos one above the other (`column`, its size that way) when a row is wider than it.
+    /// towards the middle of the frame; in a tall panel (side by side), at its foot. The
+    /// logos go one above the other (`column`, its size that way) when a row is wider than
+    /// `clear`, or than the tall panel.
     static func place(speaker: CGRect, face: CGPoint?, scale: Double, frame: CGSize, clear: CGRect,
                       size: CGSize, column: CGSize? = nil, compact: Bool) -> LogoSpot {
         var spot: LogoSpot
-        var size = size
+        var size = size, vertical = false
+        if let column, Double(size.width) > Double(clear.width) { vertical = true; size = column }
         if Double(speaker.width) >= 0.9 * Double(frame.width) {
             let centre = face ?? CGPoint(x: speaker.midX, y: speaker.minY + speaker.height * 0.42)
             let gap = faceGap * scale
@@ -124,8 +208,9 @@ struct LogoSpot: Equatable {
                 : LogoSpot(x: Double(speaker.minX) - boxGap, y: Double(speaker.midY), alignX: .end, alignY: .middle, compact: compact)
         } else {
             spot = LogoSpot(x: Double(speaker.midX), y: Double(speaker.maxY) - 28, alignX: .middle, alignY: .end, compact: compact)
-            if let column, Double(size.width) > Double(speaker.width) - 48 { spot.vertical = true; size = column }
+            if !vertical, let column, Double(size.width) > Double(speaker.width) - 48 { vertical = true; size = column }
         }
+        spot.vertical = vertical
         return spot.kept(inside: clear, size: size)
     }
 
@@ -177,14 +262,27 @@ extension VideoItem {
     }
 
     /// Where a badge with `props` goes at edited `time`: next to the speaker in the layout
-    /// at that moment. Without a screen recording the speaker fills the picture; without a
-    /// known face the badge goes to the top right of the safe area (the clear area of a Short).
+    /// at that moment, with its logos' widths when one is wide. Without a screen recording
+    /// the speaker fills the picture; without a known face the badge goes to the top right
+    /// of the safe area (the clear area of a Short).
     func logoSpot(at time: Double, props: [String: JSONValue], short: Short?, endScreen: Double?) -> LogoSpot {
         let compact = short != nil
-        let size = LogoBadge.size(props, compact: compact), column = LogoBadge.size(props, compact: compact, vertical: true)
+        let widths = LogoBadge.logoWidths(props, compact: compact)
+        var spot = speakerSpot(at: time, size: LogoBadge.size(props, compact: compact, widths: widths),
+                               column: LogoBadge.size(props, compact: compact, vertical: true, widths: widths), short: short, endScreen: endScreen)
+        if widths.contains(where: { $0 > LogoBadge.logoHeight(compact: compact) }) { spot.widths = widths }
+        return spot
+    }
+
+    /// Where a badge of `size` (`column` one above the other) goes at edited `time`.
+    private func speakerSpot(at time: Double, size: CGSize, column: CGSize, short: Short?, endScreen: Double?) -> LogoSpot {
+        let compact = short != nil
         let clear = short == nil ? GraphicPlacement.safeArea : ShortFormat.clearArea
         let canvas = short == nil ? CGSize(width: 1920, height: 1080) : ShortFormat.size
-        let corner = LogoSpot(x: Double(clear.maxX), y: Double(clear.minY), alignX: .end, alignY: .start, compact: compact)
+        var corner = LogoSpot(x: Double(clear.maxX), y: Double(clear.minY), alignX: .end, alignY: .start, compact: compact)
+        // At the corner as well, a row wider than the clear area goes one above the other.
+        var cornerSize = size
+        if Double(size.width) > Double(clear.width) { corner.vertical = true; cornerSize = column }
         guard let info else { return corner }
         let crop = (self.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
         if let short, stacksScreen(short), let screen {
@@ -192,7 +290,7 @@ extension VideoItem {
             let state = screen.state(at: time, geometry: geometry, endScreen: nil)
             return LogoSpot.place(speaker: state.speaker.rect, face: geometry.facePoint(in: state),
                                   scale: Double(state.speaker.rect.height / state.window.height), frame: canvas, clear: clear,
-                                  size: size, compact: compact)
+                                  size: size, column: column, compact: compact)
         }
         if let short {
             // The Short shows its picture across the canvas, from the top.
@@ -200,10 +298,10 @@ extension VideoItem {
             let k = Double(canvas.width / picture.width)
             let place = CGRect(x: 0, y: 0, width: canvas.width, height: picture.height * k)
             let face = screen?.bubble.face.map { CGPoint(x: (Double($0.x) - Double(picture.minX)) * k, y: (Double($0.y) - Double(picture.minY)) * k) }
-            guard let face, place.contains(face) else { return corner.kept(inside: clear, size: size) }
-            return LogoSpot.place(speaker: place, face: face, scale: k, frame: canvas, clear: clear, size: size, compact: compact)
+            guard let face, place.contains(face) else { return corner.kept(inside: clear, size: cornerSize) }
+            return LogoSpot.place(speaker: place, face: face, scale: k, frame: canvas, clear: clear, size: size, column: column, compact: compact)
         }
-        guard let screen else { return corner.kept(inside: clear, size: size) }
+        guard let screen else { return corner.kept(inside: clear, size: cornerSize) }
         let geometry = LayoutGeometry(track: screen, crop: crop)
         let state = screen.state(at: time, geometry: geometry, endScreen: endScreen)
         let unit = Double(canvas.width / geometry.frame.width)

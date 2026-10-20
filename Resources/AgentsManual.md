@@ -247,17 +247,29 @@ badges; you choose with the owner.
    `yamvideoctl setlogo --name BRAND --path FILE [--words "a, b"]`, and show the owner
    each logo you keep. The library is kept for every project, so the next video uses it
    again. `yamvideoctl logos` lists it.
+   A wide logo is fine: keep a wordmark (such as CoinDCX, 496×149) as the owner gives
+   it. Do not put it on a square background. The badge draws each logo 100 px tall
+   (96 px in a Short) and as wide as its shape asks, up to 3 times its height, so a
+   wordmark reads on a phone.
 4. Run the analysis again. Show the owner the plan (each brand, its time, where the badge
    sits) and frames from `preview --composed` and `preview --short`.
 5. After a yes, apply the badges in one `apply` with a clear label (for example "Logo
    badges"), then save.
 
+The label: each suggested logo has a `label`, the brand's name, next to the logo. Remove
+the `label` from a logo that already shows the name (a wordmark, or an icon with the name
+in it), so the name does not show two times. Keep the label for a logo that does not show
+the name (an icon or a symbol alone). Remove it from the suggestion before `addGraphic`,
+or give the badge's props again with `updateGraphic`. A Short shows the logos without
+labels in all cases.
+
 Where a badge sits: the app works it out from the layout at that moment. When the speaker
 fills the frame, it goes beside the face; beside the bubble in the Screen layout; at the
 foot of the speaker's panel side by side. In a Short it goes beside the face, inside
-YouTube's clear area, with the logos only (the captions say the names). Badges in a Short's
-part of the video show in the Short too. Do not set `props.spot`: the app writes it. Use
-`transform` only to nudge a badge.
+YouTube's clear area, with the logos only (the captions say the names). When the logos
+side by side are wider than the safe area (or the clear area of a Short), the app puts
+them one above the other. Badges in a Short's part of the video show in the Short too.
+Do not set `props.spot`: the app writes it. Use `transform` only to nudge a badge.
 
 The owner can do the same in the app: Graphics section → Find Brands.
 
