@@ -8,9 +8,9 @@ import Foundation
 
     print("\nEnd screen layout")
     let twoLeft = EndScreenLayout(videos: 2, side: .left)
-    check(twoLeft.frame == CGRect(x: 96, y: 56, width: 960, height: 540) && twoLeft.scale == 0.5 && twoLeft.cards.count == 2
+    check(twoLeft.frame == CGRect(x: 160, y: 92, width: 832, height: 468) && abs(twoLeft.scale - 832.0 / 1920) < 1e-9 && twoLeft.cards.count == 2
               && twoLeft.cards.allSatisfy { $0.minX > 1100 },
-          "two video cards sit on the right, the speaker at half size on the left", "\(twoLeft)")
+          "two video cards sit on the right, the speaker in an 832×468 frame on the left", "\(twoLeft)")
     let allBoxes = [twoLeft.frame, twoLeft.circle, twoLeft.text] + twoLeft.cards
     check(allBoxes.allSatisfy { CGRect(x: 0, y: 0, width: 1920, height: 1080).insetBy(dx: 80, dy: 40).contains($0.insetBy(dx: -EndScreen.margin, dy: -EndScreen.margin)) }
               && !allBoxes.enumerated().contains { i, a in allBoxes.enumerated().contains { j, b in i < j && a.insetBy(dx: -EndScreen.margin, dy: -EndScreen.margin).intersects(b) } },
@@ -26,7 +26,7 @@ import Foundation
     check(elementBoxes.allSatisfy { EndScreen.elementArea.insetBy(dx: 8, dy: 8).contains($0) },
           "every element box is inside YouTube's element area, with room to spare", "\(elementBoxes.filter { !EndScreen.elementArea.insetBy(dx: 8, dy: 8).contains($0) })")
     let oneRight = EndScreenLayout(props: ["videos": .number(1), "side": .string("right")])
-    check(oneRight.cards.count == 1 && oneRight.cards[0].maxX < 800 && oneRight.frame.minX == 864 && oneRight.circle.maxX == 1824,
+    check(oneRight.cards.count == 1 && oneRight.cards[0].maxX < 800 && oneRight.frame.minX == 928 && oneRight.circle.maxX == 1824,
           "one video card, mirrored when the speaker sits on the right", "\(oneRight)")
     check(EndScreenLayout.problem(props: ["videos": .number(3)])?.contains("1 or 2") == true
               && EndScreenLayout.problem(props: ["side": .string("top")])?.contains("left") == true,
@@ -88,7 +88,7 @@ import Foundation
     check(screenMotion?.screenProgress(at: 39.9) == 0 && abs((screenMotion?.screenProgress(at: 40.4) ?? 0) - 0.5) < 0.0001
               && screenMotion?.screenProgress(at: 40.8) == 1 && screenMotion?.screenProgress(at: 59.99) == 1 && screenMotion?.spans.isEmpty == true,
           "the speaker moves into the frame over 0.8 s and stays, whatever the panel style")
-    check(screenMotion.map { $0.screenPlacement(amount: 1, size: CGSize(width: 1280, height: 720)) == (64, 37, 640, 360)
+    check(screenMotion.map { $0.screenPlacement(amount: 1, size: CGSize(width: 1280, height: 720)) == (107, 61, 555, 312)
                              && $0.screenPlacement(amount: 0, size: CGSize(width: 1280, height: 720)) == (0, 0, 1280, 720) } == true,
           "in whole pixels: the end screen's frame, scaled to the picture")
 
@@ -162,7 +162,7 @@ import Foundation
     let drawnScreen = try await GraphicsSnapshot.draw(GraphicsTrack(items: [screenGraphic]).labellingEndScreen(nil), duration: 60, fps: "30",
                                                       time: 50, over: blackFrame)
     let k720 = 1280.0 / 1920
-    let borderPixel = rgb(drawnScreen.image, Int(94 * k720), Int(400 * k720))
+    let borderPixel = rgb(drawnScreen.image, Int(158 * k720), Int(400 * k720))
     let insidePixel = rgb(drawnScreen.image, Int(500 * k720), Int(400 * k720)), blankPixel = rgb(blackFrame, Int(500 * k720), Int(400 * k720))
     let cardEdge = rgb(drawnScreen.image, Int((1209 - 9) * k720), Int(340 * k720))
     check(borderPixel.0 > 180 && abs(insidePixel.0 - blankPixel.0) + abs(insidePixel.1 - blankPixel.1) + abs(insidePixel.2 - blankPixel.2) < 6,
