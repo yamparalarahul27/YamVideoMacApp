@@ -47,6 +47,8 @@ Yamparala Media/
 | Thumbnail made in YamVideo, saved frame, graphics images, other work files | `Files/` |
 | `Blur notes.md`: personal information in the recordings, with times | `Files/` |
 | `Recordings.md`: one line for each recording: day, length, what it shows, which video it is for | `Files/` |
+| `Plan.md`: the edit plan an agent writes before the first edit (Agents Manual 4.16) | `Files/` |
+| Transcripts of the recordings (`.txt` timed sentences, `.srt`, `.words.json`) | `Files/Transcripts/` |
 | Image for more than one video | `Shared Assets/` |
 | DJI `.LRF` file (a low-resolution preview from the camera) | the Trash; YamVideo does not use it |
 
@@ -67,7 +69,9 @@ to it. The code is `Sources/FootageLayout.swift`.
 2. An agent sorts each new file:
    1. Find the date. Use `ffprobe` (`format_tags=creation_time`) or the file name: DJI
       clips are `DJI_YYYYMMDDhhmmss_*`, Mac screen recordings are
-      `Screen Recording YYYY-MM-DD at …`.
+      `Screen Recording YYYY-MM-DD at …`. For a DJI clip, trust the file name: in
+      October 2026 the camera's time zone was UTC+5:00, so its `creation_time` was
+      30 min off.
    2. Find the topic. Look at 3 or 4 frames from the file.
    3. Find the video folder. Use a folder with the same topic and day, or make a new
       `YYYY-MM-DD Title` folder with `Recorded/`, `Edited/` and `Files/`.
@@ -81,6 +85,9 @@ to it. The code is `Sources/FootageLayout.swift`.
    7. Add one line for each file to `Files/Recordings.md`: day, length, what it shows,
       and which video or Short it is for.
    8. Tell the owner where each file went. If the topic is not clear, ask the owner.
+3. The agent studies the new recordings, writes `Files/Plan.md` for each video, asks the
+   owner the questions that block each plan, and plans the release days for at least two
+   months (Agents Manual 4.16 and 4.17). The owner approves each plan before the edit.
 
 ## Rules
 
