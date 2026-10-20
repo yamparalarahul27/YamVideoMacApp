@@ -1,0 +1,39 @@
+{
+  "footage" : "~/Desktop/Yamparala Media",
+  "mac" : "Yamparala",
+  "updated" : "2026-10-20T13:48:55Z",
+  "videos" : [
+    {
+      "bytes" : 954594428,
+      "exports" : 5,
+      "folder" : "2026-10-14 AppStore Learnings",
+      "projects" : [
+        "FD92F2F0-EE0F-83B2-A1B7-64B6ED2FDED4"
+      ],
+      "recordings" : [
+        "DJI_20261014194430_0007_D.MP4"
+      ]
+    },
+    {
+      "bytes" : 8777672553,
+      "exports" : 0,
+      "folder" : "2026-10-18 Sahi",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "DJI_20261018160002_0005_D.MP4",
+        "DJI_20261018163040_0006_D.MP4",
+        "DJI_20261018164303_0007_D.MP4",
+        "DJI_20261018164851_0008_D.MP4",
+        "DJI_20261018165327_0009_D.MP4",
+        "DJI_20261018165942_0010_D.MP4",
+        "DJI_20261018170242_0011_D.MP4",
+        "DJI_20261018170538_0012_D.MP4",
+        "DJI_20261018171529_0014_D.JPG",
+        "DJI_20261018171636_0015_D.MP4",
+        "Screen Recording 2026-10-19 at 7.24.17 PM.mov"
+      ]
+    }
+  ]
+}
