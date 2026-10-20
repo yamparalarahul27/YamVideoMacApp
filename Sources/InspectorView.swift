@@ -80,6 +80,11 @@ struct InspectorPane: View {
                 CaptionInspector(cue: cue).id(cue.id)
                 Divider()
             }
+        case .music:
+            if let piece = model.selectedMusic {
+                MusicInspector(item: item, piece: piece).id(piece.id)
+                Divider()
+            }
         case .recording:
             ChangesList(item: item, info: info)
         }
@@ -271,14 +276,14 @@ private struct ChangesList: View {
     var body: some View {
         InspectorSection("Changes on this video") {
             if switchable.isEmpty && fixedRows.isEmpty {
-                Text("No changes yet. A crop, colour, blur areas, zooms and graphics show here, each with a switch to turn it off.")
+                Text("No changes yet. A crop, colour, blur areas, zooms, graphics and music show here, each with a switch to turn it off.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(switchable) { change in
                 row(change.symbol, change.label, summary(change),
                     isOn: Binding(get: { item.isOn(change) }, set: { model.setChange(change, on: $0) }),
-                    reset: change == .graphics || !item.has(change) ? nil : { model.resetChange(change) })
+                    reset: change == .graphics || change == .music || !item.has(change) ? nil : { model.resetChange(change) })
             }
             ForEach(fixedRows, id: \.label) { fixed in
                 row(fixed.symbol, fixed.label, fixed.summary, isOn: fixed.isOn, reset: nil)
@@ -330,6 +335,9 @@ private struct ChangesList: View {
         case .graphics:
             let count = item.graphics?.items.count ?? 0
             return "\(count) graphic\(count == 1 ? "" : "s")"
+        case .music:
+            let count = item.music?.pieces.count ?? 0
+            return "\(count) piece\(count == 1 ? "" : "s") under the voice"
         }
     }
 
@@ -598,6 +606,7 @@ private struct RecordingInspector: View {
             case .audio:
                 subtitles
                 loudness
+                MusicSection(item: item)
             case .colour:
                 ColorInspector(item: item, info: info)
             }

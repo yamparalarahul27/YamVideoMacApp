@@ -53,7 +53,8 @@ extension AgentCatalog {
         /// made-up ids, so a copied example is at least a valid command.
         func example(_ json: String) -> JSONValue {
             let ids = ["OTHER-CLIP-ID": "0", "SECOND-CLIP-ID": "2", "FIRST-CLIP-ID": "1", "CLIP-ID": "1", "SECTION-ID": "5",
-                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c", "SHORT-ID": "d", "LAYOUT-ID": "9"]
+                       "AREA-ID": "a", "ZOOM-ID": "b", "EFFECT-ID": "e", "MARKER-ID": "f", "GRAPHIC-ID": "c", "SHORT-ID": "d", "LAYOUT-ID": "9",
+                       "MUSIC-ID": "8"]
             var text = json
             for (placeholder, digit) in ids.sorted(by: { $0.key.count > $1.key.count }) {
                 text = text.replacingOccurrences(of: placeholder, with: "00000000-0000-4000-8000-00000000000\(digit)")
@@ -330,6 +331,23 @@ extension AgentCatalog {
         add("replaceLayouts", "screen", "Every layout at once, as a plan from the transcript gives them: for example speaker for the intro and the outro, split where the speaker explains, and the base screen layout elsewhere.",
             [clip, field("layouts", "array", "The layouts, each " + layoutKeys)],
             #"{"type": "replaceLayouts", "clipID": "CLIP-ID", "layouts": [{"start": 0, "end": 30.2, "layout": "speaker"}, {"start": 512, "end": 531, "layout": "speaker"}]}"#)
+
+        // Background music (docs/plans/background-music.md)
+        let licences = MusicLicence.allCases.map(\.rawValue).joined(separator: ", ")
+        let musicKeys = "Keys: start and end (\(editedSeconds); end null plays to the end of the video, also after the edit changes its length), from (seconds of the file where it starts), level (LU under the voice, \(Int(Music.levels.lowerBound)) to \(Int(Music.levels.upperBound)), default \(Int(Music.defaultLevel)); -20 is a quiet bed, -10 is loud), fadeIn and fadeOut (0 to \(Int(Music.fades.upperBound)) s, default \(Int(Music.defaultFadeIn)) and \(Int(Music.defaultFadeOut))), loop (true plays the file again with a \(Int(Music.crossfade)) s crossfade when the piece is longer), credit ({licence: \(licences); title, artist, source (the track's page) and line (the credit for the description)}: only its keys given change)."
+        add("addMusic", "music", "Put music under the voice, on the edited timeline: jump cuts do not cut it, and it follows the frame where it starts when the edit changes. The app measures the file's loudness (and the voice's, for the first piece), so level is the same for any track. Pieces may touch but not overlap. Use only music whose licence permits a monetised YouTube video (YouTube Audio Library, CC0, CC BY with its credit, Pixabay, the owner's own, or a model whose licence permits commercial use), and set credit.licence: Export for YouTube writes the credit line and refuses CC BY-NC, CC BY-ND and CC BY-SA. Its id is in createdIDs; state.clips[].music shows it, with each play of the file and its gain.",
+            [clip, field("path", "string", "A local sound file: \(Music.fileTypes.joined(separator: ", ")), at least \(Int(Music.minimumLength)) s long."),
+             field("start", "number", "Where it starts. Default 0.", required: false, unit: editedSeconds),
+             field("end", "number", "Where it stops. Default: the next piece, or the end of the video (then it plays to the end).", required: false, unit: editedSeconds),
+             field("music", "object", "Other keys to set. " + musicKeys, required: false),
+             field("musicID", "uuid", "The new piece's id, when you choose it.", required: false)],
+            #"{"type": "addMusic", "clipID": "CLIP-ID", "path": "~/Music/Calm Piano.mp3", "start": 0, "music": {"level": -22, "credit": {"licence": "audioLibrary", "title": "Calm Piano", "artist": "Ana"}}}"#)
+        add("updateMusic", "music", "Change a piece of music: give only the keys to change.",
+            [clip, field("musicID", "uuid", "The piece, from state.clips[].music.pieces[].id."),
+             field("music", "object", musicKeys + " Also path: another file in the same place (it is measured; its credit stays until you change it).")],
+            #"{"type": "updateMusic", "clipID": "CLIP-ID", "musicID": "MUSIC-ID", "music": {"level": -18, "fadeOut": 5, "end": null}}"#)
+        add("removeMusic", "music", "Remove a piece of music.", [clip, field("musicID", "uuid", "The piece.")],
+            #"{"type": "removeMusic", "clipID": "CLIP-ID", "musicID": "MUSIC-ID"}"#)
 
         add("addMedia", "project", "Add recordings; each is probed first. New ids are in createdIDs.",
             [field("paths", "string[]", "Local video files.")], #"{"type": "addMedia", "paths": ["~/Movies/take2.mov"]}"#)

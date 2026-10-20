@@ -1,13 +1,13 @@
 # Background music
 
-**Status (2026-10-19):** Plan only. The owner confirms the plan and the order before the
-work starts.
+**Status (2026-10-20):** The owner confirmed the plan and the order on 2026-10-19. Part 1
+(music bed from a file) is built, in its own PR. Parts 2 to 4 come after it, one at a time.
 **Source:** the backlog item of 2026-10-17, and the owner's choice for the design video
 format (Juxtopposed's "I Redesigned VLC" has its own music bed): a quiet music bed under
 the voice, from open-source tools or AI music models, lower under speech.
 
 Each part is one PR. Each new tool is also an agent command, in the catalog and in the
-Agents Manual (a new recipe, 4.14 Background music). `./test.sh` passes in full before each
+Agents Manual (a new recipe, 4.15 Background music). `./test.sh` passes in full before each
 PR, with new checks in `Tests/ChecksMusic.swift`. The owner tries each part in the built app
 on a copy of the AgentUX project.
 
