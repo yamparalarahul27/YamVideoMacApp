@@ -48,7 +48,7 @@ import Foundation
     let project = VideoProject(clips: [clip], settings: ExportSettings(), selection: clip.id)
     let data = try JSONEncoder().encode(project)
     let read = try VideoProject.decodeMigrating(from: data)
-    equal(read.version, 19, "a project is saved as version 19")
+    equal(read.version, 20, "a project is saved as version 20")
     equal(read.clips.first?.item().switchedOff, [.zooms, .blurAreas], "and reads back with the same changes off")
     var older = project
     older.version = 17
@@ -86,7 +86,7 @@ import Foundation
     equal(clips.first?["switchedOff"] as? [String], ["zooms"], "and state lists what is off")
     var unknown = address(agent)
     unknown["method"] = "apply"; unknown["requestID"] = "switch-2"
-    unknown["commands"] = [["type": "setChange", "clipID": agentClip, "change": "music", "on": false]]
+    unknown["commands"] = [["type": "setChange", "clipID": agentClip, "change": "volume", "on": false]]
     check(agentError(await agentCall(agent, unknown)) != nil, "an unknown change is refused")
 
     print("\nExports leave out what is off")

@@ -130,6 +130,12 @@ enum EditCommand: Equatable {
     /// The inspector's switch: off keeps the change but leaves it out of the player and
     /// exports; on brings it back.
     case setChange(clip: UUID, change: SwitchableChange, on: Bool)
+    /// A piece of background music. `voice` is the recording's measured loudness, kept
+    /// when the recording has no music yet. Measuring happens before the command.
+    case addMusic(clip: UUID, piece: MusicPiece, voice: Double)
+    /// Replaces the piece with the same ID.
+    case updateMusic(clip: UUID, piece: MusicPiece)
+    case removeMusic(clip: UUID, piece: UUID)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -193,6 +199,9 @@ enum EditCommand: Equatable {
         case .removeScreenZoom: return "Delete Screen Zoom"
         case .replaceScreenZooms: return "Edit Screen Zooms"
         case .setChange(_, let change, let on): return "Switch \(change.label) \(on ? "On" : "Off")"
+        case .addMusic: return "Add Music"
+        case .updateMusic: return "Edit Music"
+        case .removeMusic: return "Remove Music"
         }
     }
 }
@@ -732,6 +741,27 @@ enum ProjectReducer {
                 record.switchedOff = off.isEmpty ? nil : off.sorted()
             }
 
+        case .addMusic(let clip, let piece, let voice):
+            try editMusic(clip, in: &outcome, voice: voice) { pieces in
+                guard !pieces.contains(where: { $0.id == piece.id }) else { throw EditError.invalid("A piece of music with that ID already exists.") }
+                pieces.append(piece)
+            }
+            outcome.createdIDs.append(piece.id)
+
+        case .updateMusic(let clip, let piece):
+            try editMusic(clip, in: &outcome) { pieces in
+                guard let index = pieces.firstIndex(where: { $0.id == piece.id }) else {
+                    throw EditError.notFound("No piece of music with that ID on this recording.")
+                }
+                pieces[index] = piece
+            }
+
+        case .removeMusic(let clip, let id):
+            try editMusic(clip, in: &outcome) { pieces in
+                guard pieces.contains(where: { $0.id == id }) else { throw EditError.notFound("No piece of music with that ID on this recording.") }
+                pieces.removeAll { $0.id == id }
+            }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -860,6 +890,9 @@ enum ProjectReducer {
                 screen.zooms = keptZooms
                 record.screen = screen
             }
+            if let music = record.music {
+                record.music = timeline.remap(music, from: old).bed
+            }
             if var publish = record.publish {
                 publish.chapters = timeline.remap(publish.chapters, from: old)
                 // The thumbnail's frame follows its footage, or stays inside the recording.
@@ -963,6 +996,28 @@ enum ProjectReducer {
             }
             effects.sort { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
             record.blurEffects = effects.isEmpty ? nil : effects
+        }
+    }
+
+    /// Edits a recording's music, then checks it all against the edited length. Times keep
+    /// a thousandth of a second; music needs no frame. No pieces is no music.
+    private static func editMusic(_ id: UUID, in outcome: inout EditOutcome, voice: Double? = nil,
+                                  _ body: (inout [MusicPiece]) throws -> Void) throws {
+        try editClip(id, in: &outcome) { record, info in
+            guard info.hasAudio else { throw EditError.invalid("This recording has no sound, so it cannot have music under it.") }
+            var pieces = record.music?.pieces ?? []
+            try body(&pieces)
+            func rounded(_ value: Double) -> Double { (value * 1000).rounded() / 1000 }
+            pieces = pieces.map { piece in
+                var piece = piece
+                piece.start = rounded(piece.start); piece.end = piece.end.map(rounded); piece.from = rounded(piece.from)
+                return piece
+            }.sorted { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
+            guard !pieces.isEmpty else { record.music = nil; return }
+            guard let level = record.music?.voice ?? voice else { throw EditError.invalid("Add the first piece of music with the voice's loudness.") }
+            let bed = MusicBed(voice: level, pieces: pieces)
+            if let problem = bed.problem(duration: record.timeline.duration) { throw EditError.invalid(problem) }
+            record.music = bed
         }
     }
 

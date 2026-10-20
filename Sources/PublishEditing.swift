@@ -82,7 +82,7 @@ enum YouTubeExport {
     /// The structured version of the text file, for an agent filling in YouTube Studio.
     /// `project` and `recording` say what it was made from, so the Library can find it.
     static func json(_ publish: PublishInfo, files: Files, endScreen plan: EndScreenPlan? = nil,
-                     project: UUID? = nil, recording: UUID? = nil) throws -> Data {
+                     project: UUID? = nil, recording: UUID? = nil, music: MusicBed? = nil) throws -> Data {
         let chapters: [JSONValue] = publish.chapters.sorted { $0.time < $1.time }.map {
             .object(["time": .number($0.time), "timestamp": .string(PublishInfo.timestamp($0.time)), "title": .string($0.title)])
         }
@@ -106,6 +106,7 @@ enum YouTubeExport {
         ]
         if let plan { root["endScreen"] = plan.json }
         if let test { root["thumbnailTest"] = test }
+        if let music { root["music"] = music.json }
         if let project { root["projectID"] = .string(project.uuidString) }
         if let recording { root["recordingID"] = .string(recording.uuidString) }
         let encoder = JSONEncoder()
@@ -120,9 +121,11 @@ enum YouTubeExport {
     static func run(_ item: VideoItem, info: MediaInfo, publish: PublishInfo, settings: ExportSettings, files: Files,
                     project: UUID? = nil, onProgress: @escaping @Sendable (Double) -> Void) async throws {
         let item = item.effective
-        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.music).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }
+        // The music's credit lines go at the end of the description.
+        let publish = publish.crediting(item.music)
         var videoSettings = settings
         videoSettings.format = .mp4
         let folder = files.video.deletingLastPathComponent()
@@ -132,7 +135,8 @@ enum YouTubeExport {
                                 crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                 regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots, segments: item.segments,
                                 settings: videoSettings, subtitles: item.burnedCaptions(videoSettings), color: item.colorStage(videoSettings),
-                                effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), screen: item.screen, onProgress: onProgress)
+                                effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), screen: item.screen,
+                                music: item.exportMusic(videoSettings), onProgress: onProgress)
         try Task.checkCancellation()
         let manager = FileManager.default
         if manager.fileExists(atPath: files.video.path) { _ = try manager.replaceItemAt(files.video, withItemAt: temporary) }
@@ -146,9 +150,10 @@ enum YouTubeExport {
         for (target, source) in zip(files.tests, publish.test?.images ?? []) { try writeThumbnail(source, to: target) }
         let names = files.all.filter { $0 != files.text && ($0 == files.json || manager.fileExists(atPath: $0.path)) }.map(\.lastPathComponent)
         let plan = EndScreenPlan(graphics: item.graphics, publish: publish, duration: item.editedDuration)
-        try Data(publish.uploadText(files: names, endScreen: plan, tests: files.tests.map(\.lastPathComponent)).utf8)
+        try Data(publish.uploadText(files: names, endScreen: plan, tests: files.tests.map(\.lastPathComponent), music: item.music).utf8)
             .write(to: files.text, options: .atomic)
-        try json(publish, files: files, endScreen: plan, project: project, recording: item.id).write(to: files.json, options: .atomic)
+        try json(publish, files: files, endScreen: plan, project: project, recording: item.id, music: item.music)
+            .write(to: files.json, options: .atomic)
     }
 }
 
@@ -255,7 +260,7 @@ extension AppModel {
     /// Asks for a folder, then writes the video, captions, thumbnail and upload text there.
     func promptForYouTubeExport() {
         guard let item = selectedItem, item.info != nil else { return }
-        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics)
+        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
             .first(where: { $0.severity == .blocking }) {
             statusMessage = blocking.message
             return

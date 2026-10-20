@@ -98,6 +98,8 @@ extension PlaybackController {
         var position = CMTime.zero
         /// Each recording's audio track: where it starts in the movie and where its sound is cut.
         var joints: [CMPersistentTrackID: (offset: Double, joints: [(time: Double, fade: Double)])] = [:]
+        /// Each recording's music, from where the recording starts in the movie.
+        var music: MusicPreviewTracks?
         for clip in plan.clips {
             try Task.checkCancellation()
             let source = AVURLAsset(url: clip.url)
@@ -136,6 +138,10 @@ extension PlaybackController {
                 }
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
             }
+            if audio != nil, let mix = clip.exportMusic(settings) {
+                if music == nil { music = MusicPreviewTracks(composition) }
+                try await music?.insert(mix, offset: beginning.seconds)
+            }
             instructions.append(MovieInstruction(range: CMTimeRange(start: beginning, duration: position - beginning),
                                                   trackID: video.trackID, clip: clip, transform: transform,
                                                   settings: settings, canvas: plan.size))
@@ -159,6 +165,7 @@ extension PlaybackController {
             if let clipJoints = joints[track.trackID] {
                 PlaybackController.fadeJoints(clipJoints.joints, offset: clipJoints.offset, in: parameters)
             }
+            music?.ramp(parameters)
             return parameters
         }
         item.audioMix = mix

@@ -42,6 +42,10 @@ xcrun swiftc \
 	"$ROOT/Sources/ScreenExport.swift" \
 	"$ROOT/Sources/ScreenEditing.swift" \
 	"$ROOT/Sources/ScreenAgents.swift" \
+	"$ROOT/Sources/Music.swift" \
+	"$ROOT/Sources/MusicExport.swift" \
+	"$ROOT/Sources/MusicEditing.swift" \
+	"$ROOT/Sources/MusicAgents.swift" \
 	"$ROOT/Sources/Graphics.swift" \
 	"$ROOT/Sources/Logos.swift" \
 	"$ROOT/Sources/CoverGraphics.swift" \

@@ -219,6 +219,11 @@ struct WireCommand: Codable, Equatable {
     var notes: String?
     /// addProjectNote: one line added to the Why notes, with who and when.
     var note: String?
+    /// updateMusic and removeMusic: the piece; addMusic: the new piece's id, when you choose it.
+    var musicID: UUID?
+    /// addMusic and updateMusic: the piece's keys to set: start, end (null: to the end), from,
+    /// level, fadeIn, fadeOut, loop, credit, and path (updateMusic: another file).
+    var music: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -234,6 +239,7 @@ struct WireCommand: Codable, Equatable {
         "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
         "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
         "setChange", "setProjectNotes", "addProjectNote",
+        "addMusic", "updateMusic", "removeMusic",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -241,6 +247,15 @@ struct WireCommand: Codable, Equatable {
         switch type {
         case "addMedia": return paths ?? []
         case "relinkMedia", "setScreen": return path.map { [$0] } ?? []
+        default: return []
+        }
+    }
+
+    /// Music files that must be measured (length and loudness) before this command can be resolved.
+    var musicPaths: [String] {
+        switch type {
+        case "addMusic": return path.map { [$0] } ?? []
+        case "updateMusic": return music?["path"]?.string.map { [$0] } ?? []
         default: return []
         }
     }
@@ -341,6 +356,8 @@ struct AgentState: Encodable {
         var shorts: [ShortState]
         /// The screen recording shown with it, and the layouts; nil when it has none.
         var screen: ScreenState?
+        /// The music under its voice; nil when it has none.
+        var music: MusicState?
         /// Changes switched off in the inspector: kept, but out of the player and exports.
         var switchedOff: [String]
     }
@@ -826,7 +843,8 @@ extension AppModel {
                 graphics: clip.graphics,
                 publish: clip.publish,
                 publishIssues: clip.info == nil ? [] : (clip.publish ?? PublishInfo()).issues(duration: clip.timeline.duration,
-                                                                                               graphics: clip.graphics),
+                                                                                               graphics: clip.graphics,
+                                                                                               music: clip.isOn(.music) ? clip.music : nil),
                 suggestedChapters: clip.info == nil ? [] : PublishInfo.suggestedChapters(markers: clip.markers ?? [], graphics: clip.graphics,
                                                                                          duration: clip.timeline.duration),
                 endScreen: EndScreenPlan(graphics: clip.graphics, publish: clip.publish, duration: clip.timeline.duration)?.json,
@@ -837,6 +855,7 @@ extension AppModel {
                                 source: clip.item().captionsSource(document.settings)),
                 shorts: Self.shortStates(clip, settings: document.settings),
                 screen: Self.screenState(clip),
+                music: Self.musicState(clip),
                 switchedOff: (clip.switchedOff ?? []).map(\.rawValue))
         }
         var movieOffset = 0.0
@@ -969,6 +988,23 @@ extension AppModel {
                 }
             }
             let document = committedProject
+            // Music is measured the same way: each file's length and loudness, and the voice of
+            // a recording that has no music yet.
+            var music: [String: (duration: Double, loudness: Double)] = [:]
+            for path in Set(wire.flatMap(\.musicPaths)) {
+                let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                do { music[path] = try await FFmpeg.measureMusic(url) } catch {
+                    throw EditError(code: .missingMedia, message: error.localizedDescription)
+                }
+            }
+            var voices: [UUID: Double] = [:]
+            for command in wire where command.type == "addMusic" {
+                guard let id = command.clipID, voices[id] == nil,
+                      let clip = document.clips.first(where: { $0.id == id }), clip.music == nil, clip.info?.hasAudio == true else { continue }
+                do { voices[id] = try await FFmpeg.integratedLoudness(of: clip.url) } catch {
+                    throw EditError(code: .missingMedia, message: error.localizedDescription)
+                }
+            }
             // A Short asked to be centred on the speaker is looked at with Vision first.
             var speakers: [Int: CGRect] = [:]
             for (index, command) in wire.enumerated() where command.short?["window"] == .string("speaker") {
@@ -984,7 +1020,7 @@ extension AppModel {
             }
             let commands = try wire.enumerated().map { index, command in
                 try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index], face: faces[index],
-                            border: borders[index], origin: agentOrigin(request))
+                            border: borders[index], music: music, voices: voices, origin: agentOrigin(request))
             }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
@@ -1002,7 +1038,8 @@ extension AppModel {
     /// One wire command as an `EditCommand`, against the committed document.
     private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
                          tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil, face: CGPoint? = nil,
-                         border: CGRect? = nil, origin: EditOrigin = .human) throws -> EditCommand {
+                         border: CGRect? = nil, music: [String: (duration: Double, loudness: Double)] = [:],
+                         voices: [UUID: Double] = [:], origin: EditOrigin = .human) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -1410,6 +1447,8 @@ extension AppModel {
         case "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
              "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms":
             return try Self.resolveScreen(wire, in: document, probed: probed, face: face, border: border)
+        case "addMusic", "updateMusic", "removeMusic":
+            return try Self.resolveMusic(wire, in: document, measured: music, voices: voices)
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
@@ -2104,7 +2143,8 @@ extension AppModel {
                                             regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.burnedCaptions(exportSettings),
                                             color: item.colorStage(exportSettings), effects: item.blurEffects,
-                                            graphics: item.exportGraphics(exportSettings), screen: item.screen, onProgress: progress)
+                                            graphics: item.exportGraphics(exportSettings), screen: item.screen,
+                                            music: item.exportMusic(exportSettings), onProgress: progress)
                 case .movie(let plan):
                     try await FFmpeg.exportMovie(plan: plan, settings: exportSettings, output: temporary, onProgress: progress)
                 }
@@ -2143,7 +2183,8 @@ extension AppModel {
             return .failure(EditError(code: .missingMedia, message: "A YouTube export needs a loaded recording in clip whose source is present."))
         }
         let publish = item.publish ?? PublishInfo()
-        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics).first(where: { $0.severity == .blocking }) {
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
+            .first(where: { $0.severity == .blocking }) {
             return .failure(.invalid(blocking.message + " (state.clips[].publishIssues lists everything; setPublishInfo changes it.)"))
         }
         let files = YouTubeExport.files(in: folder, publish: publish, fallback: item.url.deletingPathExtension().lastPathComponent,

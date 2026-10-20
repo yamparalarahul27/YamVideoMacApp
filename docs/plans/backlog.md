@@ -9,7 +9,4 @@ Moved to its own plan on 2026-10-19: [thumbnail-science.md](thumbnail-science.md
 
 ## Background music (parked 2026-10-17)
 
-Make a quiet music bed under the voice, with open-source tools or AI music models, and
-lower it under speech. A proposed session ("Background music: research and plan a music
-bed") does the research and the plan first. See the memory note on the design video
-format.
+Moved to its own plan on 2026-10-19: [background-music.md](background-music.md).

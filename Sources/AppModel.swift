@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// What the inspector is showing: the last thing selected, or the recording itself.
 enum InspectorFocus: Equatable {
-    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom, caption
+    case recording, section, zoom, blurArea, effect, marker, graphic, short, layout, screenZoom, caption, music
 }
 
 @MainActor
@@ -600,6 +600,8 @@ final class AppModel: ObservableObject {
     @Published var selectedLayoutID: UUID? { didSet { focusInspector(selectedLayoutID, .layout) } }
     /// The screen zoom the inspector shows; a click on the screen in the Preview aims it.
     @Published var selectedScreenZoomID: UUID? { didSet { focusInspector(selectedScreenZoomID, .screenZoom) } }
+    /// The piece of music the inspector shows, when one is selected on the Music row.
+    @Published var selectedMusicID: UUID? { didSet { focusInspector(selectedMusicID, .music) } }
     /// The viewer shows the selected Short, 9:16, with its graphics and captions.
     @Published var showsShort = false
     /// Faint marks where YouTube draws its buttons over a Short. A preference, never undone.
@@ -903,7 +905,8 @@ final class AppModel: ObservableObject {
                         color: item.colorStage(exportSettings),
                         effects: item.blurEffects,
                         graphics: item.exportGraphics(exportSettings),
-                        screen: item.screen
+                        screen: item.screen,
+                        music: item.exportMusic(exportSettings)
                     ) { [weak self] fraction in
                         Task { @MainActor [weak self] in
                             guard let self,
@@ -975,7 +978,7 @@ final class AppModel: ObservableObject {
             regions: item.blurRegions.map { $0.rect }, zoomShots: item.zoomShots,
             segments: item.segments, settings: settings, subtitles: item.burnedCaptions(settings),
             color: item.colorFilters(settings), effects: item.blurEffects, graphics: item.exportGraphics(settings),
-            screen: item.screen
+            screen: item.screen, music: item.effective.exportMusic(settings)
         ).map(Self.displayCommand).joined(separator: "\n\n")
     }
 

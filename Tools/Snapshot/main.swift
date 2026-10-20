@@ -163,6 +163,36 @@ func render<V: View>(_ view: V, size: CGSize, to url: URL, settle: TimeInterval 
     print("wrote \(url.path)")
 }
 
+/// The music under the voice: the Music row with a piece, the piece selected, and its
+/// inspector in the Audio tab. YAMVIDEO_SNAPSHOT_ONLY=music renders only these.
+/// YAMVIDEO_SNAPSHOT_MUSIC names a sound file; without it, ffmpeg makes 60 s of chords.
+@MainActor
+func musicPictures(_ model: AppModel, output: URL, size: CGSize) async {
+    var file = output.appendingPathComponent("Calm Chords.m4a")
+    if let path = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_MUSIC"], !path.isEmpty {
+        file = URL(fileURLWithPath: path)
+    } else {
+        let wave = "0.15*sin(2*PI*220*t)+0.1*sin(2*PI*277.2*t)|0.15*sin(2*PI*329.6*t)+0.1*sin(2*PI*440*t)"
+        _ = try? await Shell.run(FFmpeg.ffmpegPath ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+                                                                  "-i", "aevalsrc=\(wave):s=44100:d=60", "-c:a", "aac", file.path])
+    }
+    guard let measured = try? await FFmpeg.measureMusic(file), let voice = try? await FFmpeg.integratedLoudness(of: model.items[0].url) else {
+        print("music: could not measure \(file.path)"); return
+    }
+    let piece = MusicPiece(url: file, duration: measured.duration, loudness: measured.loudness, start: 0, end: nil)
+    if case .failure(let error) = model.perform([.addMusic(clip: model.items[0].id, piece: piece, voice: voice)]) {
+        print("music: \(error.message)"); return
+    }
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    model.selectedSegmentID = nil
+    model.inspectorTab = .audio
+    await render(window(), size: size, to: output.appendingPathComponent("6-music-row.png"))
+    model.selectedMusicID = piece.id
+    await render(window(), size: size, to: output.appendingPathComponent("6b-music-selected.png"))
+    await render(InspectorPane().environmentObject(model).frame(width: 340, height: 900), size: CGSize(width: 340, height: 900),
+                 to: output.appendingPathComponent("6c-music-inspector.png"))
+}
+
 @MainActor
 func run() async throws {
     let arguments = CommandLine.arguments
@@ -215,6 +245,10 @@ func run() async throws {
     }
     if only == "thumbnail" {
         await thumbnailMaker(model, output: output)
+        return
+    }
+    if only == "music" {
+        await musicPictures(model, output: output, size: size)
         return
     }
 
