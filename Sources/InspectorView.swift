@@ -527,11 +527,30 @@ private struct BlurAreaInspector: View {
     let region: BlurRegion
     let info: MediaInfo
 
+    /// "Whole recording", or the range in the recording's own time.
+    private var timesLabel: String {
+        guard region.isTimed else { return "Whole recording" }
+        return "\(timelineTime(region.start ?? 0)) – \(region.end.map(timelineTime) ?? "end")"
+    }
+
     var body: some View {
         InspectorSection("Blur area") {
             Text("\(Int(region.rect.width))×\(Int(region.rect.height)) px · \(model.settings.blurStyle.label.lowercased())")
                 .font(.callout)
             Text("Drag it on the picture to move or resize it.").font(.caption2).foregroundStyle(.secondary)
+            Label(timesLabel, systemImage: "clock").font(.callout)
+                .help("The time is in the recording, so cuts do not move it")
+            HStack(spacing: 6) {
+                Button("Start Here") { model.setRegionTime(region.id, start: true) }
+                    .help("Hide from the frame at the playhead")
+                Button("End Here") { model.setRegionTime(region.id, start: false) }
+                    .help("Stop hiding after the frame at the playhead")
+                if region.isTimed {
+                    Button("Whole Recording") { model.coverWholeRecording(region.id) }
+                        .help("Hide it for the whole recording again")
+                }
+            }
+            .controlSize(.small)
             HStack {
                 Button("Use on All Recordings") { model.applyCropToAll() }
                     .disabled(model.items.count < 2)

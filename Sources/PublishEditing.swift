@@ -133,7 +133,7 @@ enum YouTubeExport {
         defer { try? FileManager.default.removeItem(at: temporary) }
         try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                 crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
-                                regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots, segments: item.segments,
+                                regions: item.blurBoxes, zoomShots: item.zoomShots, segments: item.segments,
                                 settings: videoSettings, subtitles: item.burnedCaptions(videoSettings), color: item.colorStage(videoSettings),
                                 effects: item.blurEffects, graphics: item.exportGraphics(videoSettings), screen: item.screen,
                                 music: item.exportMusic(videoSettings), onProgress: onProgress)

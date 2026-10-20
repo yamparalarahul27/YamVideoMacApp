@@ -105,6 +105,9 @@ struct WireSection: Codable, Equatable {
 struct WireArea: Codable, Equatable {
     var id: UUID?
     var rect: WireRect
+    /// Source seconds; without them the area covers the whole recording.
+    var start: Double?
+    var end: Double?
 }
 
 struct WireZoom: Codable, Equatable {
@@ -165,6 +168,8 @@ struct WireCommand: Codable, Equatable {
     /// setChange: which change, and whether it is on.
     var change: String?
     var on: Bool?
+    /// updateBlurArea: true removes the area's start and end.
+    var whole: Bool?
     var hold: Double?
     var level: Double?
     var target: WirePoint?
@@ -317,7 +322,7 @@ struct AgentState: Encodable {
     struct Section: Encodable {
         var id: UUID, start: Double, end: Double, speed: Double, editedStart: Double, editedDuration: Double
     }
-    struct Area: Encodable { var id: UUID; var rect: WireRect }
+    struct Area: Encodable { var id: UUID; var rect: WireRect; var start: Double?; var end: Double? }
     struct Zoom: Encodable {
         var id: UUID, start: Double, hold: Double, level: Double, end: Double
         var target: WirePoint
@@ -831,7 +836,7 @@ extension AppModel {
                                              fpsExpression: $0.fpsExpression, hasAudio: $0.hasAudio, hdr: $0.hdrLabel) },
                 editedDuration: clip.timeline.duration, includedInMovie: clip.includedInMovie ?? true,
                 crop: clip.crop.map(WireRect.init), aspect: clip.aspectLabel, subtitles: clip.subtitles?.path,
-                sections: sections, blurAreas: clip.blurRegions.map { .init(id: $0.id, rect: WireRect($0.rect)) },
+                sections: sections, blurAreas: clip.blurRegions.map { .init(id: $0.id, rect: WireRect($0.rect), start: $0.start, end: $0.end) },
                 zooms: clip.zoomShots.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end,
                                                   target: WirePoint($0.target)) },
                 color: clip.info.map { colorState(clip, info: $0, settings: document.settings) },
@@ -1238,16 +1243,20 @@ extension AppModel {
             }
             return .setChange(clip: try field(wire.clipID, "clipID"), change: change, on: try field(wire.on, "on"))
         case "addBlurArea":
+            // A blur area's start and end are source seconds of the recording, whatever the timeSpace.
             return .addBlurArea(clip: try field(wire.clipID, "clipID"),
-                                area: BlurRegion(id: wire.areaID ?? UUID(), rect: try field(wire.rect, "rect").rect))
+                                area: BlurRegion(id: wire.areaID ?? UUID(), rect: try field(wire.rect, "rect").rect,
+                                                 start: wire.start, end: wire.end))
         case "updateBlurArea":
+            let timed = wire.start != nil || wire.end != nil || wire.whole == true
             return .updateBlurArea(clip: try field(wire.clipID, "clipID"), area: try field(wire.areaID, "areaID"),
-                                   rect: try field(wire.rect, "rect").rect)
+                                   rect: wire.rect?.rect,
+                                   times: timed ? BlurTimes(start: wire.start, end: wire.end, whole: wire.whole ?? false) : nil)
         case "removeBlurArea":
             return .removeBlurArea(clip: try field(wire.clipID, "clipID"), area: try field(wire.areaID, "areaID"))
         case "replaceBlurAreas":
             return .replaceBlurAreas(clip: try field(wire.clipID, "clipID"), areas: try field(wire.areas, "areas").map {
-                BlurRegion(id: $0.id ?? UUID(), rect: $0.rect.rect)
+                BlurRegion(id: $0.id ?? UUID(), rect: $0.rect.rect, start: $0.start, end: $0.end)
             })
         case "addZoom":
             let (clip, start) = try placed(try field(wire.start, "start"))
@@ -1714,7 +1723,7 @@ extension AppModel {
                 return .success(preview)
             }
             let data = try await FFmpeg.thumbnail(
-                url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.map(\.rect),
+                url: clip.url, at: source, duration: info.duration, regions: clip.blurRegions.filter { $0.covers(source: source) }.map(\.rect),
                 style: settings.blurStyle, strength: settings.blurStrength, toneMap: info.isHDR && settings.toneMapHDR,
                 color: clip.item().colorFilters(settings, original: request.original ?? false),
                 subtitles: clip.item().burnedCaptions(settings), subtitleStyle: settings.subtitleForceStyle,
@@ -2140,7 +2149,7 @@ extension AppModel {
                     let item = recording.effective
                     try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
-                                            regions: item.blurRegions.map(\.rect), zoomShots: item.zoomShots,
+                                            regions: item.blurBoxes, zoomShots: item.zoomShots,
                                             segments: item.segments, settings: exportSettings, subtitles: item.burnedCaptions(exportSettings),
                                             color: item.colorStage(exportSettings), effects: item.blurEffects,
                                             graphics: item.exportGraphics(exportSettings), screen: item.screen,

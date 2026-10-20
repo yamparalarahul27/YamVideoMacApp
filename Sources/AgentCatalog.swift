@@ -102,16 +102,23 @@ extension AgentCatalog {
 
         // Blur areas
         let area = field("areaID", "uuid", "A blur area's id from state.clips[].blurAreas[].id.")
-        add("addBlurArea", "blur areas", "Hide part of the picture for the whole recording (a face, a name). Style and strength are export settings.",
+        let sourceTime = "source seconds of the recording (as in its file; cuts and speed do not move it)"
+        add("addBlurArea", "blur areas", "Hide part of the picture (a face, a name, an ID card). Without start and end it covers the whole recording; with them only that part. Style and strength are export settings.",
             [clip, field("rect", rect, "The area to hide.", unit: "source pixels, origin top-left"),
+             field("start", "number", "When it starts to hide. Left out: from the start.", required: false, unit: sourceTime),
+             field("end", "number", "When it stops. Left out: to the end.", required: false, unit: sourceTime),
              field("areaID", "uuid", "Choose the new area's id, to refer to it later in the same request.", required: false)],
-            #"{"type": "addBlurArea", "clipID": "CLIP-ID", "rect": {"x": 40, "y": 40, "width": 320, "height": 120}}"#)
-        add("updateBlurArea", "blur areas", "Move or resize a blur area.", [clip, area, field("rect", rect, "Its new place.", unit: "source pixels")],
-            #"{"type": "updateBlurArea", "clipID": "CLIP-ID", "areaID": "AREA-ID", "rect": {"x": 60, "y": 40, "width": 320, "height": 120}}"#)
+            #"{"type": "addBlurArea", "clipID": "CLIP-ID", "rect": {"x": 40, "y": 900, "width": 1120, "height": 700}, "start": 124, "end": 130.4}"#)
+        add("updateBlurArea", "blur areas", "Move or resize a blur area, change its time range, or both. Give at least one of rect, start, end and whole.",
+            [clip, area, field("rect", rect, "Its new place.", required: false, unit: "source pixels"),
+             field("start", "number", "Its new start.", required: false, unit: sourceTime),
+             field("end", "number", "Its new end.", required: false, unit: sourceTime),
+             field("whole", "boolean", "true: cover the whole recording again (removes start and end).", required: false)],
+            #"{"type": "updateBlurArea", "clipID": "CLIP-ID", "areaID": "AREA-ID", "start": 62, "end": 72}"#)
         add("removeBlurArea", "blur areas", "Remove a blur area.", [clip, area],
             #"{"type": "removeBlurArea", "clipID": "CLIP-ID", "areaID": "AREA-ID"}"#)
         add("replaceBlurAreas", "blur areas", "Replace every blur area at once.",
-            [clip, field("areas", "array", "[{id?, rect}] in source pixels.")],
+            [clip, field("areas", "array", "[{id?, rect, start?, end?}]: rect in source pixels, start and end in source seconds.")],
             #"{"type": "replaceBlurAreas", "clipID": "CLIP-ID", "areas": []}"#)
 
         // Zooms

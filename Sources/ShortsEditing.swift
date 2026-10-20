@@ -332,7 +332,7 @@ enum ShortExport {
         let crop = stack == nil ? (cut.crop ?? info.fullFrame) : (item.crop ?? info.fullFrame)
         try await FFmpeg.export(input: item.url, output: output, info: info,
                                 crop: crop.evenClamped(in: info.fullFrame),
-                                regions: cut.blurRegions.map(\.rect), zoomShots: cut.zoomShots, segments: cut.segments,
+                                regions: cut.blurBoxes, zoomShots: cut.zoomShots, segments: cut.segments,
                                 settings: settings, subtitles: nil, color: item.colorStage(settings),
                                 effects: cut.blurEffects, graphics: cut.exportGraphics(settings),
                                 canvas: ShortFormat.size, captionsASS: burnedCaptions(item, short: short, settings: settings),

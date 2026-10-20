@@ -87,8 +87,10 @@ to it. The code is `Sources/FootageLayout.swift`.
 - Do not rename or move a recording after a project uses it. A project keeps the full
   path of each recording and each graphics image. If a move is necessary, use Locate
   Source in YamVideo (the agent command `relinkMedia`) for each recording.
-- Before an export, read `Files/Blur notes.md` and hide each Must item: cut it, or use a
-  Blur effect for its time range. A Blur area hides one rectangle for the whole recording.
+- Before an export, read `Files/Blur notes.md` and hide each Must item with a Blur area
+  and the item's time range (Start Here and End Here in the blur area's inspector, or
+  `addBlurArea` with `start` and `end`). The times are in the recording, so cuts do not
+  move them. Cut the part when the video does not need it.
 - Do not delete a file with `rm`. Move it to the Trash, so the owner can put it back.
 - Keep only the newest export of a video in `Edited/`. Move the older export files to
   the Trash after the new export passes its checks.
