@@ -24,3 +24,4 @@ not lose it.
 
 Git does not keep the footage, the project files, the exports or the logo library
 (`~/Library/Application Support/YamVideo/Logos`). Back them up on their own.
+The footage folder layout is in [docs/footage-layout.md](../footage-layout.md).

@@ -241,6 +241,10 @@ extension AppModel {
         panel.allowedContentTypes = [.yamVideoProject]
         panel.nameFieldStringValue = projectURL?.lastPathComponent ?? "Untitled.yamvideo"
         panel.title = "Save YamVideo Project"
+        // A first save goes into the video folder of its recording (docs/footage-layout.md).
+        if projectURL == nil, let folder = items.first.flatMap({ FootageLayout.videoFolder(of: $0.url) }) {
+            panel.directoryURL = folder
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         save(to: url, asCopy: asCopy)
     }

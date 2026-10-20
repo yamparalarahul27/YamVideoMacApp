@@ -954,7 +954,7 @@ final class AppModel: ObservableObject {
     var previewCommand: String? {
         if isMovieMode {
             guard let plan = try? moviePlan() else { return nil }
-            let output = (settings.outputFolder ?? plan.clips[0].url.deletingLastPathComponent())
+            let output = (settings.outputFolder ?? FootageLayout.editedFolder(for: plan.clips[0].url))
                 .appendingPathComponent("YamVideo-Movie.\(settings.format.fileExtension)")
             let commands: [[String]]
             if settings.format == .gif {

@@ -1585,7 +1585,7 @@ enum FFmpeg {
 
     /// A non-colliding path for the given source file, in the chosen output format.
     static func outputURL(for input: URL, settings: ExportSettings) -> URL {
-        let folder = settings.outputFolder ?? input.deletingLastPathComponent()
+        let folder = settings.outputFolder ?? FootageLayout.editedFolder(for: input)
         let stem = input.deletingPathExtension().lastPathComponent
         let suffix = settings.suffix
         let ext = settings.format.fileExtension

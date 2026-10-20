@@ -82,6 +82,7 @@ xcrun swiftc \
 	"$ROOT/Sources/AgentActivityView.swift" \
 	"$ROOT/Sources/Shell.swift" \
 	"$ROOT/Sources/FFmpeg.swift" \
+	"$ROOT/Sources/FootageLayout.swift" \
 	"$ROOT/Sources/CropEditor.swift" \
 	"$ROOT"/Tests/*.swift
 

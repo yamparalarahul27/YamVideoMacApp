@@ -262,19 +262,25 @@ struct ExportSheet: View {
         }
     }
 
+    /// With no output folder, a recording in the footage layout exports to its video's
+    /// Edited/ folder, and any other recording exports beside itself.
+    private var defaultFolderName: String {
+        model.selectedItem.flatMap { FootageLayout.videoFolder(of: $0.url) } == nil ? "Alongside each original" : "Edited folder"
+    }
+
     private var destination: some View {
         InspectorSection("Destination") {
             if scope == .movie {
                 Text("Choose the movie's name and location after you click Export Movie.").font(.caption).foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 6) {
-                    Text(model.settings.outputFolder?.lastPathComponent ?? "Alongside each original")
+                    Text(model.settings.outputFolder?.lastPathComponent ?? defaultFolderName)
                         .font(.caption).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     Button("Choose…") { model.chooseOutputFolder() }.controlSize(.small)
                     if model.settings.outputFolder != nil {
                         Button { settingsBinding.wrappedValue.outputFolder = nil } label: { Image(systemName: "xmark.circle") }
-                            .buttonStyle(.borderless).help("Save next to each source file").accessibilityLabel("Save next to each source file")
+                            .buttonStyle(.borderless).help("Use the default folder").accessibilityLabel("Use the default folder")
                     }
                 }
                 HStack(spacing: 6) {
