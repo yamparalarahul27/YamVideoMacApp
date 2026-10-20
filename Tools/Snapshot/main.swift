@@ -195,6 +195,35 @@ func musicPictures(_ model: AppModel, output: URL, size: CGSize) async {
 
 /// Gaps while cutting: a section deleted from the middle leaves its space, a blur effect
 /// spans the gap, the next section slides into half of it, then Close Gaps joins them.
+/// A callout on a screen recording: the Media panel's Graphics tab with its entry, the
+/// Preview with the callout drawn, and its inspector. YAMVIDEO_SNAPSHOT_ONLY=callout
+/// renders only these, with YAMVIDEO_SNAPSHOT_SCREEN as the screen recording and
+/// YAMVIDEO_SNAPSHOT_POINT ("x,y" in its pixels) as the callout's point.
+@MainActor
+func calloutPictures(_ model: AppModel, screen: URL, output: URL, size: CGSize) async {
+    guard let info = try? await FFmpeg.probe(url: screen) else { print("The screen recording could not be read."); return }
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    let id = model.items[0].id
+    _ = model.perform([.setScreen(clip: id, screen: ScreenTrack(url: screen, info: info))])
+    UserDefaults.standard.set("graphics", forKey: "mediaPanelTab")
+    await render(window(), size: size, to: output.appendingPathComponent("callout-1-media.png"))
+    UserDefaults.standard.set("media", forKey: "mediaPanelTab")
+    model.setPreviewFraction(0.4)
+    model.addCallout()
+    let numbers = (ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_POINT"] ?? "").split(separator: ",").compactMap { Double($0) }
+    if let callout = model.selectedGraphic, numbers.count == 2 {
+        model.mutateGraphic(callout.id, label: "Aim Callout") { $0.props["point"] = .object(["x": .number(numbers[0]), "y": .number(numbers[1])]) }
+    }
+    if let callout = model.selectedGraphic { model.setPreviewFraction(min(1, (callout.start + 1.5) / max(1, model.items[0].editedDuration))) }
+    model.setPlaybackVisible(true)
+    await render(window(), size: size, to: output.appendingPathComponent("callout-2-preview.png"))
+    await pump(2)
+    await render(window(), size: size, to: output.appendingPathComponent("callout-2-preview.png"))
+    await render(InspectorPane().environmentObject(model).frame(width: 340, height: 900), size: CGSize(width: 340, height: 900),
+           to: output.appendingPathComponent("callout-3-inspector.png"))
+    model.setPlaybackVisible(false)
+}
+
 /// YAMVIDEO_SNAPSHOT_ONLY=gaps renders only these.
 @MainActor
 func gapPictures(_ model: AppModel, output: URL, size: CGSize) async {
@@ -277,6 +306,10 @@ func run() async throws {
     }
     if only == "gaps" {
         await gapPictures(model, output: output, size: size)
+        return
+    }
+    if only == "callout", let path = ProcessInfo.processInfo.environment["YAMVIDEO_SNAPSHOT_SCREEN"] {
+        await calloutPictures(model, screen: URL(fileURLWithPath: path), output: output, size: size)
         return
     }
 

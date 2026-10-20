@@ -43,9 +43,10 @@ extension JSONValue {
 
 /// Where a kind sits: the right-hand column over the video, the side panel, the whole
 /// screen (the end screen, which moves the picture into a frame of its own), next to
-/// the speaker, wherever the layout puts them (`LogoSpot`), or over the whole picture
-/// (`cover`: kinetic text and section cards, see CoverGraphics.swift).
-enum GraphicZone: String, Codable { case column, panel, screen, speaker, cover }
+/// the speaker, wherever the layout puts them (`LogoSpot`), over the whole picture
+/// (`cover`: kinetic text and section cards, see CoverGraphics.swift), or on a point of the
+/// screen recording, wherever the layout and its zoom put it (`callout`, see Callouts.swift).
+enum GraphicZone: String, Codable { case column, panel, screen, speaker, cover, callout }
 
 /// The template kinds of graphics engine version 1. See docs/plans/graphics-track.md.
 enum GraphicKind: String, Codable, CaseIterable, Identifiable {
@@ -54,6 +55,7 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
     case endScreen
     case logoBadge
     case kineticText, sectionCard
+    case callout
 
     var id: String { rawValue }
     var zone: GraphicZone {
@@ -62,14 +64,18 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
         case .endScreen: return .screen
         case .logoBadge: return .speaker
         case .kineticText, .sectionCard: return .cover
+        case .callout: return .callout
         default: return .column
         }
     }
     /// Kinds the engine can write in ink. The others always use glass cards.
-    var hasInk: Bool { zone == .panel }
+    var hasInk: Bool { zone == .panel || self == .callout }
+    /// Kinds the mix look writes in ink.
+    var inkInMix: Bool { hasInk }
     /// Whether the owner may move and resize it on the picture. The end screen's boxes sit
-    /// where YouTube puts its elements, and a cover fills the picture, so they stay put.
-    var isPlaceable: Bool { self != .endScreen && zone != .cover }
+    /// where YouTube puts its elements, a cover fills the picture, and a callout follows
+    /// its point on the screen, so they stay put.
+    var isPlaceable: Bool { self != .endScreen && zone != .cover && zone != .callout }
     var label: String {
         switch self {
         case .namePlate: return "Name plate"
@@ -86,11 +92,12 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
         case .logoBadge: return "Logo badge"
         case .kineticText: return "Kinetic text"
         case .sectionCard: return "Section card"
+        case .callout: return "Callout"
         }
     }
 }
 
-/// glass: cards. ink: handwriting over a soft haze. mix: panel kinds in ink, the rest glass.
+/// glass: cards. ink: handwriting over a soft haze. mix: panel kinds and callouts in ink, the rest glass.
 enum GraphicsLook: String, Codable, CaseIterable, Identifiable {
     case glass, ink, mix
     var id: String { rawValue }
@@ -254,7 +261,7 @@ struct GraphicsTrack: Codable, Equatable {
 
     /// glass or ink, after the style and the kind have had their say.
     func look(of graphic: Graphic) -> GraphicsLook {
-        let wanted = graphic.look ?? (style.look == .mix ? (graphic.kind.zone == .panel ? .ink : .glass) : style.look)
+        let wanted = graphic.look ?? (style.look == .mix ? (graphic.kind.inkInMix ? .ink : .glass) : style.look)
         return wanted == .ink && graphic.kind.hasInk ? .ink : .glass
     }
 
@@ -313,6 +320,12 @@ struct GraphicsTrack: Codable, Equatable {
                 if let problem = graphic.kind == .kineticText ? KineticText.problem(props: graphic.props, length: graphic.length)
                     : SectionCard.problem(props: graphic.props, length: graphic.length) { return problem }
             }
+            if graphic.kind == .callout {
+                guard graphic.transform == nil else {
+                    return "A callout follows its point on the screen, so it cannot be moved or resized on the picture; side sets where its label goes."
+                }
+                if let problem = Callout.problem(props: graphic.props, length: graphic.length) { return problem }
+            }
             let props = JSONValue.object(graphic.props)
             if let data = try? JSONEncoder().encode(props), data.count > Self.maximumPropsBytes {
                 return "The \(name) has too much text or data."
@@ -347,6 +360,16 @@ struct GraphicsTrack: Codable, Equatable {
                 let otherEnd = other.end + (other.kind.zone == .panel ? Self.slide : 0)
                 guard other.start < cover.end - 0.001, cover.start < otherEnd - 0.001 else { continue }
                 return "The \(cover.kind.label.lowercased()) covers the whole picture, so it may not show with the \(other.kind.label.lowercased())"
+                    + (other.kind.zone == .panel ? String(format: " (a panel slides away for %.1f s after it ends).", Self.slide) : ".")
+            }
+        }
+        // A callout points into the screen, so nothing else shows with it: a panel would
+        // move the picture aside, and a card could cover its label.
+        for callout in items where callout.kind == .callout {
+            for other in items where other.id != callout.id && other.kind.zone != .cover {
+                let otherEnd = other.end + (other.kind.zone == .panel ? Self.slide : 0)
+                guard other.start < callout.end - 0.001, callout.start < otherEnd - 0.001 else { continue }
+                return "A callout shows alone, so it may not show with the \(other.kind.label.lowercased())"
                     + (other.kind.zone == .panel ? String(format: " (a panel slides away for %.1f s after it ends).", Self.slide) : ".")
             }
         }

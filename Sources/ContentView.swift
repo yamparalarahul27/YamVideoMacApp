@@ -501,7 +501,9 @@ struct CropEditorPane: View {
                            editsGraphics: !model.isConverting && !model.showsBefore,
                            onGraphicBounds: { model.graphicBounds = $0 })
                 .overlay {
-                    if item.screen != nil, model.selectedScreenZoom != nil, !model.isConverting, !model.showsBefore {
+                    if item.screen != nil, model.aimsCallout, model.selectedGraphic?.kind == .callout, !model.isConverting, !model.showsBefore {
+                        ScreenAimLayer(frame: crop.size, help: "Click the element on the screen to aim the callout") { model.aimCallout(at: $0) }
+                    } else if item.screen != nil, model.selectedScreenZoom != nil, !model.isConverting, !model.showsBefore {
                         ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
                     }
                 }

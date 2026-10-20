@@ -47,6 +47,7 @@ struct GraphicInspector: View {
                 endScreen
             } else {
                 if graphic.kind.isPlaceable { placement }
+                if graphic.kind == .callout { callout }
                 if graphic.kind == .kineticText {
                     Button("Words from the Transcript") { model.fillKineticWords(graphic.id) }
                         .controlSize(.small)
@@ -61,7 +62,8 @@ struct GraphicInspector: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             GraphicPropsEditor(graphicID: graphic.id, value: .object(graphic.props), path: [], depth: 0,
-                               hidden: graphic.kind == .endScreen ? ["videos", "side", "guides"] : graphic.kind == .sectionCard ? ["progress", "marks"] : [])
+                               hidden: graphic.kind == .endScreen ? ["videos", "side", "guides"] : graphic.kind == .sectionCard ? ["progress", "marks"]
+                                   : graphic.kind == .callout ? ["side"] : [])
         }
     }
 }
@@ -85,6 +87,31 @@ extension GraphicInspector {
                  + "box in Publish; YouTube Studio is where they are placed, since YouTube's upload cannot set them.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+extension GraphicInspector {
+    /// A callout: Aim puts its point on the element with a click on the screen, and Side
+    /// says where its label goes from there.
+    var callout: some View {
+        let side = graphic.props["side"]?.string ?? "auto"
+        let hidden = item.calloutPlace(graphic, short: nil, ink: false, endScreen: item.graphics?.endScreen?.start).hidden
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button(model.aimsCallout ? "Cancel" : "Aim") { model.aimsCallout.toggle() }
+                    .help("Then click the element on the screen in the Preview: the callout points there")
+                Picker("Side", selection: Binding(get: { side }, set: { model.setCalloutSide(graphic.id, $0) })) {
+                    ForEach(Callout.sides, id: \.self) { Text($0.capitalized).tag($0) }
+                }
+                .help("Where the label goes from the point. Auto keeps it inside the picture and clear of you.")
+            }
+            .controlSize(.small)
+            if hidden {
+                Label("Not on the picture", systemImage: "eye.slash")
+                    .font(.caption).foregroundStyle(.orange)
+                    .help("Over its time the layout hides the screen, or a screen zoom leaves its point out.")
+            }
         }
     }
 }

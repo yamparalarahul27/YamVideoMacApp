@@ -1,6 +1,8 @@
 # Callout graphic — plan (2026-10-20)
 
-Status: plan only. No code until the owner approves it.
+Status: approved by the owner on 2026-10-20 (one callout at a time; the label moves with
+the dot). Built on branch `claude/hungry-kepler-07efb9`. The default look waits for the
+owner's pick (section 5).
 
 ## 1. Goal
 
@@ -24,7 +26,10 @@ change: the covers PR (#45) added kinds the same way.
 | `text` | string | 1–4 words, 28 characters or fewer, one line. |
 | `point` | {x, y} | Screen-recording pixels (the full file, as screen zoom targets), inside the screen's crop. |
 | `side` | string | `auto` (default), `left`, `right`, `up` or `down`: where the label goes from the point. |
-| `tone` | string | `dark` (default): near-black pill, white text, accent outline. `accent`: accent pill, near-black text. |
+
+The look comes from the graphics look system, not from a prop: `ink` or `glass` for the
+callout alone, else the style's look. The `mix` look writes callouts in ink, as the
+panels (section 5).
 
 The app writes `place` into the props when it draws (as `spot` for logo badges and
 `progress` for section cards). The project never stores it, and an agent never sends it.
@@ -42,8 +47,9 @@ place: {
 - `lx, ly`: where the line meets the label (the middle of its near edge).
 - `o`: 0–1, how much of the callout shows (see section 4).
 
-Timing: from 1.5 s to 10 s. The dot pops at 0, the line draws from 0.1 s, the label
-pops at 0.3 s. Everything fades over the last 0.3 s. No beat props in v1.
+Timing: from 1.5 s to 10 s. The dot pops at 0 and one ring pulses out, the line draws
+from 0.1 s, the label comes in from 0.35 s (ink writes it from 0.45 s). Everything fades
+over the last 0.3 s. No beat props in v1.
 
 ## 3. Where it sits
 
@@ -64,13 +70,13 @@ The label must stay in the clear area and out of the speaker box.
 
 **How the app chooses the side** (`side: auto`). The app tries these places in order:
 
-1. **Beside the screen.** Only when the screen leaves a band of free space at its side
-   (Side by side with a phone recording): the label's near edge is 32 px from the
-   screen's edge, at the height of the point.
-2. **Next to the point, across.** The label's near edge is 140 px from the point, on the
-   side toward the middle of the clear area. Then the other side.
-3. **Next to the point, up and down.** The label's near edge is 110 px above the point,
-   then below.
+1. **Beside the screen**, on one line, then on two. Only when the screen leaves a band
+   of free space at its side (Side by side with a phone recording): the label's near
+   edge is 32 px from the screen's edge, at the height of the point.
+2. **Next to the point, on one line.** Across first: the label's near edge is 140 px
+   from the point, on the side toward the middle of the clear area, then the other
+   side. Then up and down: 110 px above the point, then below.
+3. **Next to the point, on two lines**, in the same order.
 
 The app uses the first place where the label stays in the clear area and out of the
 speaker box at every moment that the callout shows. If no place is good, the app uses the
@@ -84,8 +90,8 @@ middle. The app gives the lines to the engine, so the two always agree. Example:
 side with a phone recording leaves about 300 px of clear area beside the phone. "Custom
 keypad" is about 500 px on one line, so it goes on two lines (about 260 px).
 
-**Label size.** The app uses an estimate: 0.6 em for each character, the same rule as
-the logo badge labels. The engine draws the real text and puts the label's near edge on
+**Label size.** The app uses an estimate: 0.6 em for each character (Inter and Virgil
+alike), the same rule as the logo badge labels. The engine draws the real text and puts the label's near edge on
 `lx, ly`, so a small error changes only the far edge.
 
 ## 4. How it follows the screen
@@ -107,6 +113,10 @@ The callout shows (`o` = 1) when all of these are true:
 - The speaker's picture is not on top of the point. (In Ink the lines are on top of the
   speaker, so this does not apply there.)
 
+The layout the picture is in, or moving to, decides the first and the last item, and the
+speaker box. So a layout change fades the callout once, and the speaker's picture that
+sweeps past during the change does not make it flicker.
+
 When one of these changes, `o` goes to 0 or back to 1 over 0.25 s, so the callout fades
 and does not jump.
 
@@ -122,16 +132,27 @@ a panel shows, or in the 0.8 s while it slides away (the cover rule).
 
 ## 5. Look, and the phone
 
-- Text: Inter Bold, **56 px** on the 16:9 canvas. At 640 px wide that is about 19 px,
-  larger than the logo labels (46 px). In a Short, also 56 px on the 1080 px canvas
-  (about 33 px at 640 px wide).
-- Pill: 16 px top and bottom, 28 px at the sides, round ends, a soft shadow.
-- Dot: 12 px across, accent fill, a 3 px near-black ring, and one pulse ring at the start.
-- Line: 4 px accent over a 8 px near-black line, so it shows on light and dark UIs.
-- The style's `size` does not change a callout. It has its own size, as logo badges do.
+The owner asked for a look that matches the video and its theme, not a plain dark pill.
+Two looks are built, and the owner picks the one that `mix` uses. The owner saw both
+on 20 Oct in frames at 640 px wide from the Tradl and Sahi footage (not in the repo:
+they show unreleased footage):
 
-Before the PR, I look at frames at 640 px wide: Screen with a web page (Tradl), Side by
-side with a phone recording (Sahi), and a Short. The PR includes these frames.
+- **A, ink:** the label in white Virgil, 60 px, written left to right on a soft dark
+  haze; a white hand-drawn line with a dark edge.
+- **B, glass:** the label as a tag in the accent colour with near-black Inter Bold, 54
+  px, as the thumbnails' highlighted words; a straight accent line with a dark edge.
+
+Both:
+
+- Dot: 18 px across, accent fill, a near-black ring, and one ring that pulses out at
+  the start.
+- The line and the dot have a dark edge, so they show on light and dark UIs.
+- No backdrop blur: the export draws graphics on a clear background, so a blur of the
+  picture under the label would show in the Preview only. The haze is a plain
+  see-through shade with a soft edge.
+- At 640 px wide the label is about 18–20 px high, larger than the logo labels (46 px
+  at full size).
+- The style's `size` does not change a callout. It has its own size, as logo badges do.
 
 ## 6. Rules (`GraphicsTrack.problem` and the clip check)
 
@@ -139,7 +160,7 @@ side with a phone recording (Sahi), and a Short. The PR includes these frames.
 - `point`: needs `x` and `y`. A callout needs a screen recording (`setScreen` first),
   and the point must be inside the screen's crop. The clip check does this, because the
   track alone does not know the screen.
-- `side` and `tone`: one of the values.
+- `side`: one of the values.
 - Length: 1.5–10 s.
 - It shows alone: no other graphic may show with it. Two callouts may not overlap. A panel
   must slide away first.
@@ -150,13 +171,13 @@ side with a phone recording (Sahi), and a Short. The PR includes these frames.
 
 ## 7. In the app
 
-- **Inspector, Graphics:** a **Callout** button adds a 3 s callout at the playhead, at
-  the middle of the screen. The callout section has Text, Side, Tone, and **Aim**: the
-  next click on the screen in the Preview sets the point (the same path as **Aim** for
-  screen zooms, `aimScreenZoom`).
-- **Preview:** the selected callout shows its point as a small target, also outside its
-  time.
-- **Timeline:** callout blocks go in the graphics lane, with the callout's text.
+- **Media, Graphics:** a **Callout** entry (when the recording has a screen) adds a 3 s
+  callout at the playhead, at the middle of the screen, and starts Aim.
+- **Inspector:** the callout section has **Aim** (the next click on the screen in the
+  Preview sets the point, the same path as Aim for screen zooms) and **Side**. Text and
+  point are in the fields below. "Not on the picture" shows when the point never shows.
+- **Timeline:** callout blocks go in the graphics lane, in yellow, with the callout's
+  text.
 - **Short viewer:** Hide and show work as for other graphics.
 
 ## 8. Agents
@@ -169,7 +190,7 @@ side with a phone recording (Sahi), and a Short. The PR includes these frames.
 ```
 
 - `AgentCatalog`: the kind, its props and rules in the graphic field's text.
-- `state.clips[].graphics.items[]`: a callout also shows `hidden` when it never shows.
+- `state.clips[].screen.hiddenCallouts`: the callouts whose point never shows.
 - `preview --composed` draws it, so an agent can check the place.
 - Agents Manual 4.5: a short "Callouts" item: find the point in the screen recording's
   pixels (`preview` of the screen at that time), 1–4 words, 2–4 s, and check a frame
@@ -180,7 +201,7 @@ side with a phone recording (Sahi), and a Short. The PR includes these frames.
 
 New file `Tests/ChecksCallouts.swift`, a new feature in `test.sh`:
 
-1. Rules: text, words, point, side, tone, length; alone; no transform; no screen.
+1. Rules: text, words, point, side, length; alone; no transform; no screen.
 2. Inverse: for points on the screen, `screenPoint(framePoint(p)) == p` in Screen, Side
    by side and Ink, with and without a zoom.
 3. A zoom: the dot moves with the zoom target, and the label keeps its side.
@@ -205,10 +226,9 @@ agents`. Before a full run, I check `ps -Ao pid,command | grep yamvideo-tests`.
 - Callouts on the speaker's own picture (no screen recording).
 - An `analyze` kind that finds UI elements.
 
-## 11. Questions for the owner
+## 11. The owner's answers (2026-10-20)
 
-1. **Label look:** dark pill with white text (default in this plan), or the accent
-   (yellow) pill with dark text?
-2. **One at a time:** is "a callout shows alone" good for v1?
-3. **When a zoom moves the element:** the label moves with the dot (this plan), or the
-   label stays still and only the line moves?
+1. **Label look:** not a plain dark pill; a look that matches the video. Two looks to
+   pick from (section 5).
+2. **One at a time:** yes.
+3. **When a zoom moves the element:** the label moves with the dot.

@@ -162,6 +162,42 @@ extension AppModel {
         addCover(graphic, to: item, label: "Add Section Card")
     }
 
+    /// A callout at the playhead, for 3 s, pointing at the middle of the screen; Aim then
+    /// puts its point on the element.
+    func addCallout() {
+        guard let index = selectedIndex, items[index].info != nil else { statusMessage = "Select a recording first."; return }
+        let item = items[index]
+        guard let screen = item.screen else { statusMessage = "Add a screen recording first, in Media."; return }
+        let start = min(max(0, previewTime), max(0, item.editedDuration - 3))
+        let point = CGPoint(x: screen.picture.midX.rounded(), y: screen.picture.midY.rounded())
+        let graphic = Graphic(kind: .callout, start: start, end: min(item.editedDuration, start + 3), props: [
+            "text": .string("Pattern name"), "point": .object(["x": .number(point.x), "y": .number(point.y)]),
+        ])
+        addCover(graphic, to: item, label: "Add Callout")
+        if selectedGraphicID == graphic.id { aimsCallout = true; statusMessage = "Click the element on the screen to aim the callout." }
+    }
+
+    /// A click on the Preview at `point` (pixels of the frame) puts the selected callout's
+    /// point there, through the layout and the zoom on screen at the playhead.
+    func aimCallout(at point: CGPoint) {
+        guard let item = selectedItem, let info = item.info, let screen = item.screen, let graphic = selectedGraphic, graphic.kind == .callout else { return }
+        let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        guard let target = screen.screenPoint(point, at: previewTime, geometry: LayoutGeometry(track: screen, crop: crop),
+                                              endScreen: item.graphics?.endScreen?.start) else {
+            statusMessage = "Click on the screen to aim the callout. At the playhead the screen does not show there."
+            return
+        }
+        aimsCallout = false
+        mutateGraphic(graphic.id, label: "Aim Callout") {
+            $0.props["point"] = .object(["x": .number(Double(target.x).rounded()), "y": .number(Double(target.y).rounded())])
+        }
+        statusMessage = "The callout points at \(Int(target.x)), \(Int(target.y)) of the screen recording."
+    }
+
+    func setCalloutSide(_ id: UUID, _ side: String) {
+        mutateGraphic(id, label: "Callout Side") { $0.props["side"] = side == "auto" ? nil : .string(side) }
+    }
+
     private func addCover(_ graphic: Graphic, to item: VideoItem, label: String) {
         switch perform([.addGraphic(clip: item.id, graphic: graphic)], label: label) {
         case .success: selectedGraphicID = graphic.id

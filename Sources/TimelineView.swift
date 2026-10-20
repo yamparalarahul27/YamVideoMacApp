@@ -1495,6 +1495,7 @@ private struct GraphicBlock: View {
         case .column: return .purple
         case .speaker: return .pink
         case .cover: return .indigo
+        case .callout: return .yellow
         }
     }
     /// The end screen ends where the video ends: dragging it moves only its start.

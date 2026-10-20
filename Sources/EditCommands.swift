@@ -986,10 +986,16 @@ enum ProjectReducer {
     private static func editGraphics(_ id: UUID, in outcome: inout EditOutcome,
                                      _ body: (inout GraphicsTrack) throws -> Void) throws {
         try editClip(id, in: &outcome) { record, _ in
-            var track = record.graphics ?? GraphicsTrack()
+            let before = record.graphics ?? GraphicsTrack()
+            var track = before
             try body(&track)
             track.items.sort { $0.start < $1.start }
             if let problem = track.problem(duration: record.timeline.duration) { throw EditError.invalid(problem) }
+            // Callouts are checked against the screen when they change, so a screen taken
+            // away later leaves them hidden rather than blocking other graphics edits.
+            var changed = track
+            changed.items.removeAll { graphic in before.items.contains { $0.id == graphic.id && $0.kind == graphic.kind && $0.props == graphic.props } }
+            if let problem = changed.calloutProblem(screen: record.screen) { throw EditError.invalid(problem) }
             record.graphics = track.isEmpty ? nil : track
             if let shorts = record.shorts { record.shorts = Self.pruned(shorts, graphics: record.graphics) }
         }

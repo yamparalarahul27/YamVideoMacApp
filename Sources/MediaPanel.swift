@@ -103,13 +103,17 @@ struct MediaPanel: View {
     // MARK: Graphics and effects
 
     private var graphics: some View {
-        entries([
+        var list = [
             Entry(asset: .namePlate, title: "Name plate", detail: "Your name and what you do, beside you", symbol: "person.text.rectangle"),
             Entry(asset: .titleCard, title: "Title card", detail: "A title in the column", symbol: "textformat.size"),
             Entry(asset: .kineticText, title: "Kinetic text", detail: "Big words over the picture, as they are said", symbol: "text.word.spacing"),
             Entry(asset: .sectionCard, title: "Section card", detail: "A part's title over a seek bar", symbol: "rectangle.split.3x1"),
-            Entry(asset: .endScreen, title: "End screen", detail: "The last 5–20 s, for YouTube's end screen", symbol: "rectangle.inset.filled.and.person.filled"),
-        ], footer: AnyView(
+        ]
+        if model.selectedItem?.screen != nil {
+            list.append(Entry(asset: .callout, title: "Callout", detail: "A label with a line to a spot on the screen", symbol: "text.bubble"))
+        }
+        list.append(Entry(asset: .endScreen, title: "End screen", detail: "The last 5–20 s, for YouTube's end screen", symbol: "rectangle.inset.filled.and.person.filled"))
+        return entries(list, footer: AnyView(
             Button { model.chooseGraphicsFile() } label: { Label("Import Graphics File…", systemImage: "square.and.arrow.down") }
                 .controlSize(.small)
                 .disabled(!canAdd)

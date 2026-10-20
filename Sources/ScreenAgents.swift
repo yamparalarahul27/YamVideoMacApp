@@ -24,6 +24,9 @@ extension AgentState {
         var zooms: [Zoom]
         var covered: [[Double]]
         var missing: Bool
+        /// Callouts whose point never shows: over their time the layout hides the screen,
+        /// or a screen zoom leaves the point out.
+        var hiddenCallouts: [UUID]
     }
 }
 
@@ -42,7 +45,15 @@ extension AppModel {
             layouts: screen.spans.map { .init(id: $0.id, start: $0.start, end: $0.end, duration: $0.duration, layout: $0.layout.rawValue) },
             zooms: screen.zooms.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end, target: WirePoint($0.target)) },
             covered: screen.covered(on: clip.timeline).map { [$0.lowerBound, $0.upperBound] },
-            missing: !FileManager.default.fileExists(atPath: screen.url.path))
+            missing: !FileManager.default.fileExists(atPath: screen.url.path),
+            hiddenCallouts: hiddenCallouts(clip.item()))
+    }
+
+    static func hiddenCallouts(_ item: VideoItem) -> [UUID] {
+        guard let track = item.graphics else { return [] }
+        return track.items.filter { graphic in
+            graphic.kind == .callout && item.calloutPlace(graphic, short: nil, ink: false, endScreen: track.endScreen?.start).hidden
+        }.map(\.id)
     }
 
     /// Where the speaker's face is, in source pixels, at an edited time; nil when Apple

@@ -150,6 +150,20 @@ edit, and each edit becomes one undo step with your name on it.
     the video it starts. Put one at each part's first sentence, for 2–3 s, and use the
     chapter's words for the title.
   Nothing else may show with them; leave gaps round them for other graphics.
+- Callouts name a UI pattern next to the element on the screen recording (for example
+  "Empty state", "Thumb zone"): `addGraphic` with `kind: "callout"`, props `text` (1–4
+  words) and `point` {x, y}.
+  1. Find the point in the screen recording's pixels, as for a screen zoom target: look
+     at `preview --composed` at that time, then aim at the edge of the element, not at
+     its words, so the dot does not cover them.
+  2. Keep it 2–4 s, timed on the words that name the pattern.
+  3. Leave `side` at `auto`. The label then goes beside a narrow screen (a phone side by
+     side), else next to the point, inside the picture and clear of the speaker.
+  4. Check a frame at about 640 px wide. `state.clips[].screen.hiddenCallouts` lists a
+     callout whose point never shows (the layout hides the screen, or a zoom leaves the
+     point out).
+  A callout follows its point through screen zooms and layout changes, and nothing else
+  may show with it. In a Short it shows only with the screen on top.
 
 ### 4.6 Title, description, chapters and tags
 
