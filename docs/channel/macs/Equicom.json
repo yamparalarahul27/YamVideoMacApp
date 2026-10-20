@@ -1,7 +1,7 @@
 {
   "footage" : "~/Desktop/Yamparala Media",
   "mac" : "Equicom",
-  "updated" : "2026-10-20T06:37:04Z",
+  "updated" : "2026-10-20T07:41:59Z",
   "videos" : [
     {
       "bytes" : 612158590,
@@ -38,7 +38,7 @@
       ]
     },
     {
-      "bytes" : 7274996545,
+      "bytes" : 7275217874,
       "exports" : 7,
       "folder" : "2026-10-17 AgentUX System Design Part 1",
       "projects" : [
@@ -54,7 +54,7 @@
       ]
     },
     {
-      "bytes" : 9020851229,
+      "bytes" : 9020851568,
       "exports" : 0,
       "folder" : "2026-10-18 Sahi",
       "projects" : [
@@ -122,7 +122,7 @@
       ]
     },
     {
-      "bytes" : 624575147,
+      "bytes" : 624575171,
       "exports" : 0,
       "folder" : "2026-10-19 YamDrive Shorts",
       "projects" : [
