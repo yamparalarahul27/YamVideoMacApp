@@ -283,6 +283,12 @@ struct VideoItem: Identifiable {
     var includedInMovie = true
     var segments: [TimelineSegment]?
     var timeline: ClipTimeline { ClipTimeline(segments: segments ?? [TimelineSegment(id: id, start: 0, end: info?.duration ?? 0)]) }
+    /// Space on the timeline in front of a section, by its ID: left where a section was
+    /// deleted, trimmed or moved away. Only the timeline shows it; playback and exports
+    /// join the sections.
+    var gaps: [UUID: Double] = [:]
+    /// Where the timeline draws each section, with the gaps in.
+    var gapLayout: TimelineGapLayout { gaps.isEmpty ? TimelineGapLayout() : TimelineGapLayout(timeline: timeline, gaps: gaps) }
     /// The blur areas as the player and the export draw them on this timeline.
     var blurBoxes: [BlurBox] { BlurBox.boxes(blurRegions, on: timeline) }
     var editedDuration: Double { timeline.duration }

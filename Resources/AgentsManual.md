@@ -63,6 +63,10 @@ edit, and each edit becomes one undo step with your name on it.
   too.
 - A cut moves everything after it. Zooms, effects, markers and layouts follow their
   footage, and a cut that removes their footage removes them (the reply lists them).
+- **Gaps:** the owner's timeline can leave space where a section was deleted, trimmed or
+  moved, so the rest stays in place while they cut. A section's `gapBefore` is that space
+  in seconds. Gaps are only on the timeline: edited seconds, playback and exports have no
+  gaps. See 4.16.
 
 ## 4. Recipes
 
@@ -430,6 +434,22 @@ a track the owner gave or named.
    change. `removeMusic` removes one. `setChange` with `music` switches all of it off.
 6. Exports mix the music under the voice. With Loudness on, the export normalises the mix
    to -14 LUFS. Export for YouTube writes each credit line at the end of the description.
+
+### 4.16 Gaps on the timeline
+
+The owner cuts with gaps: Delete (⌘⌫) and the trim handles leave the space a section
+used, so nothing else on the row moves. They join the sections with Close Gaps (⌥⌘G) when
+they are done. ⇧⌘⌫ deletes and closes at once.
+
+1. Read `gapBefore` in `state.clips[].sections[]`. A section without it has no space in
+   front of it.
+2. Gaps change no time you send or read: zooms, graphics, captions, Shorts and exports use
+   edited seconds, which have no gaps. Export with gaps open; the video is joined.
+3. `deleteSection` closes up, as ⇧⌘⌫ does. To leave the space as ⌘⌫ does, send `setGap`
+   for the next section in the same `apply`, with its old `gapBefore` plus the deleted
+   section's `editedDuration`.
+4. `closeGaps {clipID}` joins every section; with `sectionID`, only the gap in front of
+   it. Do not close gaps the owner left unless they ask: they may still be cutting.
 
 ## 5. Problems
 

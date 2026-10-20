@@ -243,9 +243,14 @@ or understand which part of your content matters. Quiet footage may yield no sug
   frame. These keys leave text fields alone, so ⌘A still selects text while you type.
   Trims and order are edited one section at a time.
 - **Delete:** select one or more sections, then click the trash button or press **⌘⌫**.
-  Several go as one undo step. The gap closes automatically. At least one section stays;
-  remove the sidebar item to discard a recording.
-- **Reorder:** drag a section onto another, or use the earlier/later arrow buttons.
+  Several go as one undo step. The space they used stays on the timeline as a gap, so
+  nothing else moves while you cut. Playback and exports always join the sections.
+  **Close Gaps** (above the timeline, or **⌥⌘G**) joins them on the timeline too, and the
+  × on a gap closes only that one. **⇧⌘⌫** deletes and closes at once. At least one
+  section stays; remove the sidebar item to discard a recording.
+- **Move:** drag a section into the space beside it or into a gap further along. Drag it
+  over another section to reorder. The sections around it stay where they are. Trims and
+  speed changes leave space too, rather than pulling the rest along.
 - **Snapping:** with **Snapping** on (the button above the timeline, **N**, or Timeline ▸
   Snapping), dragged edges line up with the playhead, section boundaries, zoom edges and
   the start and end of the timeline once they come within 8 points of one. An accent

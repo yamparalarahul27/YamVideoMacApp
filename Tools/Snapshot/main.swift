@@ -193,6 +193,30 @@ func musicPictures(_ model: AppModel, output: URL, size: CGSize) async {
                  to: output.appendingPathComponent("6c-music-inspector.png"))
 }
 
+/// Gaps while cutting: a section deleted from the middle leaves its space, a blur effect
+/// spans the gap, the next section slides into half of it, then Close Gaps joins them.
+/// YAMVIDEO_SNAPSHOT_ONLY=gaps renders only these.
+@MainActor
+func gapPictures(_ model: AppModel, output: URL, size: CGSize) async {
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    let id = model.items[0].id
+    model.setPreviewFraction(0.5)
+    model.splitAtPlayhead()
+    let sections = model.items[0].timeline.segments
+    model.clickSegment(sections[1].id, at: model.items[0].timeline.offset(of: sections[1].id) + 0.01)
+    model.deleteSegment()
+    let after = model.items[0].timeline.segments[1]
+    let cut = model.items[0].timeline.offset(of: after.id)
+    _ = model.perform([.addBlurEffect(clip: id, effect: VideoBlurEffect(start: max(0, cut - 1), end: cut + 1))])
+    model.selectedEffectID = nil
+    model.clickSegment(after.id, at: cut + 0.01)
+    await render(window(), size: size, to: output.appendingPathComponent("7-gap.png"))
+    model.shiftSegment(after.id, by: -(model.items[0].gaps[after.id] ?? 0) / 2)
+    await render(window(), size: size, to: output.appendingPathComponent("7b-gap-slid.png"))
+    model.closeGaps()
+    await render(window(), size: size, to: output.appendingPathComponent("7c-gaps-closed.png"))
+}
+
 @MainActor
 func run() async throws {
     let arguments = CommandLine.arguments
@@ -249,6 +273,10 @@ func run() async throws {
     }
     if only == "music" {
         await musicPictures(model, output: output, size: size)
+        return
+    }
+    if only == "gaps" {
+        await gapPictures(model, output: output, size: size)
         return
     }
 

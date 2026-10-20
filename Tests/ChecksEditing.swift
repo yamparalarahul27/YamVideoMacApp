@@ -288,7 +288,7 @@ import Foundation
     editor.redoEdit()
     equal(editor.selectedItem!.timeline.segments.count, 3, "redo restores the split")
     editor.deleteSegment()
-    equal(editor.selectedItem!.timeline.segments.count, 2, "deleting a section closes its gap")
+    equal(editor.selectedItem!.timeline.segments.count, 2, "deleting a section removes it")
     editor.undoEdit()
     equal(editor.selectedItem!.timeline.segments.count, 3, "undo restores the deleted section")
     let namedProject = scratch.appendingPathComponent("round-trip.yamvideo")

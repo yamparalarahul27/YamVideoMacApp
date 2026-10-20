@@ -416,7 +416,7 @@ extension AppModel {
         let previous = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         let previousOrder = items.map(\.id)
         let settingsChanged = document.settings != settings
-        let movieBefore = (items.filter(\.includedInMovie).map(ProjectClip.init), movieSettings, settings)
+        let movieBefore = (items.filter(\.includedInMovie).map(ProjectClip.withoutGaps), movieSettings, settings)
         projectID = document.projectID ?? projectID
 
         var unprobed: [VideoItem.ID] = []
@@ -436,8 +436,10 @@ extension AppModel {
                 let time = item.timeline.time(forSource: source) ?? min(oldTime, item.editedDuration)
                 item.previewFraction = min(1, max(0, time / max(0.001, item.editedDuration)))
             }
+            // Gaps are only on the timeline: the export is the same with or without them.
             var before = ProjectClip(old), after = clip
             before.includedInMovie = nil; after.includedInMovie = nil
+            before.gaps = nil; after.gaps = nil
             if before != after || settingsChanged, item.info != nil, !item.status.isBusy { item.status = .ready }
             return item
         }
@@ -469,7 +471,7 @@ extension AppModel {
         if let id = selectedScreenZoomID, selectedItem?.screen?.zooms.contains(where: { $0.id == id }) != true { selectedScreenZoomID = nil }
         if let id = selectedMusicID, selectedItem?.music?.pieces.contains(where: { $0.id == id }) != true { selectedMusicID = nil }
 
-        let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.init), movieSettings, settings)
+        let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.withoutGaps), movieSettings, settings)
         if movieBefore != movieAfter { movieOutput = nil }
         for id in unprobed { retry(id) }
         if refresh { refreshPreview() }

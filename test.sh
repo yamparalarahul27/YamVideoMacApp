@@ -17,6 +17,7 @@ xcrun swiftc \
 	-o "$BIN" \
 	"$ROOT/Sources/Models.swift" \
 	"$ROOT/Sources/Timeline.swift" \
+	"$ROOT/Sources/TimelineGaps.swift" \
 	"$ROOT/Sources/TimelineTracks.swift" \
 	"$ROOT/Sources/PictureEditing.swift" \
 	"$ROOT/Sources/ChangeSwitches.swift" \

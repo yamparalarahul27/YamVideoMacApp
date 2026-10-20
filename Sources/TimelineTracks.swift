@@ -240,8 +240,10 @@ enum Filmstrip {
         guard pixels > 0, tileWidth > 0, segment.duration > 0 else { return [] }
         let tileSeconds = tileWidth / pixels
         let count = Int(ceil(segment.duration / tileSeconds))
-        let first = max(0, Int(floor((viewport.start - offset) / tileSeconds)))
-        let last = min(count - 1, Int(ceil((viewport.end - offset) / tileSeconds)))
+        // Where the section starts on the row, after any gap in front of it.
+        let place = viewport.gaps.display(offset)
+        let first = max(0, Int(floor((viewport.start - place) / tileSeconds)))
+        let last = min(count - 1, Int(ceil((viewport.end - place) / tileSeconds)))
         guard first <= last else { return [] }
         let step = Self.step(pixelsPerSecond: pixels, speed: segment.speed, tileWidth: tileWidth)
         return (first...last).map { index in

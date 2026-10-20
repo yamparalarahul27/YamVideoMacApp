@@ -179,6 +179,12 @@ struct YamVideoApp: App {
                 Button(model.sectionSelection.count > 1 ? "Delete Selected Sections" : "Delete Selected Section") { model.deleteSegment() }
                     .keyboardShortcut(.delete)
                     .disabled(model.sectionSelection.isEmpty)
+                Button(model.sectionSelection.count > 1 ? "Delete Sections and Close Gap" : "Delete Section and Close Gap") { model.deleteSegment(closeGap: true) }
+                    .keyboardShortcut(.delete, modifiers: [.command, .shift])
+                    .disabled(model.sectionSelection.isEmpty)
+                Button("Close Gaps") { model.closeGaps() }
+                    .keyboardShortcut("g", modifiers: [.command, .option])
+                    .disabled(model.selectedItem?.gaps.isEmpty != false || model.timelineTracks.locked.contains(.video))
                 Divider()
                 Button("Zoom In") { model.zoomTimeline(in: true) }
                     .keyboardShortcut("=", modifiers: .command)

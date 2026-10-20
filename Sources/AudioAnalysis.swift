@@ -112,19 +112,24 @@ struct WaveformView: View {
             guard !levels.isEmpty else { return }
             let from = window?.start ?? 0
             let span = max(0.000001, (window?.visible ?? timeline.duration))
+            // The window runs along the timeline's row, which has the gaps in; the sound has none.
+            let gaps = window?.gaps ?? TimelineGapLayout()
             var bars = Path()
             for column in 0..<count {
                 let a = from + span * Double(column) / Double(count)
                 let b = from + span * Double(column + 1) / Double(count)
                 var loudest = -120.0
+                var heard = false
                 // Sample the whole pixel's time span, including both sides of edit boundaries.
-                for t in [a, (a + b) / 2, max(a, b - 0.00001)] {
-                    guard let source = timeline.location(at: t)?.source else { continue }
+                for t in [a, (a + b) / 2, max(a, b - 0.00001)] where !gaps.inGap(t) {
+                    heard = true
+                    guard let source = timeline.location(at: gaps.edited(t))?.source else { continue }
                     let index = min(levels.count - 1, max(0, Int(source / AudioOverview.interval)))
                     if abs(levels[index].time - source) <= AudioOverview.interval * 2 {
                         loudest = max(loudest, levels[index].decibels)
                     }
                 }
+                guard heard else { continue }
                 let height = max(1, size.height * min(1, pow(10, loudest / 40)))
                 bars.addRect(CGRect(x: Double(column) * size.width / Double(count), y: (size.height - height) / 2, width: 1.2, height: height))
             }
