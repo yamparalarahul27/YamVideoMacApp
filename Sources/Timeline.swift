@@ -154,6 +154,9 @@ struct ProjectClip: Codable, Equatable {
     var switchedOff: [SwitchableChange]?
     /// Version 20 onwards. Nil while the recording has no music.
     var music: MusicBed?
+    /// Version 21 onwards. Space the timeline leaves in front of sections, in section
+    /// order; nil while there is none.
+    var gaps: [SectionGap]?
 
     init(_ item: VideoItem) {
         id = item.id; url = item.url; info = item.info; crop = item.crop
@@ -170,6 +173,8 @@ struct ProjectClip: Codable, Equatable {
         screen = item.screen
         switchedOff = item.switchedOff.isEmpty ? nil : item.switchedOff.sorted()
         music = item.music
+        let gaps = item.gaps.sectionGaps(in: item.timeline)
+        self.gaps = gaps.isEmpty ? nil : gaps
     }
 
     func item() -> VideoItem {
@@ -188,6 +193,7 @@ struct ProjectClip: Codable, Equatable {
         item.screen = screen
         item.switchedOff = Set(switchedOff ?? [])
         item.music = music
+        item.gaps = gaps?.lengths ?? [:]
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
         return item
@@ -220,10 +226,11 @@ struct VideoProject: Codable, Equatable {
     /// of changes. 16: adds the graphics style's size, for phones. 17: adds the thumbnail
     /// maker's picture size and its white frost background. 18: adds the changes a
     /// recording has switched off in the inspector. 19: adds the thumbnail's versions for
-    /// YouTube's Test & Compare and the winner. 20: adds a recording's background music. Every edited
+    /// YouTube's Test & Compare and the winner. 20: adds a recording's background music. 21: adds the
+    /// space the timeline leaves where a section was deleted, trimmed or moved. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 20
+    static let currentVersion = 21
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -329,6 +336,9 @@ struct VideoProject: Codable, Equatable {
         if version < 20, clips.contains(where: { $0.music != nil || $0.switchedOff?.contains(.music) == true }) {
             try reject("The project claims an older format but contains music."); return
         }
+        if version < 21, clips.contains(where: { $0.gaps != nil }) {
+            try reject("The project claims an older format but contains gaps on the timeline."); return
+        }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
@@ -352,7 +362,7 @@ struct VideoProject: Codable, Equatable {
             guard let info = clip.info else {
                 guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
                       clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil, clip.transcript == nil, clip.shorts == nil,
-                      clip.screen == nil, clip.music == nil else {
+                      clip.screen == nil, clip.music == nil, clip.gaps == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -367,6 +377,14 @@ struct VideoProject: Codable, Equatable {
                       $0.end <= info.duration + 0.001 && $0.speed.isFinite && (0.25...4).contains($0.speed) &&
                       $0.duration > 0 && ($0.speed == 1 || $0.duration >= 1 / info.fps - 0.000001) }) else {
                 try reject("The project contains invalid video sections."); return
+            }
+            if let gaps = clip.gaps {
+                let sections = Set(clip.timeline.segments.map(\.id))
+                guard !gaps.isEmpty, Set(gaps.map(\.section)).count == gaps.count,
+                      gaps.allSatisfy({ sections.contains($0.section) && $0.length.isFinite
+                          && (SectionGap.minimum...SectionGap.maximum).contains($0.length) }) else {
+                    try reject("The project contains invalid gaps on the timeline."); return
+                }
             }
             let orderedRanges = ranges.sorted { $0.start < $1.start }
             guard zip(orderedRanges, orderedRanges.dropFirst()).allSatisfy({ $0.end <= $1.start + 0.000001 }),
@@ -537,13 +555,20 @@ enum TimelineRuler {
 /// slides it, which is what lets a zoom hold a chosen moment still: there is no scroll
 /// offset to chase afterwards. It also means a long recording never builds views for
 /// footage that is off screen.
+///
+/// The row can be longer than the edit: space left where a section was deleted, trimmed
+/// or moved (`gaps`). `start`, `visible` and `total` are measured along the row; every
+/// time given to or taken from the viewport is edited time, which has no gaps, so the
+/// rows above and below the sections line up with their footage.
 struct TimelineViewport: Equatable {
-    /// Length of the whole edited timeline.
+    /// Length of the whole row: the edited timeline and its gaps.
     private(set) var total: Double
-    /// Seconds spanned by the viewport's width.
+    /// Seconds of row spanned by the viewport's width.
     private(set) var visible: Double
-    /// The time at the viewport's left edge.
+    /// The place on the row at the viewport's left edge.
     private(set) var start: Double
+    /// The space on the row in front of sections.
+    private(set) var gaps = TimelineGapLayout()
 
     /// The finest zoom offered: a sixtieth of the recording across the width. At a
     /// typical pane width that is frame-level on a short clip and ten-second ticks on
@@ -554,8 +579,9 @@ struct TimelineViewport: Equatable {
     /// about ten presses, which is fine enough to aim with and coarse enough to travel.
     static let step = 1.5
 
-    init(total: Double) {
-        self.total = max(0.001, total)
+    init(total: Double, gaps: TimelineGapLayout = TimelineGapLayout()) {
+        self.gaps = gaps
+        self.total = max(0.001, total + gaps.total)
         visible = self.total
         start = 0
     }
@@ -563,30 +589,51 @@ struct TimelineViewport: Equatable {
     /// 1 fits the whole recording; `maximumScale` is as far in as the timeline goes.
     var scale: Double { total / visible }
     var end: Double { start + visible }
+    /// The edited times at the left and right edges.
+    var editedStart: Double { gaps.edited(start) }
+    var editedEnd: Double { gaps.edited(end) }
+    /// The edited time in the middle of the view.
+    var editedMiddle: Double { gaps.edited(start + visible / 2) }
 
     func pixels(across width: Double) -> Double { width / visible }
-    /// Points from the left edge to `time`.
-    func x(of time: Double, across width: Double) -> Double { (time - start) * pixels(across: width) }
-    /// The time `x` points from the left edge.
-    func time(atX x: Double, across width: Double) -> Double { start + x / pixels(across: width) }
+    /// Points from the left edge to `time`. A time where a gap opens is the first frame
+    /// after it.
+    func x(of time: Double, across width: Double) -> Double { (gaps.display(time) - start) * pixels(across: width) }
+    /// Points from the left edge to where something ending at `time` ends: before a gap
+    /// that opens there.
+    func x(ofEnd time: Double, across width: Double) -> Double { (gaps.display(time, end: true) - start) * pixels(across: width) }
+    /// Points from `from` to `to`, gaps between them included.
+    func width(from: Double, to: Double, across width: Double) -> Double {
+        x(ofEnd: to, across: width) - x(of: from, across: width)
+    }
+    /// The edited time `x` points from the left edge. In a gap, that is where the
+    /// sections either side of it meet.
+    func time(atX x: Double, across width: Double) -> Double { gaps.edited(start + x / pixels(across: width)) }
+    /// Whether `x` points from the left edge is in a gap.
+    func inGap(atX x: Double, across width: Double) -> Bool { gaps.inGap(start + x / pixels(across: width)) }
 
-    func contains(_ time: Double) -> Bool { time >= start && time <= end }
+    func contains(_ time: Double) -> Bool {
+        let place = gaps.display(time)
+        return place >= start && place <= end
+    }
     /// True when any part of `from...to` is on screen, so it is worth building.
-    func intersects(_ from: Double, _ to: Double) -> Bool { to >= start && from <= end }
+    func intersects(_ from: Double, _ to: Double) -> Bool { gaps.display(to, end: true) >= start && gaps.display(from) <= end }
 
-    /// Follow an edit that changed the timeline's length, holding the left edge.
-    mutating func resize(total newTotal: Double) {
-        total = max(0.001, newTotal.isFinite ? newTotal : 0.001)
+    /// Follow an edit that changed the timeline's length or its gaps, holding the left edge.
+    mutating func resize(total newTotal: Double, gaps newGaps: TimelineGapLayout = TimelineGapLayout()) {
+        gaps = newGaps
+        total = max(0.001, (newTotal.isFinite ? newTotal : 0.001) + newGaps.total)
         normalise()
     }
 
-    /// Zoom so `anchor` stays at the same point across the width. At the ends the
-    /// window runs out of timeline to give, and the anchor drifts rather than the
-    /// viewport scrolling past the recording.
+    /// Zoom so `anchor` (edited time) stays at the same point across the width. At the
+    /// ends the window runs out of timeline to give, and the anchor drifts rather than
+    /// the viewport scrolling past the recording.
     mutating func zoom(to newScale: Double, keeping anchor: Double) {
-        let fraction = visible > 0 ? min(1, max(0, (anchor - start) / visible)) : 0.5
+        let place = gaps.display(anchor)
+        let fraction = visible > 0 ? min(1, max(0, (place - start) / visible)) : 0.5
         visible = total / min(Self.maximumScale, max(1, newScale.isFinite ? newScale : 1))
-        start = anchor - fraction * visible
+        start = place - fraction * visible
         normalise()
     }
 
@@ -600,7 +647,7 @@ struct TimelineViewport: Equatable {
         start = 0
     }
 
-    /// Slide the window, stopping at either end.
+    /// Slide the window `seconds` along the row, stopping at either end.
     mutating func pan(by seconds: Double) {
         start += seconds.isFinite ? seconds : 0
         normalise()
@@ -609,9 +656,10 @@ struct TimelineViewport: Equatable {
     /// Bring `time` into view without changing the zoom — how the timeline follows the
     /// playhead during playback. Already-visible times outside the margin do not move.
     mutating func reveal(_ time: Double, margin: Double = 0.12) {
+        let place = gaps.display(time)
         let inset = visible * min(0.5, max(0, margin))
-        if time < start + inset { start = time - inset }
-        else if time > end - inset { start = time - visible + inset }
+        if place < start + inset { start = place - inset }
+        else if place > end - inset { start = place - visible + inset }
         normalise()
     }
 

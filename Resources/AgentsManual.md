@@ -22,6 +22,8 @@ edit, and each edit becomes one undo step with your name on it.
      unless the owner says otherwise.
   4. Read the owner's choices in `state.autoEdit.options` and the recording's
      `publish` details, and the project's Why notes in `state.notes.why`.
+  5. Read the video folder's `Files/Plan.md` when it has one (4.16). When the owner
+     added recordings that have no plan, study them and write one first.
 
 ## 2. Rules
 
@@ -63,6 +65,10 @@ edit, and each edit becomes one undo step with your name on it.
   too.
 - A cut moves everything after it. Zooms, effects, markers and layouts follow their
   footage, and a cut that removes their footage removes them (the reply lists them).
+- **Gaps:** the owner's timeline can leave space where a section was deleted, trimmed or
+  moved, so the rest stays in place while they cut. A section's `gapBefore` is that space
+  in seconds. Gaps are only on the timeline: edited seconds, playback and exports have no
+  gaps. See 4.18.
 
 ## 4. Recipes
 
@@ -378,7 +384,8 @@ When the owner says "I added a recording", sort each new file in `Inbox/` or at 
 of the folder:
 
 1. Find its date (`ffprobe`, `format_tags=creation_time`) and its topic (look at 3 or 4
-   frames).
+   frames). For a DJI clip, use the time in its file name: its `creation_time` can carry
+   a wrong time zone.
 2. Move it into `Recorded/` of the video folder with the same topic and day. If there is
    none, make `YYYY-MM-DD Title/` with `Recorded/`, `Edited/` and `Files/`. Keep the file
    name. A YamDraw export (`recording.mp4`, `frame-NN.png`, `session.json`) goes together
@@ -391,6 +398,7 @@ of the folder:
 5. Add one line for each file to `Files/Recordings.md`: day, length, what it shows, and
    which video or Short it is for. Read it before the first edit of a video.
 6. Tell the owner where each file went. Ask when the topic is not clear.
+7. Study the new recordings and plan their videos (4.16).
 
 Before an export, read `Files/Blur notes.md` and hide each Must item with a Blur area:
 `addBlurArea {clipID, rect, start, end}` hides the rectangle from `start` to `end`. The
@@ -430,6 +438,98 @@ a track the owner gave or named.
    change. `removeMusic` removes one. `setChange` with `music` switches all of it off.
 6. Exports mix the music under the voice. With Loudness on, the export normalises the mix
    to -14 LUFS. Export for YouTube writes each credit line at the end of the description.
+
+### 4.16 Study new footage and plan the edit
+
+When the owner adds recordings, study them before any edit, write a plan for each video
+and ask the owner the questions that block it. Do not edit until the owner approves the
+plan. Sort the files first (4.14).
+
+1. **Read** `Files/Recordings.md` and `Files/Blur notes.md` of each video folder.
+2. **Transcribe each headshot**: `yamvideoctl transcribe`, or local whisper with a prompt
+   of the video's names, written with punctuation. Check the names after: a prompt can
+   pull a similar word to a name. Save the words, the captions and a list of timed
+   sentences in `Files/Transcripts/`, so the edit can use `importTranscript` later.
+   Transcribe a screen recording too when it has the owner's voice (an iPad or iPhone
+   recording often has it).
+3. **Find which recordings were made together.** Do not trust the file times alone:
+   - A DJI file name (`DJI_YYYYMMDDhhmmss`) has the camera's local time. Its
+     `creation_time` can carry a wrong time zone. Apple file names (`Screen Recording …
+     at 7.24.17 PM`, `ScreenRecording_MM-DD-YYYY HH-MM-SS`) and YamDraw's
+     `session.json` `startedAt` are correct.
+   - Two recordings with close start times and close lengths were made together. The
+     screen then gets one `offset` (4.4).
+   - Confirm each offset by content: a click, a scroll or a word that both show. A screen
+     recorded at another time needs a placement table (which part of the screen shows
+     over which sentence).
+4. **Look at the screen recordings.** Sample a frame every 2–4 s where the screen
+   changes (contact sheets with the time on each frame). Note what each part shows, the
+   UI details the owner talks about, and new personal information (4.14 step 4).
+5. **Understand the content:** the main point in the owner's words, the story, the
+   strong parts, and the weak, repeated or off-topic parts.
+6. **Write `Files/Plan.md`** in the video folder. Use these sections:
+   1. Summary: the main point, the target length (do not pad), the layout mix, the
+      effort, the most important choices.
+   2. What the recordings show: the story by source time; what each screen part shows.
+   3. Structure: chapters with source times and estimated edited times; a hook in the
+      first 10 s; a clear end.
+   4. Cuts: tight cuts, then flow cuts (repeats, fillers, restarts, side stories), each
+      with its words and times; the length after each.
+   5. Screen placement: the offset and how you found it, or the placement table; the crop.
+   6. Layouts and zooms: Speaker, Screen, Side by side or Ink for each part; zoom levels
+      and aims for the UI details the owner talks about.
+   7. Motion graphics: section cards, kinetic text, callouts, logo badges, name plate,
+      link card, end screen; check that each text reads at 640 px wide.
+   8. Personal information: each Must item with its rect and range, or the cut that
+      removes it; each Ask item as a question. A blur area covers only the main
+      recording, not a screen recording in a layout, so cut a Must part that the screen
+      shows.
+   9. Shorts: 2–4 candidates with times, title, description, tags and the hook.
+   10. Publish draft: title options, description, chapters, tags, two thumbnail ideas in
+       the owner's style (Style.md).
+   11. New app features the plan needs (describe them; do not build them).
+   12. Open questions: each one marked **Blocks edit** or **Can wait**.
+   Give times in source seconds of the headshot. Write all text in simple English
+   (rule 11).
+7. **Library:** give each video an idea (`addIdea`, 4.11) with a short summary in its
+   notes and the path of its `Plan.md`. A new idea is in stage *Idea*.
+8. **Ask the owner.** Make one overview page (an HTML page, for example an Artifact) with
+   the plans side by side, a recommended order to edit them, and the questions that block
+   each one. Then ask the owner to approve or change each plan. After a yes, edit as in
+   4.1–4.10, and add each answer as a project note (4.12).
+
+### 4.17 Plan the releases
+
+After the plans, plan when each long video and each Short goes out. Plan at least two
+months ahead. With more videos, plan further, so that each video has a day.
+
+1. Read the Library (4.11) and the plans: the long videos and the Shorts each plan
+   proposes, and the order the owner approved.
+2. Ask the owner for the rhythm the first time (for example a long video each week, a
+   Short every two days) and the platforms. Do not invent a rhythm.
+3. Propose the days as a table: each long video first, then its Shorts on the days after
+   it, so a Short sends viewers to its long video. Keep a series in order (Part 1 before
+   Part 2). Leave a video that is blocked by a question in *Not planned*.
+4. After a yes, send one `planRelease` for each video in one `libraryApply` (4.11b). The
+   owner sees the plan on the Calendar (⌘4).
+5. When the owner adds new footage, study it (4.16) and plan its videos into the free
+   days. Do not move a planned day without the owner's yes.
+
+### 4.18 Gaps on the timeline
+
+The owner cuts with gaps: Delete (⌘⌫) and the trim handles leave the space a section
+used, so nothing else on the row moves. They join the sections with Close Gaps (⌥⌘G) when
+they are done. ⇧⌘⌫ deletes and closes at once.
+
+1. Read `gapBefore` in `state.clips[].sections[]`. A section without it has no space in
+   front of it.
+2. Gaps change no time you send or read: zooms, graphics, captions, Shorts and exports use
+   edited seconds, which have no gaps. Export with gaps open; the video is joined.
+3. `deleteSection` closes up, as ⇧⌘⌫ does. To leave the space as ⌘⌫ does, send `setGap`
+   for the next section in the same `apply`, with its old `gapBefore` plus the deleted
+   section's `editedDuration`.
+4. `closeGaps {clipID}` joins every section; with `sectionID`, only the gap in front of
+   it. Do not close gaps the owner left unless they ask: they may still be cutting.
 
 ## 5. Problems
 
