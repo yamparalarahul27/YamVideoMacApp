@@ -35,6 +35,9 @@ enum EditCommand: Equatable {
     case setSectionSpeed(clip: UUID, section: UUID, speed: Double)
     /// The whole ordered section list at once, as silence removal produces it.
     case replaceSections(clip: UUID, sections: [TimelineSegment])
+    /// Every gap the timeline leaves in front of a section, at once; empty closes them all.
+    /// Gaps are only on the timeline: playback and exports join the sections.
+    case setGaps(clip: UUID, gaps: [SectionGap])
     case setCrop(clip: UUID, rect: CGRect)
     /// An `AspectPreset` label. Locks future crop drags to that shape; it does not move
     /// the crop by itself.
@@ -147,6 +150,7 @@ enum EditCommand: Equatable {
         case .moveSection: return "Move Section"
         case .setSectionSpeed: return "Change Section Speed"
         case .replaceSections: return "Edit Sections"
+        case .setGaps(_, let gaps): return gaps.isEmpty ? "Close Gaps" : "Move Section"
         case .setCrop: return "Crop"
         case .setAspect: return "Crop Aspect"
         case .addBlurArea: return "Add Blur"
@@ -372,6 +376,24 @@ enum ProjectReducer {
             try editTimeline(clip, in: &outcome) { timeline, _ in
                 guard !sections.isEmpty else { throw EditError.invalid("Keep at least one section.") }
                 timeline.segments = sections
+            }
+
+        case .setGaps(let clip, let gaps):
+            try editClip(clip, in: &outcome) { record, _ in
+                let sections = Set(record.timeline.segments.map(\.id))
+                guard Set(gaps.map(\.section)).count == gaps.count else {
+                    throw EditError.invalid("Give each section at most one gap.")
+                }
+                for gap in gaps {
+                    guard sections.contains(gap.section) else {
+                        throw EditError.notFound("No section \(gap.section.uuidString) in this recording.")
+                    }
+                    guard gap.length.isFinite, (0...SectionGap.maximum).contains(gap.length) else {
+                        throw EditError.invalid("A gap is from 0 to \(Int(SectionGap.maximum)) seconds; 0 closes it.")
+                    }
+                }
+                let kept = gaps.lengths.sectionGaps(in: record.timeline)
+                record.gaps = kept.isEmpty ? nil : kept
             }
 
         case .setCrop(let clip, let rect):
@@ -930,6 +952,7 @@ enum ProjectReducer {
                 record.publish = publish
             }
             record.segments = timeline.segments
+            if let gaps = record.gaps { record.gaps = Self.carried(gaps.lengths, from: old, to: timeline) }
         }
         outcome.removedZooms += removed.zooms
         outcome.removedEffects += removed.effects
@@ -937,6 +960,25 @@ enum ProjectReducer {
         outcome.removedGraphics += removed.graphics
         outcome.removedShorts += removed.shorts
         outcome.removedLayouts += removed.layouts
+    }
+
+    /// Gaps follow their sections. A section that is gone gives its space to the next one
+    /// that stays, so what was in front of it does not close up.
+    private static func carried(_ gaps: [UUID: Double], from old: ClipTimeline, to new: ClipTimeline) -> [SectionGap]? {
+        let staying = Set(new.segments.map(\.id))
+        var carried: [UUID: Double] = [:]
+        var pending = 0.0
+        for segment in old.segments {
+            let length = (gaps[segment.id] ?? 0) + pending
+            if staying.contains(segment.id) {
+                if length > 0 { carried[segment.id] = length }
+                pending = 0
+            } else {
+                pending = length
+            }
+        }
+        let kept = carried.sectionGaps(in: new)
+        return kept.isEmpty ? nil : kept
     }
 
     /// Edits one probed recording's graphics and checks the whole track against its

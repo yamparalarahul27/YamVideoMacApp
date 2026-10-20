@@ -80,7 +80,7 @@ extension AgentCatalog {
             [clip, section, field("start", "number", "New in point.", required: false, unit: "seconds of the source file"),
              field("end", "number", "New out point.", required: false, unit: "seconds of the source file")],
             #"{"type": "trimSection", "clipID": "CLIP-ID", "sectionID": "SECTION-ID", "start": 1.2}"#)
-        add("deleteSection", "sections", "Remove a section; the gap closes. At least one section must remain.", [clip, section],
+        add("deleteSection", "sections", "Remove a section; what follows closes up (the timeline's ⇧⌘⌫). At least one section must remain. To leave its space on the timeline as the owner's ⌫ does, follow it with setGap.", [clip, section],
             #"{"type": "deleteSection", "clipID": "CLIP-ID", "sectionID": "SECTION-ID"}"#)
         add("moveSection", "sections", "Move a section to another position in the recording.",
             [clip, section, field("index", "integer", "The position it should end up at, from 0.")],
@@ -88,6 +88,12 @@ extension AgentCatalog {
         add("setSectionSpeed", "sections", "Play a section faster or slower. Audio keeps its pitch.",
             [clip, section, field("speed", "number", "Playback rate.", unit: "× normal", range: 0.25...4)],
             #"{"type": "setSectionSpeed", "clipID": "CLIP-ID", "sectionID": "SECTION-ID", "speed": 1.5}"#)
+        add("setGap", "sections", "Leave space on the timeline in front of a section, as the owner's Delete and trims do, or change it. Only the timeline shows a gap: playback and exports join the sections. The state shows each section's gapBefore.",
+            [clip, section, field("duration", "number", "Space in front of the section; 0 closes it.", unit: "seconds", range: 0...SectionGap.maximum)],
+            #"{"type": "setGap", "clipID": "CLIP-ID", "sectionID": "SECTION-ID", "duration": 2.5}"#)
+        add("closeGaps", "sections", "Join the sections on the timeline (the owner's Close Gaps, ⌥⌘G): every gap, or only the one in front of sectionID.",
+            [clip, field("sectionID", "uuid", "Close only the gap in front of this section.", required: false)],
+            #"{"type": "closeGaps", "clipID": "CLIP-ID"}"#)
         add("replaceSections", "sections", "Replace every section at once, in play order — how silence removal applies its cuts.",
             [clip, field("sections", "array", "[{id?, start, end, speed?}] in play order; start and end in seconds of the source file.")],
             #"{"type": "replaceSections", "clipID": "CLIP-ID", "sections": [{"start": 0, "end": 3.2}, {"start": 4.1, "end": 9, "speed": 1.25}]}"#)

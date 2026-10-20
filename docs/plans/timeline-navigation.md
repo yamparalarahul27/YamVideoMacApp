@@ -93,7 +93,8 @@ rebuilt:
 - **Magnetic timeline / auto-ripple** are structurally unnecessary. Sections are
   exported through `concat`, so the timeline cannot contain a gap. There is nothing to
   ripple. This is a genuine advantage of the model and should be preserved, not traded
-  away for free positioning.
+  away for free positioning. *(2026-10-20: the owner asked for gaps while cutting. They
+  are drawn on the timeline only, so the export model stays gapless. See section 8.)*
 - **Trim to playhead** exists as `AppModel.trimToPlayhead(start:)`, bound to `⇧⌘[` and
   `⇧⌘]` in the Timeline menu.
 - **Split at playhead** exists (`⌘B`), matching Filmora's `Ctrl+B`.
@@ -337,3 +338,40 @@ Verified fix — encode with x264 parameters instead:
 Confirmed by ffprobe to produce `color_space=bt2020nc, color_transfer=arib-std-b67`.
 The neighbouring PQ fixture needs the same treatment with `transfer=smpte2084`. Fix this
 before starting section 4 so the suite is green and regressions are attributable.
+
+## 8. Gaps while cutting (2026-10-20)
+
+**Owner's feedback, from hands-on testing:** "if I cut a clip and if I try to move it or
+need to have some gap between them, it's not happening." Their way of cutting: take the
+whole strip, cut it, delete the parts in between, then join everything with one click.
+The timeline joined the sections at every delete, so the cut points still to make moved
+under them.
+
+**Asked:** must a gap ever stay in the finished video? The owner: mostly no ("A"), but
+sometimes, for another video on a layer above. There is no video layer above yet, so a
+real gap could only show black. Built A; real gaps wait for video layers (section 5,
+multi-track video).
+
+**What it does:**
+
+- Delete (⌘⌫, the trash button, the inspector) leaves the space a section used: the
+  sections after it keep their place. ⇧⌘⌫ deletes and closes at once (the old way).
+- Trims and speed changes leave space too. A section that grows uses the space in front
+  of the next one first, and pushes the rest only as far as it must.
+- Drag a section into the space beside it, or into a gap further along. Over another
+  section it reorders: moving earlier it takes the place of the section it goes in front
+  of, moving later it follows the one it goes after. The space it leaves stays.
+- Close Gaps (above the timeline, Timeline ▸ Close Gaps, ⌥⌘G) joins every section; the ×
+  on a gap closes that one. A locked Video row keeps its gaps.
+- Agents: `setGap`, `closeGaps`, and `gapBefore` on each section in the state. An agent's
+  `deleteSection` closes up, as before. Agents Manual 4.18.
+
+**How:** gaps are only on the timeline. A recording stores the space in front of each
+section (`ProjectClip.gaps`, project version 21); edited time, playback, captions,
+graphics, Shorts and every export are unchanged and have no gaps. `TimelineViewport`
+measures along the row, gaps included, and maps every edited time through
+`TimelineGapLayout`, so every row stays lined up with its footage. Blocks that span a gap
+(a graphic over two sections) draw across it; `BlockSpace` turns their drags back into
+edited time. The timeline's edits work out the new gaps with `SectionPlaces`: each
+section that stays keeps its place on the row where it can. Checks: `./test.sh gaps`.
+

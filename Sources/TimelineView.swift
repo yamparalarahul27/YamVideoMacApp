@@ -151,6 +151,7 @@ struct TimelineView: View {
         .background(.background.opacity(0.5))
         .onAppear { model.syncViewport() }
         .onChange(of: item.editedDuration) { _, _ in model.syncViewport() }
+        .onChange(of: item.gapLayout) { _, _ in model.syncViewport() }
         .onChange(of: model.previewTime) { _, time in
             // Only chase the playhead while it is running away on its own; dragging it
             // should not tug the view out from under the pointer.
@@ -245,7 +246,7 @@ struct TimelineView: View {
             tool("arrow.uturn.forward", model.redoTitle + " (⇧⌘Z)", label: "Redo") { model.redoEdit() }
                 .disabled(!model.canRedoInModule)
             toolDivider
-            tool("trash", "Delete the selection (⌫). A deleted section closes its gap.", label: "Delete") { model.deleteSelection() }
+            tool("trash", "Delete the selection (⌫; sections ⌘⌫). A deleted section leaves its space, so nothing else moves; ⇧⌘⌫ deletes and closes it.", label: "Delete") { model.deleteSelection() }
                 .disabled(!model.canDeleteSelection)
             tool("scissors", "Split at the playhead (⌘B)", label: "Split") { model.splitAtPlayhead() }
                 .disabled(locked(.video))
@@ -256,6 +257,13 @@ struct TimelineView: View {
             tool("camera.filters", "Add a full-frame blur at the playhead", label: "Add blur") { model.addBlurEffect() }
                 .disabled(locked(.effects))
             tool("flag", "Add a marker at the playhead (M)", label: "Add marker") { model.addMarkerAtPlayhead() }
+            if !item.gaps.isEmpty {
+                toolDivider
+                Button { model.closeGaps() } label: { Label("Close Gaps", systemImage: "arrow.right.to.line.compact") }
+                    .labelStyle(.titleAndIcon)
+                    .disabled(locked(.video))
+                    .help("Join the sections on the timeline (⌥⌘G). Playback and exports already join them.")
+            }
             toolDivider
             Button { model.showingAutoEdit = true } label: { Label("Auto Edit", systemImage: "wand.and.stars") }
                 .labelStyle(.titleAndIcon)
@@ -496,14 +504,14 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             Color.primary.opacity(0.001)
             if let minor {
-                ForEach(TimelineRuler.ticks(every: minor, in: viewport.start...viewport.end), id: \.self) { tick in
+                ForEach(TimelineRuler.ticks(every: minor, in: viewport.editedStart...viewport.editedEnd), id: \.self) { tick in
                     Rectangle()
                         .fill(.quaternary)
                         .frame(width: 1, height: 3)
                         .offset(x: viewport.x(of: tick, across: width), y: 15)
                 }
             }
-            ForEach(TimelineRuler.ticks(every: interval, in: viewport.start...viewport.end), id: \.self) { tick in
+            ForEach(TimelineRuler.ticks(every: interval, in: viewport.editedStart...viewport.editedEnd), id: \.self) { tick in
                 VStack(alignment: .leading, spacing: 3) {
                     if viewport.x(of: tick, across: width) + labelWidth <= width {
                         Text(TimelineRuler.label(tick, interval: interval, fps: fps))
@@ -542,6 +550,16 @@ struct TimelineView: View {
         let tileWidth = max(24, height * aspect)
         return ZStack(alignment: .topLeading) {
             Color.clear
+            ForEach(placedSegments.filter { (item.gaps[$0.segment.id] ?? 0) >= SectionGap.minimum
+                && viewport.intersects($0.offset, $0.offset) }, id: \.segment.id) { placed in
+                let from = viewport.x(ofEnd: placed.offset, across: width)
+                GapBlock(length: item.gaps[placed.segment.id] ?? 0, width: viewport.x(of: placed.offset, across: width) - from,
+                         locked: locked(.video),
+                         onClose: { model.closeGap(before: placed.segment.id) },
+                         onCloseAll: { model.closeGaps() })
+                    .frame(width: max(1, viewport.x(of: placed.offset, across: width) - from), height: height)
+                    .offset(x: from)
+            }
             ForEach(placedSegments.filter { viewport.intersects($0.offset, $0.offset + $0.segment.duration) },
                     id: \.segment.id) { placed in
                 let span = placed.offset...(placed.offset + placed.segment.duration)
@@ -563,12 +581,7 @@ struct TimelineView: View {
                                  model.clickSegment(placed.segment.id, at: placed.offset + placed.segment.duration * fraction,
                                                     extend: modifiers.contains(.shift), toggle: modifiers.contains(.command))
                              }, onTrim: { start, end in model.trimSegment(placed.segment.id, start: start, end: end) },
-                             onMove: { delta in
-                                 let time = placed.offset + placed.segment.duration / 2 + delta / pixels
-                                 if let destination = item.timeline.location(at: time)?.index {
-                                     model.moveSegment(placed.segment.id, to: destination)
-                                 }
-                             })
+                             onMove: { delta in moveSection(placed, by: delta, width: width, pixels: pixels) })
                     .frame(width: max(1, placed.segment.duration * pixels), height: height)
                     .offset(x: viewport.x(of: placed.offset, across: width))
             }
@@ -594,7 +607,7 @@ struct TimelineView: View {
                 }
                 ForEach(Array(pauses.enumerated()).filter { viewport.intersects($0.element.lowerBound, $0.element.upperBound) }, id: \.offset) { _, pause in
                     Rectangle().fill(Color.yellow.opacity(0.16))
-                        .frame(width: max(1, (pause.upperBound - pause.lowerBound) * pixels), height: waveformHeight)
+                        .frame(width: max(1, viewport.width(from: pause.lowerBound, to: pause.upperBound, across: width)), height: waveformHeight)
                         .offset(x: viewport.x(of: pause.lowerBound, across: width))
                         .help("A pause of \(String(format: "%.1f", pause.upperBound - pause.lowerBound)) s. Review Silence can cut it.")
                 }
@@ -613,6 +626,7 @@ struct TimelineView: View {
             .opacity(model.timelineTracks.muted ? 0.4 : 1)
             .contentShape(Rectangle())
             .onTapGesture { location in
+                guard !viewport.inGap(atX: location.x, across: width) else { return }
                 let time = viewport.time(atX: location.x, across: width)
                 guard let placed = placedSegments.first(where: { time >= $0.offset && time < $0.offset + $0.segment.duration }) else { return }
                 let modifiers = NSEvent.modifierFlags
@@ -646,7 +660,7 @@ struct TimelineView: View {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
             ForEach(cues.filter { viewport.intersects($0.start, $0.end) }) { cue in
                 let selected = model.inspectorFocus == .caption && model.selectedCaptionIndex == cue.index
-                let span = max(2, (cue.end - cue.start) * pixels - 1)
+                let span = max(2, viewport.width(from: cue.start, to: cue.end, across: width) - 1)
                 Text(span > 28 ? cue.text : "")
                     .font(.system(size: 9.5))
                     .lineLimit(1)
@@ -684,14 +698,18 @@ struct TimelineView: View {
             .font(.caption2).foregroundStyle(.secondary).padding(.leading, 9).padding(.top, 4)
             .allowsHitTesting(false)
             ForEach(screen.spans.filter { viewport.intersects($0.start, $0.end) }) { span in
+                let space = BlockSpace(viewport, width: width, from: span.start, to: span.end)
                 LayoutBlock(span: span, selected: model.selectedLayoutID == span.id,
-                            highlighted: model.agentHighlight?.elements.contains(span.id) == true, pixels: pixels,
-                            snapStart: { snapSpan(span.id, start: $0, duration: span.duration, pixels: pixels) },
-                            snapEdge: { snap($0, pixels: pixels, excluding: span.id) },
+                            highlighted: model.agentHighlight?.elements.contains(span.id) == true, pixels: space.pixels,
+                            snapStart: { space.block(snapSpan(span.id, start: space.time($0), duration: span.duration, pixels: pixels)) },
+                            snapEdge: { space.block(snap(space.time($0), pixels: pixels, excluding: span.id)) },
                             endSnap: endSnap,
                             onSelect: { model.selectLayout(span) },
-                            onMove: { start in model.updateLayout(span.id) { $0.end = start + $0.duration; $0.start = start } },
-                            onTrim: { start, end in model.updateLayout(span.id) { if let start { $0.start = start }; if let end { $0.end = end } } })
+                            onMove: { start in let start = space.time(start); model.updateLayout(span.id) { $0.end = start + $0.duration; $0.start = start } },
+                            onTrim: { start, end in
+                                let start = start.map(space.time), end = end.map(space.time)
+                                model.updateLayout(span.id) { if let start { $0.start = start }; if let end { $0.end = end } }
+                            })
                     .frame(height: Self.layoutHeight)
                     .offset(x: viewport.x(of: span.start, across: width))
             }
@@ -706,16 +724,17 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(Color.indigo.opacity(0.08))
             ForEach(screen.zooms.filter { viewport.intersects($0.start, $0.end) }) { shot in
+                let space = BlockSpace(viewport, width: width, from: shot.start, to: shot.end)
                 ZoomBlock(shot: shot, selected: model.selectedScreenZoomID == shot.id,
-                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
-                          snapStart: { snapSpan(shot.id, start: $0, duration: shot.duration, pixels: pixels) },
-                          snapEnd: { snap($0, pixels: pixels, excluding: shot.id) },
+                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: space.pixels,
+                          snapStart: { space.block(snapSpan(shot.id, start: space.time($0), duration: shot.duration, pixels: pixels)) },
+                          snapEnd: { space.block(snap(space.time($0), pixels: pixels, excluding: shot.id), end: true) },
                           endSnap: endSnap,
                           onSelect: { model.selectScreenZoom(shot) },
-                          onMove: { model.setScreenZoomStart(shot.id, $0) },
-                          onResize: { model.setScreenZoomHold(shot.id, $0) },
+                          onMove: { model.setScreenZoomStart(shot.id, space.time($0)) },
+                          onResize: { model.setScreenZoomHold(shot.id, space.hold($0, of: shot)) },
                           tint: .indigo, symbol: "macwindow")
-                    .frame(width: max(3, shot.duration * pixels), height: Self.zoomHeight)
+                    .frame(width: max(3, space.points), height: Self.zoomHeight)
                     .offset(x: viewport.x(of: shot.start, across: width))
             }
         }
@@ -728,15 +747,16 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
             ForEach(item.zoomShots.filter { viewport.intersects($0.start, $0.start + $0.duration) }) { shot in
+                let space = BlockSpace(viewport, width: width, from: shot.start, to: shot.end)
                 ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id,
-                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: pixels,
-                          snapStart: { snapSpan(shot.id, start: $0, duration: shot.duration, pixels: pixels) },
-                          snapEnd: { snap($0, pixels: pixels, excluding: shot.id) },
+                          highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: space.pixels,
+                          snapStart: { space.block(snapSpan(shot.id, start: space.time($0), duration: shot.duration, pixels: pixels)) },
+                          snapEnd: { space.block(snap(space.time($0), pixels: pixels, excluding: shot.id), end: true) },
                           endSnap: endSnap,
                           onSelect: { model.selectedShotID = shot.id },
-                          onMove: { model.setZoomStart(shot.id, $0) },
-                          onResize: { model.setZoomHold(shot.id, $0) })
-                    .frame(width: max(3, shot.duration * pixels), height: Self.zoomHeight)
+                          onMove: { model.setZoomStart(shot.id, space.time($0)) },
+                          onResize: { model.setZoomHold(shot.id, space.hold($0, of: shot)) })
+                    .frame(width: max(3, space.points), height: Self.zoomHeight)
                     .offset(x: viewport.x(of: shot.start, across: width))
             }
         }
@@ -752,14 +772,16 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
             ForEach(item.blurEffects.filter { viewport.intersects($0.start, $0.end) }) { effect in
+                let space = BlockSpace(viewport, width: width, from: effect.start, to: effect.end)
                 EffectBlock(effect: effect, selected: model.selectedEffectID == effect.id,
-                            highlighted: model.agentHighlight?.elements.contains(effect.id) == true, pixels: pixels,
-                            snapStart: { snapSpan(effect.id, start: $0, duration: effect.duration, pixels: pixels) },
-                            snapEdge: { snap($0, pixels: pixels, excluding: effect.id) },
+                            highlighted: model.agentHighlight?.elements.contains(effect.id) == true, pixels: space.pixels,
+                            snapStart: { space.block(snapSpan(effect.id, start: space.time($0), duration: effect.duration, pixels: pixels)) },
+                            snapEdge: { space.block(snap(space.time($0), pixels: pixels, excluding: effect.id)) },
                             endSnap: endSnap,
                             onSelect: { model.selectedEffectID = effect.id },
-                            onMove: { start in model.updateEffect(effect.id) { $0.end = start + $0.duration; $0.start = start } },
+                            onMove: { start in let start = space.time(start); model.updateEffect(effect.id) { $0.end = start + $0.duration; $0.start = start } },
                             onTrim: { start, end in
+                                let start = start.map(space.time), end = end.map(space.time)
                                 model.updateEffect(effect.id) { if let start { $0.start = start }; if let end { $0.end = end } }
                             })
                     .frame(height: Self.effectHeight)
@@ -767,7 +789,7 @@ struct TimelineView: View {
             }
             if !item.blurRegions.isEmpty {
                 let start = max(0, viewport.x(of: 0, across: width))
-                let end = min(width, viewport.x(of: total, across: width))
+                let end = min(width, viewport.x(ofEnd: total, across: width))
                 let selected = model.inspectorFocus == .blurArea
                 HStack(spacing: 3) {
                     Image(systemName: "camera.filters")
@@ -799,22 +821,24 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
             ForEach(graphics.filter { viewport.intersects($0.start, $0.end) }) { graphic in
+                let space = BlockSpace(viewport, width: width, from: graphic.start, to: graphic.end)
                 GraphicBlock(graphic: graphic, ink: item.graphics?.look(of: graphic) == .ink,
                              selected: model.selectedGraphicID == graphic.id,
-                             highlighted: model.agentHighlight?.elements.contains(graphic.id) == true, pixels: pixels,
-                             snapStart: { start in
-                                 guard let snapping = snapping() else { showGuide(at: nil); return start }
+                             highlighted: model.agentHighlight?.elements.contains(graphic.id) == true, pixels: space.pixels,
+                             snapStart: { block in
+                                 let start = space.time(block)
+                                 guard let snapping = snapping() else { showGuide(at: nil); return space.block(start) }
                                  let landed = snapping.snapSpan(start: start, duration: graphic.length, pixelsPerSecond: pixels)
                                  showGuide(at: landed.target?.time)
-                                 return landed.start
+                                 return space.block(landed.start)
                              },
-                             snapEnd: { snap($0, pixels: pixels) },
+                             snapEnd: { space.block(snap(space.time($0), pixels: pixels), end: true) },
                              endSnap: endSnap,
                              onSelect: { model.selectedGraphicID = graphic.id },
-                             onMove: { model.moveGraphic(graphic.id, to: $0) },
-                             onResize: { model.setGraphicEdge(graphic.id, end: $0) })
+                             onMove: { model.moveGraphic(graphic.id, to: space.time($0)) },
+                             onResize: { model.setGraphicEdge(graphic.id, end: space.time($0)) })
                     // The end screen takes the whole screen, so it spans both rows.
-                    .frame(width: max(3, graphic.length * pixels),
+                    .frame(width: max(3, space.points),
                            height: graphic.kind.zone == .screen ? Self.graphicsRowHeight * 2 + 2 : Self.graphicsRowHeight)
                     .offset(x: viewport.x(of: graphic.start, across: width),
                             y: graphic.kind.zone == .panel ? Self.graphicsRowHeight + 3 : 1)
@@ -833,30 +857,34 @@ struct TimelineView: View {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
             ForEach(pieces.filter { viewport.intersects($0.start, $0.end(in: duration)) }) { piece in
                 let end = piece.end(in: duration)
-                MusicBlock(piece: piece, end: end, selected: model.selectedMusicID == piece.id, pixels: pixels,
-                           snapStart: { start in
-                               guard let snapping = snapping() else { showGuide(at: nil); return start }
+                let space = BlockSpace(viewport, width: width, from: piece.start, to: end)
+                MusicBlock(piece: piece, end: end, selected: model.selectedMusicID == piece.id, pixels: space.pixels,
+                           snapStart: { block in
+                               let start = space.time(block)
+                               guard let snapping = snapping() else { showGuide(at: nil); return space.block(start) }
                                let landed = snapping.snapSpan(start: start, duration: end - piece.start, pixelsPerSecond: pixels)
                                showGuide(at: landed.target?.time)
-                               return landed.start
+                               return space.block(landed.start)
                            },
-                           snapEdge: { snap($0, pixels: pixels) },
+                           snapEdge: { space.block(snap(space.time($0), pixels: pixels)) },
                            endSnap: endSnap,
                            onSelect: { model.selectedMusicID = piece.id },
-                           onMove: { model.moveMusic(piece.id, to: $0) },
-                           onStart: { model.setMusicStart(piece.id, to: $0) },
-                           onEnd: { model.setMusicEnd(piece.id, to: $0) })
-                    .frame(width: max(6, (end - piece.start) * pixels), height: musicHeight - 2)
+                           onMove: { model.moveMusic(piece.id, to: space.time($0)) },
+                           onStart: { model.setMusicStart(piece.id, to: space.time($0)) },
+                           onEnd: { model.setMusicEnd(piece.id, to: space.time($0)) })
+                    .frame(width: max(6, space.points), height: musicHeight - 2)
                     .offset(x: viewport.x(of: piece.start, across: width), y: 1)
                 if let levels = musicLevels[piece.url] {
                     // Only the part on screen is drawn: a long piece at a close zoom is wider
-                    // than any canvas should be.
-                    let from = max(piece.start, viewport.start), to = min(end, viewport.end)
-                    if to - from > 0.01 {
-                        WaveformView(overview: levels, timeline: Self.playsTimeline(piece, duration: duration).cut(from: from - piece.start, to: to - piece.start))
-                            .frame(width: max(1, (to - from) * pixels), height: max(4, musicHeight - 14))
+                    // than any canvas should be. Each run between gaps is drawn on its own,
+                    // so the sound lines up with the sections either side of a gap.
+                    let plays = Self.playsTimeline(piece, duration: duration)
+                    ForEach(Self.runs(from: max(piece.start, viewport.editedStart), to: min(end, viewport.editedEnd), in: viewport),
+                            id: \.from) { run in
+                        WaveformView(overview: levels, timeline: plays.cut(from: run.from - piece.start, to: run.to - piece.start))
+                            .frame(width: max(1, viewport.width(from: run.from, to: run.to, across: width)), height: max(4, musicHeight - 14))
                             .opacity(0.55)
-                            .offset(x: viewport.x(of: from, across: width), y: 11)
+                            .offset(x: viewport.x(of: run.from, across: width), y: 11)
                             .allowsHitTesting(false)
                     }
                 }
@@ -865,6 +893,46 @@ struct TimelineView: View {
         .frame(width: width, height: musicHeight, alignment: .leading)
         .clipped()
         .opacity(hidden(.music) ? 0.5 : 1)
+    }
+
+    /// `from...to` in pieces that do not cross a gap.
+    private static func runs(from: Double, to: Double, in viewport: TimelineViewport) -> [TimeRun] {
+        guard to - from > 0.01 else { return [] }
+        var runs: [TimeRun] = []
+        var start = from
+        for opening in viewport.gaps.openings where opening > from + 0.000001 && opening < to - 0.000001 {
+            runs.append(TimeRun(from: start, to: opening))
+            start = opening
+        }
+        runs.append(TimeRun(from: start, to: to))
+        return runs.filter { $0.to - $0.from > 0.01 }
+    }
+
+    /// A section dragged `delta` points. Over another section it takes that place in the
+    /// order. Into the space beside it, it slides there; into space further along, it goes
+    /// there. Either way the sections around it stay where they are.
+    private func moveSection(_ placed: (index: Int, segment: TimelineSegment, offset: Double), by delta: Double,
+                             width: Double, pixels: Double) {
+        let viewport = model.viewport
+        let left = viewport.x(of: placed.offset, across: width) + delta
+        let middle = left + placed.segment.duration * pixels / 2
+        let time = viewport.time(atX: middle, across: width)
+        if viewport.inGap(atX: middle, across: width),
+           let after = placedSegments.first(where: { abs($0.offset - time) < 0.000001 && (item.gaps[$0.segment.id] ?? 0) > 0 }) {
+            if after.index == placed.index || after.index == placed.index + 1 {
+                model.shiftSegment(placed.segment.id, by: delta / pixels)
+            } else {
+                model.moveSegment(placed.segment.id, to: after.index > placed.index ? after.index - 1 : after.index,
+                                  place: viewport.start + max(0, left) / pixels)
+            }
+            return
+        }
+        guard let destination = item.timeline.location(at: time)?.index else { return }
+        if destination == placed.index {
+            model.shiftSegment(placed.segment.id, by: delta / pixels)
+        } else {
+            model.moveSegment(placed.segment.id, to: destination)
+        }
     }
 
     /// What a piece plays, as file ranges in its own time from 0: each play up to where the
@@ -882,14 +950,15 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.35))
             ForEach(Array(item.shorts.enumerated()).filter { viewport.intersects($0.element.start, $0.element.end) }, id: \.element.id) { index, short in
+                let space = BlockSpace(viewport, width: width, from: short.start, to: short.end)
                 ShortBlock(short: short, name: short.name(index: index), selected: model.selectedShortID == short.id,
-                           highlighted: model.agentHighlight?.elements.contains(short.id) == true, pixels: pixels,
-                           snapStart: { snapSpan(short.id, start: $0, duration: short.length, pixels: pixels) },
-                           snapEdge: { snap($0, pixels: pixels) },
+                           highlighted: model.agentHighlight?.elements.contains(short.id) == true, pixels: space.pixels,
+                           snapStart: { space.block(snapSpan(short.id, start: space.time($0), duration: short.length, pixels: pixels)) },
+                           snapEdge: { space.block(snap(space.time($0), pixels: pixels)) },
                            endSnap: endSnap,
                            onSelect: { model.selectShort(short.id) },
-                           onMove: { model.moveShort(short.id, to: $0) },
-                           onTrim: { start, end in model.setShortEdge(short.id, start: start, end: end) })
+                           onMove: { model.moveShort(short.id, to: space.time($0)) },
+                           onTrim: { start, end in model.setShortEdge(short.id, start: start.map(space.time), end: end.map(space.time)) })
                     .frame(height: Self.shortsHeight)
                     .offset(x: viewport.x(of: short.start, across: width))
             }
@@ -945,6 +1014,86 @@ struct TimelineView: View {
             .opacity(snapGuide != nil && model.viewport.contains(time) ? 1 : 0)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+/// A stretch of edited time.
+private struct TimeRun: Hashable {
+    var from: Double
+    var to: Double
+}
+
+/// How a block on a row draws and moves when the row has gaps. A block measures its own
+/// time at one scale from its start. Over a gap the row is wider than the block's own
+/// time, so the block gets the scale that fills its place, and its times pass through the
+/// row on the way in and out. Without gaps it changes nothing.
+private struct BlockSpace {
+    let viewport: TimelineViewport
+    let width: Double
+    let from: Double
+    /// Points the block takes on the row.
+    let points: Double
+    /// Points per second of the block's own time.
+    let pixels: Double
+
+    init(_ viewport: TimelineViewport, width: Double, from: Double, to: Double) {
+        self.viewport = viewport
+        self.width = width
+        self.from = from
+        points = viewport.width(from: from, to: to, across: width)
+        pixels = to - from > 0.000001 && points > 0 ? points / (to - from) : viewport.pixels(across: width)
+    }
+
+    private var origin: Double { viewport.x(of: from, across: width) }
+
+    /// The edited time at a time the block worked out.
+    func time(_ block: Double) -> Double { viewport.time(atX: origin + (block - from) * pixels, across: width) }
+
+    /// The block's own time for an edited time; `end` for where something ends.
+    func block(_ time: Double, end: Bool = false) -> Double {
+        let x = end ? viewport.x(ofEnd: time, across: width) : viewport.x(of: time, across: width)
+        return from + (x - origin) / pixels
+    }
+
+    /// A zoom's new hold, from the hold its block worked out.
+    func hold(_ block: Double, of shot: ZoomShot) -> Double { shot.hold + time(block - shot.hold + shot.end) - shot.end }
+}
+
+/// Space the timeline leaves in front of a section. Playback and exports skip it.
+private struct GapBlock: View {
+    let length: Double
+    let width: Double
+    let locked: Bool
+    let onClose: () -> Void
+    let onCloseAll: () -> Void
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 5)
+            .fill(Color.primary.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(Color.secondary.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            .overlay {
+                if width >= 24, !locked {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .frame(width: 18, height: 18)
+                            .background(Circle().fill(.regularMaterial))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close this gap: the sections after it move up")
+                    .accessibilityLabel("Close gap")
+                }
+            }
+            .padding(.horizontal, 1)
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Close Gap", action: onClose).disabled(locked)
+                Button("Close All Gaps", action: onCloseAll).disabled(locked)
+            }
+            .help("A gap of \(timelineTime(length)). Only the timeline shows it: playback and exports join the sections. Close Gaps (⌥⌘G) joins them here too.")
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Gap, \(timelineTime(length))")
     }
 }
 
@@ -1008,7 +1157,7 @@ private struct SegmentBlock: View {
             .gesture(DragGesture(minimumDistance: 12)
                 .onChanged { moveDelta = $0.translation.width }
                 .onEnded { value in onMove(value.translation.width); moveDelta = 0 })
-            .help("Click to select; ⇧- or ⌘-click to select several. Drag the edges to trim, or drag the section to reorder.")
+            .help("Click to select; ⇧- or ⌘-click to select several. Drag the edges to trim; the space they free stays. Drag the section into empty space, or past another section to reorder.")
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Section \(number), \(timelineTime(segment.duration))"
                                 + (segment.speed == 1 ? "" : ", \(segment.speed.formatted()) times speed"))

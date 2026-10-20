@@ -421,9 +421,28 @@ extension AppModel {
                      failure: "Move the playhead inside a section to split it.") { $0.createdIDs.first }
     }
 
+    /// Section edits from the timeline: the sections they change change, and every other
+    /// section keeps its place on the row, so deleting or trimming leaves space rather
+    /// than pulling the rest along. `pinned` places a section by hand, as a drag drops it.
+    @discardableResult
+    private func editKeepingPlace(_ commands: [EditCommand], name: String, failure: String? = nil,
+                                  pinned: [UUID: Double] = [:], select: (EditReceipt) -> SectionSelection) -> Bool {
+        guard let item = selectedItem,
+              let planned = try? ProjectReducer.apply(commands, to: project).project.clips.first(where: { $0.id == item.id }) else {
+            // The edit is refused: let the transaction say why.
+            return editSections(commands, name: name, failure: failure, select: select)
+        }
+        let gaps = SectionPlaces.gaps(after: item.timeline, item.gaps, new: planned.timeline, pinned: pinned)
+            .sectionGaps(in: planned.timeline)
+        let extra: [EditCommand] = gaps == (planned.gaps ?? []) ? [] : [.setGaps(clip: item.id, gaps: gaps)]
+        guard !(commands + extra).isEmpty else { return false }
+        return editSections(commands + extra, name: name, failure: failure, select: select)
+    }
+
     /// Deletes every selected section as one step, then selects the section that took
-    /// the first one's place.
-    func deleteSegment() {
+    /// the first one's place. Its space stays on the timeline, so nothing else moves;
+    /// `closeGap` (⇧⌘⌫) closes it at once instead.
+    func deleteSegment(closeGap: Bool = false) {
         guard let item = selectedItem else { return }
         let doomed = sectionSelection.ordered(in: item.timeline)
         guard let first = doomed.first, let index = item.timeline.segments.firstIndex(where: { $0.id == first.id }) else { return }
@@ -435,17 +454,68 @@ extension AppModel {
         }
         let name = doomed.count == 1 ? EditCommand.deleteSection(clip: item.id, section: first.id).defaultLabel
             : "Delete \(doomed.count) Sections"
-        editSections(doomed.map { .deleteSection(clip: item.id, section: $0.id) }, name: name) { _ in
+        let commands: [EditCommand] = doomed.map { .deleteSection(clip: item.id, section: $0.id) }
+        let select: (EditReceipt) -> SectionSelection = { _ in
             guard let segments = self.selectedItem?.timeline.segments, !segments.isEmpty else { return SectionSelection() }
             return .single(segments[min(index, segments.count - 1)].id)
         }
+        if closeGap {
+            editSections(commands, name: name, select: select)
+        } else if editKeepingPlace(commands, name: name, select: select), selectedItem?.gaps.isEmpty == false {
+            statusMessage = "\(name). Its space stays on the timeline; Close Gaps (⌥⌘G) joins the sections."
+        }
     }
 
-    func moveSegment(_ id: UUID, to index: Int) {
+    /// A drag that puts a section in another place in the order. Moving it earlier, it
+    /// takes the place of the section it goes in front of; moving it later, it follows the
+    /// section it goes after. The space it leaves stays, and the sections after it only
+    /// move along if they must.
+    /// `place` drops it at that point on the row instead, as a drag into far space does.
+    func moveSegment(_ id: UUID, to index: Int, place: Double? = nil) {
         guard let item = selectedItem, let old = item.timeline.segments.firstIndex(where: { $0.id == id }) else { return }
         let destination = min(max(0, index), item.timeline.segments.count - 1)
         guard old != destination else { return }
-        editSections(.moveSection(clip: item.id, section: id, to: destination)) { _ in id }
+        var pinned: [UUID: Double] = [:]
+        if let place, place.isFinite {
+            pinned[id] = max(0, place)
+        } else if destination < old {
+            let starts = SectionPlaces.starts(item.timeline, gaps: item.gaps)
+            pinned[id] = starts[item.timeline.segments[destination].id]
+        }
+        editKeepingPlace([.moveSection(clip: item.id, section: id, to: destination)],
+                         name: EditCommand.moveSection(clip: item.id, section: id, to: destination).defaultLabel,
+                         pinned: pinned) { _ in .single(id) }
+    }
+
+    /// A drag that slides a section along the row into empty space: `seconds` later
+    /// (negative: earlier). It stops at the sections either side.
+    func shiftSegment(_ id: UUID, by seconds: Double) {
+        guard let item = selectedItem, seconds.isFinite,
+              let index = item.timeline.segments.firstIndex(where: { $0.id == id }) else { return }
+        let segments = item.timeline.segments
+        let before = item.gaps[id] ?? 0
+        let after = index + 1 < segments.count ? item.gaps[segments[index + 1].id] ?? 0 : 0
+        let shift = min(after, max(-before, seconds))
+        guard abs(shift) >= SectionGap.minimum,
+              let start = SectionPlaces.starts(item.timeline, gaps: item.gaps)[id] else { return }
+        editKeepingPlace([], name: "Move Section", pinned: [id: start + shift]) { _ in .single(id) }
+    }
+
+    /// Joins every section on the timeline: the gaps close, and each section follows the
+    /// one before it. Playback and exports already join them.
+    func closeGaps() {
+        guard let item = selectedItem, !item.gaps.isEmpty else { return }
+        guard !timelineTracks.locked.contains(.video) else { statusMessage = "Video is locked. Unlock it to close gaps."; return }
+        editSections([.setGaps(clip: item.id, gaps: [])], name: "Close Gaps") { _ in self.sectionSelection }
+    }
+
+    /// Closes the space in front of one section; the sections after it move up.
+    func closeGap(before id: UUID) {
+        guard let item = selectedItem, item.gaps[id] != nil else { return }
+        guard !timelineTracks.locked.contains(.video) else { statusMessage = "Video is locked. Unlock it to close gaps."; return }
+        var gaps = item.gaps
+        gaps[id] = nil
+        editSections([.setGaps(clip: item.id, gaps: gaps.sectionGaps(in: item.timeline))], name: "Close Gap") { _ in self.sectionSelection }
     }
 
     /// The timeline's trim: unlike an agent's, a drag past a limit stops at it.
@@ -463,7 +533,8 @@ extension AppModel {
         if let start, start.isFinite { segment.start = min(segment.end - minimum, max(lower, (start * rate).rounded() / rate)) }
         if let end, end.isFinite { segment.end = max(segment.start + minimum, min(upper, (end * rate).rounded() / rate)) }
         guard segment != timeline.segments[index] else { return }
-        editSections(.trimSection(clip: item.id, section: id, start: segment.start, end: segment.end)) { _ in id }
+        let command = EditCommand.trimSection(clip: item.id, section: id, start: segment.start, end: segment.end)
+        editKeepingPlace([command], name: command.defaultLabel) { _ in .single(id) }
     }
 
     func trimToPlayhead(start: Bool) {
@@ -474,7 +545,8 @@ extension AppModel {
 
     func setSegmentSpeed(_ id: UUID, speed: Double) {
         guard let item = selectedItem else { return }
-        editSections(.setSectionSpeed(clip: item.id, section: id, speed: speed)) { _ in id }
+        let command = EditCommand.setSectionSpeed(clip: item.id, section: id, speed: speed)
+        editKeepingPlace([command], name: command.defaultLabel) { _ in .single(id) }
     }
 
     /// One speed for every selected section, as one step. If any section is too short
@@ -484,8 +556,8 @@ extension AppModel {
         let sections = sectionSelection.ordered(in: item.timeline).filter { $0.speed != speed }
         guard !sections.isEmpty else { return }
         let kept = sectionSelection
-        editSections(sections.map { .setSectionSpeed(clip: item.id, section: $0.id, speed: speed) },
-                     name: sectionSelection.count == 1 ? "Change Section Speed" : "Change Speed of \(sectionSelection.count) Sections") { _ in kept }
+        editKeepingPlace(sections.map { .setSectionSpeed(clip: item.id, section: $0.id, speed: speed) },
+                         name: sectionSelection.count == 1 ? "Change Section Speed" : "Change Speed of \(sectionSelection.count) Sections") { _ in kept }
     }
 
     // MARK: Selecting sections
@@ -545,7 +617,8 @@ extension AppModel {
     /// newly selected clip zoomed out. Called whenever the timeline is rebuilt.
     func syncViewport() {
         let total = selectedItem?.editedDuration ?? 0
-        if abs(viewport.total - total) > 0.0005 { viewport.resize(total: total) }
+        let gaps = selectedItem?.gapLayout ?? TimelineGapLayout()
+        if abs(viewport.total - total - gaps.total) > 0.0005 || viewport.gaps != gaps { viewport.resize(total: total, gaps: gaps) }
     }
 
     /// Zoom out to the whole recording.
@@ -564,7 +637,7 @@ extension AppModel {
     /// screen would drag the view somewhere you did not ask to go.
     var viewportAnchor: Double {
         let time = previewTime
-        return viewport.contains(time) ? time : viewport.start + viewport.visible / 2
+        return viewport.contains(time) ? time : viewport.editedMiddle
     }
 
     /// Scroll the timeline so the playhead stays in view while it is moving.

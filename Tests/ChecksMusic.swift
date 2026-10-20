@@ -125,7 +125,7 @@ private func close(_ a: Double, _ b: Double, _ tolerance: Double = 0.0005) -> Bo
           "music follows the edit through the reducer", "\(String(describing: afterCut.clips[0].music))")
     let data = try JSONEncoder().encode(both)
     let reopened = try VideoProject.decodeMigrating(from: data)
-    check(reopened.version == 20 && reopened.clips[0].music == both.clips[0].music, "a project saves and opens with the same music (version 20)")
+    check(reopened.version == VideoProject.currentVersion && reopened.clips[0].music == both.clips[0].music, "a project saves and opens with the same music")
     var older = both; older.version = 19
     do { try older.validate(); check(false, "a version 19 file with music is refused") }
     catch { check(error.localizedDescription.contains("music"), "a version 19 file with music is refused", error.localizedDescription) }

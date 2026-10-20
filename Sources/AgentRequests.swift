@@ -232,6 +232,7 @@ struct WireCommand: Codable, Equatable {
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
+        "closeGaps", "setGap",
         "setCrop", "setAspect", "addBlurArea", "updateBlurArea", "removeBlurArea", "replaceBlurAreas",
         "addZoom", "updateZoom", "removeZoom", "replaceZooms", "setMovieOrder", "setIncludedInMovie",
         "setMovieCanvas", "setExportSettings", "setSubtitles", "clearSubtitles", "addMedia", "removeMedia",
@@ -321,6 +322,9 @@ struct AgentState: Encodable {
     }
     struct Section: Encodable {
         var id: UUID, start: Double, end: Double, speed: Double, editedStart: Double, editedDuration: Double
+        /// Space the timeline shows in front of it, in seconds; absent when there is none.
+        /// Only the timeline has it: playback and exports join the sections.
+        var gapBefore: Double? = nil
     }
     struct Area: Encodable { var id: UUID; var rect: WireRect; var start: Double?; var end: Double? }
     struct Zoom: Encodable {
@@ -816,9 +820,10 @@ extension AppModel {
         let clips = document.clips.map { clip -> AgentState.Clip in
             var offset = 0.0
             var sections: [AgentState.Section] = []
+            let gaps = clip.gaps?.lengths ?? [:]
             for segment in clip.timeline.segments {
                 sections.append(.init(id: segment.id, start: segment.start, end: segment.end, speed: segment.speed,
-                                      editedStart: offset, editedDuration: segment.duration))
+                                      editedStart: offset, editedDuration: segment.duration, gapBefore: gaps[segment.id]))
                 offset += segment.duration
             }
             let (status, detail): (String, String?) = {
@@ -1232,6 +1237,25 @@ extension AppModel {
             return .replaceSections(clip: try field(wire.clipID, "clipID"), sections: try field(wire.sections, "sections").map {
                 TimelineSegment(id: $0.id ?? UUID(), start: $0.start, end: $0.end, speed: $0.speed ?? 1)
             })
+        case "closeGaps":
+            let clip = try field(wire.clipID, "clipID")
+            let stored = try record(clip)
+            guard let section = wire.sectionID else { return .setGaps(clip: clip, gaps: []) }
+            guard stored.gaps?.contains(where: { $0.section == section }) == true else {
+                throw EditError.notFound("No gap in front of section \(section.uuidString). gapBefore in each section of the state shows the gaps.")
+            }
+            return .setGaps(clip: clip, gaps: (stored.gaps ?? []).filter { $0.section != section })
+        case "setGap":
+            let clip = try field(wire.clipID, "clipID")
+            let section = try field(wire.sectionID, "sectionID")
+            let length = try field(wire.duration, "duration")
+            let stored = try record(clip)
+            guard stored.timeline.segments.contains(where: { $0.id == section }) else {
+                throw EditError.notFound("No section \(section.uuidString) in this recording.")
+            }
+            var gaps = (stored.gaps ?? []).filter { $0.section != section }
+            if length != 0 { gaps.append(SectionGap(section: section, length: length)) }
+            return .setGaps(clip: clip, gaps: gaps)
         case "setCrop":
             return .setCrop(clip: try field(wire.clipID, "clipID"), rect: try field(wire.rect, "rect").rect)
         case "setAspect":
