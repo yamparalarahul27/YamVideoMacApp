@@ -229,8 +229,8 @@ extension AppModel {
         setPublish(label: "Choose Thumbnail") { $0.thumbnail = url }
     }
 
-    /// Saves the picture at the playhead, graphics and all, as the thumbnail: a PNG next to
-    /// the recording.
+    /// Saves the picture at the playhead, graphics and all, as the thumbnail: a PNG in the
+    /// video's Files/ folder, or next to the recording outside the footage layout.
     func useFrameAsThumbnail() {
         guard let index = selectedIndex, items[index].info != nil else { return }
         let clip = ProjectClip(items[index])
@@ -238,7 +238,7 @@ extension AppModel {
         Task {
             do {
                 let frame = try await composedFrame(clip, at: time, settings: settings, guides: false).image
-                let folder = clip.url.deletingLastPathComponent()
+                let folder = FootageLayout.filesFolder(for: clip.url)
                 let stem = clip.url.deletingPathExtension().lastPathComponent + " thumbnail"
                 var target = folder.appendingPathComponent(stem + ".png")
                 var counter = 2
@@ -271,7 +271,7 @@ extension AppModel {
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
         panel.message = "Choose the folder for the video, its captions, thumbnail and upload text."
-        panel.directoryURL = settings.outputFolder ?? item.url.deletingLastPathComponent()
+        panel.directoryURL = settings.outputFolder ?? FootageLayout.editedFolder(for: item.url)
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         exportForYouTube(to: folder)
     }

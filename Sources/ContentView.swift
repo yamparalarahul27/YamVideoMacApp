@@ -264,7 +264,7 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("→ alongside originals")
+                Text(model.selectedItem.flatMap { FootageLayout.videoFolder(of: $0.url) } == nil ? "→ alongside originals" : "→ Edited")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -111,6 +111,16 @@ from YouTube, Instagram, X or LinkedIn: you publish by hand. Agents read and cha
 with `yamvideoctl library` (the `yamvideo_*_library` MCP tools). See the
 [distribution plan](docs/plans/distribution.md).
 
+## Footage folder
+
+Keep all footage in `~/Desktop/Yamparala Media`, one folder for each video: the project
+at the top, the recordings in `Recorded/`, the exports in `Edited/` (Shorts in
+`Edited/Shorts/`) and thumbnails and other made files in `Files/`. Drop new recordings in
+`Inbox/`, and an agent sorts them. With no output folder set, YamVideo suggests `Edited/`
+for exports and saves thumbnails in `Files/`. Each Mac writes a list of its video folders
+to `docs/channel/macs/`, and the Library says which videos are only on another Mac. The
+full rule is in [docs/footage-layout.md](docs/footage-layout.md).
+
 ## Building a movie
 
 Use the **Movie** workspace in the toolbar after importing recordings. Include or exclude

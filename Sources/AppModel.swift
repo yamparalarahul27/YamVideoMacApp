@@ -184,6 +184,9 @@ final class AppModel: ObservableObject {
     static let moduleKey = "module"
     /// The owner's ideas, and later their posts; see Library.swift and LibraryEditing.swift.
     @Published var library = Library()
+    /// This Mac's footage list and the other Macs' lists (MacInventory.swift).
+    @Published var thisMacList: MacInventory?
+    @Published var otherMacs: [MacInventory] = []
     @Published var libraryUndoEntries: [LibraryHistory] = []
     @Published var libraryRedoEntries: [LibraryHistory] = []
     /// Where the Library is read and written; nil until `loadLibrary`, so nothing is written before.
@@ -957,7 +960,7 @@ final class AppModel: ObservableObject {
     var previewCommand: String? {
         if isMovieMode {
             guard let plan = try? moviePlan() else { return nil }
-            let output = (settings.outputFolder ?? plan.clips[0].url.deletingLastPathComponent())
+            let output = (settings.outputFolder ?? FootageLayout.editedFolder(for: plan.clips[0].url))
                 .appendingPathComponent("YamVideo-Movie.\(settings.format.fileExtension)")
             let commands: [[String]]
             if settings.format == .gif {

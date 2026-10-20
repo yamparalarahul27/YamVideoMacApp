@@ -545,6 +545,20 @@ func ideas(_ model: AppModel, output: URL, size: CGSize, minimum: CGSize) async 
     model.selectedIdeaID = items[0].id
     await pump(1)
     await render(window(), size: size, to: output.appendingPathComponent("16d-idea-in-production.png"))
+    // Macs: an idea whose project is only on the other Mac, and videos only there.
+    let awayID = UUID()
+    let away = ContentItem(title: "Sahi web terminal review", topic: "Trading apps")
+    model.performLibrary([.addIdea(away)])
+    model.performLibrary([.linkProject(id: away.id, link: ProjectLink(projectID: awayID, path: "/Users/rahul/Desktop/Yamparala Media/2026-10-18 Sahi/Sahi.yamvideo"))])
+    model.thisMacList = MacInventory(mac: "Equicom", footage: "~/Desktop/Yamparala Media", updated: Date(), videos: [])
+    model.otherMacs = [MacInventory(mac: "Yamparala", footage: "~/Desktop/Yamparala Media", updated: Date().addingTimeInterval(-7200), videos: [
+        .init(folder: "2026-10-18 Sahi", projects: [awayID], recordings: ["Sahi-Mobile-Headshot.MP4"], exports: 1, bytes: 9_020_000_000),
+        .init(folder: "2026-10-19 Tradl AI First Impression", projects: [], recordings: ["Tradl.MP4", "Tradl.mov"], exports: 0, bytes: 1_000_000_000),
+        .init(folder: "2026-08-11 AgentUX iPad Sketch", projects: [], recordings: ["RPReplay.MP4"], exports: 0, bytes: 612_000_000),
+    ])]
+    model.selectedIdeaID = away.id
+    await pump(1)
+    await render(window(), size: size, to: output.appendingPathComponent("16j-macs.png"))
     model.showModule(.studio)
     await pump(1.5)
     await render(window(), size: size, to: output.appendingPathComponent("16e-studio-with-idea.png"))

@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { AppModel.shared.loadLibrary(); AppModel.shared.restoreModule() }
+        MainActor.assumeIsolated { AppModel.shared.loadLibrary(); AppModel.shared.restoreModule(); AppModel.shared.refreshMacs() }
         startAgentBridge()
         // Keys the timeline answers to. Here rather than as menu shortcuts because a menu
         // shortcut would take ⌘A, ⌘← and ⌘→ from a text field being typed in; this

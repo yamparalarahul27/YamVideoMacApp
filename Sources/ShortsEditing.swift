@@ -486,7 +486,7 @@ extension AppModel {
         panel.canCreateDirectories = true
         panel.prompt = "Export Here"
         panel.message = "Choose the folder for the Short, its captions, cover and upload text."
-        panel.directoryURL = settings.outputFolder ?? item.url.deletingLastPathComponent()
+        panel.directoryURL = settings.outputFolder ?? FootageLayout.shortsFolder(for: item.url)
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         exportShortForYouTube(short.id, to: folder)
     }

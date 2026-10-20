@@ -220,7 +220,7 @@ edit, and each edit becomes one undo step with your name on it.
   video uploads an SRT. Do not change the long video's `captions` for a Short.
 - Check each Short with `preview --short` at a few times, and show the owner frames
   before you export. Export it with `export --short` (with `--youtube` for the upload
-  files).
+  files). In the footage folder, the `--path` is the video's `Edited/Shorts/` (4.14).
 
 ### 4.9 Brand logos
 
@@ -264,7 +264,8 @@ The owner can do the same in the app: Graphics section → Find Brands.
 ### 4.10 Export for YouTube
 
 - Ask the owner first. Then `export --youtube --path FOLDER --clip ID`. It writes the
-  MP4, the captions as an SRT, a 1280×720 thumbnail, the upload text and a JSON.
+  MP4, the captions as an SRT, a 1280×720 thumbnail, the upload text and a JSON. In the
+  footage folder, FOLDER is the video's `Edited/` (4.14).
 - YouTube's upload API cannot set end screen elements. The export says which element
   goes in which box, for YouTube Studio.
 
@@ -343,6 +344,52 @@ The owner plans when each video goes out and where, and tells you the plan in wo
   without; switch it off.
 - Before an export, check `switchedOff`. If something is off that the owner did not
   ask for, say so first.
+
+### 4.14 The footage folder
+
+All footage is in `~/Desktop/Yamparala Media`, one folder for each video
+(`docs/footage-layout.md` in the YamVideo source has the full rule):
+
+```
+YYYY-MM-DD Title/          the date of the first recording
+  Name.yamvideo            the project, and "Name Video.md" next to it
+  Recorded/                recordings as recorded (Recorded/Joined/ for joined takes)
+  Edited/                  Export for YouTube files; Shorts in Edited/Shorts/
+  Files/                   thumbnails, saved frames, graphics images, work files
+```
+
+`Inbox/` is for new recordings, `Shared Assets/` for images that more than one video uses,
+and `Other/` for recordings that are not for a video. With no output folder set, the app
+suggests `Edited/` for exports and saves thumbnails in `Files/`.
+
+When the owner says "I added a recording", sort each new file in `Inbox/` or at the top
+of the folder:
+
+1. Find its date (`ffprobe`, `format_tags=creation_time`) and its topic (look at 3 or 4
+   frames).
+2. Move it into `Recorded/` of the video folder with the same topic and day. If there is
+   none, make `YYYY-MM-DD Title/` with `Recorded/`, `Edited/` and `Files/`. Keep the file
+   name. A YamDraw export (`recording.mp4`, `frame-NN.png`, `session.json`) goes together
+   into `Recorded/YamDraw <topic>/`, so the next export cannot replace it.
+3. Move DJI `.LRF` files (camera previews) to the Trash. Never use `rm`.
+4. Look for personal information in each screen recording and screenshot (names, PAN,
+   Aadhaar, signatures, email addresses, phone numbers, bank details, home area). Sample a
+   frame every few seconds. Write each item with its time range in `Files/Blur notes.md`:
+   **Must** for ID numbers, signatures and contact details, Ask for the rest.
+5. Add one line for each file to `Files/Recordings.md`: day, length, what it shows, and
+   which video or Short it is for. Read it before the first edit of a video.
+6. Tell the owner where each file went. Ask when the topic is not clear.
+
+Before an export, read `Files/Blur notes.md` and hide each Must item: cut it, or add a
+Blur effect (`addBlurEffect`) for its time range. A Blur area (`addBlurArea`) hides one
+rectangle for the whole recording. Show the owner a frame of each one.
+
+Do not rename or move a recording that a project uses: the project keeps its full path.
+If a move is necessary, send `relinkMedia` for it.
+
+Each Mac keeps a list of its video folders in the YamVideo source, `docs/channel/macs/<Mac>.json`
+(this Mac's name is in the Library's Macs menu). Read the other lists to tell the owner
+which Mac has a video that is not here. The app writes these files; do not edit them.
 
 ### 4.15 Background music
 

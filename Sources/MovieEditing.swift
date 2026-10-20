@@ -67,7 +67,9 @@ extension AppModel {
             panel.allowedContentTypes = settings.format == .mp4 ? [.mpeg4Movie] : settings.format == .gif ? [.gif] : [.webP]
             panel.nameFieldStringValue = (projectURL?.deletingPathExtension().lastPathComponent ?? "YamVideo-Movie") + "." + settings.format.fileExtension
             panel.title = "Export Movie"
-            if let directory = settings.outputFolder { panel.directoryURL = directory }
+            if let directory = settings.outputFolder ?? plan.clips.first.map({ FootageLayout.editedFolder(for: $0.url) }) {
+                panel.directoryURL = directory
+            }
             guard panel.runModal() == .OK, let output = panel.url else { return }
             // Export to a unique sibling, then atomically publish it. A cancelled export
             // cannot destroy the previous file even after confirming Replace in the panel.

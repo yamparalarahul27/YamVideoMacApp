@@ -217,6 +217,23 @@ import Foundation
     check(FFmpeg.outputURL(for: mp4Source, settings: noSuffix).path != mp4Source.path,
           "never writes over the source file")
 
+    print("\nFootage layout")
+    let video = scratch.appendingPathComponent("2026-10-20 Layout Video")
+    let recordedTake = video.appendingPathComponent("Recorded/take.mp4")
+    let joinedTake = video.appendingPathComponent("Recorded/Joined/joined.mov")
+    try FileManager.default.createDirectory(at: joinedTake.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data().write(to: recordedTake); try Data().write(to: joinedTake)
+    equal(FootageLayout.videoFolder(of: recordedTake)?.lastPathComponent, "2026-10-20 Layout Video", "finds the video folder of a recording")
+    equal(FootageLayout.videoFolder(of: joinedTake)?.lastPathComponent, "2026-10-20 Layout Video", "finds it from Recorded/Joined too")
+    check(FootageLayout.videoFolder(of: landscape) == nil, "a recording outside the layout has no video folder")
+    equal(FFmpeg.outputURL(for: recordedTake, settings: settings).deletingLastPathComponent().path,
+          video.appendingPathComponent("Edited").path, "exports a recording in the layout to Edited/")
+    check(FileManager.default.fileExists(atPath: video.appendingPathComponent("Edited").path), "makes Edited/ when it is not there")
+    equal(FootageLayout.shortsFolder(for: joinedTake).path, video.appendingPathComponent("Edited/Shorts").path, "puts Shorts in Edited/Shorts")
+    equal(FootageLayout.filesFolder(for: recordedTake).path, video.appendingPathComponent("Files").path, "puts thumbnails in Files/")
+    equal(FootageLayout.filesFolder(for: landscape).path, landscape.deletingLastPathComponent().path,
+          "keeps thumbnails beside a recording outside the layout")
+
     // MARK: - Real encodes
 
     print("\nEncode")
