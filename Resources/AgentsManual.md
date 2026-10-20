@@ -369,12 +369,27 @@ of the folder:
    frames).
 2. Move it into `Recorded/` of the video folder with the same topic and day. If there is
    none, make `YYYY-MM-DD Title/` with `Recorded/`, `Edited/` and `Files/`. Keep the file
-   name.
+   name. A YamDraw export (`recording.mp4`, `frame-NN.png`, `session.json`) goes together
+   into `Recorded/YamDraw <topic>/`, so the next export cannot replace it.
 3. Move DJI `.LRF` files (camera previews) to the Trash. Never use `rm`.
-4. Tell the owner where each file went. Ask when the topic is not clear.
+4. Look for personal information in each screen recording and screenshot (names, PAN,
+   Aadhaar, signatures, email addresses, phone numbers, bank details, home area). Sample a
+   frame every few seconds. Write each item with its time range in `Files/Blur notes.md`:
+   **Must** for ID numbers, signatures and contact details, Ask for the rest.
+5. Add one line for each file to `Files/Recordings.md`: day, length, what it shows, and
+   which video or Short it is for. Read it before the first edit of a video.
+6. Tell the owner where each file went. Ask when the topic is not clear.
+
+Before an export, read `Files/Blur notes.md` and hide each Must item: cut it, or add a
+Blur effect (`addBlurEffect`) for its time range. A Blur area (`addBlurArea`) hides one
+rectangle for the whole recording. Show the owner a frame of each one.
 
 Do not rename or move a recording that a project uses: the project keeps its full path.
 If a move is necessary, send `relinkMedia` for it.
+
+Each Mac keeps a list of its video folders in the YamVideo source, `docs/channel/macs/<Mac>.json`
+(this Mac's name is in the Library's Macs menu). Read the other lists to tell the owner
+which Mac has a video that is not here. The app writes these files; do not edit them.
 
 ## 5. Problems
 

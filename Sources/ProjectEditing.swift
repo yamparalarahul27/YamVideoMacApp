@@ -263,6 +263,7 @@ extension AppModel {
             if projectID != previousID { rotateSession() }
             noteProjectLocation()
             writeVideoNotes()
+            refreshMacs()
             scheduleAutosave()
             let missing = Self.tableHashes(project).filter { !LUTStore.has($0) }
             statusMessage = missing.isEmpty ? "Saved \(destination.lastPathComponent)."

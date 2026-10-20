@@ -15,8 +15,10 @@ struct ItemVideosSection: View {
         let rows = model.videoRows(item)
         InspectorSection(heading(rows)) {
             if rows.isEmpty {
+                let away = item.project.map { model.macsHolding($0.projectID) } ?? []
                 Text(item.project?.exists == false
-                     ? "The project file is not where it was. Locate it to see its videos."
+                     ? (away.isEmpty ? "The project file is not where it was. Locate it to see its videos."
+                                     : "The project is on \(away.joined(separator: ", ")). Open it on that Mac to see its videos.")
                      : "No videos yet. Shorts and exports made in Studio show here.")
                     .font(.callout).foregroundStyle(.secondary)
             } else {

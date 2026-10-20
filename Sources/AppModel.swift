@@ -184,6 +184,9 @@ final class AppModel: ObservableObject {
     static let moduleKey = "module"
     /// The owner's ideas, and later their posts; see Library.swift and LibraryEditing.swift.
     @Published var library = Library()
+    /// This Mac's footage list and the other Macs' lists (MacInventory.swift).
+    @Published var thisMacList: MacInventory?
+    @Published var otherMacs: [MacInventory] = []
     @Published var libraryUndoEntries: [LibraryHistory] = []
     @Published var libraryRedoEntries: [LibraryHistory] = []
     /// Where the Library is read and written; nil until `loadLibrary`, so nothing is written before.

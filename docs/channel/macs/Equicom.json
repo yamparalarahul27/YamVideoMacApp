@@ -1,0 +1,141 @@
+{
+  "footage" : "~/Desktop/Yamparala Media",
+  "mac" : "Equicom",
+  "updated" : "2026-10-20T06:37:04Z",
+  "videos" : [
+    {
+      "bytes" : 612158590,
+      "exports" : 0,
+      "folder" : "2026-08-11 AgentUX iPad Sketch",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "RPReplay_Final1786463861.MP4"
+      ]
+    },
+    {
+      "bytes" : 1324577420,
+      "exports" : 1,
+      "folder" : "2026-10-14 AppStore Learnings",
+      "projects" : [
+        "14195A07-DE74-815E-B500-E0E4D89BA29E"
+      ],
+      "recordings" : [
+        "DJI_20261014194430_0007_D.MP4"
+      ]
+    },
+    {
+      "bytes" : 2171609931,
+      "exports" : 5,
+      "folder" : "2026-10-15 YamDrive Design System",
+      "projects" : [
+        "7930B600-9A93-4734-9BDE-01C39937E1B0"
+      ],
+      "recordings" : [
+        "DJI_20261015202716_0011_D.MP4",
+        "Screen Recording 2026-10-15 at 8.24.39 PM.mov"
+      ]
+    },
+    {
+      "bytes" : 7274996545,
+      "exports" : 7,
+      "folder" : "2026-10-17 AgentUX System Design Part 1",
+      "projects" : [
+        "53DEBFE7-A70B-4FA0-BDC2-07DFD8674FC9"
+      ],
+      "recordings" : [
+        "AgentUXMainPages.mp4",
+        "DJI_20261017131236_0001_D.MP4",
+        "DJI_20261017131738_0002_D.MP4",
+        "Joined/AgentUX-camera-joined.mov",
+        "Joined/AgentUX-screen-joined.mp4",
+        "YamDrawAgentUX-SD-P1.mp4"
+      ]
+    },
+    {
+      "bytes" : 9020851229,
+      "exports" : 0,
+      "folder" : "2026-10-18 Sahi",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "915-WebTerminal-Recording.mov",
+        "IMG_0127.PNG",
+        "IMG_0128.PNG",
+        "Sahi-Mobile-Headshot.MP4",
+        "Sahi-Web-Terminal-Headshot.MP4",
+        "Sahi-Website-Recording.mov",
+        "ScreenRecording_10-18-2026 16-42-59_1.MP4",
+        "ScreenRecording_10-18-2026 16-49-54_1.MP4",
+        "ScreenRecording_10-18-2026 16-53-05_1.MP4",
+        "ScreenRecording_10-19-2026 19-11-07_1.MP4",
+        "YamDraw 915 website/frame-01.png",
+        "YamDraw 915 website/frame-02.png",
+        "YamDraw 915 website/frame-03.png",
+        "YamDraw 915 website/frame-04.png",
+        "YamDraw 915 website/frame-05.png",
+        "YamDraw 915 website/recording.mp4",
+        "YamDraw 915 website/session.json",
+        "YamDraw sahi.com website/frame-01.png",
+        "YamDraw sahi.com website/frame-02.png",
+        "YamDraw sahi.com website/frame-03.png",
+        "YamDraw sahi.com website/frame-04.png",
+        "YamDraw sahi.com website/frame-05.png",
+        "YamDraw sahi.com website/frame-06.png",
+        "YamDraw sahi.com website/frame-07.png",
+        "YamDraw sahi.com website/frame-08.png",
+        "YamDraw sahi.com website/frame-09.png",
+        "YamDraw sahi.com website/frame-10.png",
+        "YamDraw sahi.com website/frame-11.png",
+        "YamDraw sahi.com website/frame-12.png",
+        "YamDraw sahi.com website/frame-13.png",
+        "YamDraw sahi.com website/recording.mp4",
+        "YamDraw sahi.com website/session.json"
+      ]
+    },
+    {
+      "bytes" : 1362457895,
+      "exports" : 0,
+      "folder" : "2026-10-19 AgentUX System Design Part 2",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "System-Design-AgentUX-Headshot.MP4",
+        "YamDraw sketch/frame-01.png",
+        "YamDraw sketch/recording.mp4",
+        "YamDraw sketch/session.json"
+      ]
+    },
+    {
+      "bytes" : 1001071879,
+      "exports" : 0,
+      "folder" : "2026-10-19 Tradl AI First Impression",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "Tradl-ai-first-impression.MP4",
+        "Tradl-ai-web-recording.mov"
+      ]
+    },
+    {
+      "bytes" : 624575147,
+      "exports" : 0,
+      "folder" : "2026-10-19 YamDrive Shorts",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "ScreenRecording_10-19-2026 10-08-24_1.MP4",
+        "ScreenRecording_10-19-2026 19-54-36_1.MP4",
+        "ScreenRecording_10-19-2026 19-57-28_1.MP4",
+        "YamDrive-Destination-and-Free-Ride.MP4",
+        "YamDrive-Ride-Info.MP4",
+        "YamDrive-Widgets.MP4"
+      ]
+    }
+  ]
+}

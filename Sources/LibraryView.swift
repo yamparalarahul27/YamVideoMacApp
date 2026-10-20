@@ -94,6 +94,7 @@ struct LibraryPage: View {
         .onChange(of: model.library.topics) { _, topics in
             if let topic, !topics.contains(topic) { self.topic = nil }
         }
+        .onAppear { model.refreshMacs() }
     }
 
     private var emptyState: some View {
@@ -119,6 +120,7 @@ struct LibraryPage: View {
 private struct IdeasList: View {
     @EnvironmentObject var model: AppModel
     @Binding var topic: String?
+    @State private var showsMacs = false
 
     private var shown: [ContentItem] {
         guard let topic else { return model.library.items }
@@ -149,7 +151,8 @@ private struct IdeasList: View {
                         Section("\(stage.label) · \(items.count)") {
                             ForEach(items) { item in
                                 IdeaRow(item: item, agentNote: model.libraryHighlight?.items.contains(item.id) == true
-                                        ? model.libraryHighlight?.origin : nil)
+                                        ? model.libraryHighlight?.origin : nil,
+                                        elsewhere: item.project.map { model.macsHolding($0.projectID) } ?? [])
                                     .tag(item.id)
                                     .contextMenu {
                                         if item.project != nil { Button("Open in Studio") { model.openLinkedProject(item.id) } }
@@ -157,6 +160,12 @@ private struct IdeasList: View {
                                     }
                             }
                         }
+                    }
+                }
+                let away = model.videosElsewhere
+                if !away.isEmpty, topic == nil {
+                    Section("Only on other Macs · \(away.count)") {
+                        ForEach(away, id: \.video.folder) { entry in ElsewhereRow(video: entry.video, macs: entry.macs) }
                     }
                 }
             }
@@ -168,6 +177,9 @@ private struct IdeasList: View {
                 Button { if let id = model.selectedIdeaID { model.deleteIdea(id) } } label: { Image(systemName: "minus") }
                     .disabled(model.selectedIdeaID == nil).help("Delete the selected idea")
                 Spacer()
+                Button { showsMacs = true } label: { Image(systemName: "laptopcomputer") }
+                    .help("Macs: which videos are on which Mac")
+                    .popover(isPresented: $showsMacs, arrowEdge: .bottom) { MacsPopover() }
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -179,6 +191,14 @@ private struct IdeaRow: View {
     let item: ContentItem
     /// Names the agent that just changed this idea, for a moment.
     var agentNote: String?
+    /// The other Macs that hold this idea's project.
+    var elsewhere: [String] = []
+
+    /// "On Yamparala" when the project is not on this Mac but another Mac has it.
+    private var awayNote: String? {
+        guard let project = item.project, !project.exists, !elsewhere.isEmpty else { return nil }
+        return "On " + elsewhere.joined(separator: ", ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -196,11 +216,14 @@ private struct IdeaRow: View {
                     Text([long > 0 ? "long video" : nil, shorts > 0 ? "\(shorts) Short\(shorts == 1 ? "" : "s")" : nil]
                             .compactMap { $0 }.joined(separator: " and ") + " exported")
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                } else if let project = item.project {
+                } else if let project = item.project, awayNote == nil {
                     // The project is usually named after the idea; then "Project" says enough.
                     Label(project.name == item.title ? "Project" : project.name,
                           systemImage: project.exists ? "film" : "exclamationmark.triangle")
                         .font(.caption2).foregroundStyle(project.exists ? Color.secondary : Color.orange).lineLimit(1)
+                }
+                if let awayNote {
+                    Label(awayNote, systemImage: "laptopcomputer").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             if let agentNote {
@@ -480,13 +503,20 @@ private struct IdeaEditor: View {
     @ViewBuilder private var project: some View {
         if let link = item.project {
             VStack(alignment: .leading, spacing: 6) {
+                let away = model.macsHolding(link.projectID)
                 HStack(spacing: 8) {
-                    Image(systemName: link.exists ? "film" : "exclamationmark.triangle")
-                        .foregroundStyle(link.exists ? Color.secondary : Color.orange)
+                    Image(systemName: link.exists ? "film" : away.isEmpty ? "exclamationmark.triangle" : "laptopcomputer")
+                        .foregroundStyle(link.exists || !away.isEmpty ? Color.secondary : Color.orange)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(link.name).font(.callout.weight(.medium))
-                        Text(link.exists ? link.path : "Not found at \(link.path)")
+                        Text(link.exists ? link.path : away.isEmpty ? "Not found at \(link.path)"
+                             : "On \(away.joined(separator: ", ")), not on this Mac")
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            .help(link.path)
+                        if link.exists, !away.isEmpty {
+                            Label("Also on " + away.joined(separator: ", "), systemImage: "laptopcomputer")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 HStack(spacing: 8) {
@@ -560,5 +590,67 @@ private struct IdeaThumbnail: View {
             }.value
         }
         .accessibilityLabel("Image")
+    }
+}
+
+// MARK: - Other Macs
+
+/// A video folder that only another Mac holds (MacInventory.swift).
+private struct ElsewhereRow: View {
+    let video: MacInventory.Video
+    let macs: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(video.title).font(.callout).lineLimit(1)
+            Label(macs.joined(separator: ", "), systemImage: "laptopcomputer")
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(.vertical, 3)
+        .help("\(video.folder): \(video.recordings.count) recording\(video.recordings.count == 1 ? "" : "s"), "
+              + "\(video.exports) export\(video.exports == 1 ? "" : "s"), "
+              + ByteCountFormatter.string(fromByteCount: video.bytes, countStyle: .file))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// This Mac's name, and the other Macs whose lists Git brought here.
+private struct MacsPopover: View {
+    @EnvironmentObject var model: AppModel
+    @State private var name = MacInventory.thisMac
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Macs").font(.headline)
+            HStack(spacing: 6) {
+                Text("This Mac").font(.callout)
+                TextField("Name", text: $name).textFieldStyle(.roundedBorder).frame(width: 150)
+                    .onSubmit { model.renameThisMac(to: name) }
+            }
+            if let here = model.thisMacList {
+                Text("\(here.videos.count) videos in \(here.footage)").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("No footage folder at \(MacInventory.footageFolder.path)").font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
+            if model.otherMacs.isEmpty {
+                Text("No other Mac yet").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(model.otherMacs, id: \.mac) { list in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(list.mac).font(.callout.weight(.medium))
+                    Text("\(list.videos.count) videos · updated \(list.updated.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            Text(MacInventory.listsFolder == nil
+                 ? "Open the YamVideo built from its source folder to share lists."
+                 : "Commit and push docs/channel/macs to share. Pull to see the others.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 290)
+        .onAppear { model.refreshMacs() }
     }
 }
