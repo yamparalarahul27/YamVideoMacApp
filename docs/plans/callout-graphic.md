@@ -135,7 +135,9 @@ a panel shows, or in the 0.8 s while it slides away (the cover rule).
 The owner asked for a look that matches the video and its theme, not a plain dark pill.
 Two looks are built, and the owner picks the one that `mix` uses. The owner saw both
 on 20 Oct in frames at 640 px wide from the Tradl and Sahi footage (not in the repo:
-they show unreleased footage):
+they show unreleased footage). `callout-preview.png` shows both looks at the same size on
+mock screens. Until the owner picks, `mix` writes callouts in ink
+(`GraphicKind.inkInMix`):
 
 - **A, ink:** the label in white Virgil, 60 px, written left to right on a soft dark
   haze; a white hand-drawn line with a dark edge.
