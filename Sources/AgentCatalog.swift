@@ -364,6 +364,9 @@ extension AgentCatalog {
         add("setMusicDuck", "music", "The duck of all the recording's music: it stays at each piece's level under speech, and goes lift dB up before the first word, in gaps of \(String(format: "%.1f", MusicDuck.gap)) s or more between words, and after the last word. It goes down over \(String(format: "%.1f", MusicDuck.down)) s, ending \(String(format: "%.1f", MusicDuck.lead)) s before a word, and up over \(String(format: "%.1f", MusicDuck.up)) s, starting \(String(format: "%.1f", MusicDuck.hold)) s after a word. Speech comes from the transcript's words; with no transcript, from the sound levels above \(Int(MusicDuck.threshold)) dB. New music has it on with lift \(Int(MusicDuck.defaultLift)). The preview and the export play the same gain points; analyze kind music shows them.",
             [clip, field("music", "object", "duck (true or false) and lift (dB, \(Int(MusicDuck.lifts.lowerBound)) to \(Int(MusicDuck.lifts.upperBound)), default \(Int(MusicDuck.defaultLift))). Give one or both.")],
             #"{"type": "setMusicDuck", "clipID": "CLIP-ID", "music": {"duck": true, "lift": 6}}"#)
+        add("setSounds", "music", "Sound effects on the graphics: a short sound at moments of a graphic's motion (cues), from the owner's sound library. The graphics engine gives each cue's time, so a sound moves with its graphic. Cues: \(SoundCues.all.map { "\($0.key) (\($0.label), default \($0.sound), \(Int($0.level)) LU)" }.joined(separator: "; ")). A cue sits its level in LU under the voice from the sound's loudest 400 ms, and never peaks above \(Int(SoundCues.peakCap)) dBFS. The first setSounds measures the voice (or takes the music's). state.clips[].sounds shows every cue with its time, sound and gain.",
+            [clip, field("sounds", "object", "Give only the keys to change: on (true or false), level (dB added to every cue, \(Int(SoundSettings.levels.lowerBound)) to \(Int(SoundSettings.levels.upperBound)), default 0), cues ({cue key: a sound name, \"off\", or null for its default}).")],
+            #"{"type": "setSounds", "clipID": "CLIP-ID", "sounds": {"on": true, "cues": {"link.key": "button-2"}}}"#)
 
         add("addMedia", "project", "Add recordings; each is probed first. New ids are in createdIDs.",
             [field("paths", "string[]", "Local video files.")], #"{"type": "addMedia", "paths": ["~/Movies/take2.mov"]}"#)
@@ -478,6 +481,13 @@ extension AgentCatalog {
                 field("words", "array", "What the speaker says for it, matched without case: [\"next.js\", \"next js\"]. 1 to 8.", required: false)]),
             Method(method: "removeLogo", summary: "Remove a logo from the owner's library. A badge that uses it cannot draw until the logo is set again, so remove or change those badges too.", fields: [
                 field("name", "string", "The brand.")]),
+            Method(method: "sounds", summary: "The owner's sound library for sound effects: each sound's name, path, length, loudness (its loudest 400 ms, LUFS), sample peak and credit, and the cues with their default sounds and levels.", fields: []),
+            Method(method: "setSound", summary: "Add a short sound (\(Int(SoundLibrary.longest)) s or less) to the owner's sound library, or replace the one of the same name: the app measures it and keeps a copy. Use only a sound the owner gave or named, and set credit.licence: Export for YouTube refuses CC BY-NC, CC BY-ND and CC BY-SA. Returns the library.", fields: [
+                field("name", "string", "What cues call it (1 to 40 characters), for example whoosh-1."),
+                field("path", "string", "A local sound file: \(SoundLibrary.fileTypes.joined(separator: ", "))."),
+                field("credit", "object", "{licence, title, artist, source, line}, as for music.", required: false)]),
+            Method(method: "removeSound", summary: "Remove a sound from the owner's library. A cue that names it is silent until the sound is set again.", fields: [
+                field("name", "string", "The sound.")]),
             Method(method: "transcribe", summary: "Transcribe a recording on this Mac with whisper.cpp, as a job with progress; the words land as one undo step (Transcribe). state.autoEdit says whether whisper is installed and which models are downloaded; only the owner can download a model.", fields: session + [
                 field("clip", "uuid", "The recording."),
                 field("model", "string", "Default: the project's autoEdit.model.", required: false, values: TranscriptModel.allCases.map(\.rawValue)),

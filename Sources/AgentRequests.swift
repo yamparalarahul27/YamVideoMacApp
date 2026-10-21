@@ -75,9 +75,12 @@ struct AgentRequest: Codable {
     var layout: UUID?
     /// reveal: an idea in the Library; shows it on the Library page.
     var idea: UUID?
-    /// setLogo and removeLogo: the brand; setLogo: what the speaker says for it.
+    /// setLogo and removeLogo: the brand; setLogo: what the speaker says for it. setSound
+    /// and removeSound: the sound's name.
     var name: String?
     var words: [String]?
+    /// setSound: where the sound comes from: {licence, title, artist, source, line}.
+    var credit: [String: JSONValue]?
     /// preview: graphics drawn in this preview only, never stored ({kind, start, end,
     /// props, look?, transform?, id?}, as in addGraphic), to show the owner a plan.
     var draft: [JSONValue]?
@@ -229,6 +232,8 @@ struct WireCommand: Codable, Equatable {
     /// addMusic and updateMusic: the piece's keys to set: start, end (null: to the end), from,
     /// level, fadeIn, fadeOut, loop, credit, and path (updateMusic: another file).
     var music: [String: JSONValue]?
+    /// setSounds: {on, level, cues}.
+    var sounds: [String: JSONValue]?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -245,7 +250,7 @@ struct WireCommand: Codable, Equatable {
         "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
         "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
         "setChange", "setProjectNotes", "addProjectNote",
-        "addMusic", "updateMusic", "removeMusic", "setMusicDuck",
+        "addMusic", "updateMusic", "removeMusic", "setMusicDuck", "setSounds",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -367,6 +372,8 @@ struct AgentState: Encodable {
         var screen: ScreenState?
         /// The music under its voice; nil when it has none.
         var music: MusicState?
+        /// The sound effects on its graphics; nil when it has none.
+        var sounds: SoundsState?
         /// Changes switched off in the inspector: kept, but out of the player and exports.
         var switchedOff: [String]
     }
@@ -632,6 +639,7 @@ struct AgentSaveResult: Encodable {
 extension AppModel {
     static let agentMethods = ["manual", "catalog", "sessions", "state", "apply", "events", "undo", "redo", "save", "preview", "thumbnail",
                                "analyze", "export", "job", "cancel", "reveal", "transcript", "transcribe", "autoEdit", "logos", "setLogo", "removeLogo",
+                               "sounds", "setSound", "removeSound",
                                "library", "libraryApply", "libraryUndo", "libraryRedo", "scanFolder", "style"]
 
     /// Answers one request line with one response line. Never throws: every failure is
@@ -666,6 +674,7 @@ extension AppModel {
         case "reveal": return agentResponse(agentReveal(request), instanceID)
         case "transcript": return agentResponse(agentTranscript(request), instanceID)
         case "logos": return agentResponse(Result<AgentLogos, EditError>.success(Self.agentLogos()), instanceID)
+        case "sounds": return agentResponse(Result<AgentSounds, EditError>.success(Self.agentSounds()), instanceID)
         case "library": return agentResponse(Result<AgentLibrary, EditError>.success(agentLibrary()), instanceID)
         case "scanFolder": return agentResponse(agentScanFolder(request), instanceID)
         case "style": refreshStyleFromDisk(); return agentResponse(Result<AgentStyle, EditError>.success(agentStyle()), instanceID)
@@ -679,7 +688,8 @@ extension AppModel {
                 default: return self.agentResponse(self.agentLibraryHistory(request, redo: request.method == "libraryRedo"), instanceID)
                 }
             }
-        case "apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo":
+        case "apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo",
+             "setSound", "removeSound":
             return await idempotent(request, instanceID: instanceID) {
                 switch request.method {
                 case "apply": return self.agentResponse(await self.agentApply(request), instanceID)
@@ -691,6 +701,8 @@ extension AppModel {
                 case "autoEdit": return self.agentResponse(self.agentAutoEdit(request), instanceID)
                 case "setLogo": return self.agentResponse(self.agentSetLogo(request), instanceID)
                 case "removeLogo": return self.agentResponse(self.agentRemoveLogo(request), instanceID)
+                case "setSound": return self.agentResponse(await self.agentSetSound(request), instanceID)
+                case "removeSound": return self.agentResponse(self.agentRemoveSound(request), instanceID)
                 default: return self.agentResponse(self.agentCancel(request), instanceID)
                 }
             }
@@ -854,7 +866,8 @@ extension AppModel {
                 publish: clip.publish,
                 publishIssues: clip.info == nil ? [] : (clip.publish ?? PublishInfo()).issues(duration: clip.timeline.duration,
                                                                                                graphics: clip.graphics,
-                                                                                               music: clip.isOn(.music) ? clip.music : nil),
+                                                                                               music: clip.isOn(.music) ? clip.music : nil,
+                                                                                               sounds: clip.isOn(.graphics) ? clip.item().usedSounds : []),
                 suggestedChapters: clip.info == nil ? [] : PublishInfo.suggestedChapters(markers: clip.markers ?? [], graphics: clip.graphics,
                                                                                          duration: clip.timeline.duration),
                 endScreen: EndScreenPlan(graphics: clip.graphics, publish: clip.publish, duration: clip.timeline.duration)?.json,
@@ -866,6 +879,7 @@ extension AppModel {
                 shorts: Self.shortStates(clip, settings: document.settings),
                 screen: Self.screenState(clip),
                 music: Self.musicState(clip),
+                sounds: Self.soundsState(clip),
                 switchedOff: (clip.switchedOff ?? []).map(\.rawValue))
         }
         var movieOffset = 0.0
@@ -1008,9 +1022,10 @@ extension AppModel {
                 }
             }
             var voices: [UUID: Double] = [:]
-            for command in wire where command.type == "addMusic" {
+            for command in wire where command.type == "addMusic" || command.type == "setSounds" {
                 guard let id = command.clipID, voices[id] == nil,
-                      let clip = document.clips.first(where: { $0.id == id }), clip.music == nil, clip.info?.hasAudio == true else { continue }
+                      let clip = document.clips.first(where: { $0.id == id }), clip.info?.hasAudio == true,
+                      command.type == "addMusic" ? clip.music == nil : clip.sounds == nil else { continue }
                 do { voices[id] = try await FFmpeg.integratedLoudness(of: clip.url) } catch {
                     throw EditError(code: .missingMedia, message: error.localizedDescription)
                 }
@@ -1482,6 +1497,8 @@ extension AppModel {
             return try Self.resolveScreen(wire, in: document, probed: probed, face: face, border: border)
         case "addMusic", "updateMusic", "removeMusic", "setMusicDuck":
             return try Self.resolveMusic(wire, in: document, measured: music, voices: voices)
+        case "setSounds":
+            return try Self.resolveSounds(wire, in: document, voices: voices)
         default:
             throw EditError(code: .unsupportedCapability,
                             message: "Unknown command type \"\(wire.type)\". Types: \(WireCommand.types.joined(separator: ", ")).")
@@ -2222,7 +2239,7 @@ extension AppModel {
             return .failure(EditError(code: .missingMedia, message: "A YouTube export needs a loaded recording in clip whose source is present."))
         }
         let publish = item.publish ?? PublishInfo()
-        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music, sounds: item.effective.usedSounds)
             .first(where: { $0.severity == .blocking }) {
             return .failure(.invalid(blocking.message + " (state.clips[].publishIssues lists everything; setPublishInfo changes it.)"))
         }

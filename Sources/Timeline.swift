@@ -154,6 +154,8 @@ struct ProjectClip: Codable, Equatable {
     var switchedOff: [SwitchableChange]?
     /// Version 20 onwards. Nil while the recording has no music.
     var music: MusicBed?
+    /// Version 23 onwards. Nil while the recording has no sound effects.
+    var sounds: SoundSettings?
     /// Version 21 onwards. Space the timeline leaves in front of sections, in section
     /// order; nil while there is none.
     var gaps: [SectionGap]?
@@ -173,6 +175,7 @@ struct ProjectClip: Codable, Equatable {
         screen = item.screen
         switchedOff = item.switchedOff.isEmpty ? nil : item.switchedOff.sorted()
         music = item.music
+        sounds = item.sounds
         let gaps = item.gaps.sectionGaps(in: item.timeline)
         self.gaps = gaps.isEmpty ? nil : gaps
     }
@@ -193,6 +196,7 @@ struct ProjectClip: Codable, Equatable {
         item.screen = screen
         item.switchedOff = Set(switchedOff ?? [])
         item.music = music
+        item.sounds = sounds
         item.gaps = gaps?.lengths ?? [:]
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
@@ -228,10 +232,11 @@ struct VideoProject: Codable, Equatable {
     /// recording has switched off in the inspector. 19: adds the thumbnail's versions for
     /// YouTube's Test & Compare and the winner. 20: adds a recording's background music. 21: adds the
     /// space the timeline leaves where a section was deleted, trimmed or moved. 22: adds the
-    /// music's duck, down under speech and up in pauses. Every edited
+    /// music's duck, down under speech and up in pauses. 23: adds the sound effects on the
+    /// graphics. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 22
+    static let currentVersion = 23
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -343,6 +348,9 @@ struct VideoProject: Codable, Equatable {
         if version < 22, clips.contains(where: { $0.music?.duck != nil }) {
             try reject("The project claims an older format but contains a music duck."); return
         }
+        if version < 23, clips.contains(where: { $0.sounds != nil }) {
+            try reject("The project claims an older format but contains sound effects."); return
+        }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
@@ -366,7 +374,7 @@ struct VideoProject: Codable, Equatable {
             guard let info = clip.info else {
                 guard clip.segments == nil, clip.crop == nil, clip.blurRegions.isEmpty, clip.zoomShots.isEmpty,
                       clip.blurEffects == nil, clip.markers == nil, clip.graphics == nil, clip.transcript == nil, clip.shorts == nil,
-                      clip.screen == nil, clip.music == nil, clip.gaps == nil else {
+                      clip.screen == nil, clip.music == nil, clip.sounds == nil, clip.gaps == nil else {
                     try reject("The project is missing information required by its edits."); return
                 }
                 continue
@@ -442,6 +450,9 @@ struct VideoProject: Codable, Equatable {
             }
             if let problem = clip.screen?.problem(duration: duration, speaker: info) {
                 try reject("The project contains an invalid screen recording: \(problem)"); return
+            }
+            if let problem = clip.sounds?.problem {
+                try reject("The project contains invalid sound effects: \(problem)"); return
             }
             if let problem = clip.music?.problem(duration: duration) {
                 try reject("The project contains invalid music: \(problem)"); return

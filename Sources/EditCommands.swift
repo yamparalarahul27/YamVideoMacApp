@@ -142,6 +142,8 @@ enum EditCommand: Equatable {
     case removeMusic(clip: UUID, piece: UUID)
     /// The duck of all the recording's music: down under speech, up in pauses. Nil is off.
     case setMusicDuck(clip: UUID, duck: MusicDuck?)
+    /// The recording's sound effects on the graphics. Nil removes them.
+    case setSounds(clip: UUID, sounds: SoundSettings?)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -210,6 +212,7 @@ enum EditCommand: Equatable {
         case .updateMusic: return "Edit Music"
         case .removeMusic: return "Remove Music"
         case .setMusicDuck: return "Music Duck"
+        case .setSounds: return "Sound Effects"
         }
     }
 }
@@ -806,6 +809,15 @@ enum ProjectReducer {
             try editMusic(clip, in: &outcome) { pieces in
                 guard pieces.contains(where: { $0.id == id }) else { throw EditError.notFound("No piece of music with that ID on this recording.") }
                 pieces.removeAll { $0.id == id }
+            }
+
+        case .setSounds(let clip, let sounds):
+            try editClip(clip, in: &outcome) { record, info in
+                if let sounds {
+                    guard info.hasAudio else { throw EditError.invalid("This recording has no sound, so it cannot have sound effects.") }
+                    if let problem = sounds.problem { throw EditError.invalid(problem) }
+                }
+                record.sounds = sounds
             }
 
         case .setMusicDuck(let clip, let duck):

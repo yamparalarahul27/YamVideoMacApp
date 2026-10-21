@@ -626,6 +626,7 @@ private struct RecordingInspector: View {
                 subtitles
                 loudness
                 MusicSection(item: item)
+                SoundsSection(item: item)
             case .colour:
                 ColorInspector(item: item, info: info)
             }

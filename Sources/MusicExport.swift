@@ -13,15 +13,17 @@ extension FFmpeg {
     }
 
     /// Graph parts that read the music inputs (from `firstInput`) and `[voice]`, and write
-    /// `[output]`: the voice with every play of the music under it, as long as the voice.
+    /// `[output]`: the voice with every play of the music and every sound cue under it, as
+    /// long as the voice.
     static func musicGraph(_ mix: MusicMix, firstInput: Int, voice: String, output: String, prefix: String = "mu") -> [String] {
         var parts: [String] = []
         var outputs: [String] = []
         for file in mix.files.indices {
             let plays = mix.plays.indices.filter { mix.plays[$0].file == file }
-            guard !plays.isEmpty else { continue }
-            parts.append("[\(firstInput + file):a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asplit=\(plays.count)"
-                         + plays.map { "[\(prefix)s\($0)]" }.joined())
+            let cues = mix.cues.indices.filter { mix.cues[$0].file == file }
+            guard !plays.isEmpty || !cues.isEmpty else { continue }
+            parts.append("[\(firstInput + file):a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asplit=\(plays.count + cues.count)"
+                         + plays.map { "[\(prefix)s\($0)]" }.joined() + cues.map { "[\(prefix)k\($0)]" }.joined())
         }
         for (index, entry) in mix.plays.enumerated() {
             let play = entry.play
@@ -33,17 +35,25 @@ extension FFmpeg {
             parts.append(chain)
             outputs.append("[\(prefix)\(index)]")
         }
+        // A sound cue: its whole file, at its gain and in its place. The duck does not move it.
+        var cueOutputs: [String] = []
+        for (index, entry) in mix.cues.enumerated() {
+            parts.append("[\(prefix)k\(index)]atrim=duration=\(String(format: "%.6f", entry.play.length)),asetpts=PTS-STARTPTS"
+                         + ",volume=\(String(format: "%.2f", entry.gain))dB,adelay=delays=\(Int((entry.play.at * 48000).rounded()))S:all=1[\(prefix)c\(index)]")
+            cueOutputs.append("[\(prefix)c\(index)]")
+        }
         parts.append("[\(voice)]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[\(prefix)voice]")
         if let duck = mix.duck, !outputs.isEmpty {
             // Short frames (256 samples, 5 ms) so the gain moves in small steps on a ramp.
             let gain = "asetnsamples=n=256:p=0,volume='\(duck.expression)':eval=frame[\(prefix)bed]"
             parts.append(outputs.count == 1 ? outputs[0] + gain
                          : outputs.joined() + "amix=inputs=\(outputs.count):normalize=0:duration=longest:dropout_transition=0," + gain)
-            parts.append("[\(prefix)voice][\(prefix)bed]amix=inputs=2:normalize=0:duration=first:dropout_transition=0[\(output)]")
+            parts.append("[\(prefix)voice][\(prefix)bed]" + cueOutputs.joined()
+                         + "amix=inputs=\(2 + cueOutputs.count):normalize=0:duration=first:dropout_transition=0[\(output)]")
             return parts
         }
-        parts.append("[\(prefix)voice]" + outputs.joined()
-                     + "amix=inputs=\(outputs.count + 1):normalize=0:duration=first:dropout_transition=0[\(output)]")
+        parts.append("[\(prefix)voice]" + outputs.joined() + cueOutputs.joined()
+                     + "amix=inputs=\(outputs.count + cueOutputs.count + 1):normalize=0:duration=first:dropout_transition=0[\(output)]")
         return parts
     }
 
@@ -99,9 +109,13 @@ extension FFmpeg {
 // MARK: - The music in the preview
 
 /// The music's two audio tracks in a preview composition. The plays alternate between
-/// them, so a crossfade has a track for each side.
+/// them, so a crossfade has a track for each side. Sound cues go on tracks of their own.
 struct MusicPreviewTracks {
     var tracks: [AVMutableCompositionTrack]
+    let composition: AVMutableComposition
+    /// Cues that sound at the same time go on separate tracks, up to this many.
+    static let cueTrackLimit = 4
+    var cueTracks: [AVMutableCompositionTrack] = []
     /// Each track's plays, `offset` seconds into the composition, with their gain (dB) and
     /// the duck of their recording.
     var plays: [CMPersistentTrackID: [(play: MusicPlay, offset: Double, gain: Double, duck: DuckEnvelope?)]] = [:]
@@ -110,6 +124,7 @@ struct MusicPreviewTracks {
         let tracks = (0..<2).compactMap { _ in composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) }
         guard tracks.count == 2 else { return nil }
         self.tracks = tracks
+        self.composition = composition
     }
 
     /// The volume of a gain in dB. The preview cannot play louder than the file (1); the
@@ -142,6 +157,25 @@ struct MusicPreviewTracks {
             if at > end { track.insertEmptyTimeRange(CMTimeRange(start: end, duration: at - end)) }
             try track.insertTimeRange(available, of: source.track, at: at)
             plays[track.trackID, default: []].append((entry.play, offset, entry.gain, mix.duck))
+        }
+        for entry in mix.cues {
+            guard let source = assets[mix.files[entry.file]] else { continue }
+            let range = CMTimeRange(start: .zero, duration: CMTime(seconds: entry.play.length, preferredTimescale: 600_000))
+            let available = CMTimeRangeGetIntersection(range, otherRange: source.range)
+            guard available.duration > .zero else { continue }
+            let at = CMTime(seconds: offset + entry.play.at, preferredTimescale: 600_000)
+            // A track that is free at `at`, or a new one. More cues at once than the limit
+            // play in the export, but not in the preview.
+            var free = cueTracks.first { ($0.segments.isEmpty ? .zero : $0.timeRange.end) <= at }
+            if free == nil, cueTracks.count < Self.cueTrackLimit,
+               let new = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                cueTracks.append(new); free = new
+            }
+            guard let track = free else { continue }
+            let end = track.segments.isEmpty ? .zero : track.timeRange.end
+            if at > end { track.insertEmptyTimeRange(CMTimeRange(start: end, duration: at - end)) }
+            try track.insertTimeRange(available, of: source.track, at: at)
+            plays[track.trackID, default: []].append((entry.play, offset, entry.gain, nil))
         }
     }
 

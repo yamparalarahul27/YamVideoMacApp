@@ -238,7 +238,7 @@ struct MusicBed: Codable, Equatable {
     }
 }
 
-/// The music as the export and the preview play it.
+/// The music and the sound cues as the export and the preview play them.
 struct MusicMix: Equatable {
     struct Play: Equatable {
         /// The index in `files`.
@@ -251,7 +251,21 @@ struct MusicMix: Equatable {
     var plays: [Play]
     /// The duck, in edited seconds of the recording. Nil: the gains stay as they are.
     var duck: DuckEnvelope? = nil
-    var isEmpty: Bool { plays.isEmpty }
+    /// The sound effects: each a play of its whole file, at its gain. The duck does not
+    /// move them.
+    var cues: [Play] = []
+    var isEmpty: Bool { plays.isEmpty && cues.isEmpty }
+
+    /// Adds the cues that have a sound file, each file once in `files`.
+    mutating func add(_ placed: [PlacedCue], duration: Double) {
+        for cue in placed {
+            guard let url = cue.url, let gain = cue.gain, let length = cue.duration else { continue }
+            let index: Int
+            if let found = files.firstIndex(of: url) { index = found } else { files.append(url); index = files.count - 1 }
+            let play = MusicPlay(at: cue.at, from: 0, length: min(length, max(0, duration - cue.at)), fadeIn: 0, fadeOut: 0)
+            if play.length > 0.001 { cues.append(Play(file: index, play: play, gain: gain)) }
+        }
+    }
 }
 
 enum Music {
@@ -272,10 +286,13 @@ enum Music {
 }
 
 extension VideoItem {
-    /// The music the export mixes in, or nil: none, switched off, or no sound.
+    /// The music and the sound cues the export mixes in, or nil: none, switched off, or
+    /// no sound.
     func exportMusic(_ settings: ExportSettings) -> MusicMix? {
-        guard let music, isOn(.music), info?.hasAudio == true, settings.audio != .none, !settings.format.isAnimation else { return nil }
-        let mix = music.mix(duration: editedDuration, duck: musicDuck)
+        guard info?.hasAudio == true, settings.audio != .none, !settings.format.isAnimation else { return nil }
+        var mix = MusicMix(files: [], plays: [])
+        if let music, isOn(.music) { mix = music.mix(duration: editedDuration, duck: musicDuck) }
+        mix.add(placedCues(), duration: editedDuration)
         return mix.isEmpty ? nil : mix
     }
 }
@@ -391,10 +408,12 @@ extension MusicBed {
 }
 
 extension PublishInfo {
-    /// The details as uploaded with this music: each credit line at the end of the
-    /// description, unless the description has it.
-    func crediting(_ music: MusicBed?) -> PublishInfo {
-        let missing = (music?.creditLines ?? []).filter { !description.contains($0) }
+    /// The details as uploaded with this music and these sounds: each credit line at the
+    /// end of the description, unless the description has it.
+    func crediting(_ music: MusicBed?, sounds: [SoundLibrary.Sound] = []) -> PublishInfo {
+        var lines = music?.creditLines ?? []
+        for line in SoundLibrary.creditLines(sounds) where !lines.contains(line) { lines.append(line) }
+        let missing = lines.filter { !description.contains($0) }
         guard !missing.isEmpty else { return self }
         var copy = self
         let body = description.trimmingCharacters(in: .whitespacesAndNewlines)

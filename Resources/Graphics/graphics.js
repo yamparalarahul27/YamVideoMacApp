@@ -365,7 +365,14 @@
 
   // A real browser bar (owner, 21 Oct 2026): macOS window lights, a round address field,
   // a mouse pointer that turns into a text cursor and clicks, the address typed letter by
-  // letter, and with `image` a window under the bar where that page loads.
+  // letter, and with `image` a window under the bar where that page loads. The times are
+  // shared with `soundCues`, so a change to the motion also moves its sounds.
+  const LINK_MOTION = { click: 1.05, typeAt: 1.3, letter: 0.09, open: 0.2 };
+  function linkTyping(p) {
+    const typeAt = Math.max(LINK_MOTION.typeAt, num(p.typeAt, LINK_MOTION.typeAt));
+    const letters = Array.from(String(p.url || "")).length;
+    return { typeAt, letters, typed: typeAt + letters * LINK_MOTION.letter };
+  }
   KINDS.link = function (inner, p, c) {
     const k = p.kicker ? kicker(p.kicker, true) : null;
     // The label is an action the viewer must read on a phone, so it is larger than a card kicker.
@@ -395,8 +402,7 @@
     // The pointer glides in to the start of the address, from the lower right. Every state
     // is set at 0 and changed with `to`, so seeking back and forth shows the same frame.
     const fx = 137, fy = top + 44;
-    const typeAt = Math.max(1.3, num(p.typeAt, 1.3));
-    const typed = typeAt + chars.length * 0.09;
+    const { typeAt, typed } = linkTyping(p);
     tl.set(arrow, { opacity: 0, x: fx + 330, y: fy + 170 }, c.at(0));
     tl.set(ibeam, { opacity: 0, x: fx - 2, y: fy - 17, scale: 1, transformOrigin: "17px 17px" }, c.at(0));
     tl.set(ring, { opacity: 0, scale: 0.4, left: fx + 15, top: fy }, c.at(0));
@@ -404,11 +410,11 @@
     tl.to(arrow, { opacity: 1, x: fx + 12, y: fy - 4, duration: 0.5, ease: "power2.out" }, c.at(0.45));
     tl.set(arrow, { opacity: 0 }, c.at(0.95));
     tl.set(ibeam, { opacity: 1 }, c.at(0.95));
-    tl.to(ibeam, { scale: 0.86, duration: 0.08, yoyo: true, repeat: 1, ease: "power1.out" }, c.at(1.05));
-    tl.set(ring, { opacity: 0.9 }, c.at(1.05));
-    tl.to(ring, { opacity: 0, scale: 1.25, duration: 0.42, ease: "power2.out" }, c.at(1.05));
+    tl.to(ibeam, { scale: 0.86, duration: 0.08, yoyo: true, repeat: 1, ease: "power1.out" }, c.at(LINK_MOTION.click));
+    tl.set(ring, { opacity: 0.9 }, c.at(LINK_MOTION.click));
+    tl.to(ring, { opacity: 0, scale: 1.25, duration: 0.42, ease: "power2.out" }, c.at(LINK_MOTION.click));
     tl.set(caret, { opacity: 1 }, c.at(1.15));
-    if (chars.length) tl.fromTo(chars, { opacity: 0 }, { opacity: 1, duration: 0.01, stagger: 0.09 }, c.at(typeAt));
+    if (chars.length) tl.fromTo(chars, { opacity: 0 }, { opacity: 1, duration: 0.01, stagger: LINK_MOTION.letter }, c.at(typeAt));
     tl.set(ibeam, { opacity: 0 }, c.at(typeAt));
     if (win) {
       // Enter: the field lights up for a moment, the window drops in, a loading line runs, the page appears.
@@ -417,7 +423,7 @@
       tl.set(shot, { opacity: 0 }, c.at(0));
       tl.to(field, { backgroundColor: "rgba(255,255,255,0.16)", duration: 0.08 }, c.at(typed + 0.15));
       tl.to(field, { backgroundColor: "rgba(255,255,255,0.07)", duration: 0.25 }, c.at(typed + 0.23));
-      tl.to(win, { opacity: 1, y: 0, scale: 1, duration: 0.32, ease: "power3.out" }, c.at(typed + 0.2));
+      tl.to(win, { opacity: 1, y: 0, scale: 1, duration: 0.32, ease: "power3.out" }, c.at(typed + LINK_MOTION.open));
       tl.to(load, { width: "100%", duration: 0.7, ease: "power1.inOut" }, c.at(typed + 0.25));
       tl.to(load, { opacity: 0, duration: 0.2 }, c.at(typed + 0.95));
       tl.to(shot, { opacity: 1, duration: 0.32 }, c.at(typed + 0.95));
@@ -1683,6 +1689,26 @@
     return { titleSize: size, runs, picture: image ? box(image.getBoundingClientRect()) : null, speaker, frame };
   }
 
+  /**
+   * The sounds of a graphic (docs/plans/sound-effects.md): each moment of its motion that
+   * has a sound, as `{at, cue}` with `at` in seconds after the graphic starts. Pure: no
+   * DOM, so the app runs it in JavaScriptCore. Part 1 gives section cards, title cards and
+   * link cards; other kinds have none yet.
+   */
+  function soundCues(kind, props, length) {
+    const p = props || {}, end = Math.max(0, num(length, 0));
+    const cues = [];
+    const add = (at, cue) => { if (at >= 0 && at < end) cues.push({ at: Math.round(at * 1000) / 1000, cue }); };
+    if (kind === "sectionCard" || kind === "titleCard") add(0, "in");
+    if (kind === "link") {
+      const typing = linkTyping(p);
+      add(LINK_MOTION.click, "click");
+      for (let i = 0; i < typing.letters; i++) add(typing.typeAt + i * LINK_MOTION.letter, "key");
+      if (p.image) add(typing.typed + LINK_MOTION.open, "open");
+    }
+    return cues;
+  }
+
   /** Reads the inline JSON and loads it. Used by page.html. A thumbnail page starts empty
    * and is drawn by `thumbnail(data)`. */
   function boot(options) {
@@ -1698,7 +1724,7 @@
   }
 
   const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, thumbnailLayout, endLayout, shortLayout, stageSize, captions,
-    smooth, zoneOf, PANEL_SLIDE, VIDEO_SHIFT };
+    smooth, zoneOf, soundCues, PANEL_SLIDE, VIDEO_SHIFT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

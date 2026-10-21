@@ -48,6 +48,8 @@ xcrun swiftc \
 	"$ROOT/Sources/MusicExport.swift" \
 	"$ROOT/Sources/MusicEditing.swift" \
 	"$ROOT/Sources/MusicAgents.swift" \
+	"$ROOT/Sources/Sounds.swift" \
+	"$ROOT/Sources/SoundAgents.swift" \
 	"$ROOT/Sources/Graphics.swift" \
 	"$ROOT/Sources/Logos.swift" \
 	"$ROOT/Sources/CoverGraphics.swift" \

@@ -550,6 +550,29 @@ they are done. ⇧⌘⌫ deletes and closes at once.
 4. `closeGaps {clipID}` joins every section; with `sectionID`, only the gap in front of
    it. Do not close gaps the owner left unless they ask: they may still be cutting.
 
+### 4.19 Sound effects
+
+The owner wants a fast, informative feel: a short sound at moments of the graphics'
+motion (a whoosh when a section card comes in, a tap for each letter a link card types).
+The graphics engine gives each cue's time, so a sound moves with its graphic.
+
+1. Read `yamvideoctl sounds`: the owner's sound library (each sound's name, loudness, peak
+   and licence) and the cues with their default sounds and levels. A cue whose sound is not
+   in the library is silent.
+2. Add a sound only from a file the owner gave or named: `setSound {name, path, credit}`
+   (6 s or less). Set `credit.licence`. The owner's "Boring Sound Kit" has no licence file;
+   the owner said to use it, so give it the licence `other` (Export for YouTube warns).
+3. Turn the sounds on for a recording with `setSounds {clipID, sounds: {on: true}}`. The
+   first time, the app measures the voice. Choose another sound for a cue with
+   `cues: {"link.key": "button-2"}`, `"off"` for none, or null for its default.
+4. Each cue sits its level in LU under the voice (from the sound's loudest 400 ms) and
+   never peaks above -12 dBFS. `level` moves all of them (-12 to +6 dB, default 0).
+5. Read `state.clips[].sounds.cues`: each cue's time, graphic, sound and gain, and
+   `missing` when its sound is not in the library. Graphics switched off have no sounds.
+6. The export and the preview mix the cues with the voice and the music; the duck does not
+   move them. Export for YouTube stops CC BY-NC, CC BY-ND and CC BY-SA sounds and writes
+   each credit line in the description.
+
 ## 5. Problems
 
 - **`revision_conflict`:** read state again and make a new plan. For a Library command,
