@@ -233,10 +233,11 @@ struct VideoProject: Codable, Equatable {
     /// YouTube's Test & Compare and the winner. 20: adds a recording's background music. 21: adds the
     /// space the timeline leaves where a section was deleted, trimmed or moved. 22: adds the
     /// music's duck, down under speech and up in pauses. 23: adds the sound effects on the
-    /// graphics. 24: adds a layout part's own bubble. Every edited
+    /// graphics. 24: adds a layout part's own bubble. 25: adds the thumbnail maker's dark
+    /// frost background, vivid colours and the serif accent. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 24
+    static let currentVersion = 25
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -353,6 +354,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 24, clips.contains(where: { $0.screen?.spans.contains { $0.bubble != nil } == true }) {
             try reject("The project claims an older format but contains a layout with its own bubble."); return
+        }
+        if version < 25, clips.contains(where: { $0.publish?.versions.contains(where: \.usesFormat25) == true }) {
+            try reject("The project claims an older format but contains a thumbnail with the dark frost, vivid colours or the serif accent."); return
         }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
