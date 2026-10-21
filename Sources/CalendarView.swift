@@ -2,8 +2,8 @@ import SwiftUI
 
 // The Calendar module and an idea's release tree (phase 3 of docs/plans/distribution.md,
 // section 15; mock-ups in docs/prototypes/release-calendar.html). A day shows what goes out
-// on it: the long video in purple, Shorts in the accent colour, and a mark for each
-// platform, filled once it is posted. Drag a video to another day, or from Not planned
+// on it: the long video and its Shorts, each with its icon, and each platform's logo,
+// in colour once it is posted there. Drag a video to another day, or from Not planned
 // onto a day to plan it; click one to change its plan.
 
 /// A video dragged on the calendar: "item|video|day", the day empty from Not planned.
@@ -157,7 +157,7 @@ struct CalendarView: View {
                     Button { editing = PlanTarget(item: entry.item.id, video: entry.row.id, day: ReleasePlan.day(Date())) } label: {
                         HStack(alignment: .top, spacing: 7) {
                             Image(systemName: entry.row.short ? "iphone" : "film").font(.caption)
-                                .foregroundStyle(entry.row.short ? Color.accentColor : .purple)
+                                .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(entry.row.title).font(.caption.weight(.semibold)).lineLimit(2)
                                 Text("\(entry.row.short ? "Short" : "Long video") · \(entry.item.title)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -165,7 +165,7 @@ struct CalendarView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(7)
-                        .background((entry.row.short ? Color.accentColor : Color.purple).opacity(0.14), in: RoundedRectangle(cornerRadius: 7))
+                        .background(Color.primary.opacity(entry.row.short ? 0.06 : 0.11), in: RoundedRectangle(cornerRadius: 7))
                     }
                     .buttonStyle(.plain)
                     .draggable(payload(entry.item.id, entry.row.id, nil))
@@ -217,7 +217,7 @@ private struct DayCell: View {
                 Spacer(minLength: 0)
                 if let tag = tag(gap) {
                     Text(tag).font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(gap == -1 ? Color.orange : gap <= 1 ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(gap == 0 || gap == 1 ? Color.accentColor : Color.secondary)
                 }
             }
             ForEach(releases) { release in
@@ -283,8 +283,9 @@ private func missingText(_ missing: [Platform], of release: Release) -> String {
         : ListFormatter.localizedString(byJoining: missing.map(\.label)) + " not posted"
 }
 
-/// One video on a day. A long video is a solid purple bar, a Short a blue chip; a missed
-/// post says which platforms are still to do.
+/// One video on a day, on a calm chip: a long video with a film icon and its label, a
+/// Short with a phone icon; the platforms' logos give the colour. A missed post says which
+/// platforms are still to do, in red.
 struct ReleaseChip: View {
     let release: Release
     var today = ReleasePlan.day(Date())
@@ -292,49 +293,36 @@ struct ReleaseChip: View {
     var body: some View {
         let missing = release.missing(today: today)
         let past = release.day < today
-        if release.short {
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
+            if release.short {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Image(systemName: "iphone").font(.system(size: 9))
+                    Image(systemName: "iphone").font(.system(size: 9)).foregroundStyle(.secondary)
                     Text(release.title).font(.caption.weight(.semibold)).lineLimit(2)
                 }
-                .foregroundStyle(Color.accentColor)
-                HStack(spacing: 3) {
-                    if let time = release.time { Text(time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
-                    PlatformMarks(platforms: release.platforms, posted: release.posted, tint: .secondary, past: past)
-                }
-                if !missing.isEmpty { warning(missing) }
-            }
-            .padding(.leading, 8).padding(.trailing, 5).padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
-            .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor).frame(width: 3) }
-            .clipShape(RoundedRectangle(cornerRadius: 5))
-            .contentShape(Rectangle())
-            .help("\(release.title) · Short · click to change, drag to move")
-        } else {
-            VStack(alignment: .leading, spacing: 3) {
+            } else {
                 HStack(spacing: 4) {
                     Image(systemName: "film")
                     Text("LONG VIDEO" + (release.time.map { " · \($0)" } ?? ""))
                 }
-                .font(.system(size: 9, weight: .heavy)).opacity(0.9)
+                .font(.system(size: 9, weight: .heavy)).foregroundStyle(.secondary)
                 Text(release.title).font(.caption.weight(.semibold)).lineLimit(2)
-                PlatformMarks(platforms: release.platforms, posted: release.posted, tint: .white, past: past)
-                if !missing.isEmpty { warning(missing) }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 6).padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.purple, in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-            .help("\(release.title) · Long video · click to change, drag to move")
+            HStack(spacing: 4) {
+                if release.short, let time = release.time { Text(time).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
+                PlatformMarks(platforms: release.platforms, posted: release.posted, past: past)
+            }
+            if !missing.isEmpty {
+                Label(missingText(missing, of: release), systemImage: "exclamationmark.circle.fill")
+                    .font(.system(size: 9.5, weight: .bold)).foregroundStyle(.red).lineLimit(1)
+            }
         }
-    }
-
-    private func warning(_ missing: [Platform]) -> some View {
-        Label(missingText(missing, of: release), systemImage: "exclamationmark.triangle.fill")
-            .font(.system(size: 9.5, weight: .bold)).foregroundStyle(.orange).lineLimit(1)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 6).padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(release.short ? 0.07 : 0.14), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(release.short ? 0.12 : 0.3)))
+        .contentShape(Rectangle())
+        .help("\(release.title) · \(release.short ? "Short" : "Long video") · click to change, drag to move")
     }
 }
 
@@ -344,45 +332,32 @@ private struct SlotBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text("\(slot.long ? "Long video" : "Short") slot" + (slot.time.map { " · \($0)" } ?? ""))
-                .font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                .font(.caption2.weight(.semibold)).foregroundStyle(.primary)
             Text("Empty · drag one here").font(.system(size: 9.5)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.8), style: StrokeStyle(lineWidth: 1.2, dash: [4, 3])))
         .help("An empty \(slot.long ? "long video" : "Short") slot in your rhythm. Drag a video from Not planned onto it.")
     }
 }
 
-/// YT IG X in: green once posted there, orange once its day has passed without it,
-/// outlined while it is still to come.
+/// The platforms' logos: in colour once posted there, grey while still to come, and grey
+/// with a red "!" once its day has passed without it.
 struct PlatformMarks: View {
     let platforms: [Platform]
     let posted: Set<Platform>
-    let tint: Color
     var past = false
     var large = false
 
     var body: some View {
-        HStack(spacing: large ? 4 : 2) {
-            ForEach(platforms) { platform in mark(platform) }
+        HStack(spacing: large ? 7 : 4) {
+            ForEach(platforms) { platform in
+                let done = posted.contains(platform)
+                PlatformStatusLogo(platform: platform, posted: done, missed: past && !done, size: large ? 17 : 12)
+            }
         }
-    }
-
-    private func mark(_ platform: Platform) -> some View {
-        let done = posted.contains(platform)
-        let missed = past && !done
-        let fill: Color = done ? .green : missed ? .orange : .clear
-        let edge: Color = done ? .green : missed ? .orange : tint.opacity(0.8)
-        let ink: Color = done || missed ? Color.black.opacity(0.8) : tint
-        let note = done ? ": posted" : missed ? ": not posted" : ""
-        return Text(platform.mark)
-            .font(.system(size: large ? 10.5 : 9, weight: .heavy))
-            .foregroundStyle(ink)
-            .padding(.horizontal, large ? 6 : 3.5).padding(.vertical, large ? 2 : 1)
-            .background(fill, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(edge, lineWidth: 0.8))
-            .help(platform.label + note)
+        .padding(.top, 2)
     }
 }
 
@@ -423,17 +398,17 @@ private struct UpNextCard: View {
             case .release(let release):
                 VStack(alignment: .leading, spacing: 3) {
                     Text("\(ReleasePlan.relative(day, today: today)) · \(weekday)\(release.time.map { " \($0)" } ?? "")".uppercased())
-                        .font(.system(size: 9.5, weight: .heavy)).foregroundStyle(release.short ? Color.accentColor : .purple)
+                        .font(.system(size: 9.5, weight: .heavy)).foregroundStyle(day == today || ReleasePlan.days(from: today, to: day) == 1 ? Color.accentColor : .secondary)
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Image(systemName: release.short ? "iphone" : "film").font(.caption2)
                         Text(release.title).font(.caption.weight(.semibold)).lineLimit(2)
                     }
-                    PlatformMarks(platforms: release.platforms, posted: release.posted, tint: .secondary)
+                    PlatformMarks(platforms: release.platforms, posted: release.posted)
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
-                .background(release.short ? Color.primary.opacity(0.06) : Color.purple.opacity(0.2), in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(release.short ? Color.clear : Color.purple.opacity(0.6)))
+                .background(Color.primary.opacity(release.short ? 0.06 : 0.12), in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.primary.opacity(release.short ? 0.1 : 0.3)))
                 .contentShape(Rectangle())
                 .onTapGesture { open(PlanTarget(item: release.item, video: release.video, day: release.day)) }
             case .slot(let slot):
@@ -443,11 +418,11 @@ private struct UpNextCard: View {
                     Text("\(slot.long ? "Long video" : "Short") slot is empty").font(.caption.weight(.semibold))
                     Text("Drag a \(slot.long ? "long video" : "Short") here from Not planned").font(.caption2).foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.orange)
+                .foregroundStyle(.primary)
                 .padding(8)
                 .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
-                .background(targeted ? Color.orange.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.orange.opacity(0.75), style: StrokeStyle(lineWidth: 1.3, dash: [5, 3])))
+                .background(targeted ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.secondary.opacity(0.8), style: StrokeStyle(lineWidth: 1.3, dash: [5, 3])))
                 .modifier(DropDay(day: slot.day, targeted: $targeted))
             }
         }
@@ -470,7 +445,7 @@ private struct AheadCard: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.12))
-                    Capsule().fill(enough ? Color.green : Color.orange)
+                    Capsule().fill(enough ? Color.green : Color.primary.opacity(0.7))
                         .frame(width: geo.size.width * min(1, Double(ahead) / Double(max(1, weeks * 7))))
                 }
             }
@@ -586,9 +561,9 @@ private struct ScheduleList: View {
         HStack(spacing: 14) {
             Label("Long video", systemImage: "film")
             Label("Short", systemImage: "iphone")
-            HStack(spacing: 4) { PlatformMarks(platforms: [.youtube], posted: [.youtube], tint: .secondary); Text("posted") }
-            HStack(spacing: 4) { PlatformMarks(platforms: [.youtube], posted: [], tint: .secondary, past: true); Text("not posted") }
-            HStack(spacing: 4) { PlatformMarks(platforms: [.youtube], posted: [], tint: .secondary); Text("planned") }
+            HStack(spacing: 4) { PlatformMarks(platforms: [.youtube], posted: [.youtube]); Text("posted") }
+            HStack(spacing: 4) { PlatformMarks(platforms: [.youtube], posted: []); Text("planned") }
+            HStack(spacing: 4) { PlatformMarks(platforms: [.youtube], posted: [], past: true); Text("not posted, day passed") }
             Text("Dashed: an empty slot in your rhythm")
         }
         .font(.caption2).foregroundStyle(.secondary)
@@ -644,15 +619,15 @@ private struct ScheduleRow: View {
     private func releaseRow(_ release: Release) -> some View {
         let attention = !missing.isEmpty
         let isToday = release.day == today
-        let tint: Color = attention ? .orange : isToday ? .accentColor : release.short ? .primary : .purple
-        let fill: Color = attention ? Color.orange.opacity(0.1) : release.short ? Color.primary.opacity(0.05) : Color.purple.opacity(0.15)
-        let edge: Color = attention ? Color.orange.opacity(0.5) : release.short ? Color.clear : Color.purple.opacity(0.5)
+        let tint: Color = attention ? .red : isToday || ReleasePlan.days(from: today, to: release.day) == 1 ? .accentColor : .primary
+        let fill: Color = attention ? Color.red.opacity(0.08) : Color.primary.opacity(release.short ? 0.05 : 0.1)
+        let edge: Color = attention ? Color.red.opacity(0.45) : Color.primary.opacity(release.short ? 0.06 : 0.28)
         let planned = model.library.item(release.item)?.video(release.video)?.plan?.platforms.count ?? release.platforms.count
         let idea = model.library.item(release.item)?.title ?? ""
         let split = release.platforms.count < planned
             ? "Only " + ListFormatter.localizedString(byJoining: release.platforms.map(\.label)) + " this day · " + idea : idea
         let detail = attention ? missingText(missing, of: release) : split
-        let detailColor: Color = attention ? .orange : .secondary
+        let detailColor: Color = attention ? .red : .secondary
         return HStack(spacing: 12) {
             DateBadge(day: release.day)
             VStack(alignment: .leading, spacing: 1) {
@@ -666,7 +641,7 @@ private struct ScheduleRow: View {
                 Text(detail).font(.caption).foregroundStyle(detailColor).lineLimit(1)
             }
             Spacer(minLength: 8)
-            PlatformMarks(platforms: release.platforms, posted: release.posted, tint: .secondary, past: release.day < today, large: true)
+            PlatformMarks(platforms: release.platforms, posted: release.posted, past: release.day < today, large: true)
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(fill, in: RoundedRectangle(cornerRadius: 9))
@@ -681,24 +656,24 @@ private struct ScheduleRow: View {
 
     private func slotRow(_ slot: EmptySlot) -> some View {
         HStack(spacing: 12) {
-            DateBadge(day: slot.day, color: .orange)
+            DateBadge(day: slot.day, color: .secondary)
             VStack(alignment: .leading, spacing: 1) {
-                Text(ReleasePlan.relative(slot.day, today: today)).font(.callout.weight(.bold)).foregroundStyle(.orange)
+                Text(ReleasePlan.relative(slot.day, today: today)).font(.callout.weight(.bold)).foregroundStyle(.secondary)
                 Text(slot.time ?? "any time").font(.caption).foregroundStyle(.secondary)
             }
             .frame(width: 96, alignment: .leading)
-            Text(slot.long ? "LONG VIDEO SLOT" : "SHORT SLOT").font(.system(size: 9.5, weight: .heavy)).foregroundStyle(.orange)
+            Text(slot.long ? "LONG VIDEO SLOT" : "SHORT SLOT").font(.system(size: 9.5, weight: .heavy)).foregroundStyle(.secondary)
                 .padding(.horizontal, 6).padding(.vertical, 3)
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.orange.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.secondary.opacity(0.8), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
             VStack(alignment: .leading, spacing: 1) {
-                Text("Empty").font(.callout.weight(.semibold)).foregroundStyle(.orange)
+                Text("Empty").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
                 Text("Drag a \(slot.long ? "long video" : "Short") here from Not planned").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(targeted ? Color.orange.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.3, dash: [5, 3])))
+        .background(targeted ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.secondary.opacity(0.7), style: StrokeStyle(lineWidth: 1.3, dash: [5, 3])))
         .modifier(DropDay(day: slot.day, targeted: $targeted))
     }
 }
@@ -710,9 +685,9 @@ private struct Badge: View {
     var body: some View {
         Label(text, systemImage: symbol)
             .font(.system(size: 9.5, weight: .heavy))
-            .foregroundStyle(long ? Color.white : Color.accentColor)
+            .foregroundStyle(long ? Color(nsColor: .textBackgroundColor) : Color.primary)
             .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(long ? Color.purple : Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 5))
+            .background(long ? Color.primary.opacity(0.9) : Color.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
             .frame(width: 112, alignment: .leading)
     }
 }
@@ -1008,7 +983,7 @@ struct ReleaseTreeSection: View {
     }
 
     private func node(_ row: VideoRow, long: Bool) -> some View {
-        let tint = long ? Color.purple : Color.accentColor
+        let tint = Color.primary
         let plan = row.stored?.plan
         let posted = Set(row.posts.compactMap(\.platform))
         return Button { editing = PlanTarget(item: item.id, video: row.id, day: plan?.day) } label: {
@@ -1021,17 +996,17 @@ struct ReleaseTreeSection: View {
                 VStack(alignment: .trailing, spacing: 3) {
                     if let plan {
                         Text(dayText(plan)).font(.caption2.monospacedDigit())
-                        PlatformMarks(platforms: plan.platforms, posted: posted, tint: tint)
+                        PlatformMarks(platforms: plan.platforms, posted: posted, past: plan.day < ReleasePlan.day(Date()))
                     } else if !row.posts.isEmpty {
                         Text("Posted").font(.caption2).foregroundStyle(.green)
                     } else {
-                        Text("Not planned").font(.caption2).foregroundStyle(.orange)
+                        Text("Not planned").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(tint.opacity(long ? 0.6 : 0.25)))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(tint.opacity(long ? 0.35 : 0.15)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
