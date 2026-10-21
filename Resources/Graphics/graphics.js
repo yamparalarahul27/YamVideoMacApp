@@ -363,23 +363,65 @@
     c.exitColumn();
   }
 
+  // A real browser bar (owner, 21 Oct 2026): macOS window lights, a round address field,
+  // a mouse pointer that turns into a text cursor and clicks, the address typed letter by
+  // letter, and with `image` a window under the bar where that page loads.
   KINDS.link = function (inner, p, c) {
-    const k = kicker(p.kicker, true);
+    const k = p.kicker ? kicker(p.kicker, true) : null;
+    const top = k ? 76 : 0;
     const url = String(p.url || "");
     const slash = url.indexOf("/");
-    const chars = Array.from(url).map((ch, i) => h("span", { class: slash < 0 || i < slash ? "yg-dim" : null, text: ch }));
+    const chars = Array.from(url).map((ch, i) => h("span", { class: slash >= 0 && i >= slash ? "yg-ln-path" : null, text: ch }));
     const caret = h("span", { class: "yg-ln-caret" });
-    const lock = h("svg", { width: 22, height: 26, viewBox: "0 0 22 26", fill: "none", stroke: "#a6adb8", "stroke-width": 2.4 },
-      h("rect", { x: 2, y: 11, width: 18, height: 13, rx: 3 }), h("path", { d: "M6 11V7a5 5 0 0 1 10 0v4" }));
-    const bar = h("div", { class: "yg-ln-bar yg-glass" }, h("div", { class: "yg-ln-dots" }, h("i"), h("i"), h("i")),
-      lock, h("div", { class: "yg-ln-url" }, chars), caret);
-    append(inner, [k.node, bar]);
+    const lights = h("div", { class: "yg-ln-lights" }, h("i"), h("i"), h("i"));
+    const field = h("div", { class: "yg-ln-field" }, h("div", { class: "yg-ln-url" }, chars), caret);
+    const bar = h("div", { class: "yg-ln-bar yg-glass", style: "top:" + top + "px;" }, lights, field);
+    const arrow = h("svg", { class: "yg-ln-ptr", viewBox: "0 0 34 34", width: 34, height: 34 },
+      h("path", { d: "M4 3L4 27L10 21.2L14.4 31L18.6 29.2L14.3 19.6L22.6 19.6Z", fill: "#fff", stroke: "#000", "stroke-width": 1.6, "stroke-linejoin": "round" }));
+    const ibeam = h("svg", { class: "yg-ln-ptr", viewBox: "0 0 34 34", width: 34, height: 34 },
+      h("path", { d: "M12 5H22M17 5V29M12 29H22", fill: "none", stroke: "#000", "stroke-width": 4.2, "stroke-linecap": "round" }),
+      h("path", { d: "M12 5H22M17 5V29M12 29H22", fill: "none", stroke: "#fff", "stroke-width": 1.8, "stroke-linecap": "round" }));
+    const ring = h("div", { class: "yg-ln-ring" });
+    const load = p.image ? h("div", { class: "yg-ln-load" }) : null;
+    const shot = p.image ? h("img", { src: p.image, alt: "" }) : null;
+    const win = p.image ? h("div", { class: "yg-ln-win", style: "top:" + (top + 106) + "px;" }, load,
+      h("div", { class: "yg-ln-skel" }, h("i"), h("i"), h("i")), shot) : null;
+    append(inner, [k ? k.node : null, bar, win, ring, arrow, ibeam].filter(Boolean));
+    const tl = c.tl;
     c.enterColumn();
-    c.grow(k.bar, 0.2);
-    c.up(bar, 0.3);
-    if (chars.length) c.tl.fromTo(chars, { opacity: 0 }, { opacity: 1, duration: 0.01, stagger: 0.1 }, c.at(num(p.typeAt, 1)));
-    const blinks = Math.min(9, Math.max(0, Math.floor((c.length - 0.7 - 0.4) / 0.46) - 1));
-    c.tl.fromTo(caret, { opacity: 1 }, { opacity: 0, duration: 0.01, repeat: blinks, yoyo: true, repeatDelay: 0.45 }, c.at(0.7));
+    c.up(bar, 0.2);
+    // The pointer glides in to the start of the address, from the lower right. Every state
+    // is set at 0 and changed with `to`, so seeking back and forth shows the same frame.
+    const fx = 137, fy = top + 44;
+    const typeAt = Math.max(1.3, num(p.typeAt, 1.3));
+    const typed = typeAt + chars.length * 0.09;
+    tl.set(arrow, { opacity: 0, x: fx + 330, y: fy + 170 }, c.at(0));
+    tl.set(ibeam, { opacity: 0, x: fx - 2, y: fy - 17, scale: 1, transformOrigin: "17px 17px" }, c.at(0));
+    tl.set(ring, { opacity: 0, scale: 0.4, left: fx + 15, top: fy }, c.at(0));
+    tl.set(caret, { opacity: 0 }, c.at(0));
+    tl.to(arrow, { opacity: 1, x: fx + 12, y: fy - 4, duration: 0.5, ease: "power2.out" }, c.at(0.45));
+    tl.set(arrow, { opacity: 0 }, c.at(0.95));
+    tl.set(ibeam, { opacity: 1 }, c.at(0.95));
+    tl.to(ibeam, { scale: 0.86, duration: 0.08, yoyo: true, repeat: 1, ease: "power1.out" }, c.at(1.05));
+    tl.set(ring, { opacity: 0.9 }, c.at(1.05));
+    tl.to(ring, { opacity: 0, scale: 1.25, duration: 0.42, ease: "power2.out" }, c.at(1.05));
+    tl.set(caret, { opacity: 1 }, c.at(1.15));
+    if (chars.length) tl.fromTo(chars, { opacity: 0 }, { opacity: 1, duration: 0.01, stagger: 0.09 }, c.at(typeAt));
+    tl.set(ibeam, { opacity: 0 }, c.at(typeAt));
+    if (win) {
+      // Enter: the field lights up for a moment, the window drops in, a loading line runs, the page appears.
+      tl.set(win, { opacity: 0, y: -10, scale: 0.97 }, c.at(0));
+      tl.set(load, { width: "0%", opacity: 1 }, c.at(0));
+      tl.set(shot, { opacity: 0 }, c.at(0));
+      tl.to(field, { backgroundColor: "rgba(255,255,255,0.16)", duration: 0.08 }, c.at(typed + 0.15));
+      tl.to(field, { backgroundColor: "rgba(255,255,255,0.07)", duration: 0.25 }, c.at(typed + 0.23));
+      tl.to(win, { opacity: 1, y: 0, scale: 1, duration: 0.32, ease: "power3.out" }, c.at(typed + 0.2));
+      tl.to(load, { width: "100%", duration: 0.7, ease: "power1.inOut" }, c.at(typed + 0.25));
+      tl.to(load, { opacity: 0, duration: 0.2 }, c.at(typed + 0.95));
+      tl.to(shot, { opacity: 1, duration: 0.32 }, c.at(typed + 0.95));
+    }
+    const blinks = Math.min(14, Math.max(0, Math.floor((c.length - typed - 0.6) / 0.48)));
+    if (blinks) tl.to(caret, { opacity: 0, duration: 0.01, repeat: blinks, yoyo: true, repeatDelay: 0.47 }, c.at(typed + 0.3));
     c.exitColumn();
   };
 

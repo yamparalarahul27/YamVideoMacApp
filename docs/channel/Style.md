@@ -9,6 +9,7 @@ A rule is added only after the owner says yes. Each rule says where it came from
 - Show mock-ups on the owner's own footage before choosing a look. *(Shorts, 15 Oct)*
 - Never post, sign in to or read YouTube, Instagram, X or LinkedIn. The owner publishes by hand. *(16 Oct)*
 - Release rhythm: one long video every other Thursday at 7 pm, and two Shorts a week (Tuesday and Saturday at 7 pm), on YouTube, Instagram, X and LinkedIn the same day. Keep at least two finished long videos ahead; never post only to fill a slot (post Shorts only until the next long video is good). Plan at least two months ahead. *(owner, long-term rhythm without burnout, 20 Oct 2026)*
+- No em dashes in anything the viewer reads: on-screen text, titles, descriptions, captions and thumbnails. Use a full stop, a comma or a colon. *(owner, Tradl link card review, 21 Oct 2026)*
 
 ## Talking head
 - Pocket 3 close-up: cut pauses and stumbles; keep the story moments (the Nokia story stayed in full). *(AppStore, 15 Oct)*
