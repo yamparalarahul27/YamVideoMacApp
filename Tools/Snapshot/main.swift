@@ -193,6 +193,67 @@ func screenZoomPictures(_ model: AppModel, output: URL, size: CGSize) async thro
     await render(view, size: preview, to: output.appendingPathComponent("18b-screen-zoom-frame-preview.png"))
 }
 
+/// The graphics gallery: the Media panel's Graphics tab once the engine has drawn its
+/// pictures, in each look, then the checklist in Ink on the Preview. With
+/// YAMVIDEO_SNAPSHOT_PROJECT (only read), the pictures take that recording's style, and
+/// YAMVIDEO_SNAPSHOT_AT (0–1, default 0.4) places the playhead. YAMVIDEO_SNAPSHOT_ONLY=gallery
+/// renders only these.
+@MainActor
+func galleryPictures(_ model: AppModel, output: URL, size: CGSize) async throws {
+    let environment = ProcessInfo.processInfo.environment
+    if let path = environment["YAMVIDEO_SNAPSHOT_PROJECT"] {
+        model.restore(try VideoProject.decodeMigrating(from: Data(contentsOf: URL(fileURLWithPath: path))))
+    }
+    model.setPreviewFraction(Double(environment["YAMVIDEO_SNAPSHOT_AT"] ?? "") ?? 0.4)
+    await pump(2)
+    UserDefaults.standard.set("graphics", forKey: "mediaPanelTab")
+    defer { UserDefaults.standard.set("media", forKey: "mediaPanelTab") }
+    // Tall, so every tile is in view.
+    let size = CGSize(width: size.width, height: 1560)
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    // The tiles ask for their pictures as they show; asked here, all of them draw, one at a time.
+    let style = model.galleryStyle
+    for look in [GalleryLook(style: style), GalleryLook(style: style) == .glass ? .ink : .glass] {
+        for sample in GallerySample.all { GalleryPictures.shared.request(sample, style: style, look: look) }
+    }
+    for _ in 0..<180 where GallerySample.all.contains(where: { sample in
+        GalleryLook.allCases.contains { GalleryPictures.shared.picture(sample, style: style, look: $0) == nil } }) {
+        await pump(1)
+    }
+    model.openGallery()
+    for look in GalleryLook.allCases {
+        model.galleryLook = look
+        await render(window(), size: size, to: output.appendingPathComponent("19-gallery-\(look.rawValue).png"), settle: 1)
+    }
+    // A click on a tile: the Preview shows it with the bar. This tool draws the player's picture
+    // over its view, so the draft and the bar over it are drawn here on the frame, as the app does.
+    guard let list = GallerySample.all.first(where: { $0.kind == .checklist }) else { return }
+    model.galleryLook = .ink
+    // A closed window's tab stops the draft a moment later, so the click waits for that.
+    await pump(1)
+    model.toggleGalleryDraft(list)
+    await pump(1)
+    await render(window(), size: size, to: output.appendingPathComponent("19b-gallery-shown.png"), settle: 1)
+    // The window closed, and with it the tab, which stops the draft: the click again.
+    await pump(1)
+    model.toggleGalleryDraft(list)
+    await pump(2)
+    guard let item = model.selectedItem, let info = item.info, let draft = model.galleryDraftGraphic,
+          let frame = try? await model.playback.composedFrame() else { return }
+    var track = item.placedGraphics ?? GraphicsTrack(style: style)
+    track.items.append(draft)
+    let picture = try await GraphicsSnapshot.draw(track, duration: item.editedDuration, fps: info.fpsExpression,
+                                                  time: model.previewTime, over: frame).image
+    let preview = CGSize(width: 1000, height: 1000 * Double(picture.height) / Double(picture.width) + 32)
+    let view = Image(decorative: picture, scale: 1).resizable().aspectRatio(contentMode: .fit)
+        .overlay(alignment: .top) { GalleryDraftBar() }
+        .padding(16)
+    .frame(width: preview.width, height: preview.height)
+    .background(Color.black)
+    .environmentObject(model)
+    await render(view, size: preview, to: output.appendingPathComponent("19c-gallery-preview.png"))
+}
+
 /// The music under the voice: the Music row with a piece, the piece selected, and its
 /// inspector in the Audio tab. YAMVIDEO_SNAPSHOT_ONLY=music renders only these.
 /// YAMVIDEO_SNAPSHOT_MUSIC names a sound file; without it, ffmpeg makes 60 s of chords.
@@ -390,6 +451,10 @@ func run() async throws {
     }
     if only == "gaps" {
         await gapPictures(model, output: output, size: size)
+        return
+    }
+    if only == "gallery" {
+        try await galleryPictures(model, output: output, size: size)
         return
     }
     if only == "screenzoom" {

@@ -10,6 +10,9 @@ final class PlaybackController: ObservableObject {
     var hiddenTracks: Set<TimelineTrack> = []
     /// Before/After: the recording as it was, with the same cuts.
     var showsOriginal = false
+    /// The gallery's draft on one recording, not in the project: the picture moves aside for
+    /// it as for the recording's own panels.
+    var galleryDraft: (clip: UUID, graphic: Graphic)?
     @Published var isPlaying = false { didSet { if isPlaying != oldValue { updateAim() } } }
     @Published var isLoading = false
     /// The screen zoom the Preview aims: left out of the picture while paused, so a frame
@@ -114,7 +117,12 @@ final class PlaybackController: ObservableObject {
 
     /// `original` shows the recording without its colour stage, for comparison.
     func prepare(_ clip: VideoItem, settings: ExportSettings, at time: Double, play: Bool, original: Bool = false) {
-        let clip = showsOriginal ? clip.asRecorded : clip.effective.previewing(hiding: hiddenTracks)
+        var clip = showsOriginal ? clip.asRecorded : clip.effective.previewing(hiding: hiddenTracks)
+        if let draft = galleryDraft, draft.clip == clip.id, !showsOriginal, clip.isOn(.graphics), !hiddenTracks.contains(.graphics) {
+            var graphics = clip.graphics ?? GraphicsTrack(style: GraphicsStyle())
+            graphics.items.append(draft.graphic)
+            clip.graphics = graphics
+        }
         let original = original || showsOriginal
         requestedTime = time
         playWhenReady = play

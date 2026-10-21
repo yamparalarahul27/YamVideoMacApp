@@ -1,6 +1,6 @@
 # Graphics gallery, the Paper look and Pills (plan)
 
-Status: plan and mock-up, 21 Oct 2026. Nothing is built yet.
+Status: part 1 is built (21 Oct 2026, branch `claude/graphics-gallery`). Parts 2 to 4 are not started.
 Mock-up: [docs/prototypes/graphics-gallery.html](../prototypes/graphics-gallery.html) (open it from a local web server, so
 the pictures and fonts load). Its Glass and Ink pictures are real renders of the graphics engine over a
 neutral backdrop. The Paper look and Pills are drawn in the page as proposals.
@@ -39,6 +39,22 @@ references and want both as options in the app:
 - Click a tile: the Preview shows that graphic large, over the frame, without a change to the project.
   **Add at playhead** adds it (one undo step). **Replace selected** gives a selected graphic that kind's look.
 - Later (not part 1): a hover plays the graphic's motion in its tile.
+
+**What part 1 has** (`Sources/GraphicsGallery.swift`, the Media panel's Graphics tab):
+
+- Seven tiles in four groups: Cards (name plate, title card, feature list), Full screen (kinetic text,
+  section card), Panels (checklist) and End (end screen). Feature list and checklist are new in the
+  Media panel. Tags come with Pills (part 3).
+- The Look switch has Glass and Ink. Ink changes the panel kinds only. Paper comes in part 2.
+- The engine draws each tile at 1280×720 over a neutral backdrop, and the tile shows the part of the
+  frame around the graphic, so a card reads at tile size. The pictures are kept in
+  `Caches/YamVideo/Gallery`, by engine, sample, style and look.
+- A click shows the sample on the Preview at the playhead, with a bar: Add (Return) or Done (Esc). The
+  picture moves aside for a panel, as for a panel in the project. An end screen draft does not move it.
+- **+** on a tile adds the kind at the playhead, in the look the gallery shows, as one undo step.
+
+**Not as planned:** the tiles use the neutral backdrop, not the frame at the playhead (one picture per
+kind and look, and the Preview shows the frame). **Replace selected** is not in part 1.
 
 ### Part 2: the Paper look
 

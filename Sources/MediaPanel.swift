@@ -102,20 +102,7 @@ struct MediaPanel: View {
 
     // MARK: Graphics and effects
 
-    private var graphics: some View {
-        entries([
-            Entry(asset: .namePlate, title: "Name plate", detail: "Your name and what you do, beside you", symbol: "person.text.rectangle"),
-            Entry(asset: .titleCard, title: "Title card", detail: "A title in the column", symbol: "textformat.size"),
-            Entry(asset: .kineticText, title: "Kinetic text", detail: "Big words over the picture, as they are said", symbol: "text.word.spacing"),
-            Entry(asset: .sectionCard, title: "Section card", detail: "A part's title over a seek bar", symbol: "rectangle.split.3x1"),
-            Entry(asset: .endScreen, title: "End screen", detail: "The last 5–20 s, for YouTube's end screen", symbol: "rectangle.inset.filled.and.person.filled"),
-        ], footer: AnyView(
-            Button { model.chooseGraphicsFile() } label: { Label("Import Graphics File…", systemImage: "square.and.arrow.down") }
-                .controlSize(.small)
-                .disabled(!canAdd)
-                .help("A graphics.json from an agent or another project")
-        ))
-    }
+    private var graphics: some View { GraphicsGalleryTab(canAdd: canAdd) }
 
     private var effects: some View {
         var list = [
@@ -234,5 +221,118 @@ private struct LogosTab: View {
         .draggable(MediaAsset.logo(logo.name).dragText) {
             Text(logo.name).padding(6).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+}
+
+/// Over the Preview while the gallery shows a draft: what it is, and Add or Done.
+struct GalleryDraftBar: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if let sample = model.galleryDraftSample {
+            HStack(spacing: 10) {
+                Text("\(sample.title) · \(model.galleryLook.label)").font(.caption.weight(.semibold))
+                Text("A look, not in the project").font(.caption2).foregroundStyle(.secondary)
+                Button("Add") { model.addFromGallery(sample) }
+                    .controlSize(.small).keyboardShortcut(.defaultAction)
+                    .help("Add it at the playhead")
+                Button("Done") { model.galleryDraft = nil }
+                    .controlSize(.small).keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule())
+            .padding(.top, 10)
+        }
+    }
+}
+
+/// The graphics gallery (docs/plans/graphics-gallery.md): each kind as a picture in the
+/// recording's style. A click shows it on the Preview at the playhead without a change to
+/// the project; **+** adds it there.
+private struct GraphicsGalleryTab: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject private var pictures = GalleryPictures.shared
+    let canAdd: Bool
+
+    var body: some View {
+        let style = model.galleryStyle
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Picker("Look", selection: $model.galleryLook) {
+                        ForEach(GalleryLook.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help("How the pictures draw. Ink writes the panel kinds by hand; cards stay glass.")
+                    Spacer(minLength: 0)
+                    Circle().fill(Color(nsColor: NSColor(hex: style.accent) ?? .systemPink)).frame(width: 14, height: 14)
+                        .help("The accent of this recording's graphics: \(style.accent)")
+                }
+                ForEach(GallerySample.Group.allCases) { group in
+                    let samples = GallerySample.all.filter { $0.group == group }
+                    if !samples.isEmpty {
+                        Text(group.rawValue.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                            ForEach(samples) { sample in tile(sample, style: style) }
+                        }
+                    }
+                }
+                Button { model.chooseGraphicsFile() } label: { Label("Import Graphics File…", systemImage: "square.and.arrow.down") }
+                    .controlSize(.small)
+                    .disabled(!canAdd)
+                    .help("A graphics.json from an agent or another project")
+                    .padding(.top, 4)
+                Text(canAdd ? "Click a picture to see it on the Preview. + adds it at the playhead, or drag it onto the timeline."
+                     : "Select a recording to add these.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(8)
+        }
+        .onAppear { model.openGallery() }
+        .onDisappear { model.galleryDraft = nil }
+    }
+
+    private func tile(_ sample: GallerySample, style: GraphicsStyle) -> some View {
+        let shown = model.galleryDraft?.sample == sample.id
+        let look = model.galleryLook
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let image = pictures.picture(sample, style: style, look: look) {
+                        Image(nsImage: image).resizable()
+                    } else {
+                        Rectangle().fill(Color.black.opacity(0.35)).overlay(ProgressView().controlSize(.small))
+                    }
+                }
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                Button { model.addFromGallery(sample) } label: {
+                    Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 22, height: 22).background(Color.black.opacity(0.55), in: Circle())
+                }
+                .buttonStyle(.plain).padding(5)
+                .disabled(!canAdd)
+                .help("Add \(sample.title.lowercased()) at the playhead")
+                .accessibilityLabel("Add \(sample.title.lowercased()) at the playhead")
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(sample.title).font(.caption.weight(.semibold))
+                Text(sample.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(.horizontal, 7).padding(.vertical, 5)
+        }
+        .background(Color.primary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(shown ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: shown ? 2 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture { if canAdd { model.toggleGalleryDraft(sample) } }
+        .help(sample.help)
+        .draggable(sample.asset.dragText) {
+            Label(sample.title, systemImage: "rectangle.on.rectangle")
+                .padding(6).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .task(id: sample.pictureKey(style: style, look: look)) { pictures.request(sample, style: style, look: look) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(sample.title)
     }
 }

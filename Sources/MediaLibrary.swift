@@ -5,7 +5,7 @@ import Foundation
 /// Something the Media panel adds to the recording, by its + button or by a drag onto the
 /// timeline. Its `id` is what a drag carries.
 enum MediaAsset: Equatable {
-    case namePlate, titleCard, kineticText, sectionCard, endScreen
+    case namePlate, titleCard, featureList, checklist, kineticText, sectionCard, endScreen
     case logo(String)
     case blurArea, fullFrameBlur, zoom, screenZoom, marker
 
@@ -15,6 +15,8 @@ enum MediaAsset: Equatable {
         switch self {
         case .namePlate: return "namePlate"
         case .titleCard: return "titleCard"
+        case .featureList: return "featureList"
+        case .checklist: return "checklist"
         case .kineticText: return "kineticText"
         case .sectionCard: return "sectionCard"
         case .endScreen: return "endScreen"
@@ -34,7 +36,7 @@ enum MediaAsset: Equatable {
         guard dragText.hasPrefix(Self.dragPrefix) else { return nil }
         let id = String(dragText.dropFirst(Self.dragPrefix.count))
         if id.hasPrefix("logo:") { self = .logo(String(id.dropFirst(5))); return }
-        let all: [MediaAsset] = [.namePlate, .titleCard, .kineticText, .sectionCard, .endScreen,
+        let all: [MediaAsset] = [.namePlate, .titleCard, .featureList, .checklist, .kineticText, .sectionCard, .endScreen,
                                  .blurArea, .fullFrameBlur, .zoom, .screenZoom, .marker]
         guard let match = all.first(where: { $0.id == id }) else { return nil }
         self = match
@@ -51,6 +53,17 @@ extension AppModel {
             addStarter(.namePlate, props: ["title": .string("Your name"), "detail": .string("What you do")], label: "Add Name Plate")
         case .titleCard:
             addStarter(.titleCard, props: ["kicker": .string("New video"), "title": .string("Your title")], label: "Add Title Card")
+        case .featureList:
+            addStarter(.featureList, props: ["kicker": .string("Features"), "items": .array([
+                .object(["icon": .string("app"), "title": .string("First point"), "detail": .string("One line about it"), "at": .number(0.2)]),
+                .object(["icon": .string("check"), "title": .string("Second point"), "detail": .string("One line about it"), "at": .number(0.8)]),
+            ])], label: "Add Feature List")
+        case .checklist:
+            addStarter(.checklist, props: ["title": .string("Your list"), "items": .array([
+                .object(["text": .string("First point"), "at": .number(0.5)]),
+                .object(["text": .string("Second point"), "at": .number(1.2)]),
+                .object(["text": .string("Third point"), "at": .number(1.9)]),
+            ])], label: "Add Checklist")
         case .kineticText: addKineticText()
         case .sectionCard: addSectionCard()
         case .endScreen: addEndScreen()
