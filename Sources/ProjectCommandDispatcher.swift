@@ -469,6 +469,7 @@ extension AppModel {
         if let id = selectedMarkerID, selectedItem?.markers.contains(where: { $0.id == id }) != true { selectedMarkerID = nil }
         if let id = selectedLayoutID, selectedItem?.screen?.spans.contains(where: { $0.id == id }) != true { selectedLayoutID = nil }
         if let id = selectedScreenZoomID, selectedItem?.screen?.zooms.contains(where: { $0.id == id }) != true { selectedScreenZoomID = nil }
+        if aimsCallout, selectedGraphic?.kind != .callout { aimsCallout = false }
         if let id = selectedMusicID, selectedItem?.music?.pieces.contains(where: { $0.id == id }) != true { selectedMusicID = nil }
 
         let movieAfter = (items.filter(\.includedInMovie).map(ProjectClip.withoutGaps), movieSettings, settings)

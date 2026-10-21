@@ -217,6 +217,7 @@ struct ScreenZoomInspector: View {
 struct ScreenAimLayer: View {
     /// The picture's size in pixels: the recording's crop.
     let frame: CGSize
+    var help = "Click the screen to aim the selected screen zoom"
     let onAim: (CGPoint) -> Void
 
     var body: some View {
@@ -233,7 +234,7 @@ struct ScreenAimLayer: View {
                     onAim(CGPoint(x: location.x / scale, y: location.y / scale))
                 }
                 .position(x: picture.midX, y: picture.midY)
-                .help("Click the screen to aim the selected screen zoom")
+                .help(help)
         }
     }
 }

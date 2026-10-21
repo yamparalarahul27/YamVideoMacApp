@@ -128,6 +128,7 @@ graphics closer than 1.0 s share one panel, so the shade does not flash between 
 | `checklist` | panel | kicker, title, footer; items [{text, at}] |
 | `endCard` | column | kicker, title, detail, button |
 | `endScreen` | screen | videos (1 or 2), side (left, right: the speaker's side), kicker, title (added in G3, section 14) |
+| `callout` | callout | text (1–4 words), point {x, y} in screen-recording pixels, side? (auto, left, right, up, down); the app writes place (docs/plans/callout-graphic.md) |
 
 `rule.demo` is one of: `image` {image, flag? {text, box {x, y, w, h} in image fractions,
 at}}, `account` {rows [text], button, toast, tapAt, clearAt}, `flow` {nodes [{text, at}],

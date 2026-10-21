@@ -295,6 +295,17 @@ struct ScreenTrack: Codable, Equatable {
         return CGPoint(x: picture.minX + window.minX + u * window.width, y: picture.minY + window.minY + v * window.height)
     }
 
+    /// Where a point of the screen recording (its pixels) lands on the frame at an edited
+    /// time, with the screen in `place`; nil when the zoom leaves it out. The inverse of
+    /// `screenPoint`.
+    func framePoint(_ point: CGPoint, at time: Double, place: CGRect) -> CGPoint? {
+        let window = zoomWindow(at: time)
+        let u = (Double(point.x) - Double(picture.minX) - Double(window.minX)) / Double(window.width)
+        let v = (Double(point.y) - Double(picture.minY) - Double(window.minY)) / Double(window.height)
+        guard (0...1).contains(u), (0...1).contains(v) else { return nil }
+        return CGPoint(x: Double(place.minX) + u * Double(place.width), y: Double(place.minY) + v * Double(place.height))
+    }
+
     // MARK: Layout over time
 
     /// The layout in force at `time`, before any easing: Speaker from the end screen's
@@ -321,19 +332,30 @@ struct ScreenTrack: Codable, Equatable {
     /// from its moment; a change that comes while another eases starts from where that
     /// one has got to.
     func state(at time: Double, geometry: LayoutGeometry, endScreen: Double?) -> LayoutState {
+        states(at: [time], geometry: geometry, endScreen: endScreen)[0]
+    }
+
+    /// `state(at:)` at each of `times`, which must be in order, in one pass over the
+    /// changes: for a callout, which needs the places at every frame of its time.
+    func states(at times: [Double], geometry: LayoutGeometry, endScreen: Double?) -> [LayoutState] {
+        let changes = changes(endScreen: endScreen)
         var target = layout(at: 0, endScreen: endScreen)
         var from = geometry.held(target)
         var since: Double?
+        var next = 0
         func now(_ moment: Double) -> LayoutState {
             guard let since, moment - since < Self.transition else { return geometry.held(target) }
             return geometry.mix(from, geometry.held(target), amount: Self.ease((moment - since) / Self.transition))
         }
-        for change in changes(endScreen: endScreen) where change.time <= time + 0.000001 {
-            from = now(change.time)
-            target = change.to
-            since = change.time
+        return times.map { time in
+            while next < changes.count, changes[next].time <= time + 0.000001 {
+                from = now(changes[next].time)
+                target = changes[next].to
+                since = changes[next].time
+                next += 1
+            }
+            return now(time)
         }
-        return now(time)
     }
 
     /// Smoothstep: starts and stops gently, as zooms do.

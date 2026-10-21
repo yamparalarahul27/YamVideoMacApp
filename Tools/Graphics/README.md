@@ -74,5 +74,15 @@ page folder under a content-hash name, so the page has no paths outside its fold
   tall, gives each logo's width in pixels from the image's own size: a logo is 100 px
   tall (96 compact) and up to 3 times as wide. Without `widths` each logo is square.
   Without a spot, the badge sits at the top right.
+- `callout` names a UI pattern next to the element on the screen recording: `props.text`
+  (1–4 words) and `props.point` `{x, y}` in the screen recording's pixels. The app writes
+  `props.place` `{side, lines, path}` when it draws it (`CalloutPlace` in
+  Sources/Callouts.swift): the label's side from the point (`left`, `right`, `up`,
+  `down`), its one or two lines, and a path of `[t, ax, ay, lx, ly, o]`: seconds after the
+  start, the point on the stage, the middle of the label's near edge, and how much of the
+  callout shows (0–1). The engine moves in straight lines between the entries, so the
+  dot stays on the element through screen zooms and layout changes. Glass draws a tag in
+  the accent colour; ink writes the label by hand on a soft haze. Without a place, the
+  callout sits in the middle of the stage.
 
 The kinds and their props are in section 3 of the plan.

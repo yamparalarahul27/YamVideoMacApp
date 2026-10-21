@@ -23,6 +23,7 @@
     endScreen: "screen",
     logoBadge: "speaker",
     kineticText: "cover", sectionCard: "cover",
+    callout: "callout",
   };
   const STAGE = { left: 0, top: 0, width: 1920, height: 1080 };
   const DEFAULT_STYLE = { accent: "#F5C42C", panel: "shade", moveVideo: true, edge: 170, look: "glass" };
@@ -1036,6 +1037,125 @@
     return null;
   };
 
+  // ───────────────────────── Callout ─────────────────────────
+  // A short label with a thin line to a point on the screen recording. The app writes
+  // `place` (CalloutPlace in Sources/Callouts.swift): the label's side, its lines, and a
+  // path of [t, ax, ay, lx, ly, o], so the point stays on the UI element through the
+  // screen's zooms and layouts. Every motion is worked out from one time, the seconds
+  // after the start, so a seek always draws the same frame.
+
+  const CALLOUT_SHIFT = { right: [0, -50], left: [-100, -50], up: [-50, -100], down: [-50, 0] };
+  function calloutPlace(p, short) {
+    const s = (p && p.place) || {};
+    const side = CALLOUT_SHIFT[s.side] ? s.side : "right";
+    const lines = Array.isArray(s.lines) && s.lines.length ? s.lines.slice(0, 2).map(String) : [String((p && p.text) || "")];
+    let path = Array.isArray(s.path)
+      ? s.path.filter((row) => Array.isArray(row) && row.length >= 6 && row.every((v) => typeof v === "number" && isFinite(v))) : [];
+    if (!path.length) {
+      const stage = short ? SHORT_STAGE : STAGE, x = stage.width / 2, y = stage.height / 2;
+      path = [[0, x, y, x + 140, y, 1]];
+    }
+    return { side, lines, path };
+  }
+  /** The path's entry at `t`, on a straight line between the entries round it. */
+  function calloutAt(path, t) {
+    if (t <= path[0][0]) return path[0];
+    for (let i = 1; i < path.length; i++) {
+      const b = path[i];
+      if (t > b[0]) continue;
+      const a = path[i - 1], u = (t - a[0]) / Math.max(0.000001, b[0] - a[0]);
+      return a.map((v, k) => v + (b[k] - v) * u);
+    }
+    return path[path.length - 1];
+  }
+  function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+  function backOut(x) { const k = 1.70158, u = x - 1; return 1 + (k + 1) * u * u * u + k * u * u; }
+
+  /**
+   * The parts both looks share: the dot on the element (it pops, and one ring pulses
+   * out), the line from the dot to the label (it draws from 0.1 s), and the label (it
+   * comes in from 0.35 s). `label` is the label's look; `bend` curves the line, as a hand
+   * draws it (0 is straight).
+   */
+  function calloutKind(inner, p, c, label, bend, write) {
+    const place = calloutPlace(p, c.short);
+    const stage = c.short ? SHORT_STAGE : STAGE;
+    const shift = CALLOUT_SHIFT[place.side];
+    const svg = h("svg", { class: "yg-co-draw", viewBox: "0 0 " + stage.width + " " + stage.height });
+    const under = h("path", { class: "yg-co-under" }), line = h("path", { class: "yg-co-line" });
+    const pulse = h("circle", { class: "yg-co-pulse" }), ring = h("circle", { class: "yg-co-ring" }), dot = h("circle", { class: "yg-co-dot" });
+    append(svg, [under, line, pulse, ring, dot]);
+    const pop = h("div", { class: "yg-co-pop" }, label);
+    const box = h("div", { class: "yg-co-label", style: "transform:translate(" + shift[0] + "%," + shift[1] + "%);" }, pop);
+    const wrap = h("div", { class: "yg-co" }, svg, box);
+    append(inner, wrap);
+    pop.style.transformOrigin = { right: "0% 50%", left: "100% 50%", up: "50% 100%", down: "50% 0%" }[place.side];
+    const f = (n) => n.toFixed(1);
+    const state = { t: 0 };
+    function update() {
+      const t = state.t, row = calloutAt(place.path, t);
+      const ax = row[1], ay = row[2], lx = row[3], ly = row[4];
+      wrap.style.opacity = String(clamp01(row[5]));
+      const grow = backOut(clamp01(t / 0.3));
+      [dot, ring, pulse].forEach((node) => { node.setAttribute("cx", f(ax)); node.setAttribute("cy", f(ay)); });
+      dot.setAttribute("r", f(Math.max(0, 9 * grow)));
+      ring.setAttribute("r", f(Math.max(0, 13 * grow)));
+      const wave = clamp01(t / 0.8);
+      pulse.setAttribute("r", f(9 + 30 * smooth(wave)));
+      pulse.style.opacity = String(wave >= 1 ? 0 : 0.85 * (1 - wave));
+      // The line starts just outside the dot and ends where it meets the label.
+      const dx = lx - ax, dy = ly - ay, length = Math.hypot(dx, dy);
+      const drawn = smooth(clamp01((t - 0.1) / 0.35));
+      if (length > 24 && drawn > 0) {
+        const sx = ax + (dx / length) * 18, sy = ay + (dy / length) * 18;
+        const cx = (sx + lx) / 2 - (dy / length) * bend * Math.min(1, length / 300), cy = (sy + ly) / 2 + (dx / length) * bend * Math.min(1, length / 300);
+        // The first `drawn` of the curve: its control point and end, by de Casteljau.
+        const qx = sx + (cx - sx) * drawn, qy = sy + (cy - sy) * drawn;
+        const ex = (1 - drawn) * (1 - drawn) * sx + 2 * (1 - drawn) * drawn * cx + drawn * drawn * lx;
+        const ey = (1 - drawn) * (1 - drawn) * sy + 2 * (1 - drawn) * drawn * cy + drawn * drawn * ly;
+        const d = "M" + f(sx) + " " + f(sy) + " Q " + f(qx) + " " + f(qy) + " " + f(ex) + " " + f(ey);
+        under.setAttribute("d", d); line.setAttribute("d", d);
+      } else {
+        under.setAttribute("d", ""); line.setAttribute("d", "");
+      }
+      box.style.left = f(lx) + "px"; box.style.top = f(ly) + "px";
+      const come = clamp01((t - 0.35) / 0.35);
+      pop.style.opacity = String(smooth(come));
+      pop.style.transform = "scale(" + (0.86 + 0.14 * backOut(come)).toFixed(4) + ")";
+      if (write) write(clamp01((t - 0.45) / write.duration));
+    }
+    c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.01 }, c.at(0));
+    c.tl.fromTo(state, { t: 0 }, { t: c.length, duration: c.length, ease: "none", onUpdate: update }, c.at(0));
+    c.tl.to(c.host, { opacity: 0, duration: 0.3, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.3)));
+    update();
+    return place;
+  }
+
+  function calloutLines(node, lines) {
+    lines.forEach((text, i) => { if (i) append(node, h("br")); append(node, text); });
+    return node;
+  }
+
+  /** Glass: the label as a tag in the accent colour, as the thumbnails' highlighted words, and a straight accent line. */
+  KINDS.callout = function (inner, p, c) {
+    const lines = calloutPlace(p, c.short).lines;
+    const tag = calloutLines(h("div", { class: "yg-co-tag" }), lines);
+    calloutKind(inner, p, c, tag, 0, null);
+  };
+
+  /** Ink: the label in white handwriting over a soft haze, written left to right, and a hand-drawn line. */
+  INK.callout = function (inner, p, c) {
+    inner.classList.add("yg-co-ink");
+    const lines = calloutPlace(p, c.short).lines;
+    const text = calloutLines(h("div", { class: "yg-co-hand" }), lines);
+    const haze = h("div", { class: "yg-co-haze" }, h("div", { class: "yg-co-haze-bg" }), text);
+    const chars = Math.max.apply(null, lines.map((l) => l.length));
+    const write = (u) => { text.style.clipPath = "inset(-30% " + (105 * (1 - u) - 5).toFixed(1) + "% -30% -5%)"; };
+    write.duration = Math.min(1.0, Math.max(0.35, chars * 0.045));
+    const bend = (c.seed() < 0.5 ? -1 : 1) * (10 + 8 * c.seed());
+    calloutKind(inner, p, c, haze, bend, write);
+  };
+
   // ───────────────────────── Timeline ─────────────────────────
 
   function context(tl, toTime, graphic, host, delayIn, mode, short) {
@@ -1043,7 +1163,7 @@
     const at = (rel) => toTime(graphic.start + rel);
     const end = (rel) => toTime(graphic.end + rel);
     return {
-      tl, host, length, at, mode, short: !!short, ink: pen(seeded(String(graphic.id))),
+      tl, host, length, at, mode, short: !!short, ink: pen(seeded(String(graphic.id))), seed: seeded(String(graphic.id) + "/seed"),
       enterColumn() { tl.fromTo(host, { opacity: 0, x: 56 }, { opacity: 1, x: 0, duration: 0.6, ease: "power3.out" }, at(0)); },
       exitColumn() { tl.to(host, { opacity: 0, x: 36, duration: 0.4, ease: "power2.in" }, end(-0.4)); },
       enterPanel() { tl.fromTo(host, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power2.out" }, at(delayIn)); },
@@ -1076,9 +1196,10 @@
     };
   }
 
-  /** glass or ink for one graphic. "mix" writes the panel kinds in ink and keeps cards for the rest. */
+  /** glass or ink for one graphic. "mix" writes the panel kinds and callouts in ink and keeps cards for the rest. */
   function lookOf(graphic, style) {
-    const want = graphic.look || (style.look === "mix" ? (zoneOf(graphic.kind) === "panel" ? "ink" : "glass") : style.look);
+    const inkInMix = zoneOf(graphic.kind) === "panel" || graphic.kind === "callout";
+    const want = graphic.look || (style.look === "mix" ? (inkInMix ? "ink" : "glass") : style.look);
     return want === "ink" && INK[graphic.kind] ? "ink" : "glass";
   }
 
@@ -1191,14 +1312,14 @@
     for (const graphic of items) {
       const zone = zoneOf(graphic.kind);
       if (short && zone === "screen") continue;   // Shorts have no end screen
-      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : zone === "cover" ? (short ? SHORT_STAGE : STAGE)
+      let rect = zone === "column" ? COLUMN : zone === "screen" ? STAGE : zone === "cover" || zone === "callout" ? (short ? SHORT_STAGE : STAGE)
         : (style.moveVideo ? PANEL_MOVE : PANEL_STAY);
       let scaled = null;
       if (zone === "speaker") {
         // A point on the canvas, the Short's as well: the badge's own size comes from its chips.
         const spot = logoSpot(graphic.props, short);
         rect = { left: spot.x, top: spot.y, width: 0, height: 0 };
-      } else if (short && zone !== "cover") {
+      } else if (short && zone !== "cover" && zone !== "callout") {
         // The template's zone, scaled into the Short's own zone for it.
         const z = zone === "column" ? short.column : short.panel;
         const size = zone === "column" ? COLUMN : PANEL_MOVE;

@@ -609,7 +609,9 @@ final class AppModel: ObservableObject {
     // MARK: - Zoom shots
 
     @Published var selectedShotID: ZoomShot.ID? { didSet { focusInspector(selectedShotID, .zoom) } }
-    @Published var selectedGraphicID: UUID? { didSet { focusInspector(selectedGraphicID, .graphic) } }
+    @Published var selectedGraphicID: UUID? { didSet { focusInspector(selectedGraphicID, .graphic); if selectedGraphicID != oldValue { aimsCallout = false } } }
+    /// The next click on the screen in the Preview sets the selected callout's point.
+    @Published var aimsCallout = false
     /// Each graphic's box on the picture, as the Preview's engine measured it.
     @Published var graphicBounds: [UUID: GraphicBounds] = [:]
     /// The Short the inspector shows and the Short viewer plays.

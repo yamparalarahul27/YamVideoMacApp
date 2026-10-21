@@ -5,7 +5,7 @@ import Foundation
 /// Something the Media panel adds to the recording, by its + button or by a drag onto the
 /// timeline. Its `id` is what a drag carries.
 enum MediaAsset: Equatable {
-    case namePlate, titleCard, kineticText, sectionCard, endScreen
+    case namePlate, titleCard, kineticText, sectionCard, callout, endScreen
     case logo(String)
     case blurArea, fullFrameBlur, zoom, screenZoom, marker
 
@@ -17,6 +17,7 @@ enum MediaAsset: Equatable {
         case .titleCard: return "titleCard"
         case .kineticText: return "kineticText"
         case .sectionCard: return "sectionCard"
+        case .callout: return "callout"
         case .endScreen: return "endScreen"
         case .logo(let name): return "logo:" + name
         case .blurArea: return "blurArea"
@@ -34,7 +35,7 @@ enum MediaAsset: Equatable {
         guard dragText.hasPrefix(Self.dragPrefix) else { return nil }
         let id = String(dragText.dropFirst(Self.dragPrefix.count))
         if id.hasPrefix("logo:") { self = .logo(String(id.dropFirst(5))); return }
-        let all: [MediaAsset] = [.namePlate, .titleCard, .kineticText, .sectionCard, .endScreen,
+        let all: [MediaAsset] = [.namePlate, .titleCard, .kineticText, .sectionCard, .callout, .endScreen,
                                  .blurArea, .fullFrameBlur, .zoom, .screenZoom, .marker]
         guard let match = all.first(where: { $0.id == id }) else { return nil }
         self = match
@@ -53,6 +54,9 @@ extension AppModel {
             addStarter(.titleCard, props: ["kicker": .string("New video"), "title": .string("Your title")], label: "Add Title Card")
         case .kineticText: addKineticText()
         case .sectionCard: addSectionCard()
+        case .callout:
+            guard item.screen != nil else { statusMessage = "Add a screen recording first, in Media."; return }
+            addCallout()
         case .endScreen: addEndScreen()
         case .logo(let name): addLogoBadge(named: name)
         case .blurArea:

@@ -383,8 +383,9 @@ struct ShortLayout: Equatable {
             case .shade: return nil
             case .split: return Self.splitFrame.maxY - 16
             }
-        // A logo badge sits next to the face, clear of the captions. A cover hides them.
-        case .screen, .speaker, .cover: return nil
+        // A logo badge sits next to the face, clear of the captions. A cover hides them. A
+        // callout stays on the screen, above the captions' band.
+        case .screen, .speaker, .cover, .callout: return nil
         }
     }
 
