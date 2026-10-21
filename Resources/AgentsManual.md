@@ -181,6 +181,14 @@ edit, and each edit becomes one undo step with your name on it.
     the video it starts. Put one at each part's first sentence, for 2–3 s, and use the
     chapter's words for the title.
   Nothing else may show with them; leave gaps round them for other graphics.
+- The Paper look (`look: "paper"`, for the style or for one graphic) puts the card kinds
+  (`namePlate`, `titleCard`, `sectionCard`, `panelTitle`) on an off-white card with a strip
+  of tape in the accent's colours. The title is in a heavy serif and `detail` is an italic
+  line. Other kinds keep their look. A Paper card can have a `label`: a tilted sticker in
+  handwriting under the card, one line of 32 characters or fewer, for example
+  "most powerful feature". The eyebrow (`kicker`) is drawn in a darker tone of the accent,
+  so it reads on the paper. Use the look only when the owner asks for it or their Style.md
+  says so. Check the cards at about 640 px wide, as for every graphic.
 - A `link` card is a browser bar: a pointer clicks the address field and the address types
   in. Give `image` (a screenshot of that page, an absolute path) and the card about 7 s, so
   the page loads in a window under the bar. Put it on the side the owner faces (move it

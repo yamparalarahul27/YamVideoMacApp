@@ -231,7 +231,7 @@ struct GalleryDraftBar: View {
     var body: some View {
         if let sample = model.galleryDraftSample {
             HStack(spacing: 10) {
-                Text("\(sample.title) · \(model.galleryLook.label)").font(.caption.weight(.semibold))
+                Text("\(sample.title) · \(model.galleryLook.name(for: sample.kind))").font(.caption.weight(.semibold))
                 Text("A look, not in the project").font(.caption2).foregroundStyle(.secondary)
                 Button("Add") { model.addFromGallery(sample) }
                     .controlSize(.small).keyboardShortcut(.defaultAction)
@@ -263,7 +263,7 @@ private struct GraphicsGalleryTab: View {
                         ForEach(GalleryLook.allCases) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
-                    .help("How the pictures draw. Ink writes the panel kinds by hand; cards stay glass.")
+                    .help("How the pictures draw. Ink writes the panel kinds by hand. Paper puts name plates, title cards and section cards on taped paper. The other kinds stay glass.")
                     Spacer(minLength: 0)
                     Circle().fill(Color(nsColor: NSColor(hex: style.accent) ?? .systemPink)).frame(width: 14, height: 14)
                         .help("The accent of this recording's graphics: \(style.accent)")

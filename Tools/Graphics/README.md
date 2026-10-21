@@ -1,7 +1,8 @@
 # Graphics engine tools
 
 `Resources/Graphics/` holds the graphics engine: one JavaScript file that builds motion
-graphics from JSON data, one stylesheet, a pinned GSAP and the Inter font. The plan is
+graphics from JSON data, one stylesheet, a pinned GSAP and the fonts (Inter, Virgil and
+Fraunces; see THIRD-PARTY.md). The plan is
 [docs/plans/graphics-track.md](../../docs/plans/graphics-track.md). In phase G0 the engine
 runs outside the app; phase G1 puts it in the app's preview and export.
 
@@ -51,8 +52,11 @@ page folder under a content-hash name, so the page has no paths outside its fold
 - `style.panel` is `shade` (see-through, frosted) or `solid`.
 - `style.moveVideo` slides the video to the left half while a panel shows. In `full` mode a
   blurred copy of the video fills the space it leaves.
-- `style.look` is `glass` (cards), `ink` (handwriting over a soft haze) or `mix` (panel
-  graphics in ink, the rest as cards). One graphic can override it with its own `look`.
+- `style.look` is `glass` (cards), `ink` (handwriting over a soft haze), `mix` (panel
+  graphics in ink, the rest as cards) or `paper` (name plates, title cards, section cards
+  and panel titles on an off-white card with tape, in Fraunces; the rest as cards). One
+  graphic can override it with its own `look`. A paper card takes an optional `label` prop:
+  a tilted sticker in Virgil under the card.
 - `style.edge` is the soft edge of the shade next to the speaker, in pixels (default 170).
 - `YamGraphics.thumbnail(data)` draws a still YouTube thumbnail on the stage (page mode
   `thumbnail`); the app's thumbnail maker fills in the frame, the cut-out and the text.

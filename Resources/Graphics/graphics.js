@@ -553,7 +553,24 @@
   KINDS.sectionCard = function (inner, p, c) {
     const cover = coverBackground(inner, p);
     const low = cover.bg === "overlay";
-    const width = c.short ? SECTION_BAR.shortWidth : low ? SECTION_BAR.lowWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
+    const width = c.short ? SECTION_BAR.shortWidth : low ? SECTION_BAR.lowWidth : SECTION_BAR.width;
+    const seek = sectionBar(p, width);
+    const k = p.kicker ? h("div", { class: "yg-sc-kicker", text: p.kicker }) : null;
+    const title = h("div", { class: "yg-sc-title", text: p.title });
+    append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") + (low ? " yg-sc-low" : "") }, k, title, seek.bar));
+    const tl = c.tl;
+    c.enterCover(cover.node);
+    c.up([k, title].filter(Boolean), 0.1, 0.08);
+    // The bar is in place before its fill moves at 0.45 s.
+    tl.fromTo(seek.bar, { opacity: 0, y: 16, filter: "blur(6px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out" }, c.at(0.12));
+    seek.move(c, 0.45);
+    c.exitCover(cover.node, [k, title, seek.bar].filter(Boolean));
+  };
+
+  /** A section card's seek bar, `width` px wide: its segments, the fill and the knob, and
+   * `move` to run the fill up to where this card starts. */
+  function sectionBar(p, width) {
+    const gap = SECTION_BAR.gap;
     const progress = Math.max(0, Math.min(1, num(p.progress, 0)));
     const marks = (Array.isArray(p.marks) ? p.marks : []).map((m) => Math.max(0, Math.min(1, num(m, 0))))
       .filter((m) => m > 0.001 && m < 0.999).sort((a, b) => a - b)
@@ -570,19 +587,15 @@
     const fill = h("div", { class: "yg-sc-fill" }, h("div", { class: "yg-sc-fill-in", style: "width:" + width + "px;" }, segments("yg-sc-seg yg-sc-on")));
     const knob = h("div", { class: "yg-sc-knob" });
     const bar = h("div", { class: "yg-sc-track", style: "width:" + width + "px;" }, segments("yg-sc-seg"), fill, knob);
-    const k = p.kicker ? h("div", { class: "yg-sc-kicker", text: p.kicker }) : null;
-    const title = h("div", { class: "yg-sc-title", text: p.title });
-    append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") + (low ? " yg-sc-low" : "") }, k, title, bar));
-    const tl = c.tl;
-    c.enterCover(cover.node);
-    c.up([k, title].filter(Boolean), 0.1, 0.08);
-    // The bar is in place before its fill moves at 0.45 s.
-    tl.fromTo(bar, { opacity: 0, y: 16, filter: "blur(6px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out" }, c.at(0.12));
-    const move = Math.min(0.9, Math.max(0.3, c.length - 1));
-    tl.fromTo(fill, { width: from * width }, { width: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
-    tl.fromTo(knob, { left: from * width }, { left: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
-    c.exitCover(cover.node, [k, title, bar].filter(Boolean));
-  };
+    return {
+      bar,
+      move(c, rel) {
+        const move = Math.min(0.9, Math.max(0.3, c.length - 1));
+        c.tl.fromTo(fill, { width: from * width }, { width: progress * width, duration: move, ease: "power2.inOut" }, c.at(rel));
+        c.tl.fromTo(knob, { left: from * width }, { left: progress * width, duration: move, ease: "power2.inOut" }, c.at(rel));
+      },
+    };
+  }
 
   /**
    * Where a logo badge goes: `spot` {x, y, alignX, alignY, compact, vertical, widths}, the
@@ -1098,6 +1111,130 @@
     return null;
   };
 
+  // ───────────────────────── Paper look ─────────────────────────
+  // An off-white card with a soft shadow and a small tilt, a strip of tape in the accent's
+  // colour family, the eyebrow in small capitals, the title in Fraunces Black and `detail`
+  // as a Fraunces italic line, and an optional `label`: a tilted sticker in Virgil. Only the
+  // card kinds have it (PAPER); the others keep their look. The tilt comes from the
+  // graphic's ID, so a render is repeatable.
+
+  const PAPER_CARD = "#F7F2E7";
+  const PAPER_INK = "#2A211B";
+
+  function rgbOf(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+    const v = m ? parseInt(m[1], 16) : 0xF5C42C;
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  }
+  function hexOf(rgb) {
+    return "#" + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("").toUpperCase();
+  }
+  function luminance(rgb) {
+    const lin = rgb.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); });
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  }
+  /** The WCAG contrast of two colours, 1 to 21. */
+  function contrast(a, b) {
+    const la = luminance(rgbOf(a)), lb = luminance(rgbOf(b));
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+  function mixed(a, b, t) { const x = rgbOf(a), y = rgbOf(b); return hexOf(x.map((v, i) => v + (y[i] - v) * t)); }
+
+  /**
+   * Pure: the Paper colours from the accent. kicker: the accent made darker until it reads
+   * on the card (4.5:1 or more), because a light accent such as yellow is about 1.5:1 on
+   * cream. tape: the accent made a little lighter, see-through. sticker: the accent, with
+   * the ink or white on it, whichever reads better.
+   */
+  function paperColours(accent) {
+    const base = hexOf(rgbOf(accent));
+    let kicker = base;
+    for (let t = 0.05; contrast(kicker, PAPER_CARD) < 4.5 && t <= 1.0001; t += 0.05) kicker = mixed(base, PAPER_INK, t);
+    const [r, g, b] = rgbOf(mixed(base, "#FFFFFF", 0.1));
+    const stickerInk = contrast(base, "#FFFFFF") >= contrast(base, PAPER_INK) ? "#FFFFFF" : PAPER_INK;
+    return { card: PAPER_CARD, ink: PAPER_INK, kicker, tape: "rgba(" + r + ", " + g + ", " + b + ", 0.88)", sticker: base, stickerInk };
+  }
+
+  /** A paper card: the card with `children`, its tape, and the label sticker when there is one. */
+  function paperCard(cls, children, label) {
+    const card = h("div", { class: "yg-pp-card" }, children);
+    const tape = h("div", { class: "yg-pp-tape" });
+    const sticker = label ? h("div", { class: "yg-pp-label", text: label }) : null;
+    return { wrap: h("div", { class: "yg-pp " + cls }, card, tape, sticker), card, tape, sticker };
+  }
+  function paperKicker(text) { return text ? h("div", { class: "yg-pp-kicker", text }) : null; }
+  function paperTitle(text) { return h("div", { class: "yg-pp-title", text: text || "" }); }
+  function paperDetail(text) { return text ? h("div", { class: "yg-pp-detail", text }) : null; }
+
+  /**
+   * The paper's motion: the card drops in and settles its tilt, then the tape comes in,
+   * then the label pops. `tilt` (degrees, a little to the left) and the tape's angle come
+   * from the graphic's ID. Times are seconds after `rel`.
+   */
+  function paperIn(c, paper, rel, tilt) {
+    const tl = c.tl, rand = c.rand;
+    const lean = -(tilt.min + (tilt.max - tilt.min) * rand());
+    const tape = -2.5 - 3 * rand();
+    tl.fromTo(paper.wrap, { opacity: 0 }, { opacity: 1, duration: 0.28, ease: "power1.out" }, c.at(rel));
+    tl.fromTo(paper.wrap, { y: -64, rotation: lean - 6 }, { y: 0, rotation: lean, duration: 0.85, ease: "back.out(1.5)" }, c.at(rel));
+    tl.fromTo(paper.tape, { opacity: 0, scale: 1.3, rotation: tape - 8 }, { opacity: 1, scale: 1, rotation: tape, duration: 0.38, ease: "power3.out" }, c.at(rel + 0.45));
+    if (paper.sticker) {
+      tl.fromTo(paper.sticker, { opacity: 0, scale: 0.4, rotation: -16 }, { opacity: 1, scale: 1, rotation: -4 - 2 * rand(), duration: 0.5, ease: "back.out(2.2)" }, c.at(rel + 0.8));
+    }
+  }
+
+  // Cards tilt 0.8–2°, the large section card and panel card less.
+  const PAPER_TILT = { card: { min: 0.8, max: 2 }, wide: { min: 0.4, max: 1 } };
+  // The bar inside a section card's paper: the card is 1100 px wide (900 in a Short), so an
+  // overlay card ends before the speaker's bubble in the lower right corner, as glass does.
+  const PAPER_BAR = { width: 960, short: 760 };
+  const PAPER = {};
+
+  PAPER.namePlate = function (inner, p, c) {
+    const paper = paperCard("yg-pp-np", [paperKicker(p.kicker), paperTitle(p.title), paperDetail(p.detail)], p.label);
+    append(inner, paper.wrap);
+    c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.01 }, c.at(0));
+    paperIn(c, paper, 0, PAPER_TILT.card);
+    c.exitColumn();
+  };
+
+  PAPER.titleCard = function (inner, p, c) {
+    const badges = (p.badges || []).map((b) => h("span", { class: "yg-pp-badge", text: b }));
+    const foot = badges.length ? h("div", { class: "yg-pp-badges" }, badges) : null;
+    const paper = paperCard("yg-pp-tc", [paperKicker(p.kicker), paperTitle(p.title), paperDetail(p.detail), foot], p.label);
+    append(inner, paper.wrap);
+    c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.01 }, c.at(0));
+    paperIn(c, paper, 0, PAPER_TILT.card);
+    if (badges.length) c.pop(badges, Math.max(1.1, num(p.badgesAt, 5)), 0.15);
+    c.exitColumn();
+  };
+
+  PAPER.sectionCard = function (inner, p, c) {
+    const cover = coverBackground(inner, p);
+    const low = cover.bg === "overlay";
+    const seek = sectionBar(p, c.short ? PAPER_BAR.short : PAPER_BAR.width);
+    const paper = paperCard("yg-pp-sc", [paperKicker(p.kicker), paperTitle(p.title), seek.bar], p.label);
+    append(inner, h("div", { class: "yg-pp-stage" + (low ? " yg-pp-low" : "") + (c.short ? " yg-pp-short" : "") }, paper.wrap));
+    c.enterCover(cover.node);
+    paperIn(c, paper, 0.05, PAPER_TILT.wide);
+    seek.move(c, 0.6);
+    c.exitCover(cover.node, [paper.wrap]);
+  };
+
+  PAPER.panelTitle = function (inner, p, c) {
+    const badges = [];
+    for (let i = 1; i <= Math.min(9, num(p.count, 0)); i++) badges.push(h("span", { class: "yg-pp-count-n", text: pad2(i) }));
+    const count = badges.length ? h("div", { class: "yg-pp-count" }, badges) : null;
+    const paper = paperCard("yg-pp-pt", [paperKicker(p.kicker), paperTitle(p.title), paperDetail(p.detail), count], p.label);
+    append(inner, paper.wrap);
+    c.enterPanel();
+    paperIn(c, paper, c.delayIn, PAPER_TILT.wide);
+    if (badges.length) c.pop(badges, Math.max(c.delayIn + 1.1, num(p.countAt, 2)), 0.15);
+    // The column cards' exit, a 0.5 s glide through a soft blur, so the card is gone by its
+    // last frame; the panel's own short fade would still show it there.
+    c.exitColumn();
+  };
+
   // ───────────────────────── Timeline ─────────────────────────
 
   function context(tl, toTime, graphic, host, delayIn, mode, short) {
@@ -1105,7 +1242,7 @@
     const at = (rel) => toTime(graphic.start + rel);
     const end = (rel) => toTime(graphic.end + rel);
     return {
-      tl, host, length, at, mode, short: !!short, ink: pen(seeded(String(graphic.id))),
+      tl, host, length, at, mode, short: !!short, delayIn, ink: pen(seeded(String(graphic.id))), rand: seeded(graphic.id + ":paper"),
       // A card glides in on a long ease-out and goes out on an ease-in-out through a soft
       // blur, so neither end jumps. Column cards have no backdrop-filter, so the blur is safe.
       enterColumn() {
@@ -1159,10 +1296,12 @@
     };
   }
 
-  /** glass or ink for one graphic. "mix" writes the panel kinds in ink and keeps cards for the rest. */
+  /** glass, ink or paper for one graphic. "mix" writes the panel kinds in ink and keeps cards
+   * for the rest. A kind without the wanted look stays glass. */
   function lookOf(graphic, style) {
     const want = graphic.look || (style.look === "mix" ? (zoneOf(graphic.kind) === "panel" ? "ink" : "glass") : style.look);
-    return want === "ink" && INK[graphic.kind] ? "ink" : "glass";
+    if (want === "ink" && INK[graphic.kind]) return "ink";
+    return want === "paper" && PAPER[graphic.kind] ? "paper" : "glass";
   }
 
   let current = null;
@@ -1187,6 +1326,11 @@
     const stage = short ? SHORT_STAGE : STAGE;
     setStage(stage);
     document.documentElement.style.setProperty("--yg-accent", style.accent);
+    const paint = paperColours(style.accent);
+    document.documentElement.style.setProperty("--yg-paper-kicker", paint.kicker);
+    document.documentElement.style.setProperty("--yg-paper-tape", paint.tape);
+    document.documentElement.style.setProperty("--yg-paper-sticker", paint.sticker);
+    document.documentElement.style.setProperty("--yg-paper-sticker-ink", paint.stickerInk);
     const edge = Math.max(0, Math.min(400, num(style.edge, 170)));
     document.documentElement.style.setProperty("--yg-edge", edge + "px");
     const panelOffset = style.panel === "shade" ? Math.max(0, edge - PANEL_PAD) : 0;
@@ -1295,7 +1439,7 @@
       if (scaled) {
         inner.style.width = scaled.width + "px"; inner.style.height = scaled.height + "px";
         inner.style.transformOrigin = "0 0"; inner.style.transform = "scale(" + scaled.scale + ")";
-      } else if (zone === "panel" && style.moveVideo && panelOffset && look === "glass") inner.style.transform = "translateX(" + panelOffset + "px)";
+      } else if (zone === "panel" && style.moveVideo && panelOffset && look !== "ink") inner.style.transform = "translateX(" + panelOffset + "px)";
       append(host, inner);
       // The place carries the owner's move and scale; the host keeps the template's own
       // motion, so the two never fight over one transform. Between them, the style's size.
@@ -1317,7 +1461,7 @@
       append(container, place);
       places[graphic.id] = { place, host, rect, graphic, own, clear: null };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
-      (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
+      (look === "ink" ? INK : look === "paper" ? PAPER : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
     }
 
     current = { tl, node: container, plan: p, places, shift, stage, short };
@@ -1861,7 +2005,7 @@
   }
 
   const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, thumbnailLayout, endLayout, shortLayout, stageSize, captions,
-    smooth, zoneOf, soundCues, clearMove, PANEL_SLIDE, VIDEO_SHIFT, CLEAR_GAP };
+    smooth, zoneOf, lookOf, soundCues, clearMove, paperColours, contrast, PAPER_KINDS: Object.keys(PAPER), PANEL_SLIDE, VIDEO_SHIFT, CLEAR_GAP };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

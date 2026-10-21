@@ -1,6 +1,7 @@
 # Graphics gallery, the Paper look and Pills (plan)
 
-Status: part 1 is built (21 Oct 2026, branch `claude/graphics-gallery`). Parts 2 to 4 are not started.
+Status: part 1 is built (21 Oct 2026, PR #85). Part 2 is built (21 Oct 2026, branch `claude/paper-look-d7af28`). Parts 3 and 4
+are not started.
 Mock-up: [docs/prototypes/graphics-gallery.html](../prototypes/graphics-gallery.html) (open it from a local web server, so
 the pictures and fonts load). Its Glass and Ink pictures are real renders of the graphics engine over a
 neutral backdrop. The Paper look and Pills are drawn in the page as proposals.
@@ -69,6 +70,36 @@ kind and look, and the Preview shows the frame). **Replace selected** is not in 
   italics) from Fontsource, the same source as the bundled Inter. The label can use the bundled Virgil, or
   Caveat Brush (SIL OFL). A download needs the owner's yes.
 
+**What part 2 has** (the owner said yes to Fraunces on 21 Oct 2026):
+
+- `look: "paper"` for the style and for one graphic, project version 26. The card kinds have it
+  (`GraphicKind.hasPaper`: name plate, title card, section card, panel title); the other kinds stay
+  glass. `GraphicsTrack.look(of:)` and `lookOf` in graphics.js pick the same look (a check runs both
+  for every kind and look).
+- The card (`PAPER` in graphics.js, `.yg-pp` in graphics.css): #F7F2E7, a soft shadow, a tilt of
+  0.8–2° to the left (0.4–1° for the section card and the panel title) from the graphic's ID, and
+  see-through tape in a lighter tone of the accent. The eyebrow is in small capitals (Inter 700,
+  upper case, wide spacing; Fraunces has no small-caps feature) in a darker tone of the accent that
+  reads on the paper (4.5:1 or more). The title is Fraunces Black, `detail` Fraunces Bold Italic.
+  `label` (one line, 32 characters or fewer) is a tilted sticker in Virgil, in the accent, with ink
+  or white on it. The section card puts its seek bar on the paper, in the eyebrow's colour.
+- Motion: the card drops in and settles its tilt (0.85 s), the tape comes in at 0.45 s, the label
+  pops at 0.8 s. The exit is the smooth one of PR #79 (a 0.5 s glide through a blur; covers lift
+  out). The paper panel title uses that exit too, not the panel's short fade, so its last frame is
+  clear.
+- Fonts: `Fraunces-900-latin.woff2` and `Fraunces-700-italic-latin.woff2` from Fontsource 5.3.0,
+  with `Fraunces-OFL.txt`. The preview (WebKit) and the export (HyperFrames' Chrome) draw the same
+  card: a check renders it both ways and compares them.
+- The gallery's Look switch has Paper; the name plate, title card and section card tiles draw in
+  it, and the title card's sample shows a label. The inspector's style and the graphic's Look offer
+  Paper, and a Paper card without a label shows a Label field.
+- Agents: `look: "paper"` in addGraphic, updateGraphic and setGraphicsStyle, `label` in props; the
+  catalog and the Agents Manual (4.5) say so.
+
+**Not as planned:** the label uses the bundled Virgil, so Caveat Brush is not downloaded. A gallery
+draft sits at the template's place, so in a Screen part with the bubble at the top right it can
+cover the bubble, as in part 1 (PR #78 moves column cards in the project, not drafts).
+
 ### Part 3: Pills
 
 - A new kind `pills` in the column (top right, as the feature list): props `pills`, one to six
@@ -82,13 +113,13 @@ kind and look, and the Preview shows the frame). **Replace selected** is not in 
 ### Part 4: agents, Shorts and checks
 
 - Catalog and Agents Manual (4.5): the `paper` look, the `label` prop and the `pills` kind.
-- Project format bump (26) for the new look, prop and kind.
+- Project format bump for the `pills` kind (the Paper look took 26 in part 2).
 - Checks: each kind's preview draws; paper and pills render the same in the preview and in a HyperFrames
   export (frame parity); pill colours pass contrast; a Short places them in the clear area.
 
 ## Open questions for the owner
 
-1. **Blocks part 2:** may I download Fraunces (and Caveat Brush) from Fontsource/jsDelivr, SIL OFL?
+1. Answered (21 Oct 2026): yes to Fraunces from Fontsource. The label uses the bundled Virgil.
 2. Can wait: the gallery in the Graphics tab (recommended), or a separate Gallery sheet?
 3. Can wait: the eyebrow, tape and label colours from the recording's accent (recommended), or fixed as in
    the reference (orange and yellow)?

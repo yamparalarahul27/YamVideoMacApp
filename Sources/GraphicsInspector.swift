@@ -12,14 +12,21 @@ struct GraphicInspector: View {
 
     var body: some View {
         InspectorSection("\(graphic.kind.label) at \(timelineTime(graphic.start))") {
-            if graphic.kind.hasInk {
+            if graphic.kind.hasInk || graphic.kind.hasPaper {
                 Picker("Look", selection: Binding(get: { graphic.look }, set: { model.setGraphicLook(graphic.id, $0) })) {
                     Text("Style (\(item.graphics?.look(of: Graphic(kind: graphic.kind, start: 0, end: 1)).label ?? "Glass cards"))")
                         .tag(GraphicsLook?.none)
                     Text("Glass").tag(GraphicsLook?.some(.glass))
-                    Text("Ink").tag(GraphicsLook?.some(.ink))
+                    if graphic.kind.hasInk { Text("Ink").tag(GraphicsLook?.some(.ink)) }
+                    if graphic.kind.hasPaper { Text("Paper").tag(GraphicsLook?.some(.paper)) }
                 }
                 .accessibilityLabel("Look of this graphic")
+            }
+            if item.graphics?.look(of: graphic) == .paper, graphic.props["label"] == nil {
+                CommitTextField(label: "Label", value: "") { text in
+                    if !text.isEmpty { model.setGraphicProp(graphic.id, at: [.key("label")], to: .string(text)) }
+                }
+                .help("A sticker in handwriting under the paper card, \(PaperLook.labelLimit) characters or fewer")
             }
             HStack(spacing: 12) {
                 TimelineTimeField(label: "From", value: graphic.start) {
@@ -217,7 +224,7 @@ private struct GraphicPropsEditor: View {
     var hidden: Set<String> = []
 
     /// Fields people read first come first; the rest follow alphabetically.
-    private static let order = ["kicker", "number", "title", "subtitle", "detail", "from", "to", "url",
+    private static let order = ["kicker", "number", "title", "subtitle", "detail", "label", "from", "to", "url",
                                 "question", "text", "button", "toast", "footer", "type", "image"]
 
     var body: some View {

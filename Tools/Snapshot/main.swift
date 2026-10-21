@@ -194,7 +194,8 @@ func screenZoomPictures(_ model: AppModel, output: URL, size: CGSize) async thro
 }
 
 /// The graphics gallery: the Media panel's Graphics tab once the engine has drawn its
-/// pictures, in each look, then the checklist in Ink on the Preview. With
+/// pictures, in each look, then the checklist in Ink and the title card in Paper on the
+/// Preview. With
 /// YAMVIDEO_SNAPSHOT_PROJECT (only read), the pictures take that recording's style, and
 /// YAMVIDEO_SNAPSHOT_AT (0–1, default 0.4) places the playhead. YAMVIDEO_SNAPSHOT_ONLY=gallery
 /// renders only these.
@@ -213,7 +214,7 @@ func galleryPictures(_ model: AppModel, output: URL, size: CGSize) async throws 
     let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
     // The tiles ask for their pictures as they show; asked here, all of them draw, one at a time.
     let style = model.galleryStyle
-    for look in [GalleryLook(style: style), GalleryLook(style: style) == .glass ? .ink : .glass] {
+    for look in [GalleryLook(style: style)] + GalleryLook.allCases.filter({ $0 != GalleryLook(style: style) }) {
         for sample in GallerySample.all { GalleryPictures.shared.request(sample, style: style, look: look) }
     }
     for _ in 0..<180 where GallerySample.all.contains(where: { sample in
@@ -227,31 +228,36 @@ func galleryPictures(_ model: AppModel, output: URL, size: CGSize) async throws 
     }
     // A click on a tile: the Preview shows it with the bar. This tool draws the player's picture
     // over its view, so the draft and the bar over it are drawn here on the frame, as the app does.
-    guard let list = GallerySample.all.first(where: { $0.kind == .checklist }) else { return }
-    model.galleryLook = .ink
-    // A closed window's tab stops the draft a moment later, so the click waits for that.
-    await pump(1)
-    model.toggleGalleryDraft(list)
-    await pump(1)
-    await render(window(), size: size, to: output.appendingPathComponent("19b-gallery-shown.png"), settle: 1)
-    // The window closed, and with it the tab, which stops the draft: the click again.
-    await pump(1)
-    model.toggleGalleryDraft(list)
-    await pump(2)
-    guard let item = model.selectedItem, let info = item.info, let draft = model.galleryDraftGraphic,
-          let frame = try? await model.playback.composedFrame() else { return }
-    var track = item.placedGraphics ?? GraphicsTrack(style: style)
-    track.items.append(draft)
-    let picture = try await GraphicsSnapshot.draw(track, duration: item.editedDuration, fps: info.fpsExpression,
-                                                  time: model.previewTime, over: frame).image
-    let preview = CGSize(width: 1000, height: 1000 * Double(picture.height) / Double(picture.width) + 32)
-    let view = Image(decorative: picture, scale: 1).resizable().aspectRatio(contentMode: .fit)
-        .overlay(alignment: .top) { GalleryDraftBar() }
-        .padding(16)
-    .frame(width: preview.width, height: preview.height)
-    .background(Color.black)
-    .environmentObject(model)
-    await render(view, size: preview, to: output.appendingPathComponent("19c-gallery-preview.png"))
+    for (kind, look, name) in [(GraphicKind.checklist, GalleryLook.ink, "19c-gallery-preview"), (.titleCard, .paper, "19d-gallery-paper")] {
+        guard let sample = GallerySample.all.first(where: { $0.kind == kind }) else { continue }
+        model.galleryLook = look
+        // A closed window's tab stops the draft a moment later, so the click waits for that.
+        await pump(1)
+        model.toggleGalleryDraft(sample)
+        await pump(1)
+        if kind == .checklist {
+            await render(window(), size: size, to: output.appendingPathComponent("19b-gallery-shown.png"), settle: 1)
+        }
+        // The window closed, and with it the tab, which stops the draft: the click again.
+        await pump(1)
+        if model.galleryDraft == nil { model.toggleGalleryDraft(sample) }
+        await pump(2)
+        guard let item = model.selectedItem, let info = item.info, let draft = model.galleryDraftGraphic,
+              let frame = try? await model.playback.composedFrame() else { continue }
+        var track = item.placedGraphics ?? GraphicsTrack(style: style)
+        track.items.append(draft)
+        let picture = try await GraphicsSnapshot.draw(track, duration: item.editedDuration, fps: info.fpsExpression,
+                                                      time: model.previewTime, over: frame).image
+        let preview = CGSize(width: 1000, height: 1000 * Double(picture.height) / Double(picture.width) + 32)
+        let view = Image(decorative: picture, scale: 1).resizable().aspectRatio(contentMode: .fit)
+            .overlay(alignment: .top) { GalleryDraftBar() }
+            .padding(16)
+        .frame(width: preview.width, height: preview.height)
+        .background(Color.black)
+        .environmentObject(model)
+        await render(view, size: preview, to: output.appendingPathComponent(name + ".png"))
+        model.galleryDraft = nil
+    }
 }
 
 /// The music under the voice: the Music row with a piece, the piece selected, and its

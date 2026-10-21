@@ -67,6 +67,8 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
     }
     /// Kinds the engine can write in ink. The others always use glass cards.
     var hasInk: Bool { zone == .panel }
+    /// Kinds the engine can draw on taped paper (`PAPER` in graphics.js): the card kinds.
+    var hasPaper: Bool { [.namePlate, .titleCard, .sectionCard, .panelTitle].contains(self) }
     /// Whether the owner may move and resize it on the picture. The end screen's boxes sit
     /// where YouTube puts its elements, and a cover fills the picture, so they stay put.
     var isPlaceable: Bool { self != .endScreen && zone != .cover }
@@ -91,16 +93,24 @@ enum GraphicKind: String, Codable, CaseIterable, Identifiable {
 }
 
 /// glass: cards. ink: handwriting over a soft haze. mix: panel kinds in ink, the rest glass.
+/// paper: the card kinds on taped paper (`GraphicKind.hasPaper`), the rest glass. Version 26
+/// onwards.
 enum GraphicsLook: String, Codable, CaseIterable, Identifiable {
-    case glass, ink, mix
+    case glass, ink, mix, paper
     var id: String { rawValue }
     var label: String {
         switch self {
         case .glass: return "Glass cards"
         case .ink: return "Ink"
         case .mix: return "Ink + glass"
+        case .paper: return "Paper"
         }
     }
+}
+
+/// The Paper look's own rule: the label, a sticker in handwriting under the card.
+enum PaperLook {
+    static let labelLimit = 32
 }
 
 enum PanelStyle: String, Codable, CaseIterable, Identifiable {
@@ -186,7 +196,7 @@ struct Graphic: Identifiable, Codable, Equatable {
     var start: Double
     var end: Double
     var props: [String: JSONValue]
-    /// glass or ink for this graphic alone; nil follows the style.
+    /// glass, ink or paper for this graphic alone; nil follows the style.
     var look: GraphicsLook?
     /// Moved or resized on the picture; nil is the template's own place and size.
     var transform: GraphicTransform?
@@ -252,11 +262,16 @@ struct GraphicsTrack: Codable, Equatable {
         return copy
     }
 
-    /// glass or ink, after the style and the kind have had their say.
+    /// glass, ink or paper, after the style and the kind have had their say. A kind without
+    /// the look it asks for stays glass, as `lookOf` in graphics.js.
     func look(of graphic: Graphic) -> GraphicsLook {
         let wanted = graphic.look ?? (style.look == .mix ? (graphic.kind.zone == .panel ? .ink : .glass) : style.look)
-        return wanted == .ink && graphic.kind.hasInk ? .ink : .glass
+        if wanted == .ink && graphic.kind.hasInk { return .ink }
+        return wanted == .paper && graphic.kind.hasPaper ? .paper : .glass
     }
+
+    /// Whether the style or a graphic asks for the Paper look (project version 26).
+    var usesPaper: Bool { style.look == .paper || items.contains { $0.look == .paper } }
 
     /// Merged panel intervals, the same rule as `plan()` in graphics.js.
     func panelSpans() -> [PanelSpan] {
@@ -297,7 +312,12 @@ struct GraphicsTrack: Codable, Equatable {
             guard graphic.length >= Self.minimumLength - 0.000001 else {
                 return String(format: "A graphic must show for at least %.1f s.", Self.minimumLength)
             }
-            guard graphic.look != .mix else { return "A single graphic's look is glass or ink." }
+            guard graphic.look != .mix else { return "A single graphic's look is glass, ink or paper." }
+            if graphic.kind.hasPaper, let label = graphic.props["label"] {
+                guard let text = label.string, text.count <= PaperLook.labelLimit, !text.contains("\n") else {
+                    return "The \(name)'s label is one line of \(PaperLook.labelLimit) characters or fewer."
+                }
+            }
             if let problem = graphic.transform?.problem { return problem }
             if graphic.kind == .endScreen {
                 guard graphic.transform == nil else {

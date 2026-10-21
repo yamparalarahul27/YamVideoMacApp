@@ -129,7 +129,7 @@ struct WireGraphic: Codable, Equatable {
     var start: Double?
     var end: Double?
     var props: [String: JSONValue]?
-    /// "glass" or "ink"; "" clears it back to the style's choice.
+    /// "glass", "ink" or "paper"; "" clears it back to the style's choice.
     var look: String?
     /// Moved and scaled on the picture; in `updateGraphic` only the keys given change.
     var transform: WireTransform?
@@ -1147,8 +1147,8 @@ extension AppModel {
             if let look = value.look {
                 switch look {
                 case "": result.look = nil
-                case "glass", "ink": result.look = GraphicsLook(rawValue: look)
-                default: throw EditError.invalid("A graphic's look is \"glass\" or \"ink\".")
+                case "glass", "ink", "paper": result.look = GraphicsLook(rawValue: look)
+                default: throw EditError.invalid("A graphic's look is \"glass\", \"ink\" or \"paper\" (or \"\" for the style's).")
                 }
             }
             if let place = value.transform {
@@ -1199,7 +1199,7 @@ extension AppModel {
                 if let size = decoded.size, abs(size - 1) < 0.0005 { decoded.size = nil }
                 return decoded
             } catch {
-                throw EditError.invalid("graphicsStyle: panel is shade or solid, look is glass, ink or mix, "
+                throw EditError.invalid("graphicsStyle: panel is shade or solid, look is glass, ink, mix or paper, "
                     + "moveVideo is true or false, edge and size are numbers (size 1 to 1.5, or null) and accent is a colour like #F5C42C.")
             }
         }

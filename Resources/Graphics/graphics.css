@@ -420,3 +420,66 @@ body.yg-full { background: #000; }
 .yg-sc-fill-in { position: relative; height: 18px; }
 .yg-sc-knob { position: absolute; top: 9px; width: 42px; height: 42px; margin: -21px 0 0 -21px; border-radius: 50%; background: var(--yg-accent);
   box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.92), 0 8px 22px rgba(0, 0, 0, 0.5); }
+
+/* The Paper look (namePlate, titleCard, sectionCard, panelTitle): an off-white card with a
+   soft shadow and a small tilt, a strip of tape, the eyebrow in small capitals, a Fraunces
+   title with an italic line, and an optional label sticker in Virgil. graphics.js sets the
+   --yg-paper-* colours from the accent and gives the card its tilt. */
+@font-face { font-family: "Fraunces"; src: url("fonts/Fraunces-900-latin.woff2") format("woff2"); font-weight: 900; font-style: normal; font-display: block; }
+@font-face { font-family: "Fraunces"; src: url("fonts/Fraunces-700-italic-latin.woff2") format("woff2"); font-weight: 700; font-style: italic; font-display: block; }
+.yg-pp { position: absolute; font-synthesis: none; }
+.yg-pp-card { position: relative; background: #f7f2e7; color: #2a211b; border-radius: 22px;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.22); }
+.yg-pp-kicker { font-family: "Inter", sans-serif; font-weight: 700; font-size: 28px; line-height: 1.1; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--yg-paper-kicker); }
+.yg-pp-title { font-family: "Fraunces", Georgia, serif; font-weight: 900; font-size: 66px; line-height: 1.02; letter-spacing: -0.01em;
+  overflow-wrap: break-word; }
+.yg-pp-kicker + .yg-pp-title { margin-top: 16px; }
+.yg-pp-detail { margin-top: 12px; font-family: "Fraunces", Georgia, serif; font-style: italic; font-weight: 700; font-size: 40px;
+  line-height: 1.15; color: #5c4a3d; overflow-wrap: break-word; }
+/* Washi tape across the top edge: see-through, with torn ends. */
+.yg-pp-tape { position: absolute; left: 50%; top: -22px; width: 172px; height: 46px; margin-left: -86px;
+  background-color: var(--yg-paper-tape);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 55%, rgba(0, 0, 0, 0.06) 100%);
+  clip-path: polygon(2% 10%, 6% 0, 94% 4%, 99% 0, 100% 48%, 97% 100%, 5% 94%, 0 100%, 1% 52%); }
+/* The label: a sticker over the card's lower edge, in handwriting. */
+.yg-pp-label { position: absolute; left: 34px; top: 100%; margin-top: -26px; max-width: 540px; padding: 12px 30px 17px; border-radius: 12px;
+  background: var(--yg-paper-sticker); color: var(--yg-paper-sticker-ink); font-family: "Virgil", sans-serif; font-size: 44px;
+  line-height: 1.05; white-space: nowrap; box-shadow: 0 16px 34px rgba(0, 0, 0, 0.36); }
+.yg-pp-badges { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 12px; }
+.yg-pp-badge { padding: 8px 16px; border-radius: 999px; border: 2px solid var(--yg-paper-kicker); color: var(--yg-paper-kicker);
+  font-family: "Inter", sans-serif; font-weight: 700; font-size: 22px; }
+
+/* Cards in the column: room above for the tape, and at the left for the tilt. */
+.yg-pp.yg-pp-tc { left: 10px; top: 44px; width: 600px; }
+.yg-pp-tc .yg-pp-card { padding: 46px 46px 50px; }
+.yg-pp.yg-pp-np { left: 10px; top: 44px; width: max-content; min-width: 320px; max-width: 610px; }
+.yg-pp-np .yg-pp-card { padding: 42px 46px 46px; }
+.yg-pp-np .yg-pp-kicker { font-size: 26px; }
+.yg-pp-np .yg-pp-title { font-size: 54px; }
+.yg-pp-np .yg-pp-detail { font-size: 34px; }
+
+/* A section card's paper, centred on the cover; in the lower third over an overlay. */
+.yg-pp-stage { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.yg-pp-stage.yg-pp-low { align-items: flex-end; padding-bottom: 110px; }
+.yg-pp.yg-pp-sc { position: relative; width: 1100px; }
+.yg-pp-sc .yg-pp-card { padding: 64px 70px 64px; border-radius: 28px; text-align: center; }
+.yg-pp-sc .yg-pp-kicker { font-size: 34px; }
+.yg-pp-sc .yg-pp-title { font-size: 112px; }
+.yg-pp-sc .yg-pp-kicker + .yg-pp-title { margin-top: 18px; }
+.yg-pp-sc .yg-pp-tape { top: -28px; width: 230px; height: 58px; margin-left: -115px; }
+.yg-pp-sc .yg-pp-label { left: 70px; }
+.yg-pp-short .yg-pp-sc { width: 900px; }
+.yg-pp-short .yg-pp-sc .yg-pp-title { font-size: 96px; }
+.yg-pp-sc .yg-sc-track { margin: 46px auto 0; text-align: left; }
+.yg-pp-sc .yg-sc-seg { background: rgba(42, 33, 27, 0.14); }
+.yg-pp-sc .yg-sc-seg.yg-sc-on { background: var(--yg-paper-kicker); }
+.yg-pp-sc .yg-sc-knob { background: var(--yg-paper-kicker); box-shadow: 0 0 0 6px #f7f2e7, 0 6px 16px rgba(42, 33, 27, 0.35); }
+
+/* A panel title's paper, in the side panel. */
+.yg-pp.yg-pp-pt { left: 96px; top: 300px; width: 720px; }
+.yg-pp-pt .yg-pp-card { padding: 54px 56px 58px; }
+.yg-pp-pt .yg-pp-title { font-size: 84px; }
+.yg-pp-count { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 14px; }
+.yg-pp-count-n { width: 66px; height: 66px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  border: 3px solid var(--yg-paper-kicker); color: var(--yg-paper-kicker); font-family: "Inter", sans-serif; font-weight: 700; font-size: 26px; }
