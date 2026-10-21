@@ -537,10 +537,11 @@
    * section card (`marks`), its fill moving up to where this one starts (`progress`). The
    * app writes both, from 0 to 1, so they follow the edit.
    */
-  const SECTION_BAR = { width: 1400, shortWidth: 860, gap: 10 };
+  // lowWidth: an overlay card's bar ends before the speaker's bubble in the lower right corner.
+  const SECTION_BAR = { width: 1400, lowWidth: 1200, shortWidth: 860, gap: 10 };
   KINDS.sectionCard = function (inner, p, c) {
     const low = coverBackground(inner, p) === "overlay";
-    const width = c.short ? SECTION_BAR.shortWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
+    const width = c.short ? SECTION_BAR.shortWidth : low ? SECTION_BAR.lowWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
     const progress = Math.max(0, Math.min(1, num(p.progress, 0)));
     const marks = (Array.isArray(p.marks) ? p.marks : []).map((m) => Math.max(0, Math.min(1, num(m, 0))))
       .filter((m) => m > 0.001 && m < 0.999).sort((a, b) => a - b)
