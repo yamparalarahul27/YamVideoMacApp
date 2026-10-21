@@ -54,7 +54,7 @@ struct GraphicInspector: View {
                         .help("Show the words said over this time, each on the time it is spoken")
                 }
                 if graphic.kind.zone == .cover {
-                    Text("It covers the whole picture. background: solid (near black) or dim. Words between asterisks take the accent colour.")
+                    Text("It covers the whole picture. background: solid (near black), dim or overlay (the picture stays). Words between asterisks take the accent colour.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Text("Times inside the graphic are seconds after it starts.")

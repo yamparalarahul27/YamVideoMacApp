@@ -483,11 +483,15 @@
   };
 
   /**
-   * Covers fill the whole picture with their own background: near black (solid) or the
-   * picture darkened (dim). In a Short they fill its 1080×1920 canvas.
+   * Covers fill the whole picture with their own background: near black (solid), the
+   * picture darkened (dim), or overlay: the picture stays, a dark gradient rises from the
+   * bottom, and the words sit in the lower third (owner, 21 Oct 2026: a black screen
+   * breaks a talking video). In a Short they fill its 1080×1920 canvas.
    */
   function coverBackground(inner, p) {
-    append(inner, h("div", { class: "yg-cv-bg " + (p.background === "dim" ? "dim" : "solid") }));
+    const bg = p.background === "dim" || p.background === "overlay" ? p.background : "solid";
+    append(inner, h("div", { class: "yg-cv-bg " + bg }));
+    return bg;
   }
 
   /** A kinetic text's words: `words` [{text, at}], or `text` spread evenly near the start. */
@@ -507,12 +511,12 @@
    * on each line). Words between asterisks take the accent colour. Fewer words, bigger type.
    */
   KINDS.kineticText = function (inner, p, c) {
-    coverBackground(inner, p);
+    const low = coverBackground(inner, p) === "overlay";
     const stack = p.layout === "stack";
     const words = kineticWords(p, c.length);
     const n = words.length;
     const size = stack ? 170 : n <= 4 ? 150 : n <= 8 ? 128 : n <= 14 ? 108 : 92;
-    const box = h("div", { class: "yg-kt" + (stack ? " yg-kt-stack" : "") + (c.short ? " yg-kt-short" : ""),
+    const box = h("div", { class: "yg-kt" + (stack ? " yg-kt-stack" : "") + (c.short ? " yg-kt-short" : "") + (low ? " yg-kt-low" : ""),
       style: "font-size:" + Math.round(size * (c.short ? 0.85 : 1)) + "px;" });
     const spans = words.map((w) => {
       const node = h("span", { class: "yg-kt-w" });
@@ -535,7 +539,7 @@
    */
   const SECTION_BAR = { width: 1400, shortWidth: 860, gap: 10 };
   KINDS.sectionCard = function (inner, p, c) {
-    coverBackground(inner, p);
+    const low = coverBackground(inner, p) === "overlay";
     const width = c.short ? SECTION_BAR.shortWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
     const progress = Math.max(0, Math.min(1, num(p.progress, 0)));
     const marks = (Array.isArray(p.marks) ? p.marks : []).map((m) => Math.max(0, Math.min(1, num(m, 0))))
@@ -555,7 +559,7 @@
     const bar = h("div", { class: "yg-sc-track", style: "width:" + width + "px;" }, segments("yg-sc-seg"), fill, knob);
     const k = p.kicker ? h("div", { class: "yg-sc-kicker", text: p.kicker }) : null;
     const title = h("div", { class: "yg-sc-title", text: p.title });
-    append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") }, k, title, bar));
+    append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") + (low ? " yg-sc-low" : "") }, k, title, bar));
     const tl = c.tl;
     tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power2.out" }, c.at(0));
     c.up([k, title].filter(Boolean), 0.1, 0.08);

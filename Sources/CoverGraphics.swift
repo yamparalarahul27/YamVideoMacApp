@@ -6,11 +6,11 @@ import Foundation
 // for design videos that move from one part to the next.
 
 enum CoverBackground {
-    static let values = ["solid", "dim"]
+    static let values = ["solid", "dim", "overlay"]
 
     static func problem(_ props: [String: JSONValue], name: String) -> String? {
         if let background = props["background"], !(background.string.map(values.contains) ?? false) {
-            return "A \(name)'s background is solid (near black) or dim (the picture, darkened)."
+            return "A \(name)'s background is solid (near black), dim (the picture, darkened) or overlay (the picture stays; the words sit low over a gradient)."
         }
         return nil
     }
