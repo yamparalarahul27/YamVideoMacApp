@@ -224,6 +224,35 @@ struct ZoomShot: Identifiable, Equatable, Codable {
     func overlaps(_ other: ZoomShot) -> Bool {
         start < other.end && other.start < end
     }
+
+    /// Where a zoom of `duration` moved to `start` lands among `others` on a timeline of
+    /// `total` seconds: at `start` if it fits there, else against the neighbour it runs
+    /// into, in the nearest free space it fits. Nil when it fits nowhere.
+    static func fit(start: Double, duration: Double, among others: [ZoomShot], total: Double) -> Double? {
+        var spaces: [(from: Double, to: Double)] = []
+        var from = 0.0
+        for shot in others.sorted(by: { $0.start < $1.start }) {
+            if shot.start - from >= duration - 0.000001 { spaces.append((from, shot.start)) }
+            from = max(from, shot.end)
+        }
+        if total - from >= duration - 0.000001 { spaces.append((from, total)) }
+        return spaces.map { min(max(start, $0.from), max($0.from, $0.to - duration)) }
+            .min { abs($0 - start) < abs($1 - start) }
+    }
+
+    /// A new hold for this zoom: at least 0.2 s, and short enough to end before the next
+    /// of `others` and the end of the video. With `fps`, it ends on a frame.
+    static func hold(_ hold: Double, of shot: ZoomShot, among others: [ZoomShot], total: Double, fps: Double?) -> Double {
+        var end = shot.start + 2 * ease + max(0.2, hold)
+        if let fps { end = snapToFrame(end, fps: fps) }
+        end = min(end, shot.latestEnd(among: others, total: total))
+        return max(0.2, end - shot.start - 2 * ease)
+    }
+
+    /// The latest this zoom may end: where the next of `others` starts, or `total`.
+    func latestEnd(among others: [ZoomShot], total: Double) -> Double {
+        others.filter { $0.id != id && $0.start >= start + 0.000001 }.map(\.start).min().map { min($0, total) } ?? total
+    }
 }
 
 // MARK: - Queue item
