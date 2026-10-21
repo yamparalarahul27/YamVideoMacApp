@@ -3,7 +3,8 @@
  * Builds every graphic from one JSON object, then one paused GSAP timeline. The same file
  * runs in the app's preview (WKWebView), in HyperFrames for export, and in Node for
  * planning (`plan` only, no DOM). Synchronous and deterministic: no timers, no network,
- * no randomness. Text from the JSON is only ever set as textContent.
+ * no randomness. (Cards clear of the bubble are measured again when the fonts and the
+ * pictures are in; see `settleClear`.) Text from the JSON is only ever set as textContent.
  * See docs/plans/graphics-track.md.
  */
 (function (root) {
@@ -1273,7 +1274,8 @@
       // motion, so the two never fight over one transform. Between them, the style's size.
       const place = h("div", { class: "yg-place" });
       place.style.transformOrigin = rect.left + "px " + rect.top + "px";
-      setPlace(place, graphic.transform);
+      const own = ownMove(graphic.transform);
+      setPlace(place, own);
       const grow = sizeOf(zone, style, short);
       if (grow > 1) {
         const anchor = SIZE_ANCHOR[zone];
@@ -1286,12 +1288,14 @@
         append(place, host);
       }
       append(container, place);
-      places[graphic.id] = { place, host, rect, graphic };
+      places[graphic.id] = { place, host, rect, graphic, own, clear: null };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
       (look === "ink" ? INK : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
     }
 
-    current = { tl, node: container, plan: p, places, shift, stage };
+    current = { tl, node: container, plan: p, places, shift, stage, short };
+    settleClear();
+    settleClearLater(container);
     root.__timelines = root.__timelines || {};
     root.__timelines[opts.compositionId || "yam-graphics"] = tl;
     return tl;
@@ -1352,12 +1356,99 @@
     place.style.transform = x || y || s !== 1 ? "translate(" + x + "px," + y + "px) scale(" + s + ")" : "";
   }
 
-  /** Moves and scales graphics without rebuilding them: {id: transform or null}. */
+  /** Moves and scales graphics without rebuilding them: {id: transform or null}. Null (or
+   * no move at all) gives the graphic back its place clear of the bubble, if it has one. */
   function place(transforms) {
     if (!current) return;
     for (const id in transforms) {
       const entry = current.places[id];
-      if (entry) setPlace(entry.place, transforms[id]);
+      if (!entry) continue;
+      entry.own = ownMove(transforms[id]);
+      setPlace(entry.place, entry.own || entry.clear);
+    }
+  }
+
+  /** The owner's move and scale, or null when it leaves the graphic where it is. */
+  function ownMove(transform) {
+    if (!transform) return null;
+    const x = num(transform.x, 0), y = num(transform.y, 0), s = num(transform.scale, 1);
+    return x || y || s !== 1 ? { x, y, scale: s } : null;
+  }
+
+  // ───────────────────────── Clear of the bubble ─────────────────────────
+
+  /**
+   * In the Screen layout the speaker is a small picture in a corner, the bubble, and no
+   * card may cover the face in it (Sources/BubbleClear.swift). The app gives a column card
+   * `clear` {x, y, w, h, side}: the bubble's box in design pixels while the bubble shows
+   * with the card. When the card's drawn box meets it, the card moves below the bubble
+   * (side "below") or above it ("above"), CLEAR_GAP from it. When that leaves the safe area,
+   * it moves beside the bubble, towards the middle of the frame; when neither fits, as far
+   * as the safe area lets it go the first way. The owner's own move and scale win.
+   */
+  const CLEAR_GAP = 24;
+  const CLEAR_SAFE = { left: 96, top: 54, right: 1824, bottom: 1026 };
+
+  /** Pure: the move {x, y} that takes `box` {x, y, w, h} clear of `clear`, or null when
+   * the two do not meet. The app runs it in JavaScriptCore for its checks. */
+  function clearMove(box, clear) {
+    const b = clear;
+    if (!(box.x < b.x + b.w && b.x < box.x + box.w && box.y < b.y + b.h && b.y < box.y + box.h)) return null;
+    const down = b.side !== "above";
+    const dy = down ? b.y + b.h + CLEAR_GAP - box.y : b.y - CLEAR_GAP - (box.y + box.h);
+    if (box.y + dy >= CLEAR_SAFE.top && box.y + box.h + dy <= CLEAR_SAFE.bottom) return { x: 0, y: Math.round(dy) };
+    const toLeft = b.x + b.w / 2 > STAGE.width / 2;
+    const dx = toLeft ? b.x - CLEAR_GAP - (box.x + box.w) : b.x + b.w + CLEAR_GAP - box.x;
+    if (box.x + dx >= CLEAR_SAFE.left && box.x + box.w + dx <= CLEAR_SAFE.right) return { x: Math.round(dx), y: 0 };
+    const room = down ? Math.max(0, CLEAR_SAFE.bottom - (box.y + box.h)) : Math.min(0, CLEAR_SAFE.top - box.y);
+    return { x: 0, y: Math.round(down ? Math.min(dy, room) : Math.max(dy, room)) };
+  }
+
+  /** A column card's `clear` box, checked, or null. Shorts have no bubble of this kind. */
+  function clearOf(graphic, short) {
+    const c = graphic.props && graphic.props.clear;
+    if (short || !c || zoneOf(graphic.kind) !== "column") return null;
+    const x = num(c.x, NaN), y = num(c.y, NaN), w = num(c.w, NaN), h = num(c.h, NaN);
+    if (!(isFinite(x) && isFinite(y) && w > 0 && h > 0)) return null;
+    return { x, y, w, h, side: c.side === "above" ? "above" : "below" };
+  }
+
+  /**
+   * Measures each card that has a `clear` box once it has fully come in, without any move,
+   * and moves it clear of the bubble unless the owner has moved it. The playhead is put back
+   * afterwards. Runs when the graphics are built, and again when the fonts and the images
+   * are in, since text and pictures change a card's size.
+   */
+  function settleClear() {
+    if (!current) return;
+    const tl = current.tl, now = tl.time();
+    let measured = false;
+    for (const id in current.places) {
+      const entry = current.places[id], clear = clearOf(entry.graphic, current.short);
+      if (!clear) continue;
+      const g = entry.graphic;
+      entry.place.style.transform = "";
+      tl.time(Math.max(0, Math.max(g.start, g.end - 0.5) - current.shift), false);
+      const box = drawnBox(entry);
+      entry.clear = box ? clearMove(box, clear) : null;
+      measured = true;
+    }
+    if (!measured) return;
+    tl.time(now, false);
+    for (const id in current.places) {
+      const entry = current.places[id];
+      setPlace(entry.place, entry.own || entry.clear);
+    }
+  }
+
+  /** Measures the cards again once the fonts and each picture in a card with `clear` are in. */
+  function settleClearLater(container) {
+    if (!current || !Object.keys(current.places).some((id) => clearOf(current.places[id].graphic, current.short))) return;
+    const built = current;
+    const again = () => { if (current === built) settleClear(); };
+    if (typeof document !== "undefined" && document.fonts && document.fonts.ready) document.fonts.ready.then(again);
+    for (const img of container.querySelectorAll("img")) {
+      if (!img.complete) img.addEventListener("load", again, { once: true });
     }
   }
 
@@ -1410,10 +1501,12 @@
   }
 
   /** Each graphic's box once it has fully come in (half a second before it ends), without
-   * its own move and scale, and the point its scale works from: {id: {x, y, w, h, ox, oy}}.
-   * The playhead is put back afterwards. */
+   * its own move and scale, the point its scale works from, and its move clear of the
+   * bubble when it has one: {id: {x, y, w, h, ox, oy, cx?, cy?}}. The playhead is put back
+   * afterwards. */
   function bounds() {
     if (!current) return {};
+    settleClear();
     const tl = current.tl, now = tl.time(), out = {};
     for (const id in current.places) {
       const entry = current.places[id], g = entry.graphic;
@@ -1422,7 +1515,7 @@
       tl.time(Math.max(0, Math.max(g.start, g.end - 0.5) - current.shift), false);
       const box = drawnBox(entry);
       entry.place.style.transform = saved;
-      if (box) out[id] = Object.assign(box, { ox: entry.rect.left, oy: entry.rect.top });
+      if (box) out[id] = Object.assign(box, { ox: entry.rect.left, oy: entry.rect.top }, entry.clear ? { cx: entry.clear.x, cy: entry.clear.y } : {});
     }
     tl.time(now, false);
     return out;
@@ -1724,7 +1817,7 @@
   }
 
   const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, thumbnailLayout, endLayout, shortLayout, stageSize, captions,
-    smooth, zoneOf, soundCues, PANEL_SLIDE, VIDEO_SHIFT };
+    smooth, zoneOf, soundCues, clearMove, PANEL_SLIDE, VIDEO_SHIFT, CLEAR_GAP };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

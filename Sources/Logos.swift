@@ -236,8 +236,8 @@ struct LogoSpot: Equatable {
 
 extension VideoItem {
     /// The recording's graphics as the engine draws them on the 16:9 video: each logo badge
-    /// with its spot next to the speaker.
-    var placedGraphics: GraphicsTrack? { graphics.map { placingSections(placingLogos($0, short: nil), short: nil) } }
+    /// with its spot next to the speaker, and each card with the bubble's box to keep clear of.
+    var placedGraphics: GraphicsTrack? { graphics.map { placingClear(placingSections(placingLogos($0, short: nil), short: nil)) } }
 
     /// A Short's graphics (`GraphicsTrack.forShort`), each logo badge placed next to the
     /// speaker as the Short shows them. The spots are worked out in recording time, as the

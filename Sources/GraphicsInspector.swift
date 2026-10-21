@@ -93,7 +93,10 @@ extension GraphicInspector {
     /// Where the graphic sits on the picture: a move from its place in the template, in
     /// design pixels of a 1920-wide frame, and its size.
     var placement: some View {
-        let transform = graphic.transform ?? GraphicTransform()
+        // Without a move of its own, a card may sit clear of the bubble: edits start there.
+        let bounds = model.graphicBounds[graphic.id]
+        let transform = bounds?.effective(graphic.transform) ?? graphic.transform ?? GraphicTransform()
+        let clearOfBubble = (graphic.transform.map(\.isIdentity) ?? true) && bounds.map { $0.clear != .zero } == true
         func place(_ change: (inout GraphicTransform) -> Void) {
             var edited = transform
             change(&edited)
@@ -111,6 +114,11 @@ extension GraphicInspector {
                 Button("Reset Position") { model.resetGraphicPlace(graphic.id) }
                     .controlSize(.small)
                     .disabled(graphic.transform == nil)
+            }
+            if clearOfBubble {
+                Label("Clear of the bubble", systemImage: "person.crop.circle.badge.checkmark")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .help("The app moved this card so it does not cover the face in the bubble. Drag it to give it a place of your own.")
             }
             Text("In Preview, drag the graphic to move it or a corner to resize it; ⌥ turns snapping off, and ⌥ arrow keys nudge it. Across and down are pixels of a 1920-wide frame.")
                 .font(.caption2).foregroundStyle(.secondary)

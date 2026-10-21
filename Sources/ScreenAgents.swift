@@ -24,11 +24,17 @@ extension AgentState {
         var zooms: [Zoom]
         var covered: [[Double]]
         var missing: Bool
+        /// The bubble's box in the Screen layout, in design pixels of the 1920×1080 frame.
+        var bubbleBox: WireRect?
+        /// Each graphic that meets the bubble while the bubble shows, so it covers the face.
+        /// Empty when all are clear; nil when no graphic shows with the bubble, or the
+        /// graphics could not be measured.
+        var overBubble: [BubbleOverlap]?
     }
 }
 
 extension AppModel {
-    static func screenState(_ clip: ProjectClip) -> AgentState.ScreenState? {
+    static func screenState(_ clip: ProjectClip, overBubble: [AgentState.BubbleOverlap]? = nil) -> AgentState.ScreenState? {
         guard let screen = clip.screen else { return nil }
         let info = screen.info
         return AgentState.ScreenState(
@@ -42,7 +48,8 @@ extension AppModel {
             layouts: screen.spans.map { .init(id: $0.id, start: $0.start, end: $0.end, duration: $0.duration, layout: $0.layout.rawValue) },
             zooms: screen.zooms.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end, target: WirePoint($0.target)) },
             covered: screen.covered(on: clip.timeline).map { [$0.lowerBound, $0.upperBound] },
-            missing: !FileManager.default.fileExists(atPath: screen.url.path))
+            missing: !FileManager.default.fileExists(atPath: screen.url.path),
+            bubbleBox: clip.item().bubbleBox.map(WireRect.init), overBubble: overBubble)
     }
 
     /// Where the speaker's face is, in source pixels, at an edited time; nil when Apple

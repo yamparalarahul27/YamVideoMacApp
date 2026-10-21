@@ -128,6 +128,24 @@ edit, and each edit becomes one undo step with your name on it.
 5. Screen zooms: `analyze --kind screenZooms`, keep the ones where the text on the
    screen matters, aim others by hand at that text, and apply with
    `replaceScreenZooms`. A level of 1.4 to 2 makes browser text sharp.
+6. Keep the face clear. No graphic may cover the bubble. In the Screen layout the app
+   moves each column card (name plate, title card, link, feature list, end card) clear of
+   the bubble: below a top bubble, above a bottom bubble, or beside the bubble when there
+   is no room. A graphic with its own `transform` stays where the transform puts it. Do
+   not set `props.clear`: the app writes it.
+7. Check the bubble each time you move the bubble, change the layouts, or add or move
+   graphics. Read `state.clips[].screen.overBubble`. Each item is a graphic that covers
+   the bubble, with `graphicID`, `kind`, `at` (the first time it covers the bubble),
+   `rect` and `bubble` (design pixels of the 1920×1080 frame) and `why`. The list must be
+   empty before you show frames to the owner. For each item:
+   - `transform`: give the graphic a `transform` that keeps `rect` clear of `bubble`, or
+     set the transform to x 0, y 0, scale 1, so the app places it.
+   - `noRoom`: make the card smaller (`transform` scale) or give it less text.
+   - `panel`: the app does not move panels. Move the panel to a time with a different
+     layout, or set the bubble to a different corner.
+   - `badge`: remove the logo badge's `transform`.
+   When `overBubble` is missing, no graphic shows with the bubble, or the app could not
+   measure the graphics. Then look at a frame from `preview --composed` to be sure.
 
 ### 4.5 Zooms and graphics on the speaker
 
@@ -140,7 +158,8 @@ edit, and each edit becomes one undo step with your name on it.
   about 640 px wide: every text must be easy to read there. If it is small, set the
   style's `size` (`setGraphicsStyle`, 1 to 1.5; 1.3 to 1.4 suits a phone) before you
   scale graphics one by one. Cards grow to the left and panels grow half as much, so
-  check that no card covers the speaker's face. Read the owner's Style.md too: it can
+  check that no card covers the speaker's face. With a screen recording, read
+  `state.clips[].screen.overBubble` (4.4, step 7). Read the owner's Style.md too: it can
   have a rule about this.
 - Two graphics cover the whole picture, for design videos that move from part to part:
   - `kineticText`: a short phrase in big words, each on the time it is spoken. Give
