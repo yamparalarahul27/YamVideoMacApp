@@ -153,9 +153,13 @@ New folder `Resources/Graphics/`, copied into the bundle by `build.sh`:
   (graphics plus a `<video>` and `<audio>` root child, for HyperFrames full renders and for
   checks outside the app).
 
-Motion vocabulary, the same for every kind: column graphics slide in 56 px from the right
-(0.6 s, power3.out) and leave 36 px to the right (0.4 s). Contents rise 20 px (0.5 s).
-Marks pop (back.out) or draw (stroke). The panel shade slides in 160 px and fades (0.8 s).
+Motion vocabulary, the same for every kind: column graphics fade in (0.5 s) and glide in
+48 px from the right (0.9 s, expo.out). They leave 28 px to the right and fade through a
+6 px blur (0.5 s, power2.inOut), so they are gone before their last frame. Contents rise
+20 px out of a 6 px blur (0.6 s, power3.out). Covers fade their shade in and out (0.5 s and
+0.45 s, sine.inOut); their words rise out of a blur and, 0.5 s before the end, lift and blur
+away one after the other. Marks pop (back.out) or draw (stroke). The panel shade slides in
+160 px and fades (0.8 s).
 The video move uses smoothstep, `p² (3 − 2p)` over 0.8 s, in all three places (GSAP
 custom ease, Core Image, FFmpeg expression) so that they agree to the frame.
 
@@ -948,7 +952,7 @@ section titles carry the structure. Both kinds sit in a new zone, `cover`: the w
 (near black) or `dim` (the picture darkened). Nothing else may show with a cover (a panel
 must have slid away first), and a cover cannot be moved on the picture.
 
-- **`kineticText`**: big words, each popping in on the time it is spoken. `words`
+- **`kineticText`**: big words, each rising out of a soft blur on the time it is spoken. `words`
   [{text, at}], 1–24, in order; an agent may send `"transcript"` and the app fills in the
   words said over the graphic's time (`KineticText.words`, from the transcript and the
   timeline). Or `text`, spread evenly near the start. `layout` line (one centred line that
