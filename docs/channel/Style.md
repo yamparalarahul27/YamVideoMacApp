@@ -7,7 +7,7 @@ A rule is added only after the owner says yes. Each rule says where it came from
 - Plain English: short sentences, one word for one thing, active voice. *(from the start)*
 - Phones first: most viewers watch on a phone, desktop is rare. Every text on screen (graphics, cards, panels, captions, ink and screen recordings) must be easy to read on a phone. Check frames at phone size (about 640 px wide) before you apply, and make text larger when in doubt. *(owner, AgentUX video, 17 Oct 2026)*
 - Show mock-ups on the owner's own footage before choosing a look. *(Shorts, 15 Oct)*
-- Never post, sign in to or read YouTube, Instagram, X or LinkedIn. The owner publishes by hand. *(16 Oct)*
+- Never post to or sign in to YouTube, Instagram, X or LinkedIn. The owner publishes by hand. The one exception: agents and the app may read the public numbers of the owner's own YouTube posts (views, likes, comments) from a link the owner gives, without signing in. Instagram, X and LinkedIn numbers are typed in by the owner. *(16 Oct; YouTube reading allowed by the owner, 21 Oct 2026)*
 - Release rhythm: one long video every other Thursday at 7 pm, and two Shorts a week (Tuesday and Saturday at 7 pm), on YouTube, Instagram, X and LinkedIn the same day. Keep at least two finished long videos ahead; never post only to fill a slot (post Shorts only until the next long video is good). Plan at least two months ahead. *(owner, long-term rhythm without burnout, 20 Oct 2026)*
 
 ## Talking head

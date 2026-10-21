@@ -198,6 +198,9 @@ defaults and agent-chosen IDs, errors that say what is allowed, the module in ag
 4. Comparisons with Swift Charts, at day 1, 7 or 30: the same video on each platform,
    Shorts against long videos, and topics.
 5. Agents: record a check-in; results in state, so Claude can read and sum them up.
+6. From a YouTube link (added 2026-10-21): views, likes and new comments read with
+   `yt-dlp`, never signed in. Planned in [launch-templates.md](launch-templates.md),
+   part A. The owner allowed this one kind of reading on 2026-10-21.
 
 ### Phase 5: in-app AI with Apple's model
 
@@ -234,7 +237,7 @@ by `yamvideoctl`.
 | 1c | Style.md, project notes and Video.md | Merged (PR #35) |
 | 2 | Platforms and post kits | Rules checked, design and mock-ups agreed (section 14); not built |
 | 3 | Calendar | Calendar and release tree built (section 15); reminders later |
-| 4 | Results | Not started |
+| 4 | Results | Not started; YouTube numbers from a link planned (launch-templates.md, part A) |
 | 5 | In-app AI | Not started |
 
 ## 11. Phase 1 as built
