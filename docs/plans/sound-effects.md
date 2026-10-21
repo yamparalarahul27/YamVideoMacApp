@@ -1,8 +1,9 @@
 # Sound effects and music hits
 
-**Status (2026-10-21):** A plan. The owner answered four questions the same day (see
-"The owner's answers"). Nothing is built. Next: a mock-up on the Tradl video, so the owner
-can see and hear the cues, the music hits and a fast track before any code.
+**Status (2026-10-21):** The owner answered four questions and liked the Tradl mock-up.
+**Part 1 is built** (the sound library, and cues on section cards, title cards and link
+cards, project version 23), in a PR stacked on PR #71 (link card) and PR #73 (duck).
+Parts 2 to 4 come after it. See "Part 1 status".
 **Source:** the owner, 2026-10-21, after the test of the music duck (PR #73): "I like the
 music work done, but it is not my vibe … my vibe is more into fast, informative
 entertainment, education, tech."
@@ -196,6 +197,30 @@ Version 22 is the duck (PR #73), so this is version 23.
    Tradl video first.
 
 Still open: how loud a sound is (question 3 below), and sounds in Shorts (question 5).
+
+## Part 1 status (2026-10-21)
+
+- **Engine:** `soundCues(kind, props, length)` in `graphics.js` gives `[{at, cue}]`. The
+  link card's motion and its cues share `LINK_MOTION` (click 1.05 s, typing from 1.3 s,
+  0.09 s a letter, the window 0.2 s after the last letter). The app runs the function in
+  JavaScriptCore (`SoundCues.engineCues`), with a cache.
+- **Cues in part 1:** `sectionCard.in` (whoosh-1, −8 LU), `titleCard.in` (whoosh-1, −11),
+  `link.click` (button-4, −12), `link.key` (button-1, −12), `link.open` (whoosh-2, −10).
+  The kinetic word taps, badge pops and checklist ticks come in part 2.
+- **Library:** `SoundLibrary` in `~/Library/Application Support/YamVideo/Sounds`, with
+  `sounds.json`. Each sound: its length, its loudest 400 ms (LUFS), its sample peak and its
+  credit. Six seconds or less. Agents: `sounds`, `setSound`, `removeSound`; the CLI:
+  `yamvideoctl sounds`, `setsound`, `removesound`.
+- **A recording:** `SoundSettings` (`on`, `level` −12 to +6 dB, the measured `voice`, and a
+  sound or `off` for each cue). Agents: `setSounds`; state: `clips[].sounds` with each cue's
+  time, sound and gain. The inspector's Audio tab has a **Sounds** section.
+- **Mix:** the cues join the music mix as plays of their whole files that the duck does
+  not move. So the export, its loudness pass, the movie and the preview all play them.
+  The preview puts cues on up to four tracks of their own.
+- **Licences:** Export for YouTube checks the sounds that cues play, with the rules for
+  music, and writes their credit lines in the description.
+- **Not in part 1:** the timeline marks, the choice for one graphic, Shorts, the
+  `SwitchableChange` switch, music hits, sounds made by the app.
 
 ## Questions for the owner
 

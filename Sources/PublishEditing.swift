@@ -121,11 +121,11 @@ enum YouTubeExport {
     static func run(_ item: VideoItem, info: MediaInfo, publish: PublishInfo, settings: ExportSettings, files: Files,
                     project: UUID? = nil, onProgress: @escaping @Sendable (Double) -> Void) async throws {
         let item = item.effective
-        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.music).first(where: { $0.severity == .blocking }) {
+        if let blocking = publish.issues(duration: item.editedDuration, graphics: item.graphics, music: item.music, sounds: item.usedSounds).first(where: { $0.severity == .blocking }) {
             throw FFmpegError(message: blocking.message)
         }
         // The music's credit lines go at the end of the description.
-        let publish = publish.crediting(item.music)
+        let publish = publish.crediting(item.music, sounds: item.usedSounds)
         var videoSettings = settings
         videoSettings.format = .mp4
         let folder = files.video.deletingLastPathComponent()
@@ -261,7 +261,7 @@ extension AppModel {
     /// Asks for a folder, then writes the video, captions, thumbnail and upload text there.
     func promptForYouTubeExport() {
         guard let item = selectedItem, item.info != nil else { return }
-        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music)
+        if let blocking = (item.publish ?? PublishInfo()).issues(duration: item.editedDuration, graphics: item.graphics, music: item.effective.music, sounds: item.effective.usedSounds)
             .first(where: { $0.severity == .blocking }) {
             statusMessage = blocking.message
             return

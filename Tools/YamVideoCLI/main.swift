@@ -44,6 +44,11 @@ Editing (always against the revision you read: --session, --project, --revision)
                                                  and the loudness of the voice with the music)
   yamvideoctl setlogo --name BRAND --path FILE [--words "next.js, next js"]   keep a copy of a logo in the library
   yamvideoctl removelogo --name BRAND
+  yamvideoctl sounds                             the owner's sound library: each sound, its loudness and licence,
+                                                 and the cues with their default sounds
+  yamvideoctl setsound --name NAME --path FILE [--licence L] [--title T] [--source URL] [--line TEXT]
+                                                 keep a copy of a short sound (6 s or less) in the library
+  yamvideoctl removesound --name NAME
   yamvideoctl transcribe --clip ID [--model large-v3-turbo-q5_0|base.en] [--language CODE]
   yamvideoctl autoedit --clip ID [--style tight|natural|review] [--label TEXT]
                                                  transcribe if needed, cut, set captions and loudness
@@ -323,6 +328,20 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
         }
     case "removelogo", "removeLogo":
         request["method"] = "removeLogo"
+        request["name"] = try value("name")
+    case "sounds":
+        request["method"] = "sounds"
+    case "setsound", "setSound":
+        request["method"] = "setSound"
+        request["name"] = try value("name")
+        request["path"] = try value("path")
+        var credit: [String: String] = [:]
+        for key in ["licence", "title", "artist", "source", "line"] {
+            if let text = arguments.values[key] { credit[key] = text }
+        }
+        if !credit.isEmpty { request["credit"] = credit }
+    case "removesound", "removeSound":
+        request["method"] = "removeSound"
         request["name"] = try value("name")
     case "autoedit", "autoEdit":
         request["method"] = "autoEdit"

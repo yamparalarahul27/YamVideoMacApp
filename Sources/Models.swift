@@ -279,6 +279,8 @@ struct VideoItem: Identifiable {
     var screen: ScreenTrack?
     /// Background music under the voice, on the edited timeline. Nil until a piece is added.
     var music: MusicBed?
+    /// Short sounds on the graphics' motion (a whoosh on a section card). Nil: none.
+    var sounds: SoundSettings?
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

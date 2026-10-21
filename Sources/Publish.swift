@@ -262,10 +262,10 @@ struct PublishInfo: Codable, Equatable {
     /// Everything YouTube would refuse or ignore, for a recording `duration` seconds long
     /// with these graphics (for the end screen) and this music (for its licences and the
     /// credit lines the description gets).
-    func issues(duration: Double, graphics: GraphicsTrack? = nil, music: MusicBed? = nil) -> [Issue] {
-        if music != nil {
-            let credited = crediting(music)
-            return credited.issues(duration: duration, graphics: graphics) + (music?.issues ?? [])
+    func issues(duration: Double, graphics: GraphicsTrack? = nil, music: MusicBed? = nil, sounds: [SoundLibrary.Sound] = []) -> [Issue] {
+        if music != nil || !sounds.isEmpty {
+            let credited = crediting(music, sounds: sounds)
+            return credited.issues(duration: duration, graphics: graphics) + (music?.issues ?? []) + SoundLibrary.issues(sounds)
         }
         var issues: [Issue] = []
         func add(_ field: String, _ severity: Severity, _ message: String) { issues.append(Issue(field: field, severity: severity, message: message)) }
