@@ -65,8 +65,15 @@ struct GallerySample: Identifiable, Equatable {
         var shown = style
         shown.moveVideo = false
         var track = GraphicsTrack(style: shown)
-        track.items = [Graphic(id: GallerySample.draftID, kind: kind, start: 0, end: length, props: props, look: look.graphicLook(for: kind))]
+        track.items = [Graphic(id: GallerySample.draftID, kind: kind, start: 0, end: length, props: props(for: look), look: look.graphicLook(for: kind))]
         return track
+    }
+
+    /// The sample's words as `look` shows them: in Paper the title card has a label too, so
+    /// its tile shows the sticker.
+    func props(for look: GalleryLook) -> [String: JSONValue] {
+        guard look == .paper, kind == .titleCard else { return props }
+        return props.merging(["label": .string("best feature")]) { $1 }
     }
 
     /// What the picture depends on: the engine, the sample, the style and the look.
@@ -81,39 +88,64 @@ struct GallerySample: Identifiable, Equatable {
     /// sees its beat, as the gallery's look draws it.
     func draft(at time: Double, look: GalleryLook) -> Graphic {
         let start = time - beat
-        return Graphic(id: GallerySample.draftID, kind: kind, start: start, end: start + length, props: props, look: look.graphicLook(for: kind))
+        return Graphic(id: GallerySample.draftID, kind: kind, start: start, end: start + length, props: props(for: look), look: look.graphicLook(for: kind))
     }
 
     /// The draft's id, the same every time, so the Preview treats each new look as one graphic.
     static let draftID = UUID(uuidString: "0A11E2E7-0000-4000-8000-0000000000D1")!
 }
 
-/// The looks the gallery shows. Ink draws the panel kinds by hand; cards stay glass in
-/// either.
+/// The looks the gallery shows. Ink draws the panel kinds by hand and Paper puts the card
+/// kinds on taped paper; the other kinds stay glass.
 enum GalleryLook: String, CaseIterable, Identifiable {
-    case glass, ink
+    case glass, ink, paper
 
     var id: String { rawValue }
-    var label: String { self == .glass ? "Glass" : "Ink" }
+    var label: String {
+        switch self {
+        case .glass: return "Glass"
+        case .ink: return "Ink"
+        case .paper: return "Paper"
+        }
+    }
 
     /// The look the gallery opens with: the recording's own (ink + glass draws the panel
     /// kinds in ink, as ink does).
-    init(style: GraphicsStyle) { self = style.look == .glass ? .glass : .ink }
+    init(style: GraphicsStyle) {
+        switch style.look {
+        case .glass: self = .glass
+        case .ink, .mix: self = .ink
+        case .paper: self = .paper
+        }
+    }
 
-    /// The look a graphic of `kind` gets in the gallery's pictures and drafts.
+    /// The look a graphic of `kind` gets in the gallery's pictures and drafts: given in full
+    /// for each kind that has more than one look, so the recording's style never changes it;
+    /// nil for a kind that has glass only.
     func graphicLook(for kind: GraphicKind) -> GraphicsLook? {
-        kind.hasInk ? (self == .ink ? .ink : .glass) : nil
+        guard kind.hasInk || kind.hasPaper else { return nil }
+        switch self {
+        case .glass: return .glass
+        case .ink: return kind.hasInk ? .ink : .glass
+        case .paper: return kind.hasPaper ? .paper : .glass
+        }
+    }
+
+    /// The name of the look a graphic of `kind` shows in, for the Preview's bar: a feature
+    /// list in the Paper gallery is still glass.
+    func name(for kind: GraphicKind) -> String {
+        switch graphicLook(for: kind) {
+        case .ink?: return GalleryLook.ink.label
+        case .paper?: return GalleryLook.paper.label
+        default: return GalleryLook.glass.label
+        }
     }
 
     /// The graphic's own look when it is added, so it comes in as the gallery showed it;
     /// nil when the style already draws it so.
     func addedLook(for kind: GraphicKind, style: GraphicsStyle) -> GraphicsLook? {
-        guard kind.hasInk else { return nil }
-        let styleInk = style.look != .glass
-        switch self {
-        case .ink: return styleInk ? nil : .ink
-        case .glass: return styleInk ? .glass : nil
-        }
+        guard let shown = graphicLook(for: kind) else { return nil }
+        return GraphicsTrack(style: style).look(of: Graphic(kind: kind, start: 0, end: 1)) == shown ? nil : shown
     }
 }
 
@@ -266,6 +298,6 @@ extension AppModel {
               let added = item.graphics?.items.first(where: { !before.contains($0.id) }) else { return }
         var changed = added
         changed.look = look
-        _ = perform([.updateGraphic(clip: item.id, graphic: changed)], label: "\(sample.title) in \(galleryLook.label)")
+        _ = perform([.updateGraphic(clip: item.id, graphic: changed)], label: "\(sample.title) in \(galleryLook.name(for: sample.kind))")
     }
 }
