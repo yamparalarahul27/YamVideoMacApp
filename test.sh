@@ -54,6 +54,7 @@ xcrun swiftc \
 	"$ROOT/Sources/SoundAgents.swift" \
 	"$ROOT/Sources/Graphics.swift" \
 	"$ROOT/Sources/Logos.swift" \
+	"$ROOT/Sources/BubbleClear.swift" \
 	"$ROOT/Sources/CoverGraphics.swift" \
 	"$ROOT/Sources/Shorts.swift" \
 	"$ROOT/Sources/ShortsEditing.swift" \

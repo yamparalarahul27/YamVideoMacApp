@@ -100,9 +100,11 @@ struct GraphicsOverlay: NSViewRepresentable {
 
         private func place(changed graphics: [Graphic]) {
             var transforms: [String: JSONValue] = [:]
+            // No transform is null, so a card goes back to its place clear of the bubble.
             for graphic in graphics {
-                let t = graphic.transform ?? GraphicTransform()
-                transforms[graphic.id.uuidString] = .object(["x": .number(t.x), "y": .number(t.y), "scale": .number(t.scale)])
+                transforms[graphic.id.uuidString] = graphic.transform.map {
+                    .object(["x": .number($0.x), "y": .number($0.y), "scale": .number($0.scale)])
+                } ?? .null
             }
             guard let data = try? JSONEncoder().encode(JSONValue.object(transforms)) else { return }
             view?.evaluateJavaScript("YamGraphics.place(\(String(decoding: data, as: UTF8.self)));")

@@ -13,13 +13,23 @@ import SwiftUI
 struct GraphicBounds: Equatable {
     var content: CGRect
     var origin: CGPoint
+    /// The engine's own move of the box clear of the speaker's bubble (BubbleClear.swift);
+    /// zero when it stays where the template puts it.
+    var clear: CGSize = .zero
 
-    /// Where the box sits once `transform` has moved and scaled it.
-    func placed(_ transform: GraphicTransform?) -> CGRect {
-        (transform ?? GraphicTransform()).apply(content, origin: origin)
+    /// The move in force: `transform`, or the move clear of the bubble when it has none.
+    func effective(_ transform: GraphicTransform?) -> GraphicTransform {
+        if let transform, !transform.isIdentity { return transform }
+        return GraphicTransform(x: Double(clear.width), y: Double(clear.height))
     }
 
-    /// Reads `YamGraphics.bounds()`: {id: {x, y, w, h, ox, oy}}.
+    /// Where the box sits once `transform` has moved and scaled it. Without one, it sits
+    /// clear of the bubble, as the engine draws it.
+    func placed(_ transform: GraphicTransform?) -> CGRect {
+        effective(transform).apply(content, origin: origin)
+    }
+
+    /// Reads `YamGraphics.bounds()`: {id: {x, y, w, h, ox, oy, cx?, cy?}}.
     static func parse(_ json: String) -> [UUID: GraphicBounds] {
         guard let data = json.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Double]] else { return [:] }
@@ -27,7 +37,8 @@ struct GraphicBounds: Equatable {
         for (key, box) in root {
             guard let id = UUID(uuidString: key), let x = box["x"], let y = box["y"], let w = box["w"], let h = box["h"] else { continue }
             result[id] = GraphicBounds(content: CGRect(x: x, y: y, width: w, height: h),
-                                       origin: CGPoint(x: box["ox"] ?? 0, y: box["oy"] ?? 0))
+                                       origin: CGPoint(x: box["ox"] ?? 0, y: box["oy"] ?? 0),
+                                       clear: CGSize(width: box["cx"] ?? 0, height: box["cy"] ?? 0))
         }
         return result
     }
@@ -168,7 +179,7 @@ extension AppModel {
     /// ⌥ arrow keys: one design pixel, ten with ⇧.
     func nudgeSelectedGraphic(dx: Double, dy: Double) {
         guard let graphic = selectedGraphic else { return }
-        var transform = graphic.transform ?? GraphicTransform()
+        var transform = graphicBounds[graphic.id]?.effective(graphic.transform) ?? graphic.transform ?? GraphicTransform()
         transform.x += dx; transform.y += dy
         guard transform.problem == nil else { statusMessage = transform.problem; return }
         placeGraphic(graphic.id, transform, label: "Nudge Graphic")
@@ -302,12 +313,12 @@ struct GraphicsPlacementLayer: View {
                 let handle = corner.point(of: box)
                 if abs(handle.x - point.x) <= reach, abs(handle.y - point.y) <= reach {
                     return Drag(action: .resize(corner), id: selected.graphic.id,
-                                start: selected.graphic.transform ?? GraphicTransform(), bounds: selected.bounds)
+                                start: selected.bounds.effective(selected.graphic.transform), bounds: selected.bounds)
                 }
             }
             if box.insetBy(dx: -reach / 2, dy: -reach / 2).contains(point) {
                 return Drag(action: .move, id: selected.graphic.id,
-                            start: selected.graphic.transform ?? GraphicTransform(), bounds: selected.bounds)
+                            start: selected.bounds.effective(selected.graphic.transform), bounds: selected.bounds)
             }
         }
         // The topmost graphic showing now under the pointer; later ones draw on top.
@@ -315,7 +326,7 @@ struct GraphicsPlacementLayer: View {
         let showing = input.track.items.filter { $0.kind.isPlaceable && input.time >= $0.start && input.time < $0.end }
         if let hit = showing.reversed().first(where: { bounds[$0.id]?.placed($0.transform).contains(point) == true }) {
             model.selectedGraphicID = hit.id
-            return Drag(action: .move, id: hit.id, start: hit.transform ?? GraphicTransform(), bounds: bounds[hit.id])
+            return Drag(action: .move, id: hit.id, start: bounds[hit.id]?.effective(hit.transform) ?? GraphicTransform(), bounds: bounds[hit.id])
         }
         return Drag(action: .deselect)
     }

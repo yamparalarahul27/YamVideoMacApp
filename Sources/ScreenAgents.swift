@@ -31,11 +31,19 @@ extension AgentState {
         var zooms: [Zoom]
         var covered: [[Double]]
         var missing: Bool
+        /// The screen's own bubble's box in the Screen layout, in design pixels of the
+        /// 1920×1080 frame. A part with a bubble of its own has its box in `layouts`.
+        var bubbleBox: WireRect?
+        /// Each graphic that meets a place of the bubble while the bubble shows there, so it
+        /// covers the face.
+        /// Empty when all are clear; nil when no graphic shows with the bubble, or the
+        /// graphics could not be measured.
+        var overBubble: [BubbleOverlap]?
     }
 }
 
 extension AppModel {
-    static func screenState(_ clip: ProjectClip) -> AgentState.ScreenState? {
+    static func screenState(_ clip: ProjectClip, overBubble: [AgentState.BubbleOverlap]? = nil) -> AgentState.ScreenState? {
         guard let screen = clip.screen else { return nil }
         let info = screen.info
         return AgentState.ScreenState(
@@ -53,17 +61,13 @@ extension AppModel {
             },
             zooms: screen.zooms.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end, target: WirePoint($0.target)) },
             covered: screen.covered(on: clip.timeline).map { [$0.lowerBound, $0.upperBound] },
-            missing: !FileManager.default.fileExists(atPath: screen.url.path))
+            missing: !FileManager.default.fileExists(atPath: screen.url.path),
+            bubbleBox: clip.item().bubbleBox().map(WireRect.init), overBubble: overBubble)
     }
 
     /// The box of `bubble` in the Screen layout, in design pixels of the 1920×1080 frame.
     static func bubbleBox(_ clip: ProjectClip, bubble: SpeakerBubble) -> WireRect? {
-        guard let screen = clip.screen, let info = clip.info else { return nil }
-        let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
-        let geometry = LayoutGeometry(track: screen, crop: crop)
-        guard geometry.frame.width > 0 else { return nil }
-        let unit = 1920 / Double(geometry.frame.width), rect = geometry.speakerPlace(.screen, bubble: bubble).rect
-        return WireRect(CGRect(x: Double(rect.minX) * unit, y: Double(rect.minY) * unit, width: Double(rect.width) * unit, height: Double(rect.height) * unit))
+        clip.item().bubbleBox(bubble).map(WireRect.init)
     }
 
     /// Where the speaker's face is, in source pixels, at an edited time; nil when Apple
