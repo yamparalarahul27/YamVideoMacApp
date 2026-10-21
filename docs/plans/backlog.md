@@ -19,6 +19,21 @@ which made projects version 21. The owner asked to track it, not change anything
   project with no gaps could stay version 20), or let an older build open a newer file
   to read only.
 
+## Calendar: videos from the other Mac (added 2026-10-21)
+
+From the YouTube scheduling session. The owner asked to keep it in the backlog for now.
+
+- The problem: the Calendar can plan only a video that has an export on this Mac. The 4 App
+  Store Shorts (public on YouTube on 15 Oct) are only on the Yamparala Mac, so they have no
+  plan here.
+- The owner's idea: keep a video that is on the other Mac as text only (no file). Save which
+  Mac it is on, and show it on the Calendar with that Mac's name.
+- Today `Sources/MacInventory.swift` writes `docs/channel/macs/<Mac>.json` with folders,
+  export counts, projects and recordings, but no titles. The Library shows "On Yamparala" and
+  "Only on other Macs".
+- To plan: export titles and kinds (long video or Short) in the Mac list; a text-only video
+  on an idea, with its Mac; the Calendar tag; an agent command to add and plan it.
+
 ## Thumbnails: the science of a click (added 2026-10-18)
 
 Moved to its own plan on 2026-10-19: [thumbnail-science.md](thumbnail-science.md).
