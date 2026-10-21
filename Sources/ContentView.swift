@@ -501,8 +501,10 @@ struct CropEditorPane: View {
                            editsGraphics: !model.isConverting && !model.showsBefore,
                            onGraphicBounds: { model.graphicBounds = $0 })
                 .overlay {
-                    if item.screen != nil, model.selectedScreenZoom != nil, !model.isConverting, !model.showsBefore {
-                        ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
+                    if let screen = item.screen, let shot = model.selectedScreenZoom, model.inspectorFocus == .screenZoom,
+                       !model.isConverting, !model.showsBefore {
+                        ScreenZoomFrame(playback: model.playback, screen: screen, shot: shot, crop: crop,
+                                        endScreen: item.graphics?.endScreen?.start)
                     }
                 }
         }

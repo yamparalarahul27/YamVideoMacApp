@@ -10,8 +10,13 @@ final class PlaybackController: ObservableObject {
     var hiddenTracks: Set<TimelineTrack> = []
     /// Before/After: the recording as it was, with the same cuts.
     var showsOriginal = false
-    @Published var isPlaying = false
+    @Published var isPlaying = false { didSet { if isPlaying != oldValue { updateAim() } } }
     @Published var isLoading = false
+    /// The screen zoom the Preview aims: left out of the picture while paused, so a frame
+    /// can mark its area (`ScreenZoomFrame`). Nil shows every zoom.
+    var aimedScreenZoom: UUID? { didSet { if aimedScreenZoom != oldValue { updateAim() } } }
+    /// What the screen compositor reads for `aimedScreenZoom`, frame by frame.
+    let aim = ScreenZoomAim()
     @Published var error: String?
     var onTime: ((Double) -> Void)?
     private var observer: Any?
@@ -52,6 +57,18 @@ final class PlaybackController: ObservableObject {
         playWhenReady = false
         player.pause()
         isPlaying = false
+    }
+
+    /// Leaves the aimed zoom out while paused and puts it back to play. A paused player
+    /// draws its frame again only for a new video composition.
+    private func updateAim() {
+        let hidden = isPlaying ? nil : aimedScreenZoom
+        guard aim.hidden != hidden else { return }
+        aim.hidden = hidden
+        guard !isPlaying, !isLoading, let item = player.currentItem,
+              let composition = item.videoComposition?.mutableCopy() as? AVMutableVideoComposition else { return }
+        item.videoComposition = composition
+        seek(to: seeking ? requestedTime : player.currentTime().seconds)
     }
 
     func clear() {
@@ -112,7 +129,7 @@ final class PlaybackController: ObservableObject {
             // new movie.
             if loadedPicture != picture, let item = player.currentItem, !isLoading, let info = clip.info {
                 item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
-                                                              settings: settings, original: original, short: short)
+                                                              settings: settings, original: original, short: short, aim: aim)
             }
             loadedClip = record; loadedPicture = picture
             seek(to: time)
@@ -133,7 +150,7 @@ final class PlaybackController: ObservableObject {
         if let item = player.currentItem, !isLoading, error == nil, loadedMovie == nil,
            recolored?.withoutOverlays == record.withoutOverlays, loadedSettings == settings, let info = clip.info {
             item.videoComposition = Self.videoComposition(for: item.asset, clip: clip, info: info,
-                                                          settings: settings, original: original, short: short)
+                                                          settings: settings, original: original, short: short, aim: aim)
             loadedClip = record; loadedOriginal = original; loadedPicture = picture
             seek(to: time)
             if play { player.play(); isPlaying = true }
@@ -146,7 +163,7 @@ final class PlaybackController: ObservableObject {
         error = nil; isLoading = true
         task = Task {
             do {
-                let item = try await Self.makeItem(clip, settings: settings, original: original, short: short)
+                let item = try await Self.makeItem(clip, settings: settings, original: original, short: short, aim: aim)
                 try Task.checkCancellation()
                 player.replaceCurrentItem(with: item)
                 statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -207,7 +224,8 @@ final class PlaybackController: ObservableObject {
         }
     }
 
-    static func makeItem(_ clip: VideoItem, settings: ExportSettings, original: Bool = false, short: Short? = nil) async throws -> AVPlayerItem {
+    static func makeItem(_ clip: VideoItem, settings: ExportSettings, original: Bool = false, short: Short? = nil,
+                         aim: ScreenZoomAim? = nil) async throws -> AVPlayerItem {
         guard let info = clip.info else { throw FFmpegError(message: "The video is still loading.") }
         let asset = AVURLAsset(url: clip.url)
         guard let sourceVideo = try await asset.loadTracks(withMediaType: .video).first else {
@@ -259,7 +277,8 @@ final class PlaybackController: ObservableObject {
             try await music?.insert(mix)
         }
         let item = AVPlayerItem(asset: composition)
-        item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original, short: short)
+        item.videoComposition = videoComposition(for: composition, clip: clip, info: info, settings: settings, original: original,
+                                                 short: short, aim: aim)
         item.audioTimePitchAlgorithm = .spectral
         let mix = AVMutableAudioMix()
         let joints = clip.timeline.audioJoints
@@ -288,10 +307,12 @@ final class PlaybackController: ObservableObject {
     /// Everything drawn on top of the assembled sections. A colour stage that cannot be
     /// applied shows the picture as recorded; the inspector says why. With a Short, the
     /// picture is its 9:16 window, with its graphics' motion.
+    /// `aim` leaves the Preview's aimed screen zoom out while paused (16:9 only).
     static func videoComposition(for asset: AVAsset, clip: VideoItem, info: MediaInfo,
-                                 settings: ExportSettings, original: Bool, short: Short? = nil) -> AVVideoComposition {
+                                 settings: ExportSettings, original: Bool, short: Short? = nil, aim: ScreenZoomAim? = nil) -> AVVideoComposition {
         if let screen = clip.screen, short.map(clip.stacksScreen) ?? true, let composition = asset as? AVComposition,
-           let layout = screenComposition(for: composition, clip: clip, screen: screen, info: info, settings: settings, original: original, short: short) {
+           let layout = screenComposition(for: composition, clip: clip, screen: screen, info: info, settings: settings, original: original,
+                                          short: short, aim: short == nil ? aim : nil) {
             return layout
         }
         let picture = picture(clip, info: info, short: short)
