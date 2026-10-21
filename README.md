@@ -76,9 +76,10 @@ them by topic. The **Calendar** shows when each video goes out and where. **Sche
 (the first view) is a list: **Needs you** (past releases not posted on a platform yet),
 then this week, next week and on, each day said in words ("Tomorrow", "In 6 days").
 **Month** and **Week** have an **Up next** strip and how far ahead you have planned; past
-days are faded and today is outlined. A long video is a purple bar with a film icon, a
-Short a blue chip, and each platform's mark (YouTube, Instagram, X, LinkedIn) is green
-once posted, orange when its day has passed without it. **Rhythm** sets the days videos
+days are faded and today is outlined. A long video has a film icon and a LONG VIDEO
+label, a Short a phone icon, and each platform's logo (YouTube, Instagram, X, LinkedIn)
+is in colour once posted there, grey while planned, and ringed in red when its day has
+passed without it. **Rhythm** sets the days videos
 usually go out (by default a long video every other Thursday and Shorts on Tuesday and
 Saturday at 19:00, eight weeks ahead); a day in it with nothing planned shows as a dashed
 empty slot. Drag a video to another day or slot, or from *Not planned* onto one; click
