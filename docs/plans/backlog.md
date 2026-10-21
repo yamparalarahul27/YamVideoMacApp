@@ -26,3 +26,9 @@ Moved to its own plan on 2026-10-19: [thumbnail-science.md](thumbnail-science.md
 ## Background music (parked 2026-10-17)
 
 Moved to its own plan on 2026-10-19: [background-music.md](background-music.md).
+
+## Sound effects and music hits (added 2026-10-21)
+
+Its own plan from the start: [sound-effects.md](sound-effects.md). The owner wants a fast,
+informative feel; tight edits leave no pauses for the duck, so the energy comes from the
+track, short sounds on the graphics and a music hit at each section card.
