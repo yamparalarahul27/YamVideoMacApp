@@ -283,6 +283,27 @@ extension AppModel {
         if case .failure(let error) = perform([.updateLayout(clip: item.id, span: span)]) { statusMessage = error.message }
     }
 
+    /// Changes one layout's own bubble; a key set to nil follows the screen's bubble
+    /// again. `live` while a slider moves: shown at once and committed as one undo step
+    /// when it ends.
+    func updateLayoutBubble(_ id: LayoutSpan.ID, live: Bool = false, label: String = "Layout Bubble", _ change: (inout SpanBubble) -> Void) {
+        guard let item = selectedItem, let original = item.screen?.spans.first(where: { $0.id == id }) else { return }
+        var span = original
+        var bubble = span.bubble ?? SpanBubble()
+        change(&bubble)
+        span.bubble = bubble.isEmpty ? nil : bubble
+        let command = EditCommand.updateLayout(clip: item.id, span: span)
+        let key = "layout-bubble-\(id)"
+        if live || isGestureOpen(key) {
+            if let error = updateGesture(key, label: label, [command], keepPreview: true) { statusMessage = error.message }
+            refreshComposedPreview()
+            if !live { endGesture() }
+            return
+        }
+        guard span != original else { return }
+        if case .failure(let error) = perform([command], label: label) { statusMessage = error.message }
+    }
+
     /// The UI's version of an edit: snapped to frames, inside the recording and clear of
     /// the neighbours. A move keeps the length; a trim keeps the edge that was not dragged.
     func fitted(_ span: LayoutSpan, replacing original: LayoutSpan, among spans: [LayoutSpan], total: Double, fps: Double) -> LayoutSpan {

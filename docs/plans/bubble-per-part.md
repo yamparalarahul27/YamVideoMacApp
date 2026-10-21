@@ -1,6 +1,7 @@
 # A bubble for each layout part — plan
 
-**Date:** 2026-10-21. **Status:** plan, not started.
+**Date:** 2026-10-21. **Status:** built (the owner said yes to this plan on 2026-10-21). Section 9 has the
+notes from the build.
 
 ## 1. Goal
 
@@ -126,3 +127,14 @@ of the two PRs merges, `bubbleBox` must use the bubble at the card's time
 - A bubble at any point (not a corner), and a drag of the bubble on the Preview.
 - A pop (shrink and grow) in place of the glide, if the frames show that the glide is too
   fast.
+
+## 9. Notes from the build
+
+- `ScreenTrack.state(at:)` now eases to a held state with the bubble of the change
+  (`changes` gives it). `composeLayout` and `FFmpeg.layoutStage` did not change: they draw
+  the places that `state(at:)` gives.
+- Parity on test footage (`./test.sh screen`): whole frame 2.0, bubble 2.8 of 255, at
+  held frames and during both moves.
+- Frames from the Tradl project (read only, not in the repository): a move from the top
+  right to the bottom right, and one from the top right to the bottom left. Each glides
+  on the smoothstep curve. The face stays in the middle of the bubble during the move.
