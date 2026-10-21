@@ -368,7 +368,9 @@
   // letter, and with `image` a window under the bar where that page loads.
   KINDS.link = function (inner, p, c) {
     const k = p.kicker ? kicker(p.kicker, true) : null;
-    const top = k ? 76 : 0;
+    // The label is an action the viewer must read on a phone, so it is larger than a card kicker.
+    if (k) k.node.classList.add("yg-ln-label");
+    const top = k ? 84 : 0;
     const url = String(p.url || "");
     const slash = url.indexOf("/");
     const chars = Array.from(url).map((ch, i) => h("span", { class: slash >= 0 && i >= slash ? "yg-ln-path" : null, text: ch }));

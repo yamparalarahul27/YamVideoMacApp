@@ -137,6 +137,7 @@ body.yg-full { background: #000; }
 .yg-rt-chips { margin-top: 18px; display: flex; gap: 12px; }
 
 /* link */
+.yg-kicker.yg-pill.yg-ln-label { font-size: 26px; letter-spacing: 0.08em; padding: 12px 22px; }
 .yg-ln-bar { position: absolute; left: 0; top: 76px; width: 600px; height: 88px; display: flex; align-items: center; gap: 20px; padding: 0 16px 0 30px; border-radius: 999px; }
 .yg-ln-lights { display: flex; gap: 9px; flex: none; }
 .yg-ln-lights i { display: block; width: 15px; height: 15px; border-radius: 50%; }
