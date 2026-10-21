@@ -131,6 +131,7 @@ enum YouTubeExport {
         let folder = files.video.deletingLastPathComponent()
         let temporary = folder.appendingPathComponent(".yamvideo-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: temporary) }
+        await MusicSpeech.prepare(item)
         try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                 crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                 regions: item.blurBoxes, zoomShots: item.zoomShots, segments: item.segments,

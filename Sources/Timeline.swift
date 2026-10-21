@@ -227,10 +227,11 @@ struct VideoProject: Codable, Equatable {
     /// maker's picture size and its white frost background. 18: adds the changes a
     /// recording has switched off in the inspector. 19: adds the thumbnail's versions for
     /// YouTube's Test & Compare and the winner. 20: adds a recording's background music. 21: adds the
-    /// space the timeline leaves where a section was deleted, trimmed or moved. Every edited
+    /// space the timeline leaves where a section was deleted, trimmed or moved. 22: adds the
+    /// music's duck, down under speech and up in pauses. Every edited
     /// project is written as the current version; older builds reject it rather than
     /// silently dropping edits.
-    static let currentVersion = 21
+    static let currentVersion = 22
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -338,6 +339,9 @@ struct VideoProject: Codable, Equatable {
         }
         if version < 21, clips.contains(where: { $0.gaps != nil }) {
             try reject("The project claims an older format but contains gaps on the timeline."); return
+        }
+        if version < 22, clips.contains(where: { $0.music?.duck != nil }) {
+            try reject("The project claims an older format but contains a music duck."); return
         }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }

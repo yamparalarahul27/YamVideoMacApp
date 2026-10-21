@@ -1,7 +1,8 @@
 # Background music
 
-**Status (2026-10-20):** The owner confirmed the plan and the order on 2026-10-19. Part 1
-(music bed from a file) is built, in its own PR. Parts 2 to 4 come after it, one at a time.
+**Status (2026-10-21):** The owner confirmed the plan and the order on 2026-10-19. Part 1
+(music bed from a file) is merged (PR #59). Part 2 (duck) is built, in its own PR, at project
+version 22 (version 21 went to the gaps on the timeline). Parts 3 and 4 come after it.
 **Source:** the backlog item of 2026-10-17, and the owner's choice for the design video
 format (Juxtopposed's "I Redesigned VLC" has its own music bed): a quiet music bed under
 the voice, from open-source tools or AI music models, lower under speech.
@@ -52,7 +53,7 @@ on a copy of the AgentUX project.
 
 1. **Music bed from a file** (project version 20). It gives the most value first: a
    licensed track under the voice, at the correct level, in the preview and the export.
-2. **Duck.** The music goes down under speech and up in pauses (version 21). It changes the
+2. **Duck.** The music goes down under speech and up in pauses (version 22). It changes the
    gain of part 1.
 3. **Music library.** It keeps tracks and their licences for the next videos.
 4. **Make music on this Mac.** It writes new tracks into the library, and it needs a large
@@ -151,16 +152,28 @@ The rules (`MusicDuck`, `Sources/MusicDuck.swift`):
   the music stays down.
 - The limits are constants in `MusicDuck`, so they are easy to change after the owner
   listens on a phone.
-- Export: the gain points become one `volume` expression for each frame (`eval=frame`), in
-  the graph file that the export writes now for long graphs. The preview uses
-  `setVolumeRamp` between the same points.
+- Export: the plays of the music first become one bed (`amix`). Then one `volume`
+  expression (`eval=frame`, frames of 256 samples) moves the bed between the gain points,
+  and a second `amix` puts it under the voice. The expression is a sum of one flat term for
+  each part, so it never nests. A long graph goes to a file, as before (`spilledGraph`; the
+  movie now uses it too).
+- Preview: each play's volume ramps go between the points where a fade or the duck starts
+  or stops a change. Between two points the volume moves in a straight line, in the preview
+  and in the export. Where a fade and a duck ramp change together, the points are 0.05 s
+  apart.
+- With no transcript, the app measures the sound levels before the export or the preview
+  (`MusicSpeech.prepare`). With no transcript and no levels, all of the video is speech,
+  so the music never goes up over the voice.
 
-Saved data (version 21): `MusicBed.duck` (`MusicDuck`: `lift`; nil is off). The app refuses
-a file of version 20 or older that holds `duck`.
+Saved data (version 22): `MusicBed.duck` (`MusicDuck`: `lift`; nil is off). The first piece
+of a recording turns it on (lift 8 dB); a bed from a version 20 or 21 file keeps its sound
+(off). The app refuses a file of version 21 or older that holds `duck`.
 
-For agents: `updateMusic` gets `duck` and `lift`. `analyze` with kind `music` gives the runs
-of speech, the gain points and the measured loudness of the voice, the music and the mix. An
-agent can then check the mix without ears.
+For agents: `setMusicDuck {clipID, music: {duck?, lift?}}`. (The plan first gave `duck` and
+`lift` to `updateMusic`, but the duck is for all the music of a recording, not one piece.)
+`state.clips[].music.duck` gives the lift and where speech comes from. `analyze` with kind
+`music` gives the runs of speech, the gain points and the measured loudness of the voice,
+of each piece and of the mix. An agent can then check the mix without ears.
 
 ## Part 3: music library
 

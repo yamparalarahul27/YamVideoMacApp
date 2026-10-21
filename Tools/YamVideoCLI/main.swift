@@ -38,9 +38,10 @@ Editing (always against the revision you read: --session, --project, --revision)
   yamvideoctl export --path OUT.mp4 (--clip ID | --movie) [--overwrite]
   yamvideoctl export --youtube --path FOLDER --clip ID [--overwrite]   video, captions, thumbnail and upload text
   yamvideoctl export [--youtube] --path OUT.mp4|FOLDER --clip ID --short ID [--overwrite]   a Short, 1080×1920
-  yamvideoctl analyze --kind silence|zooms|screenZooms|autoEdit|thumbnailFrames|logos --clip ID [--style tight|natural|review] [--limit N]
+  yamvideoctl analyze --kind silence|zooms|screenZooms|autoEdit|thumbnailFrames|logos|music --clip ID [--style tight|natural|review] [--limit N]
                                                  (logos: the brands said and a logo badge for each; --minimum SECONDS between
-                                                 two badges of one logo, default 60)
+                                                 two badges of one logo, default 60; music: the duck's gain points
+                                                 and the loudness of the voice with the music)
   yamvideoctl setlogo --name BRAND --path FILE [--words "next.js, next js"]   keep a copy of a logo in the library
   yamvideoctl removelogo --name BRAND
   yamvideoctl transcribe --clip ID [--model large-v3-turbo-q5_0|base.en] [--language CODE]

@@ -154,6 +154,21 @@ extension AppModel {
         }
     }
 
+    /// The duck of all the recording's music. `live` while the Lift slider moves.
+    func setMusicDuck(_ duck: MusicDuck?, live: Bool = false) {
+        guard let item = selectedItem, item.music != nil else { return }
+        guard !timelineTracks.locked.contains(.music) else { statusMessage = "Music is locked. Unlock it to change it."; return }
+        let command = EditCommand.setMusicDuck(clip: item.id, duck: duck)
+        let key = "music-duck-\(item.id)"
+        if live || isGestureOpen(key) {
+            if let error = updateGesture(key, label: "Music Lift", [command]) { statusMessage = error.message }
+            if !live { endGesture() }
+            return
+        }
+        guard duck != item.music?.duck else { return }
+        if case .failure(let error) = perform([command], label: "Music Duck") { statusMessage = error.message }
+    }
+
     func removeSelectedMusic() {
         guard let item = selectedItem, let id = selectedMusicID else { return }
         guard !timelineTracks.locked.contains(.music) else { statusMessage = "Music is locked. Unlock it to delete."; return }

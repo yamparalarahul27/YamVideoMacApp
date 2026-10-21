@@ -191,10 +191,14 @@ struct MusicBed: Codable, Equatable {
     var voice: Double
     /// In order of start; they do not overlap.
     var pieces: [MusicPiece]
+    /// The music goes down under speech and up in pauses (version 22 onwards). Nil is off:
+    /// a new bed has it on, and a bed from an older file keeps its sound.
+    var duck: MusicDuck?
 
     func problem(duration: Double) -> String? {
         guard voice.isFinite, Music.loudnessRange.contains(voice) else { return "The music has no measured loudness of the voice." }
         guard !pieces.isEmpty else { return "The music has no pieces." }
+        if let problem = duck?.problem { return problem }
         guard Set(pieces.map(\.id)).count == pieces.count else { return "Two pieces of music have the same ID." }
         if let problem = pieces.lazy.compactMap({ $0.problem(duration: duration) }).first { return problem }
         let ordered = pieces.sorted { $0.start < $1.start }
@@ -218,8 +222,9 @@ struct MusicBed: Codable, Equatable {
         return time...next
     }
 
-    /// What the export and the preview play: each file once, and every play with its gain.
-    func mix(duration: Double) -> MusicMix {
+    /// What the export and the preview play: each file once, every play with its gain, and
+    /// the duck's gain points over all of it.
+    func mix(duration: Double, duck envelope: DuckEnvelope? = nil) -> MusicMix {
         var files: [URL] = []
         var plays: [MusicMix.Play] = []
         for piece in pieces.sorted(by: { $0.start < $1.start }) {
@@ -228,7 +233,8 @@ struct MusicBed: Codable, Equatable {
             let gain = piece.gain(voice: voice)
             plays += piece.plays(videoDuration: duration).map { MusicMix.Play(file: index, play: $0, gain: gain) }
         }
-        return MusicMix(files: files, plays: plays)
+        let duck = envelope.flatMap { $0.isFlat && abs($0.points.first?.lift ?? 0) < 0.0005 ? nil : $0 }
+        return MusicMix(files: files, plays: plays, duck: duck)
     }
 }
 
@@ -243,6 +249,8 @@ struct MusicMix: Equatable {
     }
     var files: [URL]
     var plays: [Play]
+    /// The duck, in edited seconds of the recording. Nil: the gains stay as they are.
+    var duck: DuckEnvelope? = nil
     var isEmpty: Bool { plays.isEmpty }
 }
 
@@ -267,7 +275,7 @@ extension VideoItem {
     /// The music the export mixes in, or nil: none, switched off, or no sound.
     func exportMusic(_ settings: ExportSettings) -> MusicMix? {
         guard let music, isOn(.music), info?.hasAudio == true, settings.audio != .none, !settings.format.isAnimation else { return nil }
-        let mix = music.mix(duration: editedDuration)
+        let mix = music.mix(duration: editedDuration, duck: musicDuck)
         return mix.isEmpty ? nil : mix
     }
 }

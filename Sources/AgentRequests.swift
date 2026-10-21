@@ -245,7 +245,7 @@ struct WireCommand: Codable, Equatable {
         "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
         "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms",
         "setChange", "setProjectNotes", "addProjectNote",
-        "addMusic", "updateMusic", "removeMusic",
+        "addMusic", "updateMusic", "removeMusic", "setMusicDuck",
     ]
 
     /// Files that must be probed before this command can be resolved.
@@ -303,7 +303,7 @@ struct AgentSessionInfo: Encodable {
     var methods: [String]
     var commands: [String]
     var analyzeKinds = AgentSessionInfo.analyzeKinds
-    static let analyzeKinds = ["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames", "logos"]
+    static let analyzeKinds = ["silence", "zooms", "screenZooms", "autoEdit", "thumbnailFrames", "logos", "music"]
     var exportScopes = ["recording", "movie"]
     var timeSpaces = ["recording", "movie"]
 }
@@ -1480,7 +1480,7 @@ extension AppModel {
         case "setScreen", "updateScreen", "removeScreen", "addLayout", "updateLayout", "removeLayout", "replaceLayouts",
              "addScreenZoom", "updateScreenZoom", "removeScreenZoom", "replaceScreenZooms":
             return try Self.resolveScreen(wire, in: document, probed: probed, face: face, border: border)
-        case "addMusic", "updateMusic", "removeMusic":
+        case "addMusic", "updateMusic", "removeMusic", "setMusicDuck":
             return try Self.resolveMusic(wire, in: document, measured: music, voices: voices)
         default:
             throw EditError(code: .unsupportedCapability,
@@ -1925,6 +1925,11 @@ extension AppModel {
                 }
                 return try JSONValue.from(AutoEditResult(plan, applied: false, transcribed: false, note: note))
             })
+        case "music":
+            guard item.music != nil else { return .failure(.invalid("Recording \(clipID) has no music. Add music with addMusic first.")) }
+            return .success(startJob(kind: "analyze", clip: clipID, origin: agentOrigin(request)) {
+                try JSONValue.from(try await MusicAnalysis.analyze(item, info: info))
+            })
         case "thumbnailFrames":
             let count = request.limit ?? 8
             guard (1...20).contains(count) else { return .failure(.invalid("limit for thumbnailFrames is from 1 to 20.")) }
@@ -2171,6 +2176,7 @@ extension AppModel {
                 switch work {
                 case .recording(let recording, let info):
                     let item = recording.effective
+                    await MusicSpeech.prepare(item)
                     try await FFmpeg.export(input: item.url, output: temporary, info: info,
                                             crop: (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
                                             regions: item.blurBoxes, zoomShots: item.zoomShots,
