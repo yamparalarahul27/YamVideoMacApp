@@ -646,3 +646,12 @@ Mock-ups on sample plans in the owner's rhythm: `docs/prototypes/calendar-glance
   posts and the last planned day. Agents Manual 4.17.
 - `./test.sh calendar`; `YAMVIDEO_SNAPSHOT_ONLY=calendar Tools/Snapshot/snapshot.sh`.
 
+**Colours, the same day.** The owner: the orange and blue "is not that good"; use the
+platforms' colours, then "icons instead of fill colour", "official logos". Mock-ups:
+`docs/prototypes/calendar-colours.html`. As built: the platforms' official logos, drawn in
+`Sources/PlatformLogos.swift` from their shapes (YouTube's red play button, Instagram's
+camera on its gradient, X's mark, LinkedIn's "in"; nothing downloaded): in colour once
+posted, grey while planned, grey in a red ring once missed. Videos are calm grey chips
+with a film or phone icon and a LONG VIDEO label; missed posts are red; empty slots are
+grey dashes.
+

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendar Colours</title>
+<style>
+  :root { --bg: #1c1c1e; --row: #2a2a2d; --line: #38383b; --text: #ececee; --muted: #9b9ba1;
+          --yt: #ff0033; --ig: linear-gradient(45deg, #feda75, #fa7e1e 30%, #d62976 60%, #962fbf 85%, #4f5bd5); --ig1: #e1306c;
+          --x: #ffffff; --li: #0a66c2; --warn: #ff453a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111113; color: var(--text); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; padding: 22px 16px 40px; }
+  h1 { font-size: 19px; margin: 0 0 4px; } .lead { color: var(--muted); margin: 0 0 18px; }
+  h2 { font-size: 15px; margin: 26px 0 10px; } h2 span { color: var(--muted); font-weight: 400; }
+  .frame { max-width: 1240px; background: var(--bg); border: 1px solid #2c2c2e; border-radius: 12px; padding: 14px 18px; display: grid; grid-template-columns: 1fr 380px; gap: 22px; }
+  h4 { margin: 10px 0 6px; font-size: 12px; color: var(--muted); } h4 b { color: var(--text); font-size: 13px; margin-right: 6px; }
+  .row { display: grid; grid-template-columns: 56px 92px 118px 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; margin-bottom: 5px; background: var(--row); }
+  .date b { font-size: 20px; font-weight: 650; } .date span { color: var(--muted); font-size: 11px; margin-left: 4px; }
+  .rel { font-weight: 700; } .rel small { display: block; color: var(--muted); font-weight: 400; }
+  .what b { display: block; } .what small { color: var(--muted); font-size: 11px; }
+  .badge { font-size: 10px; font-weight: 800; letter-spacing: .03em; border-radius: 5px; padding: 3px 7px; white-space: nowrap; display: inline-block; }
+  .marks { display: flex; gap: 4px; }
+  .m { font-size: 10.5px; font-weight: 800; border-radius: 4px; padding: 0 6px; line-height: 18px; border: 1.3px solid; }
+  /* brand marks: filled = posted, outlined = planned, outlined + strike = missed */
+  .m.yt { border-color: var(--yt); color: var(--yt); } .m.yt.on { background: var(--yt); color: #fff; }
+  .m.ig { border-color: var(--ig1); color: var(--ig1); } .m.ig.on { background: var(--ig); color: #fff; border-color: transparent; }
+  .m.x { border-color: var(--x); color: var(--x); } .m.x.on { background: #000; color: #fff; border-color: #fff; }
+  .m.li { border-color: #3d8fe0; color: #3d8fe0; } .m.li.on { background: var(--li); color: #fff; border-color: var(--li); }
+  .m.miss { position: relative; opacity: .9; } .m.miss::after { content: "!"; position: absolute; top: -6px; right: -5px; width: 12px; height: 12px; border-radius: 6px; background: var(--warn); color: #fff; font-size: 9px; line-height: 12px; text-align: center; }
+  .warn { color: var(--warn); }
+  .slot { background: transparent !important; border: 1.4px dashed #6c6c72; }
+  .slot .rel, .slot b { color: #c7c7cc; }
+  .cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .cell { min-height: 130px; border-right: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 5px; }
+  .cell:last-child { border-right: 0; }
+  .cell .n { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; } .cell .n i { font-style: normal; font-weight: 700; font-size: 10px; color: #d1d1d6; }
+  .chip { border-radius: 6px; padding: 5px 7px; } .chip .k { font-size: 9.5px; font-weight: 800; letter-spacing: .04em; } .chip .t { font-weight: 650; font-size: 12px; margin: 2px 0 3px; }
+  .chip .marks .m { font-size: 9px; line-height: 14px; padding: 0 4px; }
+  .slotbox { border: 1.4px dashed #6c6c72; border-radius: 6px; padding: 5px 7px; color: #c7c7cc; font-size: 11px; font-weight: 600; } .slotbox small { display: block; color: var(--muted); font-weight: 400; }
+  /* A: calm chips */
+  .a .long { background: #3a3a3e; border: 1px solid #5a5a5f; } .a .long .k { color: #f2f2f7; } .a .short { background: #2c2c2f; border: 1px solid #3c3c40; } .a .short .k { color: var(--muted); }
+  .a .badge.long { background: #e5e5ea; color: #111; } .a .badge.short { background: #3a3a3e; color: #e5e5ea; }
+  .a .row.longrow { background: #333336; border: 1px solid #55555a; }
+  /* B: brand-coloured videos */
+  .b .long { background: linear-gradient(0deg, rgba(255,0,51,.22), rgba(255,0,51,.22)), #222; border: 1px solid rgba(255,0,51,.7); } .b .long .k { color: #ff5a73; }
+  .b .short { background: linear-gradient(0deg, rgba(214,41,118,.18), rgba(150,47,191,.18)), #222; border: 1px solid rgba(214,41,118,.55); } .b .short .k { background: var(--ig); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .b .badge.long { background: var(--yt); color: #fff; } .b .badge.short { background: var(--ig); color: #fff; }
+  .b .row.longrow { background: rgba(255,0,51,.13); border: 1px solid rgba(255,0,51,.5); }
+  .b .row.shortrow { background: rgba(214,41,118,.10); border: 1px solid rgba(214,41,118,.35); }
+  .need { background: rgba(255,69,58,.10) !important; border: 1px solid rgba(255,69,58,.45) !important; }
+  .legend { color: var(--muted); font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+  @media (max-width: 900px) { .frame { grid-template-columns: 1fr; } .row { grid-template-columns: 50px 1fr; } .row .badge, .row .what, .row .marks { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<h1>Calendar colours — two options</h1>
+<p class="lead">Platform colours instead of orange and blue. Filled mark = posted, outlined = planned, a red "!" = its day passed without it. Empty slots are a neutral dashed outline.</p>
+
+<h2>Option A <span>· calm grey videos; the colour comes from the platform marks</span></h2>
+<div class="frame a">
+  <div>
+    <h4><b>Needs you</b>2</h4>
+    <div class="row need"><div class="date"><b>20</b><span>Tue</span></div><div class="rel warn">Yesterday<small>19:00</small></div><div><span class="badge short">▯ SHORT</span></div><div class="what"><b>Draw it before you build it</b><small class="warn">Not posted yet</small></div><div class="marks"><span class="m yt miss">YT</span><span class="m ig miss">IG</span><span class="m x miss">X</span><span class="m li miss">in</span></div></div>
+    <div class="row need"><div class="date"><b>17</b><span>Sat</span></div><div class="rel warn">4 days ago<small>19:00</small></div><div><span class="badge short">▯ SHORT</span></div><div class="what"><b>One database for 136 references</b><small class="warn">X and LinkedIn not posted</small></div><div class="marks"><span class="m yt on">YT</span><span class="m ig on">IG</span><span class="m x miss">X</span><span class="m li miss">in</span></div></div>
+    <h4><b>This week</b>19–25 Oct</h4>
+    <div class="row longrow"><div class="date"><b>22</b><span>Thu</span></div><div class="rel">Tomorrow<small>19:00</small></div><div><span class="badge long">🎬 LONG VIDEO</span></div><div class="what"><b>The search behind my Mobbin (Part 2)</b><small>System design for designers, Part 2</small></div><div class="marks"><span class="m yt">YT</span><span class="m ig">IG</span><span class="m x">X</span><span class="m li">in</span></div></div>
+    <div class="row"><div class="date"><b>24</b><span>Sat</span></div><div class="rel">In 3 days<small>19:00</small></div><div><span class="badge short">▯ SHORT</span></div><div class="what"><b>Why search beats folders</b><small>System design for designers, Part 2</small></div><div class="marks"><span class="m yt">YT</span><span class="m ig">IG</span><span class="m x">X</span><span class="m li">in</span></div></div>
+    <div class="row slot"><div class="date"><b>27</b><span>Tue</span></div><div class="rel">In 6 days<small>19:00</small></div><div><span class="badge" style="border:1px dashed #8e8e93;color:#c7c7cc">SHORT SLOT</span></div><div class="what"><b>Empty</b><small>Drag a Short here from Not planned</small></div><div></div></div>
+  </div>
+  <div>
+    <h4><b>Month</b>cells</h4>
+    <div class="cells">
+      <div class="cell"><div class="n">17</div><div class="chip short"><div class="k">▯ SHORT · 19:00</div><div class="t">One database for 136 references</div><div class="marks"><span class="m yt on">YT</span><span class="m ig on">IG</span><span class="m x miss">X</span><span class="m li miss">in</span></div></div></div>
+      <div class="cell"><div class="n">22 <i>Tomorrow</i></div><div class="chip long"><div class="k">🎬 LONG VIDEO · 19:00</div><div class="t">The search behind my Mobbin (Part 2)</div><div class="marks"><span class="m yt">YT</span><span class="m ig">IG</span><span class="m x">X</span><span class="m li">in</span></div></div></div>
+      <div class="cell"><div class="n">27 <i>in 6 days</i></div><div class="slotbox">Short slot · 19:00<small>Empty · drag one here</small></div></div>
+    </div>
+    <div class="legend"><span class="m yt on">YT</span><span class="m ig on">IG</span><span class="m x on">X</span><span class="m li on">in</span> posted · <span class="m yt">YT</span> planned · <span class="m yt miss">YT</span> missed</div>
+  </div>
+</div>
+
+<h2>Option B <span>· long videos in YouTube red, Shorts in the Instagram gradient</span></h2>
+<div class="frame b">
+  <div>
+    <h4><b>Needs you</b>2</h4>
+    <div class="row need"><div class="date"><b>20</b><span>Tue</span></div><div class="rel warn">Yesterday<small>19:00</small></div><div><span class="badge short">▯ SHORT</span></div><div class="what"><b>Draw it before you build it</b><small class="warn">Not posted yet</small></div><div class="marks"><span class="m yt miss">YT</span><span class="m ig miss">IG</span><span class="m x miss">X</span><span class="m li miss">in</span></div></div>
+    <div class="row need"><div class="date"><b>17</b><span>Sat</span></div><div class="rel warn">4 days ago<small>19:00</small></div><div><span class="badge short">▯ SHORT</span></div><div class="what"><b>One database for 136 references</b><small class="warn">X and LinkedIn not posted</small></div><div class="marks"><span class="m yt on">YT</span><span class="m ig on">IG</span><span class="m x miss">X</span><span class="m li miss">in</span></div></div>
+    <h4><b>This week</b>19–25 Oct</h4>
+    <div class="row longrow"><div class="date"><b>22</b><span>Thu</span></div><div class="rel">Tomorrow<small>19:00</small></div><div><span class="badge long">🎬 LONG VIDEO</span></div><div class="what"><b>The search behind my Mobbin (Part 2)</b><small>System design for designers, Part 2</small></div><div class="marks"><span class="m yt">YT</span><span class="m ig">IG</span><span class="m x">X</span><span class="m li">in</span></div></div>
+    <div class="row shortrow"><div class="date"><b>24</b><span>Sat</span></div><div class="rel">In 3 days<small>19:00</small></div><div><span class="badge short">▯ SHORT</span></div><div class="what"><b>Why search beats folders</b><small>System design for designers, Part 2</small></div><div class="marks"><span class="m yt">YT</span><span class="m ig">IG</span><span class="m x">X</span><span class="m li">in</span></div></div>
+    <div class="row slot"><div class="date"><b>27</b><span>Tue</span></div><div class="rel">In 6 days<small>19:00</small></div><div><span class="badge" style="border:1px dashed #8e8e93;color:#c7c7cc">SHORT SLOT</span></div><div class="what"><b>Empty</b><small>Drag a Short here from Not planned</small></div><div></div></div>
+  </div>
+  <div>
+    <h4><b>Month</b>cells</h4>
+    <div class="cells">
+      <div class="cell"><div class="n">17</div><div class="chip short"><div class="k">▯ SHORT · 19:00</div><div class="t">One database for 136 references</div><div class="marks"><span class="m yt on">YT</span><span class="m ig on">IG</span><span class="m x miss">X</span><span class="m li miss">in</span></div></div></div>
+      <div class="cell"><div class="n">22 <i>Tomorrow</i></div><div class="chip long"><div class="k">🎬 LONG VIDEO · 19:00</div><div class="t">The search behind my Mobbin (Part 2)</div><div class="marks"><span class="m yt">YT</span><span class="m ig">IG</span><span class="m x">X</span><span class="m li">in</span></div></div></div>
+      <div class="cell"><div class="n">27 <i>in 6 days</i></div><div class="slotbox">Short slot · 19:00<small>Empty · drag one here</small></div></div>
+    </div>
+    <div class="legend"><span class="m yt on">YT</span><span class="m ig on">IG</span><span class="m x on">X</span><span class="m li on">in</span> posted · <span class="m yt">YT</span> planned · <span class="m yt miss">YT</span> missed</div>
+  </div>
+</div>
+</body>
+</html>
