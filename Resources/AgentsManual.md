@@ -150,6 +150,11 @@ edit, and each edit becomes one undo step with your name on it.
     the video it starts. Put one at each part's first sentence, for 2–3 s, and use the
     chapter's words for the title.
   Nothing else may show with them; leave gaps round them for other graphics.
+- A `link` card is a browser bar: a pointer clicks the address field and the address types
+  in. Give `image` (a screenshot of that page, an absolute path) and the card about 7 s, so
+  the page loads in a window under the bar. Put it on the side the owner faces (move it
+  with `transform`), clear of the face. Write the label (`kicker`) as an action, for example
+  "Link in the description".
 
 ### 4.6 Title, description, chapters and tags
 

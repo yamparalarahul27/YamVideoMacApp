@@ -90,6 +90,12 @@ import Foundation
     let dimShot = try await GraphicsSnapshot.draw(GraphicsTrack(items: [dimmed]), duration: 10, fps: "30", time: 3.4, over: grey)
     let dimCorner = rgb(dimShot.image, 20, 20)
     check(dimCorner.0 < greyCorner.0 - 30, "a dim cover darkens the picture", "\(dimCorner) over \(greyCorner)")
+    var overlaid = kinetic; overlaid.props["background"] = .string("overlay")
+    check(GraphicsTrack(items: [overlaid]).problem(duration: 60) == nil, "a cover may use the overlay background")
+    let overlayShot = try await GraphicsSnapshot.draw(GraphicsTrack(items: [overlaid]), duration: 10, fps: "30", time: 3.4, over: grey)
+    let overlayTop = rgb(overlayShot.image, 20, 20), overlayBottom = rgb(overlayShot.image, 20, 700)
+    check(abs(overlayTop.0 - greyCorner.0) < 8 && overlayBottom.0 < greyCorner.0 - 30,
+          "an overlay cover keeps the picture at the top and darkens it at the bottom", "\(overlayTop) \(overlayBottom) over \(greyCorner)")
 
     // The bar's fill (and its knob) in the accent: how far right it reaches, in the 1280 frame.
     func fillEnd(_ image: CGImage) -> Int {

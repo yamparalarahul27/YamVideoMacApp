@@ -122,7 +122,7 @@ graphics closer than 1.0 s share one panel, so the shade does not flash between 
 | `titleCard` | column | kicker, title, detail; badges [text], badgesAt |
 | `phoneScreens` | column | kicker, title, detail; screens [{image, at}] |
 | `route` | column | kicker, from, to, drawAt; question?, questionAt; chips [{text, at}] |
-| `link` | column | kicker, url, typeAt |
+| `link` | column | kicker? (none: the bar moves to the top), url, typeAt (1.3 s or later), image? (a page that loads in a window under the bar). A browser bar with macOS window lights; a pointer clicks the field and the address types in (21 Oct 2026). |
 | `panelTitle` | panel | kicker, title, count (numbered badges), countAt |
 | `rule` | panel | kicker, number, title, subtitle?; points [{text, at}]; demo? (below) |
 | `checklist` | panel | kicker, title, footer; items [{text, at}] |
