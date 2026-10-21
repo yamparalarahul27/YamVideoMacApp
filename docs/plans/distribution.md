@@ -617,3 +617,32 @@ own day. New plans tick all four platforms. Reminders come later, with phase 4.
 **Later.** Reminders (macOS notifications on the day), the check-in reminders of phase 4,
 and post kits (phase 2) opening from a release.
 
+### 15.1 At a glance (2026-10-21)
+
+**The owner's feedback:** "It is hard for me to know when is when at first glance." The
+month showed short chips with cut-off titles, long videos only a colour apart from Shorts,
+past and future alike, missed posts like plans, and a third of the window empty.
+Mock-ups on sample plans in the owner's rhythm: `docs/prototypes/calendar-glance.html`
+(A: the month made readable with Up next; B: a Schedule list). **The owner chose both.**
+
+**As built.**
+- **Schedule** (the first view; the last view chosen comes back): *Needs you* (past
+  releases not posted on a platform), then *This week*, *Next week* and each week to the
+  planning horizon, every day said in words; the rhythm's empty slots as dashed rows; what
+  went out in the last four weeks folded under *Earlier*. A platform with its own day is a
+  row of its own ("Only LinkedIn this day").
+- **Month and Week:** the grid fills the window; an *Up next* strip (the next four
+  releases or empty slots, and *Planned ahead* against the horizon); past days faded,
+  today outlined, Yesterday/Today/Tomorrow and "in N days" on days with something on;
+  long videos as purple bars with a film icon, Shorts as blue chips; marks green when
+  posted, orange when missed; dashed empty slots.
+- **The rhythm** (`ReleaseRhythm`, Library version 4): the long video's day and weeks
+  apart, the Shorts' days, the time and how many weeks ahead to plan. Nil uses Style.md's
+  (a long video every other Thursday, Shorts Tuesday and Saturday at 19:00, eight weeks).
+  Every other week counts from the latest long video on that day. A long-video week is
+  filled by a long video on any of its days; a week needs as many Shorts as Short days.
+  Set it with **Rhythm** in the Calendar's bar; it undoes with the Library.
+- Agents: `setRhythm`; `library.calendar` gives the rhythm, the empty slots, the missed
+  posts and the last planned day. Agents Manual 4.17.
+- `./test.sh calendar`; `YAMVIDEO_SNAPSHOT_ONLY=calendar Tools/Snapshot/snapshot.sh`.
+

@@ -428,6 +428,9 @@ extension AgentCatalog {
                  field("platforms", "string[]", "Of youtube, instagram, x, linkedin. Left out: all four.", required: false),
                  field("ownDays", "object", "A platform that goes out on another day: {platform: yyyy-MM-dd}.", required: false)],
                 #"{"type": "planRelease", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003", "day": "2026-10-19", "clock": "19:00", "platforms": ["youtube", "instagram", "x", "linkedin"]}"#)
+        library("setRhythm", "Set the owner's release rhythm, as they tell you: the day a long video goes out and how many weeks apart, the days the Shorts go out, the time, and how many weeks ahead they plan. The Calendar shows each day in it with nothing planned as an empty slot; library.calendar lists them and the missed posts. Left out, a key takes the default (long video every other Thursday, Shorts Tuesday and Saturday, 19:00, 8 weeks); with no rhythm at all it goes back to the default.",
+                [field("rhythm", "object", "{longDay (monday…sunday, or null for no long-video slots), longEvery (weeks, 1–8), longFrom (a day in a long-video week, yyyy-MM-dd; left out, the latest long video), shortDays ([monday…sunday]), time (HH:mm or null), aheadWeeks (1–52)}", required: false)],
+                #"{"type": "setRhythm", "rhythm": {"longDay": "thursday", "longEvery": 2, "shortDays": ["tuesday", "saturday"], "time": "19:00"}}"#)
         library("unplanRelease", "Take a video's plan away; it waits in the Calendar's Not planned list.", [idea, field("videoID", "uuid", "A video from library.ideas[].videos[].id.")],
                 #"{"type": "unplanRelease", "ideaID": "IDEA-ID", "videoID": "00000000-0000-4000-8000-000000000003"}"#)
 

@@ -41,9 +41,12 @@ struct LibraryWireCommand: Codable, Equatable {
     var rule: String?
     /// addStyleRule: where the rule came from, like "feedback on AppStore, 17 Oct".
     var source: String?
+    /// setRhythm: the release rhythm; keys left out take the default. Left out entirely,
+    /// the rhythm goes back to the default.
+    var rhythm: ReleaseRhythm?
 
     static let types = ["addIdea", "updateIdea", "removeIdea", "addIdeaImages", "removeIdeaImage", "linkProject", "unlinkProject",
-                        "importVideos", "addPost", "removePost", "planRelease", "unplanRelease", "setStyle", "addStyleRule", "removeStyleRule"]
+                        "importVideos", "addPost", "removePost", "planRelease", "unplanRelease", "setRhythm", "setStyle", "addStyleRule", "removeStyleRule"]
 }
 
 /// The parts of a request only Library methods read, decoded from the same line.
@@ -104,6 +107,20 @@ struct AgentLibrary: Encodable {
     }
     struct Step: Encodable { var transactionID: UUID; var label: String; var by: String }
     struct History: Encodable { var undo: Step?; var redo: Step? }
+    /// What the Calendar shows the owner about the plan as a whole.
+    struct Calendar: Encodable {
+        struct Slot: Encodable { var day: String; var kind: String; var time: String? }
+        struct Missed: Encodable { var ideaID: UUID; var videoID: UUID; var title: String; var day: String; var missing: [String] }
+        var today: String
+        /// The rhythm in use, and whether the owner set it (false: the default).
+        var rhythm: ReleaseRhythm
+        var rhythmSet: Bool
+        /// The rhythm's days from today to the planning horizon with nothing planned.
+        var emptySlots: [Slot]
+        /// Past releases still not posted on a platform, newest first.
+        var missed: [Missed]
+        var lastPlannedDay: String?
+    }
 
     var revision: Int
     var folder: String?
@@ -114,6 +131,7 @@ struct AgentLibrary: Encodable {
     var module: String
     var openProject: OpenProject
     var history: History
+    var calendar: Calendar
     var ideas: [Idea]
 }
 
@@ -180,7 +198,20 @@ extension AppModel {
                             selectedIdea: selectedIdeaID, module: module.rawValue,
                             openProject: .init(projectID: projectID, path: projectURL?.path, idea: openProjectIdea?.id),
                             history: .init(undo: step(libraryUndoEntries.last), redo: step(libraryRedoEntries.last)),
-                            ideas: ideas)
+                            calendar: agentCalendar(), ideas: ideas)
+    }
+
+    func agentCalendar(today: Date = Date()) -> AgentLibrary.Calendar {
+        let day = ReleasePlan.day(today)
+        let horizon = ReleasePlan.calendar.date(byAdding: .day, value: library.rhythmInUse.aheadWeeks * 7, to: today) ?? today
+        return .init(today: day, rhythm: library.rhythmInUse, rhythmSet: library.rhythm != nil,
+                     emptySlots: library.emptySlots(from: day, through: ReleasePlan.day(horizon))
+                        .map { .init(day: $0.day, kind: $0.long ? "long" : "short", time: $0.time) },
+                     missed: library.missed(before: day).map {
+                         .init(ideaID: $0.release.item, videoID: $0.release.video, title: $0.release.title, day: $0.release.day,
+                               missing: $0.missing.map(\.rawValue))
+                     },
+                     lastPlannedDay: library.lastPlannedDay)
     }
 
     /// `libraryApply`: 1–100 Library commands as one undo step, all or nothing, against
@@ -312,6 +343,8 @@ extension AppModel {
             let found = LibraryScan.candidates(roots: roots, library: library)
             guard !found.isEmpty else { throw EditError.notFound("No YamVideo projects or Export for YouTube files at those paths.") }
             return LibraryScan.commands(found).map { ($0, []) }
+        case "setRhythm":
+            return [(.setRhythm(wire.rhythm), [])]
         case "setStyle":
             guard let text = wire.text else { throw EditError(code: .invalidRequest, message: "setStyle needs text: all of Style.md.") }
             return [(.setStyle(text), [])]
