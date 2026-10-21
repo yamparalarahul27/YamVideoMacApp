@@ -1,10 +1,10 @@
 {
   "footage" : "~/Desktop/Yamparala Media",
   "mac" : "Equicom",
-  "updated" : "2026-10-20T07:41:59Z",
+  "updated" : "2026-10-21T05:17:41Z",
   "videos" : [
     {
-      "bytes" : 612158590,
+      "bytes" : 612272153,
       "exports" : 0,
       "folder" : "2026-08-11 AgentUX iPad Sketch",
       "projects" : [
@@ -54,30 +54,51 @@
       ]
     },
     {
-      "bytes" : 9020851568,
+      "bytes" : 3835859531,
       "exports" : 0,
-      "folder" : "2026-10-18 Sahi",
+      "folder" : "2026-10-18 915 by Groww",
       "projects" : [
 
       ],
       "recordings" : [
         "915-WebTerminal-Recording.mov",
-        "IMG_0127.PNG",
-        "IMG_0128.PNG",
-        "Sahi-Mobile-Headshot.MP4",
-        "Sahi-Web-Terminal-Headshot.MP4",
-        "Sahi-Website-Recording.mov",
-        "ScreenRecording_10-18-2026 16-42-59_1.MP4",
-        "ScreenRecording_10-18-2026 16-49-54_1.MP4",
-        "ScreenRecording_10-18-2026 16-53-05_1.MP4",
-        "ScreenRecording_10-19-2026 19-11-07_1.MP4",
+        "DJI_20261018170538_0012_D.MP4",
+        "DJI_20261018171529_0014_D.JPG",
+        "DJI_20261018171636_0015_D.MP4",
         "YamDraw 915 website/frame-01.png",
         "YamDraw 915 website/frame-02.png",
         "YamDraw 915 website/frame-03.png",
         "YamDraw 915 website/frame-04.png",
         "YamDraw 915 website/frame-05.png",
         "YamDraw 915 website/recording.mp4",
-        "YamDraw 915 website/session.json",
+        "YamDraw 915 website/session.json"
+      ]
+    },
+    {
+      "bytes" : 13963280042,
+      "exports" : 0,
+      "folder" : "2026-10-18 Sahi",
+      "projects" : [
+
+      ],
+      "recordings" : [
+        "DJI_20261018160002_0005_D.MP4",
+        "DJI_20261018163040_0006_D.MP4",
+        "DJI_20261018164303_0007_D.MP4",
+        "DJI_20261018164851_0008_D.MP4",
+        "DJI_20261018165327_0009_D.MP4",
+        "DJI_20261018165942_0010_D.MP4",
+        "DJI_20261018170242_0011_D.MP4",
+        "IMG_0127.PNG",
+        "IMG_0128.PNG",
+        "Sahi-Mobile-Headshot.MP4",
+        "Sahi-Web-Terminal-Headshot.MP4",
+        "Sahi-Website-Recording.mov",
+        "Screen Recording 2026-10-19 at 7.24.17 PM.mov",
+        "ScreenRecording_10-18-2026 16-42-59_1.MP4",
+        "ScreenRecording_10-18-2026 16-49-54_1.MP4",
+        "ScreenRecording_10-18-2026 16-53-05_1.MP4",
+        "ScreenRecording_10-19-2026 19-11-07_1.MP4",
         "YamDraw sahi.com website/frame-01.png",
         "YamDraw sahi.com website/frame-02.png",
         "YamDraw sahi.com website/frame-03.png",
@@ -96,7 +117,7 @@
       ]
     },
     {
-      "bytes" : 1362457895,
+      "bytes" : 1362532320,
       "exports" : 0,
       "folder" : "2026-10-19 AgentUX System Design Part 2",
       "projects" : [
@@ -110,11 +131,11 @@
       ]
     },
     {
-      "bytes" : 1001071879,
+      "bytes" : 1002090983,
       "exports" : 0,
       "folder" : "2026-10-19 Tradl AI First Impression",
       "projects" : [
-
+        "B87A2A80-A67A-4C61-8076-E29472F326F0"
       ],
       "recordings" : [
         "Tradl-ai-first-impression.MP4",
@@ -122,7 +143,7 @@
       ]
     },
     {
-      "bytes" : 624575171,
+      "bytes" : 624611610,
       "exports" : 0,
       "folder" : "2026-10-19 YamDrive Shorts",
       "projects" : [
