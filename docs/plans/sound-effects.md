@@ -55,7 +55,10 @@ So the energy cannot come from pauses. It must come from three places:
    stops a licence that a monetised video cannot use, with the same rules as music.
 4. **The level is in LU under the voice**, as for music. A sound is short, so the app
    measures its loudest 400 ms (momentary loudness), not the integrated loudness. Default:
-   −8 LU, so a whoosh is clear but softer than the voice.
+   −8 LU, so a whoosh is clear but softer than the voice. **A peak cap also applies: no cue
+   peaks above −12 dBFS.** A click of 0.12 s has a low 400 ms loudness, so the loudness rule
+   alone gives it too much gain (in the mock-up, the key taps and the checklist ticks peaked
+   at −3 and −2 dBFS before the cap).
 5. **Music hits use the gain points of the duck.** At the start of each section card, the
    music goes up 4 dB over 0.15 s and comes back over 1.0 s. The hit adds points to the same
    envelope as the duck, so the preview and the export play the same sound. The
@@ -63,6 +66,22 @@ So the energy cannot come from pauses. It must come from three places:
    plan". It fits now, because in a tight edit the section cards are the only moments where
    the music can come forward. The hit is short (about 1.2 s), so it does not fight the voice
    for long.
+
+## The mock-up on Tradl (2026-10-21)
+
+A video made outside the app, to hear the plan before any code: the Tradl edit (new look,
+no music) with a fast beat, 38 cues from the owner's kit and three music hits. Made with
+ffmpeg from the app's export; the script is the model for the export graph.
+
+- **Beat:** made with ffmpeg (no download): 120 BPM, Am F C G, kick, clap, hi-hat, bass and
+  a plucked arpeggio. At −18 LU under the voice (2 LU over the music default, for a faster
+  feel). A sketch of the tempo and the energy, not a real track.
+- **Cues and levels (LU under the voice):** section cards whoosh-1 −8; title cards whoosh-1
+  −11; the first kinetic word whoosh-2 −10, later words button-2 and button-3 −12; name
+  plate whoosh-2 −12; link card: click button-4, 8 key taps button-1, window whoosh-2 −10;
+  checklist ticks natural-tap-1 −10. All capped at −12 dBFS peak.
+- **Music hits:** +4 dB at 0:18.7, 0:34.7 and 1:29.3.
+- **The mix:** −14.1 LUFS, −1.8 dBTP; the beat alone measures about −32 LUFS.
 
 ## The track for this channel
 
