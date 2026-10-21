@@ -205,6 +205,12 @@ final class AppModel: ObservableObject {
     @Published var showingProjectNotes = false
     /// The Style sheet (Style.md), while it is up.
     @Published var showingStyle = false
+    /// The gallery's sample the Preview shows, not in the project; nil shows none.
+    @Published var galleryDraft: GalleryDraft? { didSet { if galleryDraft != oldValue { showGalleryDraft() } } }
+    /// The look the gallery's pictures and drafts use.
+    @Published var galleryLook = GalleryLook.glass { didSet { if galleryLook != oldValue { showGalleryDraft() } } }
+    /// The recording the gallery's look was set for (see `openGallery`).
+    var galleryLookClip: UUID?
     /// Style.md as last read or written, and the file's date then, to notice the owner
     /// editing it in another app.
     var styleOnDisk: String?

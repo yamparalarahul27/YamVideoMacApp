@@ -450,6 +450,7 @@ struct CropEditorPane: View {
             picture
                 .frame(maxHeight: .infinity)
                 .overlay(alignment: .top) { beforeBadge }
+                .overlay(alignment: .top) { if model.pictureEdit == nil, !model.showsBefore { GalleryDraftBar() } }
             Divider()
             if let edit = model.pictureEdit { editBar(edit) } else { playerBar }
         }
@@ -514,7 +515,10 @@ struct CropEditorPane: View {
     /// for the vertical layouts of a later phase.
     private var graphicsOverlay: GraphicsOverlayInput? {
         guard !model.timelineTracks.hidden.contains(.graphics), !model.showsBefore, item.isOn(.graphics) else { return nil }
-        guard let track = item.placedGraphics, !track.items.isEmpty else { return nil }
+        // The gallery's draft shows with the recording's graphics, not in the project.
+        var track = item.placedGraphics ?? GraphicsTrack(style: item.graphics?.style ?? GraphicsStyle())
+        if let draft = model.galleryDraftGraphic { track.items.append(draft) }
+        guard !track.items.isEmpty else { return nil }
         let frame = crop.size
         guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
         return GraphicsOverlayInput(clip: item.id, track: track.labellingEndScreen(item.publish?.endScreen), duration: item.editedDuration,

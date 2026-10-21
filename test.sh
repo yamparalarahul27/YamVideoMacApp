@@ -61,6 +61,7 @@ xcrun swiftc \
 	"$ROOT/Sources/LogoAgents.swift" \
 	"$ROOT/Sources/EndScreen.swift" \
 	"$ROOT/Sources/GraphicsRender.swift" \
+	"$ROOT/Sources/GraphicsGallery.swift" \
 	"$ROOT/Sources/Publish.swift" \
 	"$ROOT/Sources/Captions.swift" \
 	"$ROOT/Sources/PublishEditing.swift" \
