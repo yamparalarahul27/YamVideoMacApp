@@ -189,7 +189,7 @@ struct ScreenZoomInspector: View {
                 Text(String(format: "%.1f s", shot.hold))
                     .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Text("Click the screen in the Preview to aim it. It eases in and out over \(String(format: "%.1f", ZoomShot.ease)) s each way.")
+            Text("Drag its frame in the Preview to aim it. It eases in and out over \(String(format: "%.1f", ZoomShot.ease)) s each way.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -236,6 +236,98 @@ struct ScreenAimLayer: View {
                 }
                 .position(x: picture.midX, y: picture.midY)
                 .help("Click the screen to aim the selected screen zoom")
+        }
+    }
+}
+
+/// Over the Preview while a screen zoom is selected. Paused, the screen shows without that
+/// zoom and a frame marks the area the zoom fills: drag the frame, or click the screen, to
+/// aim it. Playing, the zoom plays, and a click aims it as before.
+struct ScreenZoomFrame: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var playback: PlaybackController
+    let screen: ScreenTrack
+    let shot: ZoomShot
+    /// The recording's crop: the frame's size in pixels.
+    let crop: CGRect
+    let endScreen: Double?
+    /// From the pointer to the aim while the frame moves, in screen-recording pixels.
+    @State private var grab: CGSize?
+
+    private let tint = Color.cyan
+
+    var body: some View {
+        Group {
+            if playback.isPlaying {
+                ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
+            } else {
+                GeometryReader { geo in aimFrame(in: geo.size) }
+            }
+        }
+        .task(id: shot.id) { playback.aimedScreenZoom = shot.id }
+        .onDisappear { playback.aimedScreenZoom = nil }
+    }
+
+    @ViewBuilder
+    private func aimFrame(in size: CGSize) -> some View {
+        // The Preview draws the picture fitted inside its 16-point padding.
+        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 16, dy: 16)
+        let scale = min(bounds.width / crop.width, bounds.height / crop.height)
+        let origin = CGPoint(x: bounds.midX - crop.width * scale / 2, y: bounds.midY - crop.height * scale / 2)
+        let toView = { (r: CGRect) in CGRect(x: origin.x + r.minX * scale, y: origin.y + r.minY * scale, width: r.width * scale, height: r.height * scale) }
+        let geometry = LayoutGeometry(track: screen, crop: crop)
+        let time = model.previewTime
+        if let place = screen.zoomArea(shot, at: time, geometry: geometry, endScreen: endScreen) {
+            let area = toView(place.area), screenRect = toView(place.screen)
+            /// A point of the view on the screen recording, as the paused Preview shows it.
+            let toScreen = { (p: CGPoint) in
+                screen.screenPoint(CGPoint(x: (p.x - origin.x) / scale, y: (p.y - origin.y) / scale), at: time,
+                                   geometry: geometry, endScreen: endScreen, leavingOut: shot.id)
+            }
+            ZStack(alignment: .topLeading) {
+                // The screen outside the zoom's area, dimmed.
+                Path { path in
+                    path.addRect(screenRect)
+                    path.addRoundedRect(in: area, cornerSize: CGSize(width: 4, height: 4))
+                }
+                .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(tint, lineWidth: 2)
+                    .shadow(color: .black.opacity(0.5), radius: 3)
+                    .frame(width: area.width, height: area.height)
+                    .offset(x: area.minX, y: area.minY)
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(tint)
+                    .position(x: area.midX, y: area.midY)
+                Text("\(shot.levelLabel) zoom")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(tint))
+                    .fixedSize()
+                    .offset(x: area.minX + 6, y: area.minY + 6)
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .contentShape(Path(screenRect))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if grab == nil {
+                            // On the frame it moves with the pointer; elsewhere it jumps there first.
+                            let start = toScreen(value.startLocation)
+                            grab = area.contains(value.startLocation) ? start.map { CGSize(width: shot.target.x - $0.x, height: shot.target.y - $0.y) } ?? .zero : .zero
+                        }
+                        guard let grab, let point = toScreen(value.location) else { return }
+                        let target = screen.aimTarget(CGPoint(x: point.x + grab.width, y: point.y + grab.height), level: shot.level)
+                        model.aimScreenZoomLive(shot.id, target)
+                    }
+                    .onEnded { _ in
+                        grab = nil
+                        model.endScreenZoomAim()
+                    }
+            )
+            .help("Drag the frame, or click the screen, to aim the zoom. Play to see it.")
         }
     }
 }
