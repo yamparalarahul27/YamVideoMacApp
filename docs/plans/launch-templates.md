@@ -38,9 +38,11 @@ main author; last commit 2026-10-07; many open bugs say its commands are out of 
 Watch time and retention come from no tool: only YouTube Studio and each app's own
 insights have them.
 
-**Decision:** do not install Agent-Reach. Take its YouTube approach only: `yt-dlp`, never
-with cookies or a sign-in. X, Instagram and LinkedIn numbers stay typed in by the owner
-(or read from a screenshot, distribution phase 4), as before.
+**Decision:** do not install Agent-Reach. Take its YouTube approach: `yt-dlp`, never with
+cookies or a sign-in. The owner then asked for Instagram, X and LinkedIn too ("not only
+YouTube"). Agent-Reach reaches those only through the owner's own signed-in session, which
+is the ban risk the owner wants to avoid, so section 4 uses each platform's official route
+instead.
 
 ## 3. brag: what it is and what we take
 
@@ -72,10 +74,35 @@ We do not take brag's method of an agent writing new HTML each time. YamVideo's 
 are fixed templates with typed fields (graphics-track.md section 2), so a template runs the
 same way every time and the owner can edit it.
 
-## 4. Part A: YouTube numbers from a link
+## 4. Part A: numbers from a post's link
 
 Fits distribution phase 4 (Results). The owner pastes a post's link in the Library today;
-this reads its numbers.
+this reads its numbers. Never with the owner's cookies or a scraped session, on any
+platform.
+
+### Each platform's route (checked 2026-10-21)
+
+| Platform | Route | Gives | Sign-in | Cost | Decision |
+|---|---|---|---|---|---|
+| YouTube | `yt-dlp` on the public page | Views, likes, comment count, comments | None | Free | **Yes** (2026-10-21) |
+| Instagram | The official Instagram API with Instagram Login, for the owner's own professional (creator) account | Views of reels (the `views` metric, since v22.0), likes, comments, reach | Once, on Instagram's own consent page; a token then | Free as far as found; confirm | Owner to decide |
+| X | The official X API, now pay-per-use (the free tier ended in February 2026) | The post's public numbers and replies | An API key; no account sign-in | About $0.005 a post read (secondary sources) | Owner to decide: pay a few cents a check, or a screenshot |
+| LinkedIn | The Member Post Analytics API (July 2025) seems open only to approved partner tools | Impressions, reach, reactions, comments | — | — | A screenshot of the post's analytics, read with Vision (distribution phase 4, item 2), or typed in |
+
+Watch time and retention stay with each platform's own analytics: a screenshot or typed
+in.
+
+Sources: [Instagram media insights](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/),
+[Graph API v22.0 changelog](https://developers.facebook.com/docs/graph-api/changelog/version22.0),
+[X moves to pay-per-use](https://opentermsarchive.org/en/memos/x-replaces-its-dollar200-entry-level-api-plan-with-a-pay-per-use-model/),
+[X API pricing 2026](https://www.postproxy.dev/blog/x-api-pricing-2026/),
+[LinkedIn Member Post Analytics API](https://www.destinationcrm.com/Articles/CRM-News/CRM-Across-the-Wire/LinkedIn-Launches-Member-Post-Analytics-API-170402.aspx),
+[Postiz issue on the scope](https://github.com/gitroomhq/postiz-app/issues/1680). Confirm
+Instagram's cost and whether a development-mode Meta app can read the owner's own account
+without app review, X's current per-read price, and LinkedIn's access rules at the start of
+the step.
+
+### YouTube (first)
 
 1. **Check Numbers** on a YouTube post (a video or a Short) in the Library runs
    `yt-dlp --dump-json --skip-download URL` on this Mac, never with cookies. It stores a
@@ -132,7 +159,7 @@ its licence is unknown.
 
 | Step | What | Status |
 |---|---|---|
-| A | YouTube numbers from a link | Next. Ask the owner first to install yt-dlp |
+| A | Numbers from a link: YouTube first, then Instagram and X as the owner decides, LinkedIn from a screenshot | Next. Ask the owner first to install yt-dlp |
 | B1 | Templates gallery and the App demo template | After A |
 | B2 | Launch Short template | After B1 |
 | B3 | Sound effects | After B2 |
@@ -146,7 +173,9 @@ The owner likes them asked one at a time, and mock-ups on their own footage befo
 is chosen.
 
 - **A:** How many of the newest comments to keep at each check? Should a check run from
-  the Library only, or from the calendar's reminders too?
+  the Library only, or from the calendar's reminders too? Instagram: authorise the app
+  once on Instagram's own page (official, free)? X: pay a few cents a check through the
+  official API, or use a screenshot?
 - **B1:** Where the gallery lives: a Templates tab beside Media and Graphics, or the
   Graphics tab. Which app's screens to use for the first mock-up (the bike ride app?).
 - **B2:** The tones to offer at first (brag has seven). The ending: a store badge, a link
