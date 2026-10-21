@@ -33,7 +33,7 @@ So the energy cannot come from pauses. It must come from three places:
   points, and the preview and the export play the same points.
 - **Graphics:** each graphic has a start and an end on the edited timeline, and follows the
   edit. Each kind has its own motion in `Resources/Graphics/graphics.js`, with fixed times.
-  For example, a section card fades in over 0.25 s and its bar moves from 0.45 s to 1.35 s.
+  For example, a section card's shade fades in over 0.5 s and its bar moves from 0.45 s to 1.35 s.
   The link card (PR #71) types one letter each 0.09 s from 1.3 s, and its window opens
   0.2 s after the last letter.
 - **Sound:** the export mixes the voice and the music. Graphics have no sound. Shorts keep

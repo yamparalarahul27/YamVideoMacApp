@@ -327,6 +327,30 @@ body.yg-full { background: #000; }
 .yg-thumb.bg-frost .yg-thumb-title { color: #121417; text-shadow: none; }
 .yg-thumb.bg-frost .yg-thumb-cut.outlined { filter: url(#yg-outline) drop-shadow(0 14px 34px rgba(0, 0, 0, 0.22)); }
 .yg-thumb.bg-frost .yg-thumb-image { filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.16)); }
+/* Dark frost: the frame moves with the speaker, as under the white frost. Toward the title
+   the room gets more blurred (three copies, each more blurred and shown further out) and
+   darker (one gradient), so it fades to near black with no edge. Only the cut-out speaker
+   and the title are bright. */
+.yg-thumb.bg-shade { background: #0b0d11; }
+.yg-thumb.bg-shade .yg-thumb-scrim { display: none; }
+.yg-thumb.bg-shade .yg-thumb-bg { filter: brightness(0.34) saturate(0.7); }
+.yg-thumb-shade { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; }
+.yg-thumb-shade .yg-thumb-frost-bg { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
+.yg-thumb-shade.l1 .yg-thumb-frost-bg { filter: brightness(0.34) saturate(0.7) blur(6px); }
+.yg-thumb-shade.l2 .yg-thumb-frost-bg { filter: brightness(0.34) saturate(0.7) blur(16px); }
+.yg-thumb-shade.l3 .yg-thumb-frost-bg { filter: brightness(0.34) saturate(0.7) blur(34px); }
+.yg-thumb.side-left .yg-thumb-shade.l1 { -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 50%, transparent 74%); }
+.yg-thumb.side-left .yg-thumb-shade.l2 { -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 38%, transparent 62%); }
+.yg-thumb.side-left .yg-thumb-shade.l3 { -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 26%, transparent 50%); }
+.yg-thumb.side-right .yg-thumb-shade.l1 { -webkit-mask-image: linear-gradient(270deg, #000 0%, #000 50%, transparent 74%); }
+.yg-thumb.side-right .yg-thumb-shade.l2 { -webkit-mask-image: linear-gradient(270deg, #000 0%, #000 38%, transparent 62%); }
+.yg-thumb.side-right .yg-thumb-shade.l3 { -webkit-mask-image: linear-gradient(270deg, #000 0%, #000 26%, transparent 50%); }
+.yg-thumb-shade-dark { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.yg-thumb.side-left .yg-thumb-shade-dark { background: linear-gradient(90deg, rgba(9, 11, 15, 0.97) 0%, rgba(9, 11, 15, 0.93) 30%,
+  rgba(9, 11, 15, 0.78) 48%, rgba(9, 11, 15, 0.58) 66%, rgba(9, 11, 15, 0.5) 100%); }
+.yg-thumb.side-right .yg-thumb-shade-dark { background: linear-gradient(270deg, rgba(9, 11, 15, 0.97) 0%, rgba(9, 11, 15, 0.93) 30%,
+  rgba(9, 11, 15, 0.78) 48%, rgba(9, 11, 15, 0.58) 66%, rgba(9, 11, 15, 0.5) 100%); }
+.yg-thumb.bg-shade .yg-thumb-image { filter: drop-shadow(0 16px 36px rgba(0, 0, 0, 0.55)); }
 .yg-thumb-scrim { position: absolute; top: 0; width: 1150px; height: 1080px; }
 .yg-thumb.side-right .yg-thumb-scrim { right: 0; background: linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.5) 45%, rgba(0, 0, 0, 0.66) 100%); }
 .yg-thumb.side-left .yg-thumb-scrim { left: 0; background: linear-gradient(270deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.5) 45%, rgba(0, 0, 0, 0.66) 100%); }
@@ -341,6 +365,9 @@ body.yg-full { background: #000; }
 .yg-thumb-title { width: 100%; color: #fff; font-weight: 700; line-height: 1.02; letter-spacing: -0.025em;
   overflow-wrap: normal; text-shadow: 0 6px 30px rgba(0, 0, 0, 0.6); }
 .yg-thumb-title em { font-style: normal; color: var(--yg-accent); }
+/* Serif italic accent words: Apple's New York, a system font, so the Mac needs no download. */
+.yg-thumb.accent-serif .yg-thumb-title em { font-family: "New York", ui-serif, Georgia, serif; font-style: italic; font-weight: 700;
+  letter-spacing: -0.02em; }
 /* The band is 78 % of the line box, so the bands of two lines in a row do not touch. */
 .yg-thumb.highlight .yg-thumb-title em { color: #121417; padding: 0 0.14em; margin: 0 -0.04em; text-shadow: none;
   background: linear-gradient(var(--yg-accent), var(--yg-accent)) center / 100% 78% no-repeat;

@@ -464,6 +464,10 @@ struct ThumbnailMakerSheet: View {
                 Toggle("Highlight", isOn: $design.highlight)
                     .help("The coloured words get a band of the accent colour, in dark text")
                 TextField("Tag, like NEW or 3 RULES", text: $design.tag).textFieldStyle(.roundedBorder)
+                Picker("Accent words", selection: $design.accentFont) {
+                    ForEach(ThumbnailDesign.AccentFont.allCases) { Text($0.label).tag($0) }
+                }
+                .help("The font of the words between asterisks")
                 ColorPicker("Accent", selection: Binding(
                     get: { Color(nsColor: NSColor(hex: design.accent ?? accent) ?? .systemYellow) },
                     set: { design.accent = NSColor($0).hexString }), supportsOpacity: false)
@@ -485,13 +489,20 @@ struct ThumbnailMakerSheet: View {
                         .accessibilityLabel("Speaker size")
                     Text("\(Int((design.zoom * 100).rounded())) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
+                HStack {
+                    Text("Vivid").font(.caption).foregroundStyle(.secondary)
+                    Slider(value: $design.vivid, in: ThumbnailDesign.vividRange, step: 0.05).disabled(!design.cutout)
+                        .accessibilityLabel("Speaker colour strength")
+                        .help("Stronger colours on the speaker alone")
+                    Text("\(Int((design.vivid * 100).rounded())) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
                 Picker("Place", selection: $design.place) {
                     ForEach(ThumbnailDesign.Place.allCases) { Text($0.label).tag($0) }
                 }
                 .disabled(!design.cutout)
                 .help("Clear: the speaker moves away from the title and the picture, so nothing overlaps")
                 if design.place == .clear {
-                    Text("Use Plain, White or White frost behind.")
+                    Text("Use Plain, White or a frost behind.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         .help("The speaker moves to the far side, and gets smaller if necessary, so the title and the picture do not overlap them. The other backgrounds show the speaker in the old place.")
                 }

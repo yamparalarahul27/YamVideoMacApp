@@ -20,7 +20,17 @@ func equal<T: Equatable>(_ actual: T, _ expected: T, _ label: String) {
     check(actual == expected, label, "got \(actual), expected \(expected)")
 }
 
-let scratch = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("yamvideo-tests", isDirectory: true)
+/// Each run deletes this folder at its start and end, so two runs in the same folder crash
+/// each other. YAMVIDEO_TEST_SCRATCH gives a run a folder of its own.
+let scratch: URL = {
+    guard let path = ProcessInfo.processInfo.environment["YAMVIDEO_TEST_SCRATCH"] else {
+        return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("yamvideo-tests", isDirectory: true)
+    }
+    // Made first, so the path resolves as the app sees it (/tmp, not /private/tmp).
+    let folder = URL(fileURLWithPath: path, isDirectory: true)
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    return folder.resolvingSymlinksInPath()
+}()
 let ffmpeg = FFmpeg.ffmpegPath ?? "ffmpeg"
 
 // MARK: - Fixtures

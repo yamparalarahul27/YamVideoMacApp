@@ -138,6 +138,35 @@ import Foundation
           "with the white frost, the speaker and their frame move to the far side, and the title is dark on a white shade",
           "shade \(frostShade), frame \(frostFrame), red \(redShare(frostThumb, xs: 700..<1240)) / \(redShare(frostThumb, xs: 40..<640))")
 
+    // Dark frost: the frame moves with the speaker as under the white frost, but the shade
+    // and the speaker's own room are near black: only the cut-out speaker and the title are bright.
+    var shaded = clearLeft; shaded.background = .shade
+    let shadeThumb = try await ThumbnailMaker.render(shaded, sources: subjectSources, accent: "#F5C42C")
+    let darkShade = rgb(shadeThumb, 30, 700), darkRoom = rgb(shadeThumb, 1270, 700)
+    check([darkShade.0, darkShade.1, darkShade.2, darkRoom.0, darkRoom.1, darkRoom.2].allSatisfy { $0 < 50 }
+              && redShare(shadeThumb, xs: 700..<1240) > 0.1 && redShare(shadeThumb, xs: 40..<640) < 0.02
+              && brightShare(shadeThumb, xs: 40..<640) > 0.005,
+          "with the dark frost, the speaker moves with their frame, their room is near black, and the title is light",
+          "shade \(darkShade), room \(darkRoom), red \(redShare(shadeThumb, xs: 700..<1240)), title \(brightShare(shadeThumb, xs: 40..<640))")
+    // Vivid: stronger colours on the speaker alone; the room and the title stay as they were.
+    var vivid = shaded; vivid.vivid = 1.4
+    let vividThumb = try await ThumbnailMaker.render(vivid, sources: subjectSources, accent: "#F5C42C")
+    /// How far the speaker's red stands out from grey, on average.
+    func redness(_ image: CGImage) -> Double {
+        var total = 0.0, count = 0
+        for y in stride(from: 300, to: 700, by: 8) { for x in stride(from: 700, to: 1240, by: 8) {
+            let p = rgb(image, x, y)
+            if p.0 > 150 && p.0 > p.1 + 60 { total += Double(p.0) - Double(p.1 + p.2) / 2; count += 1 }
+        } }
+        return total / Double(max(1, count))
+    }
+    let roomAfter = rgb(vividThumb, 1270, 700)
+    check(redness(vividThumb) > redness(shadeThumb) + 5 && abs(roomAfter.0 - darkRoom.0) <= 2,
+          "vivid makes the speaker's colours stronger and leaves the room as it was",
+          String(format: "redness %.1f against %.1f, room %@ against %@", redness(vividThumb), redness(shadeThumb), "\(roomAfter)", "\(darkRoom)"))
+    var tooVivid = shaded; tooVivid.vivid = 1.6
+    check(tooVivid.problem?.contains("1.4") == true, "vivid above 1.4 is refused", tooVivid.problem ?? "no problem")
+
     print("\nPhone check")
     check(PhoneSize.homeFeed.points(1920) == 390 && Int(PhoneSize.searchList.height) == 94
               && Int(PhoneSize.searchList.pixels(PhoneCheck.letterLimits.smallest).rounded(.up)) == 103,
@@ -404,6 +433,12 @@ import Foundation
     var frostAsSixteen = frostSaved; frostAsSixteen.version = 16
     check(frostSaved == frostProject && frostSaved.version >= 17 && (try? frostSaved.validate()) != nil && (try? frostAsSixteen.validate()) == nil,
           "the frost and the picture size survive a version 17 round trip, and a version 16 file with them is refused")
+    var shadeProject = designSaved
+    shadeProject.clips[0].publish?.design?.background = .shade; shadeProject.clips[0].publish?.design?.vivid = 1.2
+    let shadeSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(shadeProject))
+    var shadeAsTwentyFour = shadeSaved; shadeAsTwentyFour.version = 24
+    check(shadeSaved == shadeProject && shadeSaved.version >= 25 && (try? shadeSaved.validate()) != nil && (try? shadeAsTwentyFour.validate()) == nil,
+          "the dark frost and vivid survive a version 25 round trip, and a version 24 file with them is refused")
 
     thumbnailer.selection = subjectItem.id
     thumbnailer.showModule(.library)

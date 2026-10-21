@@ -116,6 +116,14 @@ edit, and each edit becomes one undo step with your name on it.
    moment.
 3. `updateScreen` with a `crop` to remove a dark window border, and the bubble
    (`corner`, `size`, `shape` circle or rounded).
+   - The bubble can move for one part. When the screen shows something important
+     under the bubble's corner (a menu, a button, a code line), give that part a
+     `screen` layout with its own `bubble`, for example `{"corner": "topLeft"}`. Keys
+     that you leave out follow the screen's bubble. The bubble glides to its new place
+     over 0.4 s.
+   - After you move the bubble, read `state.clips[].screen.layouts[].bubbleBox` and
+     check that no graphic in that part covers it. Check a frame of the glide with
+     `preview --composed`.
 4. Plan layouts from the transcript and show the plan: `speaker` for the intro and the
    outro, `split` (side by side) where the speaker explains without the screen, and
    the base `screen` layout where the screen shows the point. Apply with
@@ -202,10 +210,15 @@ edit, and each edit becomes one undo step with your name on it.
    - `time`: a suggested frame.
    - `title`: up to 3 lines; put the key words between asterisks.
    - `highlight: true`: the words between asterisks get a band of the accent colour.
-   - `background`: `white`, `solid` (dark), `dim`, `blur`, `frame` or `frost` (the
-     whole frame, with a white blurred shade on the title side, as in the Ink layout).
+   - `background`: `white`, `solid` (dark), `dim`, `blur`, `frame`, `frost` (the
+     whole frame, with a white blurred shade on the title side, as in the Ink layout) or
+     `shade` (the same with a dark shade: the speaker's own room behind them is near
+     black too, so only the cut-out speaker is bright and lines up with the room).
    - `place: "clear"`: the speaker moves clear of the title and the picture, so nothing
-     overlaps. Use it with the `white`, `solid` or `frost` background.
+     overlaps. Use it with the `white`, `solid`, `frost` or `shade` background.
+   - `vivid`: 1 to 1.4, stronger colours on the speaker alone (1 is as recorded).
+   - `accentFont: "serif"`: the words between asterisks in an italic serif (Apple's New
+     York), against the bold sans of the other words. Use it on one or two words.
    - `outlineWidth`: the white outline round the speaker, 2 to 16 (3 is thin).
    - `image`: a picture under the title, for example logos or icons. Make it a
      transparent PNG.

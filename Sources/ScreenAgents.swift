@@ -10,7 +10,14 @@ extension AgentState {
     /// holds), `picture` the part of the screen recording shown.
     struct ScreenState: Encodable {
         struct Bubble: Encodable { var corner: String; var size: Double; var face: WirePoint?; var shape: String; var corners: Double }
-        struct Span: Encodable { var id: UUID; var start: Double; var end: Double; var duration: Double; var layout: String }
+        /// A part's own bubble: only the keys it sets.
+        struct PartBubble: Encodable { var corner: String?; var size: Double?; var shape: String?; var corners: Double? }
+        struct Span: Encodable {
+            var id: UUID; var start: Double; var end: Double; var duration: Double; var layout: String
+            var bubble: PartBubble?
+            /// In the Screen layout: the bubble's box, in design pixels of the 1920×1080 frame.
+            var bubbleBox: WireRect?
+        }
         var path: String
         var name: String
         var media: Media
@@ -45,11 +52,25 @@ extension AppModel {
             layout: screen.layout.rawValue,
             bubble: .init(corner: screen.bubble.corner.rawValue, size: screen.bubble.size, face: screen.bubble.face.map(WirePoint.init),
                           shape: screen.bubble.shape.rawValue, corners: screen.bubble.corners),
-            layouts: screen.spans.map { .init(id: $0.id, start: $0.start, end: $0.end, duration: $0.duration, layout: $0.layout.rawValue) },
+            layouts: screen.spans.map { span in
+                .init(id: span.id, start: span.start, end: span.end, duration: span.duration, layout: span.layout.rawValue,
+                      bubble: span.bubble.map { AgentState.ScreenState.PartBubble(corner: $0.corner?.rawValue, size: $0.size, shape: $0.shape?.rawValue, corners: $0.corners) },
+                      bubbleBox: span.layout == .screen ? bubbleBox(clip, bubble: span.bubble?.applied(to: screen.bubble) ?? screen.bubble) : nil)
+            },
             zooms: screen.zooms.map { .init(id: $0.id, start: $0.start, hold: $0.hold, level: $0.level, end: $0.end, target: WirePoint($0.target)) },
             covered: screen.covered(on: clip.timeline).map { [$0.lowerBound, $0.upperBound] },
             missing: !FileManager.default.fileExists(atPath: screen.url.path),
             bubbleBox: clip.item().bubbleBox.map(WireRect.init), overBubble: overBubble)
+    }
+
+    /// The box of `bubble` in the Screen layout, in design pixels of the 1920×1080 frame.
+    static func bubbleBox(_ clip: ProjectClip, bubble: SpeakerBubble) -> WireRect? {
+        guard let screen = clip.screen, let info = clip.info else { return nil }
+        let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+        let geometry = LayoutGeometry(track: screen, crop: crop)
+        guard geometry.frame.width > 0 else { return nil }
+        let unit = 1920 / Double(geometry.frame.width), rect = geometry.speakerPlace(.screen, bubble: bubble).rect
+        return WireRect(CGRect(x: Double(rect.minX) * unit, y: Double(rect.minY) * unit, width: Double(rect.width) * unit, height: Double(rect.height) * unit))
     }
 
     /// Where the speaker's face is, in source pixels, at an edited time; nil when Apple
@@ -116,6 +137,7 @@ extension AppModel {
             if let end = value.end { result.end = end }
             if let layout = try kind(value.layout) { result.layout = layout }
             else if old == nil { throw EditError.invalid("A new layout needs layout: speaker, screen or split.") }
+            if let bubble = value.bubble { result.bubble = try mergedBubble(bubble, onto: result.bubble) }
             return result
         }
         switch wire.type {
@@ -223,28 +245,10 @@ extension AppModel {
             if let unknown = bubble.keys.sorted().first(where: { !keys.contains($0) }) {
                 throw EditError.invalid("Unknown bubble key \"\(unknown)\". Keys: corner, size, face, shape, corners.")
             }
-            if let value = bubble["shape"] {
-                guard let name = value.string, let shape = SpeakerBubble.Shape(rawValue: name) else {
-                    throw EditError.invalid("shape is one of: \(SpeakerBubble.Shape.allCases.map(\.rawValue).joined(separator: ", ")).")
-                }
-                result.bubble.shape = shape
-            }
-            if let value = bubble["corners"] {
-                guard let corners = value.number else {
-                    throw EditError.invalid("corners is a number: a rounded square's corner radius as a share of its side.")
-                }
-                result.bubble.corners = corners
-            }
-            if let value = bubble["corner"] {
-                guard let name = value.string, let corner = SpeakerBubble.Corner(rawValue: name) else {
-                    throw EditError.invalid("corner is one of: \(SpeakerBubble.Corner.allCases.map(\.rawValue).joined(separator: ", ")).")
-                }
-                result.bubble.corner = corner
-            }
-            if let value = bubble["size"] {
-                guard let size = value.number else { throw EditError.invalid("size is a number: the bubble's diameter as a share of the frame's height.") }
-                result.bubble.size = size
-            }
+            if let value = bubble["shape"] { result.bubble.shape = try bubbleShape(value) }
+            if let value = bubble["corners"] { result.bubble.corners = try bubbleCorners(value) }
+            if let value = bubble["corner"] { result.bubble.corner = try bubbleCorner(value) }
+            if let value = bubble["size"] { result.bubble.size = try bubbleSize(value) }
             if let value = bubble["face"] {
                 switch value {
                 case .null: result.bubble.face = nil
@@ -258,5 +262,50 @@ extension AppModel {
             }
         }
         return result
+    }
+
+    /// A part's bubble with the keys of `value` merged in. A key set to null follows the
+    /// screen's bubble again; null for the whole removes the part's bubble.
+    static func mergedBubble(_ value: JSONValue, onto old: SpanBubble?) throws -> SpanBubble? {
+        if value == .null { return nil }
+        guard let keys = value.object else {
+            throw EditError.invalid("A layout's bubble is {corner, size, shape, corners}, or null to use the screen's bubble.")
+        }
+        let known: Set<String> = ["corner", "size", "shape", "corners"]
+        if let unknown = keys.keys.sorted().first(where: { !known.contains($0) }) {
+            throw EditError.invalid("Unknown bubble key \"\(unknown)\" in a layout. Keys: corner, size, shape, corners. The face is the screen's: set it with updateScreen.")
+        }
+        var bubble = old ?? SpanBubble()
+        if let value = keys["corner"] { bubble.corner = value == .null ? nil : try bubbleCorner(value) }
+        if let value = keys["size"] { bubble.size = value == .null ? nil : try bubbleSize(value) }
+        if let value = keys["shape"] { bubble.shape = value == .null ? nil : try bubbleShape(value) }
+        if let value = keys["corners"] { bubble.corners = value == .null ? nil : try bubbleCorners(value) }
+        return bubble.isEmpty ? nil : bubble
+    }
+
+    private static func bubbleCorner(_ value: JSONValue) throws -> SpeakerBubble.Corner {
+        guard let name = value.string, let corner = SpeakerBubble.Corner(rawValue: name) else {
+            throw EditError.invalid("corner is one of: \(SpeakerBubble.Corner.allCases.map(\.rawValue).joined(separator: ", ")).")
+        }
+        return corner
+    }
+
+    private static func bubbleShape(_ value: JSONValue) throws -> SpeakerBubble.Shape {
+        guard let name = value.string, let shape = SpeakerBubble.Shape(rawValue: name) else {
+            throw EditError.invalid("shape is one of: \(SpeakerBubble.Shape.allCases.map(\.rawValue).joined(separator: ", ")).")
+        }
+        return shape
+    }
+
+    private static func bubbleSize(_ value: JSONValue) throws -> Double {
+        guard let size = value.number else { throw EditError.invalid("size is a number: the bubble's diameter as a share of the frame's height.") }
+        return size
+    }
+
+    private static func bubbleCorners(_ value: JSONValue) throws -> Double {
+        guard let corners = value.number else {
+            throw EditError.invalid("corners is a number: a rounded square's corner radius as a share of its side.")
+        }
+        return corners
     }
 }

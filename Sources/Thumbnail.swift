@@ -25,7 +25,8 @@ struct ThumbnailDesign: Codable, Equatable {
     enum Background: String, Codable, CaseIterable, Identifiable {
         /// frost: the frame as recorded, moved with the speaker, under a white blurred shade
         /// on the title side that fades out before the speaker, as the Ink layout's shade does.
-        case frame, dim, blur, solid, white, frost
+        /// shade: the same under a dark shade, with the speaker's own room near black too.
+        case frame, dim, blur, solid, white, frost, shade
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -35,6 +36,7 @@ struct ThumbnailDesign: Codable, Equatable {
             case .solid: return "Plain"
             case .white: return "White"
             case .frost: return "White frost"
+            case .shade: return "Dark frost"
             }
         }
     }
@@ -66,8 +68,19 @@ struct ThumbnailDesign: Codable, Equatable {
     /// How big the picture beside the title is: 1 to 1.6 times its usual size (at most
     /// 520×340 pixels of a 1920×1080 frame). The title gets smaller to make room.
     var imageSize = 1.0
+    /// How strong the speaker's colours are: 1 (as recorded) to 1.4.
+    var vivid = 1.0
+    /// The font of the words between asterisks: the title's own bold, or a serif in italics.
+    var accentFont = AccentFont.bold
+
+    enum AccentFont: String, Codable, CaseIterable, Identifiable {
+        case bold, serif
+        var id: String { rawValue }
+        var label: String { self == .bold ? "Bold" : "Serif italic" }
+    }
 
     static let zooms = 1.0...1.6
+    static let vividRange = 1.0...1.4
     static let outlineWidths = 2.0...16.0
     static let imageSizes = 1.0...1.6
     static let titleLimit = 90
@@ -76,7 +89,7 @@ struct ThumbnailDesign: Codable, Equatable {
     init(time: Double = 0, title: String = "") { self.time = time; self.title = title }
 
     private enum CodingKeys: String, CodingKey {
-        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight, imageSize
+        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight, imageSize, vivid, accentFont
     }
 
     /// Missing keys keep their defaults; `image` is a plain path, as for the thumbnail.
@@ -100,6 +113,8 @@ struct ThumbnailDesign: Codable, Equatable {
         outlineWidth = try c.decodeIfPresent(Double.self, forKey: .outlineWidth) ?? defaults.outlineWidth
         highlight = try c.decodeIfPresent(Bool.self, forKey: .highlight) ?? defaults.highlight
         imageSize = try c.decodeIfPresent(Double.self, forKey: .imageSize) ?? defaults.imageSize
+        vivid = try c.decodeIfPresent(Double.self, forKey: .vivid) ?? defaults.vivid
+        accentFont = try c.decodeIfPresent(AccentFont.self, forKey: .accentFont) ?? defaults.accentFont
     }
 
     func encode(to encoder: Encoder) throws {
@@ -118,7 +133,13 @@ struct ThumbnailDesign: Codable, Equatable {
         try c.encode(outlineWidth, forKey: .outlineWidth)
         try c.encode(highlight, forKey: .highlight)
         if imageSize != 1 { try c.encode(imageSize, forKey: .imageSize) }
+        if vivid != 1 { try c.encode(vivid, forKey: .vivid) }
+        if accentFont != .bold { try c.encode(accentFont, forKey: .accentFont) }
     }
+
+    /// Whether the design uses what format 25 added: the dark frost, vivid colours or the
+    /// serif accent.
+    var usesFormat25: Bool { background == .shade || vivid != 1 || accentFont != .bold }
 
     /// The first thing that cannot be stored, saying what is allowed; nil when all is well.
     var problem: String? {
@@ -132,6 +153,7 @@ struct ThumbnailDesign: Codable, Equatable {
         if let accent, !(accent.count == 7 && accent.hasPrefix("#") && accent.dropFirst().allSatisfy(\.isHexDigit)) {
             return "The thumbnail accent is a colour like #F5C42C."
         }
+        guard vivid.isFinite, Self.vividRange.contains(vivid) else { return "Vivid is from 1 (as recorded) to 1.4." }
         guard zoom.isFinite, Self.zooms.contains(zoom) else { return "The speaker's size is from 1 to 1.6." }
         guard outlineWidth.isFinite, Self.outlineWidths.contains(outlineWidth) else { return "The outline's width is from 2 to 16 pixels." }
         guard imageSize.isFinite, Self.imageSizes.contains(imageSize) else { return "The picture's size is from 1 to 1.6." }
@@ -280,6 +302,7 @@ enum ThumbnailMaker {
             "highlight": .bool(design.highlight), "side": .string(side.rawValue),
             "background": .string(design.background.rawValue), "zoom": .number(design.zoom),
             "imageSize": .number(design.imageSize),
+            "vivid": .number(design.vivid), "accentFont": .string(design.accentFont.rawValue),
         ])
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]

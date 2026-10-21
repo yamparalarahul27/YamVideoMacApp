@@ -83,6 +83,7 @@ struct ScreenSection: View {
         Picker("Bubble", selection: Binding(get: { screen.bubble.corner }, set: { corner in model.updateScreen(label: "Bubble Corner") { $0.bubble.corner = corner } })) {
             ForEach(SpeakerBubble.Corner.allCases) { corner in Text(corner.label).tag(corner) }
         }
+        .help("The base bubble's corner. A Screen part on the Layout lane can have its own bubble.")
         HStack(spacing: 6) {
             Text("Size").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
             Slider(value: Binding(get: { screen.bubble.size }, set: { size in model.updateScreen(live: true, label: "Bubble Size") { $0.bubble.size = size } }),
@@ -91,11 +92,12 @@ struct ScreenSection: View {
             Text("\(Int((screen.bubble.size * 100).rounded()))%").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .trailing)
         }
+        .help("The base bubble's size, as a share of the frame's height")
         Picker("Shape", selection: Binding(get: { screen.bubble.shape }, set: { shape in model.updateScreen(label: "Bubble Shape") { $0.bubble.shape = shape } })) {
             ForEach(SpeakerBubble.Shape.allCases) { shape in Text(shape.label).tag(shape) }
         }
         .pickerStyle(.segmented)
-        .help("The speaker's bubble in the Screen layout: a circle, or a square with soft corners")
+        .help("The base bubble's shape in the Screen layout: a circle, or a square with soft corners")
         if screen.bubble.shape == .rounded {
             HStack(spacing: 6) {
                 Text("Corners").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
@@ -187,7 +189,7 @@ struct ScreenZoomInspector: View {
                 Text(String(format: "%.1f s", shot.hold))
                     .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             }
-            Text("Click the screen in the Preview to aim it. It eases in and out over \(String(format: "%.1f", ZoomShot.ease)) s each way.")
+            Text("Drag its frame in the Preview to aim it. It eases in and out over \(String(format: "%.1f", ZoomShot.ease)) s each way.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -238,7 +240,99 @@ struct ScreenAimLayer: View {
     }
 }
 
-/// The selected layout span: which layout, when.
+/// Over the Preview while a screen zoom is selected. Paused, the screen shows without that
+/// zoom and a frame marks the area the zoom fills: drag the frame, or click the screen, to
+/// aim it. Playing, the zoom plays, and a click aims it as before.
+struct ScreenZoomFrame: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var playback: PlaybackController
+    let screen: ScreenTrack
+    let shot: ZoomShot
+    /// The recording's crop: the frame's size in pixels.
+    let crop: CGRect
+    let endScreen: Double?
+    /// From the pointer to the aim while the frame moves, in screen-recording pixels.
+    @State private var grab: CGSize?
+
+    private let tint = Color.cyan
+
+    var body: some View {
+        Group {
+            if playback.isPlaying {
+                ScreenAimLayer(frame: crop.size) { model.aimScreenZoom(at: $0) }
+            } else {
+                GeometryReader { geo in aimFrame(in: geo.size) }
+            }
+        }
+        .task(id: shot.id) { playback.aimedScreenZoom = shot.id }
+        .onDisappear { playback.aimedScreenZoom = nil }
+    }
+
+    @ViewBuilder
+    private func aimFrame(in size: CGSize) -> some View {
+        // The Preview draws the picture fitted inside its 16-point padding.
+        let bounds = CGRect(origin: .zero, size: size).insetBy(dx: 16, dy: 16)
+        let scale = min(bounds.width / crop.width, bounds.height / crop.height)
+        let origin = CGPoint(x: bounds.midX - crop.width * scale / 2, y: bounds.midY - crop.height * scale / 2)
+        let toView = { (r: CGRect) in CGRect(x: origin.x + r.minX * scale, y: origin.y + r.minY * scale, width: r.width * scale, height: r.height * scale) }
+        let geometry = LayoutGeometry(track: screen, crop: crop)
+        let time = model.previewTime
+        if let place = screen.zoomArea(shot, at: time, geometry: geometry, endScreen: endScreen) {
+            let area = toView(place.area), screenRect = toView(place.screen)
+            /// A point of the view on the screen recording, as the paused Preview shows it.
+            let toScreen = { (p: CGPoint) in
+                screen.screenPoint(CGPoint(x: (p.x - origin.x) / scale, y: (p.y - origin.y) / scale), at: time,
+                                   geometry: geometry, endScreen: endScreen, leavingOut: shot.id)
+            }
+            ZStack(alignment: .topLeading) {
+                // The screen outside the zoom's area, dimmed.
+                Path { path in
+                    path.addRect(screenRect)
+                    path.addRoundedRect(in: area, cornerSize: CGSize(width: 4, height: 4))
+                }
+                .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(tint, lineWidth: 2)
+                    .shadow(color: .black.opacity(0.5), radius: 3)
+                    .frame(width: area.width, height: area.height)
+                    .offset(x: area.minX, y: area.minY)
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(tint)
+                    .position(x: area.midX, y: area.midY)
+                Text("\(shot.levelLabel) zoom")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(tint))
+                    .fixedSize()
+                    .offset(x: area.minX + 6, y: area.minY + 6)
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .contentShape(Path(screenRect))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if grab == nil {
+                            // On the frame it moves with the pointer; elsewhere it jumps there first.
+                            let start = toScreen(value.startLocation)
+                            grab = area.contains(value.startLocation) ? start.map { CGSize(width: shot.target.x - $0.x, height: shot.target.y - $0.y) } ?? .zero : .zero
+                        }
+                        guard let grab, let point = toScreen(value.location) else { return }
+                        let target = screen.aimTarget(CGPoint(x: point.x + grab.width, y: point.y + grab.height), level: shot.level)
+                        model.aimScreenZoomLive(shot.id, target)
+                    }
+                    .onEnded { _ in
+                        grab = nil
+                        model.endScreenZoomAim()
+                    }
+            )
+            .help("Drag the frame, or click the screen, to aim the zoom. Play to see it.")
+        }
+    }
+}
+
+/// The selected layout span: which layout, when, and in the Screen layout its bubble.
 struct LayoutInspector: View {
     @EnvironmentObject var model: AppModel
     let span: LayoutSpan
@@ -251,6 +345,9 @@ struct LayoutInspector: View {
                 ForEach(ScreenLayout.allCases) { layout in Text(layout.label).tag(layout) }
             }
             .pickerStyle(.segmented)
+            if span.layout == .screen, let base = model.selectedItem?.screen?.bubble {
+                bubble(base)
+            }
             DisclosureGroup("Details") {
                 VStack(alignment: .leading, spacing: 6) {
                     TimelineTimeField(label: "Start", value: span.start) { start in
@@ -276,6 +373,62 @@ struct LayoutInspector: View {
             }
             .controlSize(.small)
         }
+    }
+
+    /// This part's own bubble: each row starts at the base bubble's value, and a change
+    /// sets the part's own.
+    @ViewBuilder
+    private func bubble(_ base: SpeakerBubble) -> some View {
+        let own = span.bubble ?? SpanBubble()
+        let shown = own.applied(to: base)
+        Picker("Bubble", selection: Binding(get: { own.corner }, set: { corner in
+            model.updateLayoutBubble(span.id, label: "Layout Bubble Corner") { $0.corner = corner }
+        })) {
+            Text("Base").tag(SpeakerBubble.Corner?.none)
+            Divider()
+            ForEach(SpeakerBubble.Corner.allCases) { corner in Text(corner.label).tag(Optional(corner)) }
+        }
+        .help("Where the bubble sits in this part. Base uses the corner in the Screen section (\(base.corner.label.lowercased())).")
+        slider("Size", value: shown.size, own: own.size != nil, range: SpeakerBubble.sizeRange,
+               help: "The bubble's size in this part, as a share of the frame's height", reset: "Use the base size again") { size, live in
+            model.updateLayoutBubble(span.id, live: live, label: "Layout Bubble Size") { $0.size = size }
+        }
+        Picker("Shape", selection: Binding(get: { own.shape }, set: { shape in
+            model.updateLayoutBubble(span.id, label: "Layout Bubble Shape") { $0.shape = shape }
+        })) {
+            Text("Base").tag(SpeakerBubble.Shape?.none)
+            Divider()
+            ForEach(SpeakerBubble.Shape.allCases) { shape in Text(shape.label).tag(Optional(shape)) }
+        }
+        .help("The bubble's shape in this part. Base uses the shape in the Screen section (\(base.shape.label.lowercased())).")
+        if shown.shape == .rounded {
+            slider("Corners", value: shown.corners, own: own.corners != nil, range: SpeakerBubble.cornersRange,
+                   help: "How round the corners are in this part, as a share of the bubble's side", reset: "Use the base corners again") { corners, live in
+                model.updateLayoutBubble(span.id, live: live, label: "Layout Bubble Corners") { $0.corners = corners }
+            }
+        }
+    }
+
+    /// A bubble value of this part: a slider, its percent, and a button that gives the
+    /// value back to the base bubble. `set` gets nil from the button.
+    private func slider(_ title: String, value: Double, own: Bool, range: ClosedRange<Double>, help: String, reset: String,
+                        set: @escaping (Double?, Bool) -> Void) -> some View {
+        HStack(spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
+            Slider(value: Binding(get: { value }, set: { set($0, true) }), in: range,
+                   onEditingChanged: { editing in if !editing { model.endGesture() } })
+                .accessibilityLabel("Bubble \(title.lowercased()) in this layout")
+            Text("\(Int((value * 100).rounded()))%").font(.system(.caption, design: .monospaced))
+                .foregroundStyle(own ? .primary : .secondary)
+                .frame(width: 40, alignment: .trailing)
+            Button { set(nil, false) } label: { Image(systemName: "arrow.uturn.backward") }
+                .buttonStyle(.borderless)
+                .opacity(own ? 1 : 0)
+                .disabled(!own)
+                .help(reset)
+                .accessibilityLabel(reset)
+        }
+        .help(help)
     }
 }
 
@@ -311,10 +464,12 @@ struct LayoutBlock: View {
     var body: some View {
         let width = max(4, span.duration * pixels)
         let tint = span.layout.tint
+        // A Screen part with its own corner shows that corner.
+        let corner = span.layout == .screen ? span.bubble?.corner : nil
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4).fill(tint.opacity(selected ? 0.45 : 0.22))
             HStack(spacing: 3) {
-                Image(systemName: span.layout.symbol)
+                Image(systemName: corner?.symbol ?? span.layout.symbol)
                 Text(span.layout.label).lineLimit(1)
             }
             .font(.system(size: 10, weight: .medium))
@@ -338,9 +493,10 @@ struct LayoutBlock: View {
         .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in delta = (movedStart(value.translation.width) - span.start) * pixels }
             .onEnded { value in onSelect(); onMove(movedStart(value.translation.width)); delta = 0; endSnap() })
-        .help("A layout: drag to move it, drag an edge to change when it starts or ends")
+        .help(corner.map { "A layout with the bubble at the \($0.label.lowercased()): drag to move it, drag an edge to change when it starts or ends" }
+              ?? "A layout: drag to move it, drag an edge to change when it starts or ends")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(span.layout.label) layout from \(timelineTime(span.start)) to \(timelineTime(span.end))")
+        .accessibilityLabel("\(span.layout.label) layout\(corner.map { ", bubble \($0.label.lowercased())," } ?? "") from \(timelineTime(span.start)) to \(timelineTime(span.end))")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { onSelect() }
     }

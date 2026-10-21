@@ -49,6 +49,9 @@ struct LayoutSpan: Identifiable, Codable, Equatable {
     var start: Double
     var end: Double
     var layout: ScreenLayout
+    /// Version 24 onwards: the part's own bubble in the Screen layout. Nil, or a key it
+    /// leaves out, follows the screen's bubble. Other layouts keep it but do not show it.
+    var bubble: SpanBubble? = nil
 
     static let defaultDuration = 5.0
 
@@ -99,6 +102,14 @@ struct SpeakerBubble: Codable, Equatable {
             case .bottomRight: return "Bottom right"
             }
         }
+        var symbol: String {
+            switch self {
+            case .topLeft: return "rectangle.inset.topleft.filled"
+            case .topRight: return "rectangle.inset.topright.filled"
+            case .bottomLeft: return "rectangle.inset.bottomleft.filled"
+            case .bottomRight: return "rectangle.inset.bottomright.filled"
+            }
+        }
     }
 
     var corner = Corner.bottomRight
@@ -134,6 +145,39 @@ struct SpeakerBubble: Codable, Equatable {
     /// The corner radius of a bubble `side` pixels wide.
     func radius(side: Double) -> Double {
         shape == .circle ? side / 2 : side * corners
+    }
+
+    /// Why a bubble's size or corners cannot stand, if they cannot.
+    static func problem(size: Double?, corners: Double?) -> String? {
+        if let size, !(size.isFinite && sizeRange.contains(size)) {
+            return "The bubble's size must be from \(sizeRange.lowerBound) to \(sizeRange.upperBound) of the frame's height."
+        }
+        if let corners, !(corners.isFinite && cornersRange.contains(corners)) {
+            return "The bubble's corners must be from \(cornersRange.lowerBound) to \(cornersRange.upperBound) of its side."
+        }
+        return nil
+    }
+}
+
+/// A layout part's own bubble: each key it sets replaces the screen's bubble in that part,
+/// and each key it leaves out (nil) follows it. The face is the recording's, so it is not
+/// here.
+struct SpanBubble: Codable, Equatable {
+    var corner: SpeakerBubble.Corner?
+    var size: Double?
+    var shape: SpeakerBubble.Shape?
+    var corners: Double?
+
+    var isEmpty: Bool { corner == nil && size == nil && shape == nil && corners == nil }
+
+    /// `base` with this part's keys over it.
+    func applied(to base: SpeakerBubble) -> SpeakerBubble {
+        var bubble = base
+        if let corner { bubble.corner = corner }
+        if let size { bubble.size = size }
+        if let shape { bubble.shape = shape }
+        if let corners { bubble.corners = corners }
+        return bubble
     }
 }
 
@@ -225,11 +269,10 @@ struct ScreenTrack: Codable, Equatable {
                 return "The screen's crop must be at least 16 pixels and lie inside the \(info.width)×\(info.height) screen recording."
             }
         }
-        guard bubble.size.isFinite, SpeakerBubble.sizeRange.contains(bubble.size) else {
-            return "The bubble's size must be from \(SpeakerBubble.sizeRange.lowerBound) to \(SpeakerBubble.sizeRange.upperBound) of the frame's height."
-        }
-        guard bubble.corners.isFinite, SpeakerBubble.cornersRange.contains(bubble.corners) else {
-            return "The bubble's corners must be from \(SpeakerBubble.cornersRange.lowerBound) to \(SpeakerBubble.cornersRange.upperBound) of its side."
+        if let problem = SpeakerBubble.problem(size: bubble.size, corners: bubble.corners) { return problem }
+        for span in spans {
+            guard let own = span.bubble, let problem = SpeakerBubble.problem(size: own.size, corners: own.corners) else { continue }
+            return String(format: "In the layout at %.2f–%.2f s: ", span.start, span.end) + problem
         }
         if let face = bubble.face {
             guard face.x.isFinite, face.y.isFinite, (0...CGFloat(speaker.width)).contains(face.x), (0...CGFloat(speaker.height)).contains(face.y) else {
@@ -274,10 +317,14 @@ struct ScreenTrack: Codable, Equatable {
     /// zooms (`renderFrame`, `FFmpeg.zoomFilter`): the zoom and the aim ease in together,
     /// and the window stays inside the picture.
     func zoomWindow(at time: Double) -> CGRect {
-        let size = picture.size
-        guard let shot = zooms.first(where: { time >= $0.start && time < $0.end }) else { return CGRect(origin: .zero, size: size) }
+        guard let shot = zooms.first(where: { time >= $0.start && time < $0.end }) else { return CGRect(origin: .zero, size: picture.size) }
         let phase = min(1, max(0, min((time - shot.start) / ZoomShot.ease, (shot.end - time) / ZoomShot.ease)))
-        let ramp = phase * phase * (3 - 2 * phase)
+        return zoomWindow(shot, ramp: phase * phase * (3 - 2 * phase))
+    }
+
+    /// A zoom's window `ramp` of the way in (0 the whole picture, 1 its hold).
+    func zoomWindow(_ shot: ZoomShot, ramp: Double = 1) -> CGRect {
+        let size = picture.size
         let zoom = 1 + (shot.level - 1) * ramp
         let w = Double(size.width), h = Double(size.height)
         let cx = w / 2 + (Double(shot.target.x - picture.minX) - w / 2) * ramp
@@ -287,12 +334,43 @@ struct ScreenTrack: Codable, Equatable {
     }
 
     /// Where a point of the frame falls on the screen recording at an edited time, in its
-    /// pixels, through the layout and any zoom; nil off the screen.
-    func screenPoint(_ point: CGPoint, at time: Double, geometry: LayoutGeometry, endScreen: Double?) -> CGPoint? {
-        guard let place = state(at: time, geometry: geometry, endScreen: endScreen).screen, place.rect.contains(point) else { return nil }
-        let window = zoomWindow(at: time)
+    /// pixels, through the layout and any zoom; nil off the screen. `leavingOut` is a zoom
+    /// the frame does not show (the one the Preview aims).
+    func screenPoint(_ point: CGPoint, at time: Double, geometry: LayoutGeometry, endScreen: Double?,
+                     leavingOut: ZoomShot.ID? = nil) -> CGPoint? {
+        let track = without(leavingOut)
+        guard let place = track.state(at: time, geometry: geometry, endScreen: endScreen).screen, place.rect.contains(point) else { return nil }
+        let window = track.zoomWindow(at: time)
         let u = (point.x - place.rect.minX) / place.rect.width, v = (point.y - place.rect.minY) / place.rect.height
         return CGPoint(x: picture.minX + window.minX + u * window.width, y: picture.minY + window.minY + v * window.height)
+    }
+
+    /// Where a zoom's hold falls on the frame at an edited time, when the frame shows the
+    /// screen without that zoom: the area the zoom fills, and the screen's place, in frame
+    /// pixels. Nil while the screen does not show.
+    func zoomArea(_ shot: ZoomShot, at time: Double, geometry: LayoutGeometry, endScreen: Double?) -> (area: CGRect, screen: CGRect)? {
+        let track = without(shot.id)
+        guard let place = track.state(at: time, geometry: geometry, endScreen: endScreen).screen else { return nil }
+        let view = track.zoomWindow(at: time), hold = zoomWindow(shot)
+        let sx = place.rect.width / view.width, sy = place.rect.height / view.height
+        let area = CGRect(x: place.rect.minX + (hold.minX - view.minX) * sx, y: place.rect.minY + (hold.minY - view.minY) * sy,
+                          width: hold.width * sx, height: hold.height * sy)
+        return (area, place.rect)
+    }
+
+    /// The aim for a zoom of `level` nearest `point`: the window's centre, kept where the
+    /// whole window stays on the picture, so the frame in the Preview sits round it.
+    func aimTarget(_ point: CGPoint, level: Double) -> CGPoint {
+        let w = picture.width / level, h = picture.height / level
+        return CGPoint(x: min(max(point.x, picture.minX + w / 2), picture.maxX - w / 2),
+                       y: min(max(point.y, picture.minY + h / 2), picture.maxY - h / 2))
+    }
+
+    private func without(_ id: ZoomShot.ID?) -> ScreenTrack {
+        guard let id, zooms.contains(where: { $0.id == id }) else { return self }
+        var track = self
+        track.zooms.removeAll { $0.id == id }
+        return track
     }
 
     // MARK: Layout over time
@@ -302,17 +380,36 @@ struct ScreenTrack: Codable, Equatable {
     /// the base layout.
     func layout(at time: Double, endScreen: Double?) -> ScreenLayout {
         if let endScreen, time >= endScreen - 0.000001 { return .speaker }
-        return spans.first { time >= $0.start - 0.000001 && time < $0.end - 0.000001 }?.layout ?? layout
+        return span(at: time)?.layout ?? layout
     }
 
-    /// Each moment the layout changes, in time order, with the layout it changes to.
-    func changes(endScreen: Double?) -> [(time: Double, to: ScreenLayout)] {
+    /// The bubble in the Screen layout at `time`: the part's own keys over the screen's
+    /// bubble. From the end screen's start, the screen's bubble.
+    func bubble(at time: Double, endScreen: Double?) -> SpeakerBubble {
+        if let endScreen, time >= endScreen - 0.000001 { return bubble }
+        return span(at: time)?.bubble?.applied(to: bubble) ?? bubble
+    }
+
+    private func span(at time: Double) -> LayoutSpan? {
+        spans.first { time >= $0.start - 0.000001 && time < $0.end - 0.000001 }
+    }
+
+    /// What shows at `time` before any easing: the layout, and the bubble it puts the
+    /// speaker in. Outside the Screen layout no bubble shows, so a part's own does not count.
+    private func look(at time: Double, endScreen: Double?) -> (layout: ScreenLayout, bubble: SpeakerBubble) {
+        let layout = layout(at: time, endScreen: endScreen)
+        return (layout, layout == .screen ? bubble(at: time, endScreen: endScreen) : bubble)
+    }
+
+    /// Each moment the layout changes, in time order, with the layout it changes to and
+    /// its bubble. In the Screen layout a move of the bubble is a change too.
+    func changes(endScreen: Double?) -> [(time: Double, to: ScreenLayout, bubble: SpeakerBubble)] {
         var times = spans.flatMap { [$0.start, $0.end] }
         if let endScreen { times.append(endScreen) }
-        var result: [(time: Double, to: ScreenLayout)] = []
+        var result: [(time: Double, to: ScreenLayout, bubble: SpeakerBubble)] = []
         for time in Set(times.map { ($0 * 1_000_000).rounded() / 1_000_000 }).sorted() where time > 0.000001 {
-            let before = layout(at: time - 0.00001, endScreen: endScreen), after = layout(at: time, endScreen: endScreen)
-            if before != after { result.append((time, after)) }
+            let before = look(at: time - 0.00001, endScreen: endScreen), after = look(at: time, endScreen: endScreen)
+            if before != after { result.append((time, after.layout, after.bubble)) }
         }
         return result
     }
@@ -321,16 +418,17 @@ struct ScreenTrack: Codable, Equatable {
     /// from its moment; a change that comes while another eases starts from where that
     /// one has got to.
     func state(at time: Double, geometry: LayoutGeometry, endScreen: Double?) -> LayoutState {
-        var target = layout(at: 0, endScreen: endScreen)
-        var from = geometry.held(target)
+        let first = look(at: 0, endScreen: endScreen)
+        var target = geometry.held(first.layout, bubble: first.bubble)
+        var from = target
         var since: Double?
         func now(_ moment: Double) -> LayoutState {
-            guard let since, moment - since < Self.transition else { return geometry.held(target) }
-            return geometry.mix(from, geometry.held(target), amount: Self.ease((moment - since) / Self.transition))
+            guard let since, moment - since < Self.transition else { return target }
+            return geometry.mix(from, target, amount: Self.ease((moment - since) / Self.transition))
         }
         for change in changes(endScreen: endScreen) where change.time <= time + 0.000001 {
             from = now(change.time)
-            target = change.to
+            target = geometry.held(change.to, bubble: change.bubble)
             since = change.time
         }
         return now(time)
@@ -550,13 +648,16 @@ struct LayoutGeometry: Equatable {
         return move < 1 ? 0 : Self.even(move)
     }
 
-    func speakerPlace(_ layout: ScreenLayout) -> LayoutPlace {
+    /// The speaker's place in a layout; in the Screen layout, in `bubble` (nil: the
+    /// screen's own bubble).
+    func speakerPlace(_ layout: ScreenLayout, bubble: SpeakerBubble? = nil) -> LayoutPlace {
         let w = Double(frame.width), h = Double(frame.height)
         if stack != nil, layout != .speaker { return stackSpeaker }
         switch layout {
         case .speaker:
             return LayoutPlace(rect: CGRect(x: 0, y: 0, width: w, height: h), radius: 0)
         case .screen:
+            let bubble = bubble ?? self.bubble
             let side = Self.even(bubble.size * h), margin = (Self.bubbleMargin * unit).rounded()
             let left = bubble.corner == .topLeft || bubble.corner == .bottomLeft
             let top = bubble.corner == .topLeft || bubble.corner == .topRight
@@ -600,9 +701,10 @@ struct LayoutGeometry: Equatable {
         return CGRect(x: x, y: y, width: w, height: h)
     }
 
-    /// A layout at rest.
-    func held(_ layout: ScreenLayout) -> LayoutState {
-        let place = speakerPlace(layout)
+    /// A layout at rest; the Screen layout with the speaker in `bubble` (nil: the screen's
+    /// own bubble).
+    func held(_ layout: ScreenLayout, bubble: SpeakerBubble? = nil) -> LayoutState {
+        let place = speakerPlace(layout, bubble: bubble)
         let aspect = Double(place.rect.width / place.rect.height)
         let window: CGRect
         switch (layout, stack) {

@@ -497,8 +497,9 @@
    */
   function coverBackground(inner, p) {
     const bg = p.background === "dim" || p.background === "overlay" ? p.background : "solid";
-    append(inner, h("div", { class: "yg-cv-bg " + bg }));
-    return bg;
+    const node = h("div", { class: "yg-cv-bg " + bg });
+    append(inner, node);
+    return { bg, node };
   }
 
   /** A kinetic text's words: `words` [{text, at}], or `text` spread evenly near the start. */
@@ -518,7 +519,8 @@
    * on each line). Words between asterisks take the accent colour. Fewer words, bigger type.
    */
   KINDS.kineticText = function (inner, p, c) {
-    const low = coverBackground(inner, p) === "overlay";
+    const cover = coverBackground(inner, p);
+    const low = cover.bg === "overlay";
     const stack = p.layout === "stack";
     const words = kineticWords(p, c.length);
     const n = words.length;
@@ -529,14 +531,16 @@
       const node = h("span", { class: "yg-kt-w" });
       accented(node, w.text);
       append(box, node);
-      return { node, at: Math.min(w.at, Math.max(0, c.length - 0.5)) };
+      // The last word lands before the words start to go out (0.5 s before the end).
+      return { node, at: Math.min(w.at, Math.max(0, c.length - 0.8)) };
     });
     append(inner, box);
     const tl = c.tl;
-    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" }, c.at(0));
-    spans.forEach((s) => tl.fromTo(s.node, { opacity: 0, y: 28, scale: 0.94 },
-      { opacity: 1, y: 0, scale: 1, duration: 0.22, ease: "back.out(2)" }, c.at(s.at)));
-    tl.to(c.host, { opacity: 0, duration: 0.3, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.3)));
+    c.enterCover(cover.node);
+    // Each word rises out of a soft blur on the time it is said.
+    spans.forEach((s) => tl.fromTo(s.node, { opacity: 0, y: 36, filter: "blur(12px)" },
+      { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.55, ease: "expo.out" }, c.at(s.at)));
+    c.exitCover(cover.node, spans.map((s) => s.node));
   };
 
   /**
@@ -547,7 +551,8 @@
   // lowWidth: an overlay card's bar ends before the speaker's bubble in the lower right corner.
   const SECTION_BAR = { width: 1400, lowWidth: 1200, shortWidth: 860, gap: 10 };
   KINDS.sectionCard = function (inner, p, c) {
-    const low = coverBackground(inner, p) === "overlay";
+    const cover = coverBackground(inner, p);
+    const low = cover.bg === "overlay";
     const width = c.short ? SECTION_BAR.shortWidth : low ? SECTION_BAR.lowWidth : SECTION_BAR.width, gap = SECTION_BAR.gap;
     const progress = Math.max(0, Math.min(1, num(p.progress, 0)));
     const marks = (Array.isArray(p.marks) ? p.marks : []).map((m) => Math.max(0, Math.min(1, num(m, 0))))
@@ -569,13 +574,14 @@
     const title = h("div", { class: "yg-sc-title", text: p.title });
     append(inner, h("div", { class: "yg-sc" + (c.short ? " yg-sc-short" : "") + (low ? " yg-sc-low" : "") }, k, title, bar));
     const tl = c.tl;
-    tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power2.out" }, c.at(0));
+    c.enterCover(cover.node);
     c.up([k, title].filter(Boolean), 0.1, 0.08);
-    tl.fromTo(bar, { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, c.at(0.2));
+    // The bar is in place before its fill moves at 0.45 s.
+    tl.fromTo(bar, { opacity: 0, y: 16, filter: "blur(6px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out" }, c.at(0.12));
     const move = Math.min(0.9, Math.max(0.3, c.length - 1));
     tl.fromTo(fill, { width: from * width }, { width: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
     tl.fromTo(knob, { left: from * width }, { left: progress * width, duration: move, ease: "power2.inOut" }, c.at(0.45));
-    tl.to(c.host, { opacity: 0, duration: 0.35, ease: "power2.in" }, c.at(Math.max(0, c.length - 0.35)));
+    c.exitCover(cover.node, [k, title, bar].filter(Boolean));
   };
 
   /**
@@ -1100,11 +1106,32 @@
     const end = (rel) => toTime(graphic.end + rel);
     return {
       tl, host, length, at, mode, short: !!short, ink: pen(seeded(String(graphic.id))),
-      enterColumn() { tl.fromTo(host, { opacity: 0, x: 56 }, { opacity: 1, x: 0, duration: 0.6, ease: "power3.out" }, at(0)); },
-      exitColumn() { tl.to(host, { opacity: 0, x: 36, duration: 0.4, ease: "power2.in" }, end(-0.4)); },
+      // A card glides in on a long ease-out and goes out on an ease-in-out through a soft
+      // blur, so neither end jumps. Column cards have no backdrop-filter, so the blur is safe.
+      enterColumn() {
+        tl.fromTo(host, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, at(0));
+        tl.fromTo(host, { x: 48 }, { x: 0, duration: 0.9, ease: "expo.out" }, at(0));
+      },
+      exitColumn() {
+        tl.to(host, { opacity: 0, x: 28, duration: 0.5, ease: "power2.inOut" }, end(-0.5));
+        tl.fromTo(host, { filter: "blur(0px)" }, { filter: "blur(6px)", duration: 0.5, ease: "power2.in", immediateRender: false }, end(-0.5));
+      },
       enterPanel() { tl.fromTo(host, { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power2.out" }, at(delayIn)); },
       exitPanel() { tl.to(host, { opacity: 0, duration: 0.35, ease: "power2.in" }, end(-0.35)); },
-      up(targets, rel, stagger) { tl.fromTo(targets, { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out", stagger: stagger || 0 }, at(rel)); },
+      // A cover's shade eases in and out; its words come and go on their own, over it.
+      enterCover(shade) {
+        tl.fromTo(host, { opacity: 0 }, { opacity: 1, duration: 0.01 }, at(0));
+        tl.fromTo(shade, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "sine.inOut" }, at(0));
+      },
+      exitCover(shade, parts) {
+        const stagger = parts.length > 1 ? Math.min(0.03, 0.12 / (parts.length - 1)) : 0;
+        tl.to(parts, { opacity: 0, y: -16, filter: "blur(10px)", duration: 0.35, ease: "power2.inOut", stagger }, end(-0.5));
+        tl.to(shade, { opacity: 0, duration: 0.45, ease: "sine.inOut" }, end(-0.45));
+      },
+      up(targets, rel, stagger) {
+        tl.fromTo(targets, { opacity: 0, y: 20, filter: "blur(6px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.6, ease: "power3.out", stagger: stagger || 0 }, at(rel));
+      },
       pop(targets, rel, stagger) { tl.fromTo(targets, { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(1.8)", stagger: stagger || 0 }, at(rel)); },
       grow(targets, rel) {
         if (!targets || (Array.isArray(targets) && !targets.length)) return;
@@ -1663,25 +1690,42 @@
     const d = data || {};
     document.documentElement.style.setProperty("--yg-accent", d.accent || DEFAULT_STYLE.accent);
     const root = h("div", { id: "yg-thumb", class: "yg-thumb bg-" + (d.background || "dim") + " side-" + (d.side === "left" ? "left" : "right")
-      + (d.highlight ? " highlight" : "") });
+      + (d.highlight ? " highlight" : "") + (d.accentFont === "serif" ? " accent-serif" : "") });
     const pictures = [];
     const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
     append(root, outlineFilter(d.outlineWidth));
     if (d.frame) append(root, picture(d.frame, "yg-thumb-bg"));
-    const frost = d.background === "frost" && d.frame;
+    const frost = (d.background === "frost" || d.background === "shade") && d.frame;
     // The white frost: a blurred copy of the frame under a white wash, faded out toward the speaker.
-    if (frost) {
+    if (d.background === "frost" && d.frame) {
       const layer = h("div", { class: "yg-thumb-frost" });
       append(layer, picture(d.frame, "yg-thumb-frost-bg"));
       append(root, layer);
     }
+    // The dark frost: the blur and the dark grow from the speaker toward the title, with no
+    // edge: three copies of the frame, each more blurred and shown further toward the
+    // title side, then a dark gradient over all of it.
+    if (d.background === "shade" && d.frame) {
+      [1, 2, 3].forEach((level) => {
+        const layer = h("div", { class: "yg-thumb-shade l" + level });
+        append(layer, picture(d.frame, "yg-thumb-frost-bg"));
+        append(root, layer);
+      });
+      append(root, h("div", { class: "yg-thumb-shade-dark" }));
+    }
     append(root, h("div", { class: "yg-thumb-scrim" }));
     if (d.cutout) {
+      const speaker = d.speaker || { x: 0, y: 0, w: 1920, h: 1080 };
       const cut = picture(d.cutout, "yg-thumb-cut" + (d.outline ? " outlined" : ""));
       const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
-      const speaker = d.speaker || { x: 0, y: 0, w: 1920, h: 1080 };
       cut.style.transformOrigin = (num(speaker.x, 0) + num(speaker.w, 1920) / 2) + "px " + (num(speaker.y, 0) + num(speaker.h, 1080)) + "px";
       if (zoom !== 1) cut.style.transform = "scale(" + zoom + ")";
+      // Vivid: stronger colours on the speaker alone (1 as recorded, up to 1.4).
+      const vivid = Math.max(1, Math.min(1.4, num(d.vivid, 1)));
+      if (vivid > 1) {
+        cut.style.filter = "saturate(" + vivid + ") contrast(" + (1 + (vivid - 1) / 4).toFixed(3) + ")"
+          + (d.outline ? " url(#yg-outline)" : "") + " drop-shadow(0 18px 40px rgba(0, 0, 0, 0.5))";
+      }
       append(root, cut);
     }
     const column = h("div", { class: "yg-thumb-text" });

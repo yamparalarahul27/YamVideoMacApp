@@ -163,6 +163,36 @@ func render<V: View>(_ view: V, size: CGSize, to url: URL, settle: TimeInterval 
     print("wrote \(url.path)")
 }
 
+/// A screen zoom's frame in the Preview: the project in YAMVIDEO_SNAPSHOT_PROJECT (one with a
+/// screen recording), its screen zoom number YAMVIDEO_SNAPSHOT_ZOOM (default 0) selected and
+/// the player paused. The file is only read. YAMVIDEO_SNAPSHOT_ONLY=screenzoom renders only this.
+@MainActor
+func screenZoomPictures(_ model: AppModel, output: URL, size: CGSize) async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let path = environment["YAMVIDEO_SNAPSHOT_PROJECT"] else { print("Set YAMVIDEO_SNAPSHOT_PROJECT."); return }
+    model.restore(try VideoProject.decodeMigrating(from: Data(contentsOf: URL(fileURLWithPath: path))))
+    await pump(2)
+    guard let zooms = model.selectedItem?.screen?.zooms, !zooms.isEmpty else { print("The project has no screen zooms."); return }
+    model.selectScreenZoom(zooms[min(max(0, Int(environment["YAMVIDEO_SNAPSHOT_ZOOM"] ?? "") ?? 0), zooms.count - 1)])
+    await pump(4)
+    await render(ContentView().environmentObject(model).frame(width: size.width, height: size.height), size: size,
+                 to: output.appendingPathComponent("18-screen-zoom-frame.png"), settle: 3)
+    // This tool draws the player's picture over its view, so the frame on top of it does
+    // not show there. The Preview's picture and the frame alone, in the same order as the app.
+    guard let item = model.selectedItem, let info = item.info, let screen = item.screen, let shot = model.selectedScreenZoom,
+          let picture = try? await model.playback.composedFrame() else { return }
+    let crop = (item.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+    let preview = CGSize(width: 1000, height: 1000 * crop.height / crop.width + 32)
+    let view = ZStack {
+        Image(decorative: picture, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(16)
+        ScreenZoomFrame(playback: model.playback, screen: screen, shot: shot, crop: crop, endScreen: item.graphics?.endScreen?.start)
+    }
+    .frame(width: preview.width, height: preview.height)
+    .background(Color.black)
+    .environmentObject(model)
+    await render(view, size: preview, to: output.appendingPathComponent("18b-screen-zoom-frame-preview.png"))
+}
+
 /// The music under the voice: the Music row with a piece, the piece selected, and its
 /// inspector in the Audio tab. YAMVIDEO_SNAPSHOT_ONLY=music renders only these.
 /// YAMVIDEO_SNAPSHOT_MUSIC names a sound file; without it, ffmpeg makes 60 s of chords.
@@ -360,6 +390,10 @@ func run() async throws {
     }
     if only == "gaps" {
         await gapPictures(model, output: output, size: size)
+        return
+    }
+    if only == "screenzoom" {
+        try await screenZoomPictures(model, output: output, size: size)
         return
     }
 

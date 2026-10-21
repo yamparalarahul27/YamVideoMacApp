@@ -172,6 +172,9 @@ where the screen file has footage.
 5. A ring or a shadow round the bubble.
 6. A crop box for the screen on the picture (agents can set any crop now; the app has
    Crop Border only).
+7. ~~A bubble for each layout part~~ (2026-10-21): a Screen part can set its own corner,
+   size, shape and corners; the bubble glides between two places over 0.4 s. See
+   `bubble-per-part.md`.
 
 ## 11. Notes from part 1
 

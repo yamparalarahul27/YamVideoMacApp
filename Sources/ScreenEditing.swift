@@ -168,7 +168,9 @@ extension AppModel {
 
     /// Applies an edit only if it keeps the zoom inside the recording and clear of the
     /// others. With a `gesture` key the change shows live and is committed when it ends.
-    private func mutateScreenZoom(_ id: ZoomShot.ID, gesture: String? = nil, _ transform: (inout ZoomShot) -> Void) {
+    /// `refresh: false` keeps the picture: the Preview leaves an aimed zoom out, so a new
+    /// aim changes only the frame drawn over it.
+    private func mutateScreenZoom(_ id: ZoomShot.ID, gesture: String? = nil, refresh: Bool = true, _ transform: (inout ZoomShot) -> Void) {
         guard let item = selectedItem, let screen = item.screen, let original = screen.zooms.first(where: { $0.id == id }) else { return }
         var shot = original
         transform(&shot)
@@ -187,7 +189,7 @@ extension AppModel {
         let command = EditCommand.updateScreenZoom(clip: item.id, zoom: shot)
         if let gesture {
             if let error = updateGesture(gesture, label: "Adjust Screen Zoom", [command], keepPreview: true) { statusMessage = error.message }
-            refreshComposedPreview()
+            if refresh { refreshComposedPreview() }
             return
         }
         guard shot != original else { return }
@@ -198,15 +200,38 @@ extension AppModel {
 
     /// `live` while the hold slider moves; the slider ends the gesture.
     func setScreenZoomHold(_ id: ZoomShot.ID, _ hold: Double, live: Bool = false) {
-        let duration = selectedItem?.editedDuration ?? 0
+        guard let item = selectedItem, let zooms = item.screen?.zooms else { return }
+        let fps = item.info?.fps ?? 30
         mutateScreenZoom(id, gesture: live ? "screen-zoom-hold-\(id)" : nil) { shot in
-            shot.hold = min(max(0.2, hold), max(0.2, duration - shot.start - 2 * ZoomShot.ease))
+            shot.hold = ZoomShot.hold(hold, of: shot, among: zooms, total: item.editedDuration, fps: live ? nil : fps)
         }
     }
 
-    func setScreenZoomStart(_ id: ZoomShot.ID, _ start: Double) { mutateScreenZoom(id) { $0.start = start } }
+    /// A screen zoom moved on the timeline lands on a frame, or against the zoom it runs into.
+    func setScreenZoomStart(_ id: ZoomShot.ID, _ start: Double) {
+        guard let item = selectedItem, let zooms = item.screen?.zooms, let shot = zooms.first(where: { $0.id == id }) else { return }
+        guard let landed = ZoomShot.fit(start: snapToFrame(start, fps: item.info?.fps ?? 30), duration: shot.duration,
+                                        among: zooms.filter { $0.id != id }, total: item.editedDuration) else {
+            statusMessage = "There is no room for that screen zoom there."
+            return
+        }
+        mutateScreenZoom(id) { $0.start = landed }
+    }
 
     func setScreenZoomTarget(_ id: ZoomShot.ID, _ target: CGPoint) { mutateScreenZoom(id) { $0.target = target } }
+
+    /// A drag of the zoom's frame in the Preview: each move shows at once, and the drag's
+    /// end (`endScreenZoomAim`) makes one undo step.
+    func aimScreenZoomLive(_ id: ZoomShot.ID, _ target: CGPoint) {
+        mutateScreenZoom(id, gesture: "screen-zoom-aim-\(id)", refresh: false) { $0.target = target }
+    }
+
+    func endScreenZoomAim() {
+        endGesture()
+        if let shot = selectedScreenZoom {
+            statusMessage = "The \(shot.levelLabel) screen zoom aims at \(Int(shot.target.x)), \(Int(shot.target.y)) of the screen recording."
+        }
+    }
 
     func retimeSelectedScreenZoomToPlayhead() {
         guard let id = selectedScreenZoomID else { return }
@@ -281,6 +306,27 @@ extension AppModel {
         span = fitted(span, replacing: original, among: screen.spans, total: item.editedDuration, fps: info.fps)
         guard span != original else { return }
         if case .failure(let error) = perform([.updateLayout(clip: item.id, span: span)]) { statusMessage = error.message }
+    }
+
+    /// Changes one layout's own bubble; a key set to nil follows the screen's bubble
+    /// again. `live` while a slider moves: shown at once and committed as one undo step
+    /// when it ends.
+    func updateLayoutBubble(_ id: LayoutSpan.ID, live: Bool = false, label: String = "Layout Bubble", _ change: (inout SpanBubble) -> Void) {
+        guard let item = selectedItem, let original = item.screen?.spans.first(where: { $0.id == id }) else { return }
+        var span = original
+        var bubble = span.bubble ?? SpanBubble()
+        change(&bubble)
+        span.bubble = bubble.isEmpty ? nil : bubble
+        let command = EditCommand.updateLayout(clip: item.id, span: span)
+        let key = "layout-bubble-\(id)"
+        if live || isGestureOpen(key) {
+            if let error = updateGesture(key, label: label, [command], keepPreview: true) { statusMessage = error.message }
+            refreshComposedPreview()
+            if !live { endGesture() }
+            return
+        }
+        guard span != original else { return }
+        if case .failure(let error) = perform([command], label: label) { statusMessage = error.message }
     }
 
     /// The UI's version of an edit: snapped to frames, inside the recording and clear of

@@ -26,6 +26,27 @@ final class ScreenCompositionInstruction: NSObject, AVVideoCompositionInstructio
     }
 }
 
+/// The screen zoom the owner aims in the Preview. While the player is paused, the
+/// compositor leaves it out, so the Preview shows the whole screen and a frame marks the
+/// area the zoom fills (`ScreenZoomFrame`). The compositor reads it on its own queue.
+final class ScreenZoomAim: @unchecked Sendable {
+    private let lock = NSLock()
+    private var id: UUID?
+
+    var hidden: UUID? {
+        get { lock.lock(); defer { lock.unlock() }; return id }
+        set { lock.lock(); id = newValue; lock.unlock() }
+    }
+
+    /// `screen` without the hidden zoom, or nil when it has none to leave out.
+    func leavingOut(_ screen: ScreenTrack) -> ScreenTrack? {
+        guard let id = hidden, screen.zooms.contains(where: { $0.id == id }) else { return nil }
+        var track = screen
+        track.zooms.removeAll { $0.id == id }
+        return track
+    }
+}
+
 /// Draws a frame of a recording with a screen. The engine hands both sources over in
 /// half-float RGB, converted to the composition's Rec.709. Core Image reads them, and
 /// writes the frame, in Core Media's own 709 space (`ColorPipeline.videoSpace`), as the
@@ -110,7 +131,7 @@ extension PlaybackController {
     /// one-track preview draws it, the layout put together, then the move aside. With a
     /// Short that shows the screen, the layout draws the Short's 1080×1920 canvas.
     static func screenComposition(for composition: AVComposition, clip: VideoItem, screen: ScreenTrack, info: MediaInfo,
-                                  settings: ExportSettings, original: Bool, short: Short? = nil) -> AVVideoComposition? {
+                                  settings: ExportSettings, original: Bool, short: Short? = nil, aim: ScreenZoomAim? = nil) -> AVVideoComposition? {
         let tracks = composition.tracks.filter { $0.mediaType == .video }
         guard tracks.count >= 2 else { return nil }
         let key = Self.picture(clip, info: info, short: nil)
@@ -129,8 +150,8 @@ extension PlaybackController {
             let face = renderFrame(speaker, info: info, crop: crop, regions: regions, shots: shots, settings: settings,
                                    time: time, color: color, effects: effects)
             let state = screen.state(at: time, geometry: geometry, endScreen: endScreen)
-            let frame = composeLayout(speaker: face, screen: screenFrame, track: screen, state: state, frame: frameSize,
-                                      picture: crop.size, time: time)
+            let frame = composeLayout(speaker: face, screen: screenFrame, track: aim?.leavingOut(screen) ?? screen, state: state,
+                                      frame: frameSize, picture: crop.size, time: time)
             guard let motion else { return frame }
             return moveAside(frame, size: crop.size, motion: motion, time: time)
         }
