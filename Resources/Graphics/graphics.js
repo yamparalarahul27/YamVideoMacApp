@@ -97,7 +97,7 @@
     const side = p.side === "right" ? "right" : "left";
     const card = (y) => ({ x: 1209, y, w: 615, h: 346 });
     // The circle ends inside YouTube's element area (bottom 917), so the frame sits high.
-    let frame = { x: 96, y: 56, w: 960, h: 540 };
+    let frame = { x: 160, y: 92, w: 832, h: 468 };
     let circle = { x: 96, y: 612, w: 296, h: 296 };
     let text = { x: 432, y: 612, w: 624, h: 296 };
     let cards = videos === 2 ? [card(162), card(556)] : [card(153)];

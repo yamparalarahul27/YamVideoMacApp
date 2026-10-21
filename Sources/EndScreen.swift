@@ -49,7 +49,7 @@ struct EndScreenLayout: Equatable {
 
     var videos: Int
     var side: Side
-    /// Where the speaker's picture goes: half size, so the picture keeps its shape.
+    /// Where the speaker's picture goes: 832×468, so the picture keeps its shape.
     var frame: CGRect
     /// The Subscribe circle's footprint.
     var circle: CGRect
@@ -65,7 +65,9 @@ struct EndScreenLayout: Equatable {
         self.side = side
         let card = EndScreen.card, circle = EndScreen.circle
         // The circle ends inside YouTube's element area (bottom 917), so the frame sits high.
-        var frame = CGRect(x: 96, y: 56, width: 960, height: 540)
+        // 832×468 (16:9), centred over the circle and the text, leaves a clear gap above the
+        // circle (owner, 20 Oct 2026: the frame looked crowded on the circle).
+        var frame = CGRect(x: 160, y: 92, width: 832, height: 468)
         var round = CGRect(x: 96, y: 612, width: circle, height: circle)
         var text = CGRect(x: 432, y: 612, width: 624, height: circle)
         var cards = self.videos == 2
