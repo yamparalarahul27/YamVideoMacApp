@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendar at a Glance</title>
+<style>
+  :root {
+    --bg: #1c1c1e; --panel: #232325; --cell: #1f1f21; --line: #343437; --text: #ececee; --muted: #9b9ba1;
+    --faint: #6c6c72; --purple: #bf5af2; --blue: #0a84ff; --green: #30d158; --orange: #ff9f0a; --red: #ff453a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #111113; color: var(--text); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 22px; max-width: 900px; }
+  h2 { font-size: 15px; margin: 34px 0 10px; }
+  h2 span { color: var(--muted); font-weight: 400; }
+  .frame { max-width: 1360px; background: var(--bg); border: 1px solid #2c2c2e; border-radius: 12px; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .bar .title { font-size: 20px; font-weight: 650; margin-right: 6px; }
+  .btn { background: #3a3a3c; border-radius: 6px; padding: 3px 10px; font-size: 12px; }
+  .seg { display: flex; background: #2c2c2e; border-radius: 7px; padding: 2px; margin-left: auto; }
+  .seg span { padding: 3px 12px; border-radius: 5px; font-size: 12px; color: var(--muted); }
+  .seg span.on { background: #5a5a5e; color: var(--text); }
+  .pick { background: #2c2c2e; border-radius: 6px; padding: 3px 10px; font-size: 12px; width: 200px; }
+  .body { display: grid; grid-template-columns: 1fr 260px; min-height: 760px; }
+  .side { border-left: 1px solid var(--line); padding: 12px; background: var(--panel); }
+  .side h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+  .wait { border-radius: 7px; padding: 7px 8px; margin-bottom: 6px; display: flex; gap: 8px; align-items: flex-start; }
+  .wait.long { background: rgba(191, 90, 242, .16); }
+  .wait.short { background: rgba(10, 132, 255, .14); }
+  .wait b { display: block; font-size: 12px; }
+  .wait small { color: var(--muted); font-size: 11px; }
+  .hint { color: var(--faint); font-size: 11px; margin-top: 10px; }
+
+  /* Up next */
+  .next { display: grid; grid-template-columns: repeat(4, 1fr) 1.1fr; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .card { border-radius: 9px; padding: 8px 10px; background: #2a2a2d; min-height: 70px; }
+  .card .when { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+  .card .t { font-weight: 600; margin: 3px 0 2px; }
+  .card .d { color: var(--muted); font-size: 11px; }
+  .card.long { background: rgba(191, 90, 242, .2); border: 1px solid rgba(191, 90, 242, .55); }
+  .card.long .when { color: var(--purple); }
+  .card.short .when { color: var(--blue); }
+  .card.slot { background: transparent; border: 1.5px dashed rgba(255, 159, 10, .7); }
+  .card.slot .when, .card.slot .t { color: var(--orange); }
+  .card.ahead { background: #26262a; }
+  .meter { height: 6px; border-radius: 3px; background: #3a3a3c; margin: 7px 0 4px; overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 28%; background: var(--orange); }
+
+  /* Month grid */
+  .dow, .grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .dow div { padding: 6px 8px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .dow div.today { color: var(--blue); font-weight: 700; }
+  .grid { grid-auto-rows: 1fr; height: 610px; }
+  .day { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px; background: var(--cell); position: relative; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .day .n { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .day .rel { font-size: 10px; font-weight: 700; color: var(--blue); }
+  .day.out .n { color: var(--faint); }
+  .day.past { background: #19191a; }
+  .day.past > *:not(.n) { opacity: .62; }
+  .day.today { background: rgba(10, 132, 255, .08); box-shadow: inset 0 0 0 2px var(--blue); }
+  .day.today .n b { background: var(--blue); color: #fff; border-radius: 10px; padding: 0 7px; }
+  .rlong { background: var(--purple); color: #fff; border-radius: 6px; padding: 5px 7px; }
+  .rlong .k { font-size: 10px; font-weight: 800; letter-spacing: .04em; opacity: .9; }
+  .rlong .t { font-weight: 650; font-size: 12px; line-height: 1.25; }
+  .rshort { background: rgba(10, 132, 255, .16); border-left: 3px solid var(--blue); border-radius: 5px; padding: 4px 6px; }
+  .rshort .t { font-weight: 600; font-size: 11.5px; line-height: 1.25; color: #cfe4ff; }
+  .meta { display: flex; align-items: center; gap: 3px; margin-top: 3px; font-size: 10.5px; flex-wrap: wrap; }
+  .p { font-size: 9.5px; font-weight: 800; border-radius: 4px; padding: 0 4px; border: 1px solid currentColor; line-height: 14px; }
+  .p.ok { background: var(--green); border-color: var(--green); color: #062b10; }
+  .p.miss { background: var(--orange); border-color: var(--orange); color: #2b1800; }
+  .p.plan { color: var(--muted); }
+  .rlong .p.plan { color: #f4dcff; }
+  .warn { color: var(--orange); font-size: 10.5px; font-weight: 700; }
+  .slot { border: 1.5px dashed rgba(255, 159, 10, .65); color: var(--orange); border-radius: 6px; padding: 5px 7px; font-size: 11px; font-weight: 600; }
+  .slot small { display: block; color: var(--muted); font-weight: 400; }
+  .ico { font-size: 11px; }
+
+  /* Schedule list */
+  .list { padding: 6px 18px 18px; }
+  .week { margin-top: 14px; }
+  .week h4 { font-size: 12px; margin: 0 0 6px; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+  .week h4 b { color: var(--text); font-size: 13px; }
+  .row { display: grid; grid-template-columns: 74px 110px 1fr 230px; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 9px; margin-bottom: 5px; background: #242427; }
+  .row .date { display: flex; align-items: baseline; gap: 6px; }
+  .row .date b { font-size: 22px; font-weight: 650; }
+  .row .date span { color: var(--muted); font-size: 12px; }
+  .row .rel { font-size: 12px; font-weight: 700; }
+  .row .rel small { display: block; color: var(--muted); font-weight: 400; }
+  .row .what { display: flex; gap: 10px; align-items: center; min-width: 0; }
+  .row .what b { font-size: 13px; }
+  .row .what small { display: block; color: var(--muted); font-size: 11px; }
+  .badge { font-size: 10px; font-weight: 800; letter-spacing: .03em; border-radius: 5px; padding: 3px 6px; white-space: nowrap; }
+  .badge.long { background: var(--purple); color: #fff; }
+  .badge.short { background: rgba(10, 132, 255, .22); color: #9ccbff; }
+  .row.long { background: rgba(191, 90, 242, .14); border: 1px solid rgba(191, 90, 242, .45); }
+  .row.attention { background: rgba(255, 159, 10, .1); border: 1px solid rgba(255, 159, 10, .45); }
+  .row.slot { background: transparent; border: 1.5px dashed rgba(255, 159, 10, .55); }
+  .row.slot .what b { color: var(--orange); }
+  .row.todayrow { background: rgba(10, 132, 255, .1); border: 1px solid rgba(10, 132, 255, .5); }
+  .plats { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
+  .plats .p { font-size: 10.5px; line-height: 17px; padding: 0 6px; }
+  .collapsed { color: var(--muted); font-size: 12px; padding: 8px 10px; border-radius: 8px; background: #212123; }
+  .legend { display: flex; gap: 14px; color: var(--muted); font-size: 11px; margin: 10px 0 0; flex-wrap: wrap; }
+  @media (max-width: 900px) {
+    .body { grid-template-columns: 1fr; }
+    .side { border-left: 0; border-top: 1px solid var(--line); }
+    .next { grid-template-columns: 1fr 1fr; }
+    .grid { height: auto; grid-auto-rows: minmax(110px, auto); }
+    .frame { overflow-x: auto; }
+    .row { grid-template-columns: 60px 1fr; }
+    .row .what, .row .plats { grid-column: 1 / -1; justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<h1>Calendar at a glance — two options</h1>
+<p class="lead">Same sample plans as the current Calendar: long videos every other Thursday, Shorts on Tuesday and Saturday at 7 pm. Today is Wednesday 21 October. Green = posted, orange = needs you (a missed post or an empty slot in your rhythm), grey = planned.</p>
+
+<!-- ============ OPTION A ============ -->
+<h2>Option A <span>· the month, made easy to read, with an Up next strip</span></h2>
+<div class="frame">
+  <div class="bar">
+    <span class="title">October 2026</span><span class="btn">‹</span><span class="btn">Today</span><span class="btn">›</span>
+    <div class="seg"><span class="on">Month</span><span>Week</span><span>Schedule</span></div>
+    <span class="pick">All ideas ⌄</span>
+  </div>
+  <div class="next">
+    <div class="card long"><div class="when">Tomorrow · Thu 7 pm</div><div class="t">🎬 The search behind my Mobbin (Part 2)</div><div class="d">Long video · YT IG X in</div></div>
+    <div class="card short"><div class="when">In 3 days · Sat 7 pm</div><div class="t">▯ Why search beats folders</div><div class="d">Short · YT IG X in</div></div>
+    <div class="card slot"><div class="when">In 6 days · Tue 7 pm</div><div class="t">Short slot is empty</div><div class="d">Drag a Short here from Not planned</div></div>
+    <div class="card short"><div class="when">In 10 days · Sat 7 pm</div><div class="t">▯ Plan a ride, record it, know your bike</div><div class="d">Short · YT IG X in</div></div>
+    <div class="card ahead"><div class="when" style="color:var(--muted)">Planned ahead</div><div class="meter"><i></i></div><div class="d"><b style="color:var(--text)">Until 7 Nov</b> · your rule is 2 months (to 21 Dec). 2 long videos planned.</div></div>
+  </div>
+  <div class="body">
+    <div>
+      <div class="dow"><div>Mon</div><div>Tue</div><div class="today">Wed · today</div><div>Thu</div><div>Fri</div><div>Sat</div><div>Sun</div></div>
+      <div class="grid">
+        <div class="day out past"><div class="n">28</div></div>
+        <div class="day out past"><div class="n">29</div></div>
+        <div class="day out past"><div class="n">30</div></div>
+        <div class="day past"><div class="n">1</div></div>
+        <div class="day past"><div class="n">2</div></div>
+        <div class="day past"><div class="n">3</div><div class="rshort"><div class="t">▯ App Store tip: let users delete everything</div><div class="meta"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p ok">X</span><span class="p ok">in</span></div></div></div>
+        <div class="day past"><div class="n">4</div></div>
+
+        <div class="day past"><div class="n">5</div></div>
+        <div class="day past"><div class="n">6</div><div class="rshort"><div class="t">▯ 3 things to check before you publish an iOS app</div><div class="meta"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p ok">X</span><span class="p ok">in</span></div></div></div>
+        <div class="day past"><div class="n">7</div></div>
+        <div class="day past"><div class="n">8</div><div class="rlong"><div class="k">🎬 LONG VIDEO · 7 PM</div><div class="t">How I built my own Mobbin (Part 1)</div><div class="meta"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p ok">X</span><span class="p ok">in</span></div></div></div>
+        <div class="day past"><div class="n">9</div></div>
+        <div class="day past"><div class="n">10</div><div class="rshort"><div class="t">▯ Why I built my own bike ride app</div><div class="meta"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p ok">X</span><span class="p ok">in</span></div></div></div>
+        <div class="day past"><div class="n">11</div></div>
+
+        <div class="day past"><div class="n">12</div></div>
+        <div class="day past"><div class="n">13</div><div class="rshort"><div class="t">▯ Designers need system design</div><div class="meta"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p ok">X</span><span class="p ok">in</span></div></div></div>
+        <div class="day past"><div class="n">14</div></div>
+        <div class="day past"><div class="n">15</div></div>
+        <div class="day past"><div class="n">16</div></div>
+        <div class="day past"><div class="n">17</div><div class="rshort" style="opacity:1"><div class="t">▯ One database for 136 references</div><div class="meta"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p miss">X</span><span class="p miss">in</span></div><div class="warn">⚠ X, LinkedIn not posted</div></div></div>
+        <div class="day past"><div class="n">18</div></div>
+
+        <div class="day past"><div class="n">19</div></div>
+        <div class="day past"><div class="n">20 <span class="rel" style="color:var(--orange)">Yesterday</span></div><div class="rshort" style="opacity:1"><div class="t">▯ Draw it before you build it</div><div class="meta"><span class="p miss">YT</span><span class="p miss">IG</span><span class="p miss">X</span><span class="p miss">in</span></div><div class="warn">⚠ Not posted yet</div></div></div>
+        <div class="day today"><div class="n"><b>21</b><span class="rel">Today</span></div><div class="d" style="color:var(--muted);font-size:11px">Nothing goes out today</div></div>
+        <div class="day"><div class="n">22 <span class="rel">Tomorrow</span></div><div class="rlong"><div class="k">🎬 LONG VIDEO · 7 PM</div><div class="t">The search behind my Mobbin (Part 2)</div><div class="meta"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div></div>
+        <div class="day"><div class="n">23</div></div>
+        <div class="day"><div class="n">24 <span class="rel" style="color:var(--muted)">in 3 days</span></div><div class="rshort"><div class="t">▯ Why search beats folders</div><div class="meta">7 pm <span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div></div>
+        <div class="day"><div class="n">25</div></div>
+
+        <div class="day"><div class="n">26</div></div>
+        <div class="day"><div class="n">27 <span class="rel" style="color:var(--muted)">in 6 days</span></div><div class="slot">Short slot · 7 pm<small>Empty — drag a Short here</small></div></div>
+        <div class="day"><div class="n">28</div></div>
+        <div class="day"><div class="n">29</div></div>
+        <div class="day"><div class="n">30</div></div>
+        <div class="day"><div class="n">31 <span class="rel" style="color:var(--muted)">in 10 days</span></div><div class="rshort"><div class="t">▯ Plan a ride, record it, know your bike</div><div class="meta">7 pm <span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div></div>
+        <div class="day out"><div class="n">1</div></div>
+      </div>
+    </div>
+    <div class="side">
+      <h3>Not planned · 5</h3>
+      <div class="wait long"><span class="ico">🎬</span><div><b>Tradl AI: first impression</b><small>Long video · Tradl AI first impression</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>Tagging 136 screens with AI</b><small>Short · System design, Part 2</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>My iPad sketch to a real schema</b><small>Short · System design, Part 2</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>KYC in four minutes?</b><small>Short · Sahi web terminal review</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>The hidden practice mode</b><small>Short · Sahi web terminal review</small></div></div>
+      <div class="hint">Drag one onto a day or an empty slot.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ OPTION B ============ -->
+<h2>Option B <span>· Schedule: a list by week, with "today", "tomorrow" and empty slots spelled out</span></h2>
+<div class="frame">
+  <div class="bar">
+    <span class="title">Schedule</span><span class="btn">Today</span>
+    <div class="seg"><span>Month</span><span>Week</span><span class="on">Schedule</span></div>
+    <span class="pick">All ideas ⌄</span>
+  </div>
+  <div class="body">
+    <div class="list">
+      <div class="week">
+        <h4><b>Needs you</b> 2</h4>
+        <div class="row attention"><div class="date"><b>20</b><span>Tue</span></div><div class="rel" style="color:var(--orange)">Yesterday<small>7 pm</small></div><div class="what"><span class="badge short">SHORT</span><div><b>Draw it before you build it</b><small>Not posted on any platform yet</small></div></div><div class="plats"><span class="p miss">YT</span><span class="p miss">IG</span><span class="p miss">X</span><span class="p miss">in</span></div></div>
+        <div class="row attention"><div class="date"><b>17</b><span>Sat</span></div><div class="rel" style="color:var(--orange)">4 days ago<small>7 pm</small></div><div class="what"><span class="badge short">SHORT</span><div><b>One database for 136 references</b><small>X and LinkedIn not posted</small></div></div><div class="plats"><span class="p ok">YT</span><span class="p ok">IG</span><span class="p miss">X</span><span class="p miss">in</span></div></div>
+      </div>
+      <div class="week">
+        <h4><b>This week</b> 19–25 Oct</h4>
+        <div class="row todayrow"><div class="date"><b>21</b><span>Wed</span></div><div class="rel" style="color:var(--blue)">Today</div><div class="what"><div><b style="color:var(--muted);font-weight:500">Nothing goes out today</b></div></div><div></div></div>
+        <div class="row long"><div class="date"><b>22</b><span>Thu</span></div><div class="rel" style="color:var(--purple)">Tomorrow<small>7 pm</small></div><div class="what"><span class="badge long">🎬 LONG VIDEO</span><div><b>The search behind my Mobbin (Part 2)</b><small>System design for designers, Part 2</small></div></div><div class="plats"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div>
+        <div class="row"><div class="date"><b>24</b><span>Sat</span></div><div class="rel">In 3 days<small>7 pm</small></div><div class="what"><span class="badge short">SHORT</span><div><b>Why search beats folders</b><small>System design for designers, Part 2</small></div></div><div class="plats"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div>
+      </div>
+      <div class="week">
+        <h4><b>Next week</b> 26 Oct – 1 Nov</h4>
+        <div class="row slot"><div class="date"><b>27</b><span>Tue</span></div><div class="rel">In 6 days<small>7 pm</small></div><div class="what"><span class="badge short" style="background:transparent;border:1px dashed var(--orange);color:var(--orange)">SHORT SLOT</span><div><b>Empty</b><small>Drag a Short here, or click to pick one</small></div></div><div></div></div>
+        <div class="row"><div class="date"><b>31</b><span>Sat</span></div><div class="rel">In 10 days<small>7 pm</small></div><div class="what"><span class="badge short">SHORT</span><div><b>Plan a ride, record it, know your bike</b><small>YamDrive Shorts</small></div></div><div class="plats"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div>
+      </div>
+      <div class="week">
+        <h4><b>2–8 Nov</b> in 2 weeks</h4>
+        <div class="row"><div class="date"><b>3</b><span>Tue</span></div><div class="rel">In 13 days<small>7 pm</small></div><div class="what"><span class="badge short">SHORT</span><div><b>Widgets for riders</b><small>YamDrive Shorts</small></div></div><div class="plats"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div>
+        <div class="row long"><div class="date"><b>5</b><span>Thu</span></div><div class="rel" style="color:var(--purple)">In 15 days<small>7 pm · LinkedIn Fri</small></div><div class="what"><span class="badge long">🎬 LONG VIDEO</span><div><b>I tried India's new trading app</b><small>Sahi web terminal review</small></div></div><div class="plats"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in Fri</span></div></div>
+        <div class="row"><div class="date"><b>7</b><span>Sat</span></div><div class="rel">In 17 days<small>7 pm</small></div><div class="what"><span class="badge short">SHORT</span><div><b>Free ride mode</b><small>YamDrive Shorts</small></div></div><div class="plats"><span class="p plan">YT</span><span class="p plan">IG</span><span class="p plan">X</span><span class="p plan">in</span></div></div>
+      </div>
+      <div class="week">
+        <h4><b>9–15 Nov</b> in 3 weeks · not planned yet</h4>
+        <div class="row slot"><div class="date"><b>10</b><span>Tue</span></div><div class="rel">In 20 days</div><div class="what"><span class="badge short" style="background:transparent;border:1px dashed var(--orange);color:var(--orange)">SHORT SLOT</span><div><b>Empty</b></div></div><div></div></div>
+        <div class="row slot"><div class="date"><b>14</b><span>Sat</span></div><div class="rel">In 24 days</div><div class="what"><span class="badge short" style="background:transparent;border:1px dashed var(--orange);color:var(--orange)">SHORT SLOT</span><div><b>Empty</b></div></div><div></div></div>
+      </div>
+      <div class="week">
+        <h4><b>Earlier in October</b></h4>
+        <div class="collapsed">✓ 6 posted on every platform · show</div>
+      </div>
+      <div class="legend"><span>🎬 long video</span><span>SHORT</span><span><span class="p ok">YT</span> posted</span><span><span class="p plan">YT</span> planned</span><span><span class="p miss">YT</span> missed</span><span>dashed = empty slot in your rhythm</span></div>
+    </div>
+    <div class="side">
+      <h3>Not planned · 5</h3>
+      <div class="wait long"><span class="ico">🎬</span><div><b>Tradl AI: first impression</b><small>Long video · Tradl AI first impression</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>Tagging 136 screens with AI</b><small>Short · System design, Part 2</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>My iPad sketch to a real schema</b><small>Short · System design, Part 2</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>KYC in four minutes?</b><small>Short · Sahi web terminal review</small></div></div>
+      <div class="wait short"><span class="ico">▯</span><div><b>The hidden practice mode</b><small>Short · Sahi web terminal review</small></div></div>
+      <div class="hint">Drag one onto an empty slot.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

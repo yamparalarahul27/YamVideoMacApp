@@ -72,11 +72,18 @@ The sidebar on the left switches between **Library**, **Calendar** and **Studio*
 the editor. The Library keeps what you plan to make and what you made, apart from any project: each idea has a
 title, notes, a topic, links and images (dropped, pasted or chosen; they are copied in).
 The list groups items by stage (*Idea*, *In production*, *Ready*, *Scheduled*, *Posted*) and filters
-them by topic. The **Calendar** shows when each video goes out and where: a month or a
-week, the long video in purple, Shorts in blue, and a mark for each platform (YouTube,
-Instagram, X, LinkedIn), filled once it is posted. Drag a video to another day, or from
-*Not planned* onto a day; click one to choose its day, time, platforms (all four unless
-you untick one) and any platform's own day, or to mark it posted. An idea's page shows
+them by topic. The **Calendar** shows when each video goes out and where. **Schedule**
+(the first view) is a list: **Needs you** (past releases not posted on a platform yet),
+then this week, next week and on, each day said in words ("Tomorrow", "In 6 days").
+**Month** and **Week** have an **Up next** strip and how far ahead you have planned; past
+days are faded and today is outlined. A long video is a purple bar with a film icon, a
+Short a blue chip, and each platform's mark (YouTube, Instagram, X, LinkedIn) is green
+once posted, orange when its day has passed without it. **Rhythm** sets the days videos
+usually go out (by default a long video every other Thursday and Shorts on Tuesday and
+Saturday at 19:00, eight weeks ahead); a day in it with nothing planned shows as a dashed
+empty slot. Drag a video to another day or slot, or from *Not planned* onto one; click
+one to choose its day, time, platforms (all four unless you untick one) and any
+platform's own day, or to mark it posted with its link. An idea's page shows
 its **Release plan**: the long video with a branch to each Short, each with its day and
 platforms, and **Plan All Shorts…** spreads them one every few days. Nothing is ever
 posted for you.

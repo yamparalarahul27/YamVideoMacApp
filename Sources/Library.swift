@@ -180,18 +180,22 @@ struct Library: Codable, Equatable {
     /// 1: ideas with notes, links, images, a topic and a linked project. 2: adds each
     /// item's videos: where they were exported and where they are published. 3: adds each
     /// video's release plan (an older build refuses the file rather than drop the plans).
-    static let currentVersion = 3
+    /// 4: adds the release rhythm.
+    static let currentVersion = 4
 
     var version = Library.currentVersion
     /// Counts every committed change, undo and redo, and is saved with the file, so an
     /// agent's plan from before a relaunch can never match by accident.
     var revision = 0
     var items: [ContentItem] = []
+    /// When long videos and Shorts usually go out (version 4); nil uses Style.md's
+    /// default, a long video every other Thursday and Shorts on Tuesday and Saturday.
+    var rhythm: ReleaseRhythm?
     /// Style.md's text. It has its own file beside Library.json, so it is not encoded
     /// here, but it changes and undoes with the rest of the Library.
     var style = ""
 
-    private enum CodingKeys: String, CodingKey { case version, revision, items }
+    private enum CodingKeys: String, CodingKey { case version, revision, items, rhythm }
 
     func item(_ id: UUID?) -> ContentItem? { id.flatMap { id in items.first { $0.id == id } } }
 
@@ -211,7 +215,7 @@ struct Library: Codable, Equatable {
         let linked = items.compactMap(\.project?.projectID)
         guard Set(linked).count == linked.count else { return "Two ideas are linked to the same project." }
         for item in items { if let problem = item.problem { return problem } }
-        return nil
+        return rhythm?.problem
     }
 
     /// Reads a Library file: a newer version is refused rather than half read.
@@ -382,6 +386,8 @@ enum LibraryCommand: Equatable {
     case setStyle(String)
     case addStyleRule(section: String, rule: String, source: String?)
     case removeStyleRule(String)
+    /// The release rhythm; nil goes back to the default.
+    case setRhythm(ReleaseRhythm?)
 
     var defaultLabel: String {
         switch self {
@@ -402,6 +408,7 @@ enum LibraryCommand: Equatable {
         case .setStyle: return "Edit Style"
         case .addStyleRule: return "Add Style Rule"
         case .removeStyleRule: return "Remove Style Rule"
+        case .setRhythm: return "Release Rhythm"
         }
     }
 }
@@ -508,6 +515,9 @@ enum LibraryReducer {
                 outcome.library.style = try StyleDoc.adding(rule, to: section, source: source, in: outcome.library.style)
             case .removeStyleRule(let rule):
                 outcome.library.style = try StyleDoc.removing(rule, in: outcome.library.style)
+            case .setRhythm(let rhythm):
+                if let problem = rhythm?.problem { throw EditError.invalid(problem) }
+                outcome.library.rhythm = rhythm
             }
         }
         for id in outcome.changedIDs {

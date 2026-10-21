@@ -38,6 +38,7 @@ struct LibraryHistory {
     let origin: EditOrigin
     let items: [ContentItem]
     var style = ""
+    var rhythm: ReleaseRhythm?
     /// Typing in one field of one idea is one step while it goes on: the field's key,
     /// and when it last changed.
     var coalesce: String?
@@ -153,7 +154,7 @@ extension AppModel {
         func keep(_ entries: inout [LibraryHistory]) {
             entries = entries.map { entry in
                 LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin,
-                               items: entry.items, style: text, coalesce: entry.coalesce, date: entry.date)
+                               items: entry.items, style: text, rhythm: entry.rhythm, coalesce: entry.coalesce, date: entry.date)
             }
         }
         keep(&libraryUndoEntries); keep(&libraryRedoEntries)
@@ -191,7 +192,8 @@ extension AppModel {
         catch let error as EditError { return .failure(error) }
         catch { return .failure(.invalid(error.localizedDescription)) }
         var receipt = LibraryReceipt(revision: library.revision, transactionID: nil,
-                                     changed: outcome.library.items != library.items || outcome.library.style != library.style,
+                                     changed: outcome.library.items != library.items || outcome.library.style != library.style
+                                        || outcome.library.rhythm != library.rhythm,
                                      createdIDs: outcome.createdIDs, changedIDs: outcome.changedIDs)
         guard !dryRun, receipt.changed else { return .success(receipt) }
 
@@ -203,13 +205,14 @@ extension AppModel {
         } else {
             transaction = UUID()
             libraryUndoEntries.append(LibraryHistory(name: label, transactionID: transaction, origin: origin,
-                                                     items: library.items, style: library.style, coalesce: coalesce))
+                                                     items: library.items, style: library.style, rhythm: library.rhythm, coalesce: coalesce))
             if libraryUndoEntries.count > 100 { libraryUndoEntries.removeFirst() }
             libraryRedoEntries.removeAll()
         }
         let before = library.items
         library.items = outcome.library.items
         library.style = outcome.library.style
+        library.rhythm = outcome.library.rhythm
         receipt.transactionID = transaction
         receipt.revision = commitLibrary(origin: origin, label: label, transaction: transaction, before: before)
         return .success(receipt)
@@ -274,12 +277,14 @@ extension AppModel {
             return .failure(EditError(code: .historyConflict,
                 message: "The most recent Library step is now \"\(entry.name)\" by \(entry.origin.label). Read the Library and decide again."))
         }
-        let opposite = LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin, items: library.items, style: library.style)
+        let opposite = LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin, items: library.items,
+                                      style: library.style, rhythm: library.rhythm)
         if redo { libraryRedoEntries.removeLast(); libraryUndoEntries.append(opposite) }
         else { libraryUndoEntries.removeLast(); libraryRedoEntries.append(opposite) }
         let before = library.items
         library.items = entry.items
         library.style = entry.style
+        library.rhythm = entry.rhythm
         let changed = Set(entry.items.map(\.id)).symmetricDifference(before.map(\.id))
             .union(entry.items.filter { item in before.first { $0.id == item.id } != item }.map(\.id))
         if origin.isHuman, let first = changed.first(where: { library.item($0) != nil }) { selectedIdeaID = first }
@@ -550,7 +555,7 @@ extension AppModel {
                     return item
                 }
                 return LibraryHistory(name: entry.name, transactionID: entry.transactionID, origin: entry.origin,
-                                      items: items, style: entry.style, coalesce: entry.coalesce, date: entry.date)
+                                      items: items, style: entry.style, rhythm: entry.rhythm, coalesce: entry.coalesce, date: entry.date)
             }
         }
         follow(&libraryUndoEntries); follow(&libraryRedoEntries)

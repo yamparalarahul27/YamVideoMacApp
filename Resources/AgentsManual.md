@@ -505,15 +505,21 @@ months ahead. With more videos, plan further, so that each video has a day.
 
 1. Read the Library (4.11) and the plans: the long videos and the Shorts each plan
    proposes, and the order the owner approved.
-2. Ask the owner for the rhythm the first time (for example a long video each week, a
-   Short every two days) and the platforms. Do not invent a rhythm.
+2. Read the rhythm in `library.calendar.rhythm`: the long video's day and how many weeks
+   apart, the Shorts' days, the time and how far ahead to plan. `rhythmSet: false` means
+   it is still the default from Style.md; confirm it with the owner the first time, and
+   save their answer with `setRhythm`. Do not invent a rhythm.
+   `library.calendar.emptySlots` lists the rhythm's days with nothing planned, and
+   `library.calendar.missed` the past releases not posted on a platform yet.
 3. Propose the days as a table: each long video first, then its Shorts on the days after
    it, so a Short sends viewers to its long video. Keep a series in order (Part 1 before
    Part 2). Leave a video that is blocked by a question in *Not planned*.
 4. After a yes, send one `planRelease` for each video in one `libraryApply` (4.11b). The
    owner sees the plan on the Calendar (⌘4).
-5. When the owner adds new footage, study it (4.16) and plan its videos into the free
-   days. Do not move a planned day without the owner's yes.
+5. When the owner adds new footage, study it (4.16) and plan its videos into the empty
+   slots first. Do not move a planned day without the owner's yes.
+6. A missed release is the owner's to post. Do not post; when the owner gives the link,
+   record it with `addPost`.
 
 ### 4.18 Gaps on the timeline
 

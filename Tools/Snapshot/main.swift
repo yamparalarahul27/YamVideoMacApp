@@ -217,6 +217,85 @@ func gapPictures(_ model: AppModel, output: URL, size: CGSize) async {
     await render(window(), size: size, to: output.appendingPathComponent("7c-gaps-closed.png"))
 }
 
+/// The release calendar with plans like the owner's rhythm: a long video every other
+/// Thursday and Shorts on Tuesday and Saturday at 19:00, some posted, some not planned.
+/// YAMVIDEO_SNAPSHOT_ONLY=calendar renders only these, in a Library of their own.
+@MainActor
+func calendarPictures(_ model: AppModel, output: URL, size: CGSize) async {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("yamvideo-snapshot-calendar-\(UUID().uuidString)")
+    model.loadLibrary(from: folder)
+    let all = Platform.allCases
+    func posts(_ platforms: [Platform], on day: String, _ slug: String) -> [VideoPost] {
+        let date = ReleasePlan.date(day) ?? Date()
+        return platforms.map { platform in
+            switch platform {
+            case .youtube: return VideoPost(link: "https://youtube.com/shorts/\(slug)", posted: date)
+            case .instagram: return VideoPost(link: "https://www.instagram.com/reel/\(slug)/", posted: date)
+            case .x: return VideoPost(link: "https://x.com/yamparalarahul/status/1849\(slug.count)00", posted: date)
+            case .linkedin: return VideoPost(link: "https://www.linkedin.com/posts/yamparala_\(slug)", posted: date)
+            }
+        }
+    }
+    typealias Video = (title: String, short: Bool, day: String?, posted: [Platform], own: [String: String]?)
+    let ideas: [(title: String, videos: [Video])] = [
+        ("System design for designers, Part 1", [
+            ("How I built my own Mobbin (Part 1)", false, "2026-10-08", all, nil),
+            ("Designers need system design", true, "2026-10-13", all, nil),
+            ("One database for 136 references", true, "2026-10-17", [.youtube, .instagram], nil),
+            ("Draw it before you build it", true, "2026-10-20", [], nil)]),
+        ("System design for designers, Part 2", [
+            ("The search behind my Mobbin (Part 2)", false, "2026-10-22", [], nil),
+            ("Why search beats folders", true, "2026-10-24", [], nil),
+            ("Tagging 136 screens with AI", true, nil, [], nil),
+            ("My iPad sketch to a real schema", true, nil, [], nil)]),
+        ("Sahi web terminal review", [
+            ("I tried India's new trading app", false, "2026-11-05", [], ["linkedin": "2026-11-06"]),
+            ("KYC in four minutes?", true, nil, [], nil),
+            ("The hidden practice mode", true, nil, [], nil)]),
+        ("YamDrive Shorts", [
+            ("Plan a ride, record it, know your bike", true, "2026-10-31", [], nil),
+            ("Widgets for riders", true, "2026-11-03", [], nil),
+            ("Free ride mode", true, "2026-11-07", [], nil)]),
+        ("Tradl AI first impression", [("Tradl AI: first impression", false, nil, [], nil)]),
+        ("App Store learnings", [
+            ("App Store tip: let users delete everything", true, "2026-10-03", all, nil),
+            ("3 things to check before you publish an iOS app", true, "2026-10-06", all, nil),
+            ("Why I built my own bike ride app", true, "2026-10-10", all, nil)]),
+    ]
+    var itemIDs: [UUID] = []
+    for idea in ideas {
+        let item = ContentItem(title: idea.title)
+        itemIDs.append(item.id)
+        model.performLibrary([.addIdea(item)])
+        for video in idea.videos {
+            let slug = video.title.lowercased().filter { $0.isLetter }.prefix(10)
+            let piece = VideoPiece(id: UUID(), short: video.short, title: video.title,
+                                   posts: video.day.map { posts(video.posted, on: $0, String(slug)) } ?? [],
+                                   plan: video.day.map { ReleasePlan(day: $0, time: "19:00", platforms: all, ownDays: video.own) })
+            model.performLibrary([.putVideo(id: item.id, video: piece)])
+        }
+    }
+    let window = { ContentView().environmentObject(model).frame(width: size.width, height: size.height) }
+    model.showModule(.calendar)
+    for (mode, name) in [("schedule", "17a-calendar-schedule.png"), ("month", "17b-calendar-month.png"), ("week", "17c-calendar-week.png")] {
+        UserDefaults.standard.set(mode, forKey: "calendarMode")
+        await pump(1)
+        await render(window(), size: size, to: output.appendingPathComponent(name))
+    }
+    UserDefaults.standard.removeObject(forKey: "calendarMode")
+    await render(RhythmEditor(done: {}).environmentObject(model).frame(width: 470, height: 330), size: CGSize(width: 470, height: 330),
+                 to: output.appendingPathComponent("17f-rhythm.png"))
+    if let item = model.library.item(itemIDs[1]), let video = item.videos.first {
+        await render(PlanEditor(target: PlanTarget(item: item.id, video: video.id, day: video.plan?.day), done: {})
+                        .environmentObject(model).frame(width: 560, height: 420), size: CGSize(width: 560, height: 420),
+                     to: output.appendingPathComponent("17d-plan-editor.png"))
+    }
+    model.selectedIdeaID = itemIDs[1]
+    model.showModule(.library)
+    await pump(1.5)
+    await render(window(), size: size, to: output.appendingPathComponent("17e-release-tree.png"))
+}
+
 @MainActor
 func run() async throws {
     let arguments = CommandLine.arguments
@@ -273,6 +352,10 @@ func run() async throws {
     }
     if only == "music" {
         await musicPictures(model, output: output, size: size)
+        return
+    }
+    if only == "calendar" {
+        await calendarPictures(model, output: output, size: size)
         return
     }
     if only == "gaps" {
