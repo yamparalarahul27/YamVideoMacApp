@@ -3,6 +3,8 @@
 #   ./test.sh                  every feature
 #   ./test.sh screen shorts    only those features (and the features they start from)
 #   ./test.sh --list           the feature names
+# Each run deletes its scratch folder at its start and end. To run beside another
+# checkout's run, give this one its own: YAMVIDEO_TEST_SCRATCH=/some/empty/folder ./test.sh
 # Each feature's checks are in Tests/Checks<Feature>.swift; Tests/Base.swift has the
 # shared values and clips, Tests/Support.swift the shared helpers.
 set -euo pipefail

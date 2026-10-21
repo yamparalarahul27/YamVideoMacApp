@@ -359,8 +359,21 @@ import Foundation
           String(format: "offset %d, mean %.2f", movedPlace.offset, movedPlace.mean))
     equal(try await frameCount(movedOut), try await frameCount(moveClip), "cutting the video into panel windows and joining it again keeps every frame")
     let windowed = moveStage.parts.joined(separator: ";")
-    check(windowed.contains("concat=n=4") && windowed.contains("trim=start_frame=0:end_frame=29,setpts=PTS-STARTPTS,format=yuv420p10le"),
+    check(windowed.contains("trim=start_frame=0:end_frame=29,setpts=PTS-STARTPTS,format=yuv420p10le"),
           "frames away from the panels pass straight through", String(windowed.prefix(400)))
+    // In a long export ffmpeg queued up to 88 frames between a sendcmd and the overlay it
+    // set, so values sent by time landed seconds early (Tradl, 21 Oct 2026). Each chain of
+    // the move keeps one state: every value it sends goes out before its first frame.
+    let commandFiles = windowed.components(separatedBy: "sendcmd=f='").dropFirst().compactMap { $0.split(separator: "'").first.map(String.init) }
+    let lateCommands = try commandFiles.flatMap { path in
+        try String(contentsOfFile: path, encoding: .utf8).split(separator: "\n").filter { !$0.hasPrefix("0.000000 ") }
+    }
+    check(!commandFiles.isEmpty && lateCommands.isEmpty, "no chain of the move changes a value after its first frame",
+          lateCommands.prefix(3).joined(separator: " | "))
+    let moving = (0..<135).filter { (0.0001...0.9999).contains(moveMotion.progress(at: Double($0) / 30).amount) }
+    // The video's last frame keeps its chain open, so a frame more or less at the end is drawn too.
+    check(moving.allSatisfy { windowed.contains("trim=start_frame=\($0):end_frame=\($0 + 1),") || ($0 == 134 && windowed.contains("trim=start_frame=134,")) },
+          "while the picture moves, each frame has a chain of its own", "\(moving.count) moving frames")
 
     // GIF: both passes see the graphics; the palette stays input 1.
     var gfxGIF = ExportSettings(); gfxGIF.format = .gif
