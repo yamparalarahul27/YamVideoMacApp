@@ -733,14 +733,22 @@ final class AppModel: ObservableObject {
 
     /// `live` while the hold slider is being dragged; the slider ends the gesture.
     func setZoomHold(_ id: ZoomShot.ID, _ hold: Double, live: Bool = false) {
-        let duration = selectedItem?.editedDuration ?? 0
+        guard let item = selectedItem else { return }
+        let fps = item.info?.fps ?? 30
         mutateShot(id, gesture: live ? "zoom-hold-\(id)" : nil) { shot in
-            shot.hold = min(max(0.2, hold), max(0.2, duration - shot.start - 2 * ZoomShot.ease))
+            shot.hold = ZoomShot.hold(hold, of: shot, among: item.zoomShots, total: item.editedDuration, fps: live ? nil : fps)
         }
     }
 
+    /// A zoom moved on the timeline lands on a frame, or against the zoom it runs into.
     func setZoomStart(_ id: ZoomShot.ID, _ start: Double) {
-        mutateShot(id) { $0.start = start }
+        guard let item = selectedItem, let shot = item.zoomShots.first(where: { $0.id == id }) else { return }
+        guard let landed = ZoomShot.fit(start: snapToFrame(start, fps: item.info?.fps ?? 30), duration: shot.duration,
+                                        among: item.zoomShots.filter { $0.id != id }, total: item.editedDuration) else {
+            statusMessage = "There is no room for that zoom there."
+            return
+        }
+        mutateShot(id) { $0.start = landed }
     }
 
     /// Moves the shot's start to wherever the playhead is.

@@ -274,10 +274,14 @@ struct ScreenTrack: Codable, Equatable {
     /// zooms (`renderFrame`, `FFmpeg.zoomFilter`): the zoom and the aim ease in together,
     /// and the window stays inside the picture.
     func zoomWindow(at time: Double) -> CGRect {
-        let size = picture.size
-        guard let shot = zooms.first(where: { time >= $0.start && time < $0.end }) else { return CGRect(origin: .zero, size: size) }
+        guard let shot = zooms.first(where: { time >= $0.start && time < $0.end }) else { return CGRect(origin: .zero, size: picture.size) }
         let phase = min(1, max(0, min((time - shot.start) / ZoomShot.ease, (shot.end - time) / ZoomShot.ease)))
-        let ramp = phase * phase * (3 - 2 * phase)
+        return zoomWindow(shot, ramp: phase * phase * (3 - 2 * phase))
+    }
+
+    /// A zoom's window `ramp` of the way in (0 the whole picture, 1 its hold).
+    func zoomWindow(_ shot: ZoomShot, ramp: Double = 1) -> CGRect {
+        let size = picture.size
         let zoom = 1 + (shot.level - 1) * ramp
         let w = Double(size.width), h = Double(size.height)
         let cx = w / 2 + (Double(shot.target.x - picture.minX) - w / 2) * ramp
@@ -287,12 +291,43 @@ struct ScreenTrack: Codable, Equatable {
     }
 
     /// Where a point of the frame falls on the screen recording at an edited time, in its
-    /// pixels, through the layout and any zoom; nil off the screen.
-    func screenPoint(_ point: CGPoint, at time: Double, geometry: LayoutGeometry, endScreen: Double?) -> CGPoint? {
-        guard let place = state(at: time, geometry: geometry, endScreen: endScreen).screen, place.rect.contains(point) else { return nil }
-        let window = zoomWindow(at: time)
+    /// pixels, through the layout and any zoom; nil off the screen. `leavingOut` is a zoom
+    /// the frame does not show (the one the Preview aims).
+    func screenPoint(_ point: CGPoint, at time: Double, geometry: LayoutGeometry, endScreen: Double?,
+                     leavingOut: ZoomShot.ID? = nil) -> CGPoint? {
+        let track = without(leavingOut)
+        guard let place = track.state(at: time, geometry: geometry, endScreen: endScreen).screen, place.rect.contains(point) else { return nil }
+        let window = track.zoomWindow(at: time)
         let u = (point.x - place.rect.minX) / place.rect.width, v = (point.y - place.rect.minY) / place.rect.height
         return CGPoint(x: picture.minX + window.minX + u * window.width, y: picture.minY + window.minY + v * window.height)
+    }
+
+    /// Where a zoom's hold falls on the frame at an edited time, when the frame shows the
+    /// screen without that zoom: the area the zoom fills, and the screen's place, in frame
+    /// pixels. Nil while the screen does not show.
+    func zoomArea(_ shot: ZoomShot, at time: Double, geometry: LayoutGeometry, endScreen: Double?) -> (area: CGRect, screen: CGRect)? {
+        let track = without(shot.id)
+        guard let place = track.state(at: time, geometry: geometry, endScreen: endScreen).screen else { return nil }
+        let view = track.zoomWindow(at: time), hold = zoomWindow(shot)
+        let sx = place.rect.width / view.width, sy = place.rect.height / view.height
+        let area = CGRect(x: place.rect.minX + (hold.minX - view.minX) * sx, y: place.rect.minY + (hold.minY - view.minY) * sy,
+                          width: hold.width * sx, height: hold.height * sy)
+        return (area, place.rect)
+    }
+
+    /// The aim for a zoom of `level` nearest `point`: the window's centre, kept where the
+    /// whole window stays on the picture, so the frame in the Preview sits round it.
+    func aimTarget(_ point: CGPoint, level: Double) -> CGPoint {
+        let w = picture.width / level, h = picture.height / level
+        return CGPoint(x: min(max(point.x, picture.minX + w / 2), picture.maxX - w / 2),
+                       y: min(max(point.y, picture.minY + h / 2), picture.maxY - h / 2))
+    }
+
+    private func without(_ id: ZoomShot.ID?) -> ScreenTrack {
+        guard let id, zooms.contains(where: { $0.id == id }) else { return self }
+        var track = self
+        track.zooms.removeAll { $0.id == id }
+        return track
     }
 
     // MARK: Layout over time

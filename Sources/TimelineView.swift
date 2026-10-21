@@ -207,7 +207,9 @@ struct TimelineView: View {
     /// The targets for one moment of a drag, or nil while snapping is off or ⌥ is held.
     private func snapping(playhead: Bool = true, excluding: UUID? = nil) -> TimelineSnapping? {
         guard model.dragSnaps() else { return nil }
-        return TimelineSnapping(timeline: item.timeline, zooms: item.zoomShots, effects: item.blurEffects, markers: item.markers,
+        return TimelineSnapping(timeline: item.timeline, zooms: item.zoomShots, screenZooms: item.screen?.zooms ?? [],
+                                layoutChanges: item.screen?.spans.flatMap { [$0.start, $0.end] } ?? [],
+                                effects: item.blurEffects, markers: item.markers,
                                 playhead: playhead ? model.previewTime : nil, excluding: excluding)
     }
 
@@ -227,6 +229,20 @@ struct TimelineView: View {
         let landed = snapping.snapSpan(start: start, duration: duration, pixelsPerSecond: pixels)
         showGuide(at: landed.target?.time)
         return landed.start
+    }
+
+    /// Where a zoom moved whole lands: snapped, on a frame, and clear of `zooms` (against
+    /// the one it runs into). It stays where it was when it fits nowhere.
+    private func landZoom(_ shot: ZoomShot, start: Double, among zooms: [ZoomShot], pixels: Double) -> Double {
+        let snapped = snapSpan(shot.id, start: start, duration: shot.duration, pixels: pixels)
+        return ZoomShot.fit(start: snapToFrame(snapped, fps: item.info?.fps ?? 30), duration: shot.duration,
+                            among: zooms.filter { $0.id != shot.id }, total: total) ?? shot.start
+    }
+
+    /// Where a zoom's dragged end lands: snapped, on a frame, before the next zoom.
+    private func landZoomEnd(_ shot: ZoomShot, end: Double, among zooms: [ZoomShot], pixels: Double) -> Double {
+        let snapped = snapToFrame(snap(end, pixels: pixels, excluding: shot.id), fps: item.info?.fps ?? 30)
+        return min(snapped, shot.latestEnd(among: zooms, total: total))
     }
 
     private func showGuide(at time: Double?) {
@@ -727,8 +743,9 @@ struct TimelineView: View {
                 let space = BlockSpace(viewport, width: width, from: shot.start, to: shot.end)
                 ZoomBlock(shot: shot, selected: model.selectedScreenZoomID == shot.id,
                           highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: space.pixels,
-                          snapStart: { space.block(snapSpan(shot.id, start: space.time($0), duration: shot.duration, pixels: pixels)) },
-                          snapEnd: { space.block(snap(space.time($0), pixels: pixels, excluding: shot.id), end: true) },
+                          snapStart: { space.block(landZoom(shot, start: space.time($0), among: screen.zooms, pixels: pixels)) },
+                          snapEnd: { space.block(landZoomEnd(shot, end: space.time($0), among: screen.zooms, pixels: pixels), end: true) },
+                          time: space.time,
                           endSnap: endSnap,
                           onSelect: { model.selectScreenZoom(shot) },
                           onMove: { model.setScreenZoomStart(shot.id, space.time($0)) },
@@ -750,8 +767,9 @@ struct TimelineView: View {
                 let space = BlockSpace(viewport, width: width, from: shot.start, to: shot.end)
                 ZoomBlock(shot: shot, selected: model.selectedShotID == shot.id,
                           highlighted: model.agentHighlight?.elements.contains(shot.id) == true, pixels: space.pixels,
-                          snapStart: { space.block(snapSpan(shot.id, start: space.time($0), duration: shot.duration, pixels: pixels)) },
-                          snapEnd: { space.block(snap(space.time($0), pixels: pixels, excluding: shot.id), end: true) },
+                          snapStart: { space.block(landZoom(shot, start: space.time($0), among: item.zoomShots, pixels: pixels)) },
+                          snapEnd: { space.block(landZoomEnd(shot, end: space.time($0), among: item.zoomShots, pixels: pixels), end: true) },
+                          time: space.time,
                           endSnap: endSnap,
                           onSelect: { model.selectedShotID = shot.id },
                           onMove: { model.setZoomStart(shot.id, space.time($0)) },
@@ -1369,6 +1387,8 @@ private struct ZoomBlock: View {
     /// Where the zoom lands when moved to start at a time, and where its end lands.
     let snapStart: (Double) -> Double
     let snapEnd: (Double) -> Double
+    /// The edited time of a time the block worked out, for the label while it moves.
+    let time: (Double) -> Double
     let endSnap: () -> Void
     let onSelect: () -> Void
     let onMove: (Double) -> Void
@@ -1377,12 +1397,15 @@ private struct ZoomBlock: View {
     var symbol = "plus.magnifyingglass"
     @State private var delta = 0.0
     @State private var resize = 0.0
+    /// While a drag moves the block or its end: where that lands, in edited time.
+    @State private var landing: Double?
 
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: 3) {
                 Image(systemName: symbol)
-                Text(shot.levelLabel).lineLimit(1)
+                // While it moves, the time it lands on, to the frame's hundredth.
+                Text(landing.map(timelineTime) ?? shot.levelLabel).lineLimit(1).monospacedDigit()
                 Spacer(minLength: 0)
             }
             .font(.system(size: 10, weight: .medium))
@@ -1397,19 +1420,29 @@ private struct ZoomBlock: View {
                 .allowsHitTesting(false))
             .contentShape(Rectangle())
             .onTapGesture(perform: onSelect)
-            .gesture(DragGesture(minimumDistance: 2)
-                .onChanged { value in delta = (movedStart(value.translation.width) - shot.start) * pixels }
+            // Global, so the block following the pointer does not shift the space its own
+            // drag is measured in (a local drag made the block jitter).
+            .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                .onChanged { value in
+                    let start = movedStart(value.translation.width)
+                    delta = (start - shot.start) * pixels
+                    landing = time(start)
+                }
                 .onEnded { value in
-                    onSelect(); onMove(movedStart(value.translation.width)); delta = 0; endSnap()
+                    onSelect(); onMove(movedStart(value.translation.width)); delta = 0; landing = nil; endSnap()
                 })
             .overlay(alignment: .trailing) {
                 RoundedRectangle(cornerRadius: 2).fill(tint).frame(width: 5, height: 16).padding(.trailing, 3)
                     .contentShape(Rectangle())
-                    .highPriorityGesture(DragGesture(minimumDistance: 1)
-                        .onChanged { resize = (resizedEnd($0.translation.width) - shot.end) * pixels }
+                    .highPriorityGesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { value in
+                            let end = resizedEnd(value.translation.width)
+                            resize = (end - shot.end) * pixels
+                            landing = time(end)
+                        }
                         .onEnded { value in
                             onSelect(); onResize(shot.hold + resizedEnd(value.translation.width) - shot.end)
-                            resize = 0; endSnap()
+                            resize = 0; landing = nil; endSnap()
                         })
                     .help("Drag to change zoom duration")
             }
