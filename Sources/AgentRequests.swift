@@ -143,6 +143,23 @@ struct WireLayout: Codable, Equatable {
     var end: Double?
     /// speaker, screen or split.
     var layout: String?
+    /// The part's own bubble: {corner, size, shape, corners}, each key optional. null (kept
+    /// apart from a missing key) removes it.
+    var bubble: JSONValue?
+
+    init(id: UUID? = nil, start: Double? = nil, end: Double? = nil, layout: String? = nil, bubble: JSONValue? = nil) {
+        self.id = id; self.start = start; self.end = end; self.layout = layout; self.bubble = bubble
+    }
+
+    enum CodingKeys: String, CodingKey { case id, start, end, layout, bubble }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decodeIfPresent(UUID.self, forKey: .id)
+        start = try values.decodeIfPresent(Double.self, forKey: .start)
+        end = try values.decodeIfPresent(Double.self, forKey: .end)
+        layout = try values.decodeIfPresent(String.self, forKey: .layout)
+        bubble = values.contains(.bubble) ? try values.decode(JSONValue.self, forKey: .bubble) : nil
+    }
 }
 
 /// A graphic's move (design pixels of a 1920×1080 frame) and scale on the picture.

@@ -101,6 +101,14 @@ func logoFixture(_ name: String, red: Double, green: Double, blue: Double, width
           "two logos too wide for the speaker's panel go one above the other", "\(spot(splitPair, in: placed))")
     check(talk.graphics!.items.allSatisfy { $0.props["spot"] == nil } && talk.exportGraphics(ExportSettings()) == placed,
           "the spot is worked out for drawing and never stored; the export draws what the preview draws")
+    // A Screen part with its own bubble at the top right: the badge goes on its left.
+    var ownTalk = talk
+    ownTalk.screen?.spans.append(LayoutSpan(start: 40, end: 50, layout: .screen, bubble: SpanBubble(corner: .topRight)))
+    let inOwn = badge(42, 44, [(red.path, "Claude", 0)])
+    ownTalk.graphics = GraphicsTrack(items: [inOwn])
+    let ownSpot = spot(inOwn, in: ownTalk.placedGraphics!)
+    check(ownSpot["alignX"]?.string == "end" && ownSpot["x"]?.number == 1532,
+          "in a part with its own bubble at the top right, the badge is beside that bubble", "\(ownSpot)")
 
     var short = Short(start: 20, end: 50, window: CGRect(x: 700, y: 0, width: 608, height: 1080))
     short.screen = .top

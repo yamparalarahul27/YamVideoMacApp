@@ -768,4 +768,128 @@ import Foundation
     check(agentError(bsStar) == "invalid_command" && ((bsStar["error"] as? [String: Any])?["message"] as? String ?? "").contains("circle, rounded"),
           "an unknown shape is refused with the shapes allowed")
 
+    // MARK: - A bubble for each layout part
+
+    print("\nA bubble for each layout part")
+    var bpTrack = ScreenTrack(url: URL(fileURLWithPath: "/tmp/screen.mov"), info: ssScreenInfo)
+    bpTrack.bubble = SpeakerBubble(corner: .bottomRight, size: 0.3, face: CGPoint(x: 900, y: 380), shape: .rounded, corners: 0.2)
+    bpTrack.spans = [LayoutSpan(start: 10, end: 20, layout: .screen, bubble: SpanBubble(corner: .topLeft)),
+                     LayoutSpan(start: 20, end: 30, layout: .screen, bubble: SpanBubble(corner: .topLeft, size: 0.22)),
+                     LayoutSpan(start: 30, end: 40, layout: .split, bubble: SpanBubble(corner: .topRight)),
+                     LayoutSpan(start: 40, end: 50, layout: .screen, bubble: SpanBubble(shape: .circle)),
+                     LayoutSpan(start: 60, end: 70, layout: .screen, bubble: SpanBubble(corner: .bottomRight))]
+    let bpGeometry = LayoutGeometry(track: bpTrack, crop: ssSpeakerInfo.fullFrame)
+    let bpBase = bpGeometry.speakerPlace(.screen)
+    let bpHeld = bpTrack.state(at: 15, geometry: bpGeometry, endScreen: nil)
+    check(bpHeld.speaker.rect == CGRect(x: 40, y: 40, width: 324, height: 324) && abs(bpHeld.speaker.radius - 324 * 0.2) < 0.0001
+              && bpBase.rect == CGRect(x: 1556, y: 716, width: 324, height: 324) && bpHeld.screen == bpGeometry.screenPlace(.screen),
+          "a part's own corner moves the bubble there; the size and shape it leaves out follow the screen's bubble", "\(bpHeld.speaker)")
+    check(bpTrack.state(at: 25, geometry: bpGeometry, endScreen: nil).speaker.rect == CGRect(x: 40, y: 40, width: 238, height: 238)
+              && bpTrack.state(at: 45, geometry: bpGeometry, endScreen: nil).speaker == LayoutPlace(rect: bpBase.rect, radius: 162),
+          "a part's own size and shape")
+    check(bpTrack.bubble(at: 35, endScreen: nil).corner == .topRight && bpTrack.state(at: 35, geometry: bpGeometry, endScreen: nil) == bpGeometry.held(.split),
+          "a part in another layout keeps its bubble, but its layout shows no bubble")
+    equal(bpTrack.changes(endScreen: nil).map { "\($0.time) \($0.to.rawValue) \($0.bubble.corner.rawValue) \($0.bubble.size)" },
+          ["10.0 screen topLeft 0.3", "20.0 screen topLeft 0.22", "30.0 split bottomRight 0.3", "40.0 screen bottomRight 0.3", "50.0 screen bottomRight 0.3"],
+          "a change of the bubble between two Screen parts is a change; a part with the screen's own bubble makes none")
+    var bpWhole = true, bpAspect = true
+    for step in 0...16 {
+        let state = bpTrack.state(at: 9.9 + Double(step) * 0.04, geometry: bpGeometry, endScreen: nil)
+        if !ssWhole(state.speaker.rect) || !ssFrame.contains(state.speaker.rect) { bpWhole = false }
+        if abs(Double(state.speaker.rect.width / state.speaker.rect.height) - Double(state.window.width / state.window.height)) > 0.02 { bpAspect = false }
+    }
+    let bpHalf = bpTrack.state(at: 10.2, geometry: bpGeometry, endScreen: nil)
+    check(bpHalf.speaker.rect == CGRect(x: 798, y: 378, width: 324, height: 324) && bpHalf.window == bpGeometry.held(.screen).window
+              && bpTrack.state(at: 10.4, geometry: bpGeometry, endScreen: nil) == bpHeld && bpWhole && bpAspect,
+          "the bubble glides from one corner to the other over 0.4 s, in whole pixels, and the face in it does not move", "\(bpHalf.speaker)")
+    check(bpTrack.state(at: 20.2, geometry: bpGeometry, endScreen: nil).speaker.rect.width < 324
+              && bpTrack.state(at: 20.2, geometry: bpGeometry, endScreen: nil).speaker.rect.width > 238,
+          "a change of size eases too")
+    check(bpTrack.state(at: 15, geometry: bpGeometry, endScreen: 12) == bpGeometry.held(.speaker) && bpTrack.bubble(at: 15, endScreen: 12) == bpTrack.bubble,
+          "the end screen still shows only the speaker")
+    var bpHuge = bpTrack; bpHuge.spans[0].bubble?.size = 0.9
+    var bpSharp = bpTrack; bpSharp.spans[0].bubble?.corners = 0.01
+    check(bpHuge.problem(duration: 80, speaker: ssSpeakerInfo)?.hasPrefix("In the layout at 10.00–20.00 s") == true
+              && bpSharp.problem(duration: 80, speaker: ssSpeakerInfo)?.contains("corners") == true && bpTrack.problem(duration: 80, speaker: ssSpeakerInfo) == nil,
+          "a part's size and corners must be in the same ranges as the screen's bubble")
+    let bpPlainJSON = String(decoding: try JSONEncoder().encode(LayoutSpan(start: 1, end: 2, layout: .screen)), as: UTF8.self)
+    let bpOwnJSON = String(decoding: try JSONEncoder().encode(bpTrack.spans[1]), as: UTF8.self)
+    check(!bpPlainJSON.contains("bubble") && bpOwnJSON.contains("\"corner\":\"topLeft\"") && !bpOwnJSON.contains("shape"),
+          "a part without its own bubble writes no bubble key, and a part writes only the keys it sets", bpOwnJSON)
+
+    // In the project: round trip, version, cuts.
+    var bpLive = ScreenTrack(url: ssScreenURL, info: ssScreenMedia, offset: 1)
+    bpLive.spans = [LayoutSpan(start: 2, end: 4, layout: .screen, bubble: SpanBubble(corner: .topLeft, size: 0.22, shape: .rounded))]
+    let bpProject = try ProjectReducer.apply([.setScreen(clip: ssItem.id, screen: bpLive)], to: ssProject).project
+    let bpSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(bpProject))
+    check(bpSaved == bpProject && bpSaved.clips[0].screen?.spans.first?.bubble == bpLive.spans[0].bubble && bpSaved.version == 24,
+          "a part's bubble survives a project round trip, in version 24")
+    var bpAsOld = bpSaved; bpAsOld.version = 23
+    var bpOldPlain = ssSaved; bpOldPlain.version = 23
+    check((try? bpAsOld.validate()) == nil && (try? bpOldPlain.validate()) != nil,
+          "a version 23 file with a part's bubble is refused; one without is read")
+    check(reducerRefusal([.addLayout(clip: ssItem.id, span: LayoutSpan(start: 4.5, end: 5, layout: .screen, bubble: SpanBubble(size: 0.9)))], bpProject) == .invalidCommand,
+          "a layout with a bubble size out of range is refused")
+    let bpCut = try ProjectReducer.apply([.replaceSections(clip: ssItem.id, sections: [TimelineSegment(start: 1, end: 6)])], to: bpProject)
+    let bpCutSpan = bpCut.project.clips[0].screen?.spans.first
+    check(bpCutSpan.map { abs($0.start - 1) < 0.0001 && $0.bubble == bpLive.spans[0].bubble } == true,
+          "a part keeps its bubble when a cut moves it", "\(String(describing: bpCutSpan))")
+
+    // Parity: the bubble at the bottom right, at the top left in 2–4 s, and the moves.
+    var bpItem = ssItem; bpItem.segments = nil; bpItem.screen = bpLive
+    let bpExport = scratch.appendingPathComponent("bp-moves.mp4")
+    try await FFmpeg.export(input: ssSpeakerURL, output: bpExport, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: bpLive) { _ in }
+    equal(try await frameCount(bpExport), try await frameCount(ssSpeakerURL), "the export with a bubble move keeps every frame of the speaker")
+    let bpGeo = LayoutGeometry(track: bpLive, crop: ssSpeakerMedia.fullFrame)
+    var bpWorst = (whole: 0.0, speaker: 0.0)
+    for frame in [30, 61, 63, 66, 90, 121, 124, 127, 150] {
+        let native = try await nativePicture(bpItem, frame: frame)
+        let exported = try await ffmpegPicture(bpExport, graph: nil, frame: frame, width: 1280, height: 720)
+        let rect = bpLive.state(at: Double(frame) / 30, geometry: bpGeo, endScreen: nil).speaker.rect
+        let inner = rect.insetBy(dx: rect.width * 0.2, dy: rect.height * 0.2)
+        var total = 0.0, count = 0
+        for y in stride(from: Int(inner.minY), to: Int(inner.maxY), by: 2) { for x in stride(from: Int(inner.minX), to: Int(inner.maxX), by: 2) {
+            for channel in 0..<3 { total += abs(native.at(x, y, channel) - exported.at(x, y, channel)) }; count += 3 } }
+        bpWorst.whole = max(bpWorst.whole, meanDifference(native, exported, xs: 4..<1276))
+        bpWorst.speaker = max(bpWorst.speaker, total / Double(max(1, count)))
+    }
+    print(String(format: "       bubble move parity: whole frame %.2f, bubble %.2f of 255", bpWorst.whole, bpWorst.speaker))
+    check(bpWorst.whole < 3 && bpWorst.speaker < 3, "the export draws each part's bubble, held and while it moves, as the preview does")
+
+    // Agents.
+    let bpAgent = AppModel(recoveryURL: nil)
+    var bpAgentItem = ssItem; bpAgentItem.segments = nil; bpAgentItem.screen = ssLive
+    bpAgent.restore(VideoProject(clips: [ProjectClip(bpAgentItem)], settings: ExportSettings(), selection: bpAgentItem.id))
+    let bpClip = bpAgentItem.id.uuidString
+    @MainActor func bpApply(_ id: String, _ commands: [[String: Any]]) async -> [String: Any] {
+        var request = address(bpAgent)
+        request["method"] = "apply"; request["requestID"] = id; request["client"] = "Claude"; request["commands"] = commands
+        return await agentCall(bpAgent, request)
+    }
+    func bpMessage(_ reply: [String: Any]) -> String { (reply["error"] as? [String: Any])?["message"] as? String ?? "" }
+    let bpPlan = await bpApply("bp-plan", [["type": "replaceLayouts", "clipID": bpClip, "layouts": [
+        ["start": 0, "end": 2, "layout": "screen", "bubble": ["corner": "topLeft", "size": 0.22]], ["start": 2, "end": 4, "layout": "screen"]]]])
+    let bpSpans = { bpAgent.items[0].screen?.spans ?? [] }
+    check(bpPlan["ok"] as? Bool == true && bpSpans().first?.bubble == SpanBubble(corner: .topLeft, size: 0.22) && bpSpans().last?.bubble == nil,
+          "replaceLayouts sets a part's own bubble", "\(bpPlan)")
+    let bpLayouts = ((agentResult(await agentCall(bpAgent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["screen"] as? [String: Any])?["layouts"] as? [[String: Any]]
+    let bpOwn = bpLayouts?.first?["bubble"] as? [String: Any], bpBoxes = bpLayouts?.compactMap { $0["bubbleBox"] as? [String: Double] }
+    check(bpOwn?["corner"] as? String == "topLeft" && bpOwn?["size"] as? Double == 0.22 && bpOwn?["shape"] == nil && bpLayouts?.last?["bubble"] == nil
+              && bpBoxes?.count == 2 && (bpBoxes?.first?["x"] ?? 999) < 100 && (bpBoxes?.last?["x"] ?? 0) > 1400,
+          "state shows a part's own keys and where its bubble is", "\(bpLayouts ?? [])")
+    let bpFirst = bpSpans()[0].id.uuidString, bpSecond = bpSpans()[1].id.uuidString
+    let bpMerge = await bpApply("bp-merge", [["type": "updateLayout", "clipID": bpClip, "layoutID": bpSecond, "layout": ["bubble": ["shape": "rounded"]]],
+                                             ["type": "updateLayout", "clipID": bpClip, "layoutID": bpFirst, "layout": ["bubble": ["size": NSNull()]]]])
+    check(bpMerge["ok"] as? Bool == true && bpSpans()[1].bubble == SpanBubble(shape: .rounded) && bpSpans()[0].bubble == SpanBubble(corner: .topLeft),
+          "updateLayout merges bubble keys, and a key set to null follows the screen's bubble again", "\(bpMerge)")
+    let bpClear = await bpApply("bp-clear", [["type": "updateLayout", "clipID": bpClip, "layoutID": bpFirst, "layout": ["bubble": NSNull()]]])
+    check(bpClear["ok"] as? Bool == true && bpSpans()[0].bubble == nil && bpSpans()[0].layout == .screen, "bubble null removes the part's bubble", "\(bpClear)")
+    let bpFace = await bpApply("bp-face", [["type": "updateLayout", "clipID": bpClip, "layoutID": bpFirst, "layout": ["bubble": ["face": ["x": 1, "y": 1]]]]])
+    let bpBig = await bpApply("bp-big", [["type": "updateLayout", "clipID": bpClip, "layoutID": bpFirst, "layout": ["bubble": ["size": 0.9]]]])
+    let bpCorner = await bpApply("bp-corner", [["type": "addLayout", "clipID": bpClip, "layout": ["start": 4, "end": 5, "layout": "screen", "bubble": ["corner": "middle"]]]])
+    check(agentError(bpFace) == "invalid_command" && bpMessage(bpFace).contains("updateScreen") && agentError(bpBig) == "invalid_command"
+              && bpMessage(bpBig).contains("size") && agentError(bpCorner) == "invalid_command" && bpMessage(bpCorner).contains("topLeft"),
+          "a face, a size out of range and an unknown corner in a part's bubble are refused", "\(bpMessage(bpFace)) | \(bpMessage(bpBig)) | \(bpMessage(bpCorner))")
+    let bpAdd = await bpApply("bp-add", [["type": "addLayout", "clipID": bpClip, "layout": ["start": 4, "end": 5, "layout": "screen", "bubble": ["corner": "topRight", "corners": 0.3]]]])
+    check(bpAdd["ok"] as? Bool == true && bpSpans().last?.bubble == SpanBubble(corner: .topRight, corners: 0.3), "addLayout takes a part's bubble", "\(bpAdd)")
 }

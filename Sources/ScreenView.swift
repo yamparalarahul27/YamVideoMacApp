@@ -83,6 +83,7 @@ struct ScreenSection: View {
         Picker("Bubble", selection: Binding(get: { screen.bubble.corner }, set: { corner in model.updateScreen(label: "Bubble Corner") { $0.bubble.corner = corner } })) {
             ForEach(SpeakerBubble.Corner.allCases) { corner in Text(corner.label).tag(corner) }
         }
+        .help("The base bubble's corner. A Screen part on the Layout lane can have its own bubble.")
         HStack(spacing: 6) {
             Text("Size").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
             Slider(value: Binding(get: { screen.bubble.size }, set: { size in model.updateScreen(live: true, label: "Bubble Size") { $0.bubble.size = size } }),
@@ -91,11 +92,12 @@ struct ScreenSection: View {
             Text("\(Int((screen.bubble.size * 100).rounded()))%").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                 .frame(width: 40, alignment: .trailing)
         }
+        .help("The base bubble's size, as a share of the frame's height")
         Picker("Shape", selection: Binding(get: { screen.bubble.shape }, set: { shape in model.updateScreen(label: "Bubble Shape") { $0.bubble.shape = shape } })) {
             ForEach(SpeakerBubble.Shape.allCases) { shape in Text(shape.label).tag(shape) }
         }
         .pickerStyle(.segmented)
-        .help("The speaker's bubble in the Screen layout: a circle, or a square with soft corners")
+        .help("The base bubble's shape in the Screen layout: a circle, or a square with soft corners")
         if screen.bubble.shape == .rounded {
             HStack(spacing: 6) {
                 Text("Corners").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
@@ -330,7 +332,7 @@ struct ScreenZoomFrame: View {
     }
 }
 
-/// The selected layout span: which layout, when.
+/// The selected layout span: which layout, when, and in the Screen layout its bubble.
 struct LayoutInspector: View {
     @EnvironmentObject var model: AppModel
     let span: LayoutSpan
@@ -343,6 +345,9 @@ struct LayoutInspector: View {
                 ForEach(ScreenLayout.allCases) { layout in Text(layout.label).tag(layout) }
             }
             .pickerStyle(.segmented)
+            if span.layout == .screen, let base = model.selectedItem?.screen?.bubble {
+                bubble(base)
+            }
             DisclosureGroup("Details") {
                 VStack(alignment: .leading, spacing: 6) {
                     TimelineTimeField(label: "Start", value: span.start) { start in
@@ -368,6 +373,62 @@ struct LayoutInspector: View {
             }
             .controlSize(.small)
         }
+    }
+
+    /// This part's own bubble: each row starts at the base bubble's value, and a change
+    /// sets the part's own.
+    @ViewBuilder
+    private func bubble(_ base: SpeakerBubble) -> some View {
+        let own = span.bubble ?? SpanBubble()
+        let shown = own.applied(to: base)
+        Picker("Bubble", selection: Binding(get: { own.corner }, set: { corner in
+            model.updateLayoutBubble(span.id, label: "Layout Bubble Corner") { $0.corner = corner }
+        })) {
+            Text("Base").tag(SpeakerBubble.Corner?.none)
+            Divider()
+            ForEach(SpeakerBubble.Corner.allCases) { corner in Text(corner.label).tag(Optional(corner)) }
+        }
+        .help("Where the bubble sits in this part. Base uses the corner in the Screen section (\(base.corner.label.lowercased())).")
+        slider("Size", value: shown.size, own: own.size != nil, range: SpeakerBubble.sizeRange,
+               help: "The bubble's size in this part, as a share of the frame's height", reset: "Use the base size again") { size, live in
+            model.updateLayoutBubble(span.id, live: live, label: "Layout Bubble Size") { $0.size = size }
+        }
+        Picker("Shape", selection: Binding(get: { own.shape }, set: { shape in
+            model.updateLayoutBubble(span.id, label: "Layout Bubble Shape") { $0.shape = shape }
+        })) {
+            Text("Base").tag(SpeakerBubble.Shape?.none)
+            Divider()
+            ForEach(SpeakerBubble.Shape.allCases) { shape in Text(shape.label).tag(Optional(shape)) }
+        }
+        .help("The bubble's shape in this part. Base uses the shape in the Screen section (\(base.shape.label.lowercased())).")
+        if shown.shape == .rounded {
+            slider("Corners", value: shown.corners, own: own.corners != nil, range: SpeakerBubble.cornersRange,
+                   help: "How round the corners are in this part, as a share of the bubble's side", reset: "Use the base corners again") { corners, live in
+                model.updateLayoutBubble(span.id, live: live, label: "Layout Bubble Corners") { $0.corners = corners }
+            }
+        }
+    }
+
+    /// A bubble value of this part: a slider, its percent, and a button that gives the
+    /// value back to the base bubble. `set` gets nil from the button.
+    private func slider(_ title: String, value: Double, own: Bool, range: ClosedRange<Double>, help: String, reset: String,
+                        set: @escaping (Double?, Bool) -> Void) -> some View {
+        HStack(spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
+            Slider(value: Binding(get: { value }, set: { set($0, true) }), in: range,
+                   onEditingChanged: { editing in if !editing { model.endGesture() } })
+                .accessibilityLabel("Bubble \(title.lowercased()) in this layout")
+            Text("\(Int((value * 100).rounded()))%").font(.system(.caption, design: .monospaced))
+                .foregroundStyle(own ? .primary : .secondary)
+                .frame(width: 40, alignment: .trailing)
+            Button { set(nil, false) } label: { Image(systemName: "arrow.uturn.backward") }
+                .buttonStyle(.borderless)
+                .opacity(own ? 1 : 0)
+                .disabled(!own)
+                .help(reset)
+                .accessibilityLabel(reset)
+        }
+        .help(help)
     }
 }
 
@@ -403,10 +464,12 @@ struct LayoutBlock: View {
     var body: some View {
         let width = max(4, span.duration * pixels)
         let tint = span.layout.tint
+        // A Screen part with its own corner shows that corner.
+        let corner = span.layout == .screen ? span.bubble?.corner : nil
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4).fill(tint.opacity(selected ? 0.45 : 0.22))
             HStack(spacing: 3) {
-                Image(systemName: span.layout.symbol)
+                Image(systemName: corner?.symbol ?? span.layout.symbol)
                 Text(span.layout.label).lineLimit(1)
             }
             .font(.system(size: 10, weight: .medium))
@@ -430,9 +493,10 @@ struct LayoutBlock: View {
         .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in delta = (movedStart(value.translation.width) - span.start) * pixels }
             .onEnded { value in onSelect(); onMove(movedStart(value.translation.width)); delta = 0; endSnap() })
-        .help("A layout: drag to move it, drag an edge to change when it starts or ends")
+        .help(corner.map { "A layout with the bubble at the \($0.label.lowercased()): drag to move it, drag an edge to change when it starts or ends" }
+              ?? "A layout: drag to move it, drag an edge to change when it starts or ends")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(span.layout.label) layout from \(timelineTime(span.start)) to \(timelineTime(span.end))")
+        .accessibilityLabel("\(span.layout.label) layout\(corner.map { ", bubble \($0.label.lowercased())," } ?? "") from \(timelineTime(span.start)) to \(timelineTime(span.end))")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { onSelect() }
     }
