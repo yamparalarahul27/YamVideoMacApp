@@ -618,6 +618,9 @@ final class AppModel: ObservableObject {
     @Published var selectedGraphicID: UUID? { didSet { focusInspector(selectedGraphicID, .graphic) } }
     /// Each graphic's box on the picture, as the Preview's engine measured it.
     @Published var graphicBounds: [UUID: GraphicBounds] = [:]
+    /// Each recording's graphics as the engine measured them for the bubble check in
+    /// `state`, with the engine data they were measured from (BubbleClear.swift).
+    var bubbleMeasures: [UUID: (key: Data, bounds: [UUID: GraphicBounds])] = [:]
     /// The Short the inspector shows and the Short viewer plays.
     @Published var selectedShortID: UUID? { didSet { focusInspector(selectedShortID, .short) } }
     /// The screen layout span the inspector shows, when one is selected.

@@ -683,6 +683,7 @@ extension AppModel {
                 ?? .failure(EditError(code: .missingMedia, message: "The Agents Manual is missing from this build.")), instanceID)
         case "state":
             if let refusal = checkSession(request, required: false) { return agentResponse(Result<AgentEmpty, EditError>.failure(refusal), instanceID) }
+            await measureGraphicsForBubble()
             return agentResponse(.success(agentState()), instanceID)
         case "events": return agentResponse(agentEvents(request), instanceID)
         case "preview": return agentResponse(await agentPreview(request), instanceID)
@@ -894,7 +895,7 @@ extension AppModel {
                 captions: .init(use: document.settings.captionUse(hasFile: clip.subtitles != nil).rawValue,
                                 source: clip.item().captionsSource(document.settings)),
                 shorts: Self.shortStates(clip, settings: document.settings),
-                screen: Self.screenState(clip),
+                screen: Self.screenState(clip, overBubble: bubbleOverlaps(clip)),
                 music: Self.musicState(clip),
                 sounds: Self.soundsState(clip),
                 switchedOff: (clip.switchedOff ?? []).map(\.rawValue))

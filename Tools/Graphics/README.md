@@ -78,5 +78,12 @@ page folder under a content-hash name, so the page has no paths outside its fold
   tall, gives each logo's width in pixels from the image's own size: a logo is 100 px
   tall (96 compact) and up to 3 times as wide. Without `widths` each logo is square.
   Without a spot, the badge sits at the top right.
+- A column card (`namePlate`, `featureList`, `titleCard`, `phoneScreens`, `route`, `link`,
+  `endCard`) can have `props.clear` `{x, y, w, h, side}`: the speaker's bubble in the
+  Screen layout, in pixels. The app writes it (Sources/BubbleClear.swift) while the bubble
+  shows with the card. When the card's drawn box meets that box, the engine moves the card
+  below it (`side` `below`) or above it (`above`), 24 px from it (`clearMove`). When that
+  leaves the title-safe area, the card moves beside the bubble, towards the middle. An
+  item's own `transform` wins. `YamGraphics.bounds()` gives the move as `cx`, `cy`.
 
 The kinds and their props are in section 3 of the plan.
