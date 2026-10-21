@@ -18,10 +18,10 @@ extension FFmpeg {
     /// encoded values. The fill (blurred hard) is made at quarter size and the frost at
     /// half size, which looks the same and costs a fraction. What changes from frame to
     /// frame (how far the picture has moved, how wide its edge fades, how strong the fill
-    /// and the frost are) comes from `GraphicsMotion`, the function the preview uses,
-    /// through `sendcmd`, as the blur effects do. The two ramps are still images repeated
-    /// for every frame; mergeplanes reads one frame of them ahead, so their gains go out a
-    /// frame early (measured, and checked by `./test.sh`).
+    /// and the frost are) comes from `GraphicsMotion`, the function the preview uses. A
+    /// panel window is cut into chains of one state: a hold is one chain, and each frame
+    /// of a slide has its own. Each chain gets its values once, through `sendcmd`, before
+    /// its first frame. The two ramps are still images repeated for every frame.
     static func moveStage(_ motion: GraphicsMotion, frame: CGSize, fps: Double, fpsExpression: String,
                           duration: Double, tags: FrameTags, name: String = "mv") throws -> EffectStage {
         let rate = max(1, fps)
@@ -73,7 +73,21 @@ extension FFmpeg {
                 }
                 if window.end == nil { segments[segments.count - 1].end = nil }
             } else {
-                segments.append((window.first, window.end, .panel(index)))
+                // Frames in one state share a chain; while the picture moves, each frame has a
+                // chain of its own. So a chain's values never change, and nothing waits on when
+                // `sendcmd` runs: in a long export ffmpeg queued up to 88 frames between the
+                // sendcmd and the overlay, and a panel's slide out came 2.4 s early (Tradl,
+                // 21 Oct 2026).
+                let last = window.end ?? total
+                var frame = window.first
+                while frame < last {
+                    let state = moveState(motion, at: Double(frame) / rate)
+                    var end = frame + 1
+                    while end < last, moveState(motion, at: Double(end) / rate) == state { end += 1 }
+                    if end - frame == 1 { firstSingle = firstSingle ?? frame }
+                    segments.append((frame, end == last ? window.end : end, .panel(index)))
+                    frame = end
+                }
             }
             cursor = window.end ?? Int.max
         }
@@ -107,7 +121,7 @@ extension FFmpeg {
                 let frames = (segment.end ?? (total + 2)) - segment.first
                 parts += try moveWindow(motion, spans: windows[window].spans, first: segment.first, frames: frames,
                                         frame: frame, rate: rate, fpsExpression: fpsExpression, tags: tags,
-                                        input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)w\(window)_")
+                                        input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)w\(index)_")
             case .screen(let amount):
                 parts += placedWindow(motion.screenPlacement(amount: amount, size: frame), gain: GraphicsMotion.fillDim * amount,
                                       frame: frame, tags: tags, input: "[\(name)s\(index)]\(trim)", output: output, name: "\(name)e\(index)_")
@@ -177,6 +191,18 @@ extension FFmpeg {
             + String(format: "lutyuv=y='(val-%d)*%.6f+%d'", black, gain, black) + ":u='\(chroma)':v='\(chroma)',scale=\(w):\(h):flags=bilinear,setsar=1"
     }
 
+    /// What a frame of the move looks like: how far the picture has moved, and which frost
+    /// shows. Frames with the same state can share one chain.
+    struct MoveState: Equatable {
+        var amount: Double
+        var frost: [Double]?
+    }
+
+    static func moveState(_ motion: GraphicsMotion, at time: Double) -> MoveState {
+        let (amount, span) = motion.progress(at: time)
+        return MoveState(amount: amount, frost: span.flatMap(motion.frostRamp(for:)).map { [$0.from, $0.to, $0.blur] })
+    }
+
     /// One panel window of the move, its frames timed from 0. On the 16:9 video the picture
     /// slides left; under a Short's bottom sheet it lifts; under a full shade it stays put
     /// and only the frost comes in.
@@ -227,23 +253,22 @@ extension FFmpeg {
         shown["lutyuv@\(name)a y"] = "val*1000000"
         for index in frosts.indices { shown["lutyuv@\(name)r\(index) y"] = "val*0" }
         let saturation = GraphicsMotion.fillSaturation
-        for index in 0..<frames {
-            let (amount, span) = motion.progress(at: Double(first + index) / rate)
-            let now = (Double(index) - 0.5) / rate, early = (Double(index) - 1.5) / rate
-            if moves {
-                let shift = vertical ? motion.lift(amount: amount, size: frame) : Int((Double(w) * GraphicsTrack.shiftFraction * amount).rounded())
-                send(now, "overlay@\(name)x", axis, String(-shift))
-                let gain = GraphicsMotion.fillDim * amount
-                send(now, "lutyuv@\(name)f", "y", String(format: "(val-%d)*%.6f+%d", black, gain, black))
-                send(now, "lutyuv@\(name)f", "u", String(format: "(val-512)*%.6f+512", gain * saturation))
-                send(now, "lutyuv@\(name)f", "v", String(format: "(val-512)*%.6f+512", gain * saturation))
-                // The edge fade is `edgeFade × amount` wide: the full-width ramp over amount.
-                send(early, "lutyuv@\(name)a", "y", amount > 0.000001 ? String(format: "val*%.6f", 1 / amount) : "val*1000000")
-            }
-            for (frost, entry) in frosts.enumerated() {
-                let strength = span.flatMap(motion.frostRamp(for:)).map { $0 == entry.ramp } == true ? amount : 0
-                send(early, "lutyuv@\(name)r\(frost)", "y", String(format: "val*%.6f", strength))
-            }
+        // Every frame of a chain has the state of its first (`moveStage` cuts the chains so),
+        // so its values go out once, before the first frame.
+        let (amount, span) = motion.progress(at: Double(first) / rate)
+        if moves {
+            let shift = vertical ? motion.lift(amount: amount, size: frame) : Int((Double(w) * GraphicsTrack.shiftFraction * amount).rounded())
+            send(0, "overlay@\(name)x", axis, String(-shift))
+            let gain = GraphicsMotion.fillDim * amount
+            send(0, "lutyuv@\(name)f", "y", String(format: "(val-%d)*%.6f+%d", black, gain, black))
+            send(0, "lutyuv@\(name)f", "u", String(format: "(val-512)*%.6f+512", gain * saturation))
+            send(0, "lutyuv@\(name)f", "v", String(format: "(val-512)*%.6f+512", gain * saturation))
+            // The edge fade is `edgeFade × amount` wide: the full-width ramp over amount.
+            send(0, "lutyuv@\(name)a", "y", amount > 0.000001 ? String(format: "val*%.6f", 1 / amount) : "val*1000000")
+        }
+        for (frost, entry) in frosts.enumerated() {
+            let strength = span.flatMap(motion.frostRamp(for:)).map { $0 == entry.ramp } == true ? amount : 0
+            send(0, "lutyuv@\(name)r\(frost)", "y", String(format: "val*%.6f", strength))
         }
         let script = Data((lines.joined(separator: "\n") + "\n").utf8)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("YamVideo-move", isDirectory: true)
