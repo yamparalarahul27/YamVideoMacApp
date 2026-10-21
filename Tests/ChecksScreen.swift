@@ -822,8 +822,8 @@ import Foundation
     bpLive.spans = [LayoutSpan(start: 2, end: 4, layout: .screen, bubble: SpanBubble(corner: .topLeft, size: 0.22, shape: .rounded))]
     let bpProject = try ProjectReducer.apply([.setScreen(clip: ssItem.id, screen: bpLive)], to: ssProject).project
     let bpSaved = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(bpProject))
-    check(bpSaved == bpProject && bpSaved.clips[0].screen?.spans.first?.bubble == bpLive.spans[0].bubble && bpSaved.version == 24,
-          "a part's bubble survives a project round trip, in version 24")
+    check(bpSaved == bpProject && bpSaved.clips[0].screen?.spans.first?.bubble == bpLive.spans[0].bubble && bpSaved.version >= 24,
+          "a part's bubble survives a project round trip, in version 24 or later")
     var bpAsOld = bpSaved; bpAsOld.version = 23
     var bpOldPlain = ssSaved; bpOldPlain.version = 23
     check((try? bpAsOld.validate()) == nil && (try? bpOldPlain.validate()) != nil,

@@ -1597,25 +1597,42 @@
     const d = data || {};
     document.documentElement.style.setProperty("--yg-accent", d.accent || DEFAULT_STYLE.accent);
     const root = h("div", { id: "yg-thumb", class: "yg-thumb bg-" + (d.background || "dim") + " side-" + (d.side === "left" ? "left" : "right")
-      + (d.highlight ? " highlight" : "") });
+      + (d.highlight ? " highlight" : "") + (d.accentFont === "serif" ? " accent-serif" : "") });
     const pictures = [];
     const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
     append(root, outlineFilter(d.outlineWidth));
     if (d.frame) append(root, picture(d.frame, "yg-thumb-bg"));
-    const frost = d.background === "frost" && d.frame;
+    const frost = (d.background === "frost" || d.background === "shade") && d.frame;
     // The white frost: a blurred copy of the frame under a white wash, faded out toward the speaker.
-    if (frost) {
+    if (d.background === "frost" && d.frame) {
       const layer = h("div", { class: "yg-thumb-frost" });
       append(layer, picture(d.frame, "yg-thumb-frost-bg"));
       append(root, layer);
     }
+    // The dark frost: the blur and the dark grow from the speaker toward the title, with no
+    // edge: three copies of the frame, each more blurred and shown further toward the
+    // title side, then a dark gradient over all of it.
+    if (d.background === "shade" && d.frame) {
+      [1, 2, 3].forEach((level) => {
+        const layer = h("div", { class: "yg-thumb-shade l" + level });
+        append(layer, picture(d.frame, "yg-thumb-frost-bg"));
+        append(root, layer);
+      });
+      append(root, h("div", { class: "yg-thumb-shade-dark" }));
+    }
     append(root, h("div", { class: "yg-thumb-scrim" }));
     if (d.cutout) {
+      const speaker = d.speaker || { x: 0, y: 0, w: 1920, h: 1080 };
       const cut = picture(d.cutout, "yg-thumb-cut" + (d.outline ? " outlined" : ""));
       const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
-      const speaker = d.speaker || { x: 0, y: 0, w: 1920, h: 1080 };
       cut.style.transformOrigin = (num(speaker.x, 0) + num(speaker.w, 1920) / 2) + "px " + (num(speaker.y, 0) + num(speaker.h, 1080)) + "px";
       if (zoom !== 1) cut.style.transform = "scale(" + zoom + ")";
+      // Vivid: stronger colours on the speaker alone (1 as recorded, up to 1.4).
+      const vivid = Math.max(1, Math.min(1.4, num(d.vivid, 1)));
+      if (vivid > 1) {
+        cut.style.filter = "saturate(" + vivid + ") contrast(" + (1 + (vivid - 1) / 4).toFixed(3) + ")"
+          + (d.outline ? " url(#yg-outline)" : "") + " drop-shadow(0 18px 40px rgba(0, 0, 0, 0.5))";
+      }
       append(root, cut);
     }
     const column = h("div", { class: "yg-thumb-text" });
