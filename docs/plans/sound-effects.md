@@ -1,6 +1,8 @@
 # Sound effects and music hits
 
-**Status (2026-10-21):** A plan for the owner to approve. Nothing is built.
+**Status (2026-10-21):** A plan. The owner answered four questions the same day (see
+"The owner's answers"). Nothing is built. Next: a mock-up on the Tradl video, so the owner
+can see and hear the cues, the music hits and a fast track before any code.
 **Source:** the owner, 2026-10-21, after the test of the music duck (PR #73): "I like the
 music work done, but it is not my vibe … my vibe is more into fast, informative
 entertainment, education, tech."
@@ -88,7 +90,7 @@ If the owner agrees, a short rule for the track goes into `docs/channel/Style.md
 |---|---|---|---|
 | Section card | the card comes in (0 s) | whoosh-1 | on |
 | Kinetic text | the first word | whoosh-2 | on |
-| Kinetic text | each later word | a soft tap (button-1 to 6) | off |
+| Kinetic text | each later word | a soft tap (button-1 to 6) | on |
 | Link card | each typed letter | a key tap (button-1 to 6, in turn) | on |
 | Link card | Enter, the window opens | whoosh-2 | on |
 | Name plate | comes in | whoosh-2, quieter | on |
@@ -157,6 +159,24 @@ Version 22 is the duck (PR #73), so this is version 23.
 3. **Music hits** at section cards.
 4. **Sounds that the app makes** (ffmpeg). If the kit's licence is unknown, this part comes
    first, so part 1 has sounds to use.
+
+## The owner's answers (2026-10-21)
+
+1. **Sources:** use free open sounds (CC0, or CC BY with its credit), the owner's "Boring
+   Sound Kit" (the owner says to use it; its source is not known, so the app marks its
+   licence "other", and Export for YouTube warns), and sounds that the app makes. AI sounds
+   (a local model) can come later. All of it must be easy for an agent to direct: the app is
+   the medium where the owner and the agent work together. So each sound has a name in the
+   library, and agents choose cues by name.
+2. **Cues:** all four groups are on by default: whooshes on section and title cards, key
+   taps on the link card, pops on badges and ticks, and a tap on each kinetic word. (The
+   table above had the kinetic word taps off; they are now on.)
+3. **Music hits:** the owner asked for a recommendation. Recommendation: yes, a short swell
+   (4 dB, about 1.2 s) at each section card. The mock-up lets the owner hear it first.
+4. **The track rule for Style.md:** not yet. The owner wants to see a fast track on the
+   Tradl video first.
+
+Still open: how loud a sound is (question 3 below), and sounds in Shorts (question 5).
 
 ## Questions for the owner
 
