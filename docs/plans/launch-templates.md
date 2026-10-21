@@ -1,6 +1,6 @@
 # Launch templates and YouTube numbers
 
-**Status (2026-10-21):** plan only. Research done and the owner's two decisions are in.
+**Status (2026-10-21):** plan only. Research done and the owner's decisions are in.
 Nothing is built yet. Each part is its own chat and its own pull request, in the order of
 section 6.
 
@@ -85,12 +85,21 @@ platform.
 | Platform | Route | Gives | Sign-in | Cost | Decision |
 |---|---|---|---|---|---|
 | YouTube | `yt-dlp` on the public page | Views, likes, comment count, comments | None | Free | **Yes** (2026-10-21) |
-| Instagram | The official Instagram API with Instagram Login, for the owner's own professional (creator) account | Views of reels (the `views` metric, since v22.0), likes, comments, reach | Once, on Instagram's own consent page; a token then | Free as far as found; confirm | Owner to decide |
-| X | The official X API, now pay-per-use (the free tier ended in February 2026) | The post's public numbers and replies | An API key; no account sign-in | About $0.005 a post read (secondary sources) | Owner to decide: pay a few cents a check, or a screenshot |
+| Instagram | The official Instagram API with Instagram Login, for the owner's own professional (creator) account | Views of reels (the `views` metric, since v22.0), likes, comments, reach | Once, on Instagram's own consent page; a token then | Free as far as found; confirm | **Yes** (2026-10-21): the owner signs in once |
+| X | The official X API, now pay-per-use (the free tier ended in February 2026) | The post's public numbers and replies | An API key; no account sign-in | About $0.005 a post read (secondary sources) | **Yes** (2026-10-21): the official API with a few dollars of credit |
 | LinkedIn | The Member Post Analytics API (July 2025) seems open only to approved partner tools | Impressions, reach, reactions, comments | — | — | A screenshot of the post's analytics, read with Vision (distribution phase 4, item 2), or typed in |
 
 Watch time and retention stay with each platform's own analytics: a screenshot or typed
 in.
+
+**Signing in, as the owner asked (2026-10-21):** YouTube never. Instagram once, on
+Instagram's own consent page: the app swaps the one-hour token for a 60-day one and
+refreshes it whenever it runs (a token can be refreshed after 24 hours and before it
+expires; one not refreshed for 60 days expires). The owner signs in again only if it
+lapses or they remove the app's access. X never: an app-only key from the X developer
+site, with prepaid credit. LinkedIn never: a screenshot. Never the owner's cookies.
+Sources: [refresh access token](https://developers.facebook.com/documentation/instagram-platform/reference/refresh_access_token),
+[access token](https://developers.facebook.com/docs/instagram-platform/reference/access_token/).
 
 Sources: [Instagram media insights](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/insights/),
 [Graph API v22.0 changelog](https://developers.facebook.com/docs/graph-api/changelog/version22.0),
@@ -159,7 +168,7 @@ its licence is unknown.
 
 | Step | What | Status |
 |---|---|---|
-| A | Numbers from a link: YouTube first, then Instagram and X as the owner decides, LinkedIn from a screenshot | Next. Ask the owner first to install yt-dlp |
+| A | Numbers from a link: YouTube (yt-dlp), Instagram and X (official APIs), LinkedIn from a screenshot | Next. Ask the owner first to install yt-dlp; set up the Meta app and the X key with the owner |
 | B1 | Templates gallery and the App demo template | After A |
 | B2 | Launch Short template | After B1 |
 | B3 | Sound effects | After B2 |
@@ -173,9 +182,9 @@ The owner likes them asked one at a time, and mock-ups on their own footage befo
 is chosen.
 
 - **A:** How many of the newest comments to keep at each check? Should a check run from
-  the Library only, or from the calendar's reminders too? Instagram: authorise the app
-  once on Instagram's own page (official, free)? X: pay a few cents a check through the
-  official API, or use a screenshot?
+  the Library only, or from the calendar's reminders too? Instagram and X are decided
+  (official routes); the owner creates the Meta app and the X key with step-by-step help.
+  Keys and tokens live in the macOS Keychain, never in the project or Git.
 - **B1:** Where the gallery lives: a Templates tab beside Media and Graphics, or the
   Graphics tab. Which app's screens to use for the first mock-up (the bike ride app?).
 - **B2:** The tones to offer at first (brag has seven). The ending: a store badge, a link
