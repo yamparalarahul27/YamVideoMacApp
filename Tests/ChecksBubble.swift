@@ -47,7 +47,7 @@ import JavaScriptCore
     let logo = try logoFixture("bubble-logo.png", red: 0, green: 0.6, blue: 1)
     let badge = gfx(.logoBadge, 20, 22, ["logos": .array([.object(["image": .string(logo.path), "at": .number(0)])])])
     talk.graphics = GraphicsTrack(style: tradlStyle, items: [early, across, feedback, badge])
-    equal(talk.bubbleBox, CGRect(x: 1618, y: 40, width: 262, height: 262), "the bubble's box is in design pixels of the 1920×1080 frame")
+    equal(talk.bubbleBox(), CGRect(x: 1618, y: 40, width: 262, height: 262), "the bubble's box is in design pixels of the 1920×1080 frame")
     let placed = talk.placedGraphics!
     func clear(_ graphic: Graphic, in track: GraphicsTrack) -> [String: JSONValue]? { track.items.first { $0.id == graphic.id }?.props["clear"]?.object }
     equal(clear(feedback, in: placed), ["x": .number(1618), "y": .number(40), "w": .number(262), "h": .number(262), "side": .string("below")],
@@ -143,6 +143,39 @@ import JavaScriptCore
     noScreen.restore(VideoProject(clips: [ProjectClip(plain)], settings: ExportSettings(), selection: plain.id))
     let plainClips = agentResult(await agentCall(noScreen, ["method": "state"]))["clips"] as? [[String: Any]]
     check(plainClips?.first?["screen"] is NSNull || plainClips?.first?["screen"] == nil, "without a screen recording there is no bubble to check")
+
+    // A layout part with a bubble of its own: the base bubble is bottom right, and the part
+    // from 30 to 40 s moves it to the top right.
+    var parts = talk
+    parts.shorts = []
+    parts.screen?.bubble.corner = .bottomRight
+    parts.screen?.spans = [LayoutSpan(start: 0, end: 10, layout: .speaker),
+                           LayoutSpan(start: 30, end: 40, layout: .screen, bubble: SpanBubble(corner: .topRight))]
+    let inBase = gfx(.titleCard, 12, 16, ["title": .string("Under the base bubble")])
+    let across2 = gfx(.titleCard, 26, 34, feedback.props)
+    let inPart = gfx(.titleCard, 35, 39, feedback.props)
+    parts.graphics = GraphicsTrack(style: tradlStyle, items: [inBase, across2, inPart])
+    let partPlaced = parts.placedGraphics!
+    equal(clear(inPart, in: partPlaced)?["y"], .number(40), "a card in a part with its own bubble keeps clear of that bubble (top right)")
+    equal(clear(inPart, in: partPlaced)?["side"], .string("below"), "and moves below it")
+    equal(clear(inBase, in: partPlaced)?["y"], .number(778), "a card outside the part keeps clear of the base bubble (bottom right)")
+    equal(clear(across2, in: partPlaced)?["y"], .number(778), "a card that starts before the part keeps clear of the bubble when it is fully in")
+    equal(parts.bubblePlaces(from: 26, to: 34, endScreen: nil).map(\.time), [26, 30], "while that card shows, the bubble has two places")
+    let partMeasured = try await GraphicsSnapshot.bounds(partPlaced, duration: 60, fps: "30")
+    let partBubble = CGRect(x: 1618, y: 40, width: 262, height: 262)
+    if let card = partMeasured[inPart.id] {
+        check(!card.placed(nil).intersects(partBubble) && abs(card.placed(nil).minY - (partBubble.maxY + BubbleClear.gap)) < 1,
+              "the engine moves the card below the part's bubble", "\(card.placed(nil))")
+    } else {
+        check(false, "the engine measures the card in the part", "\(partMeasured)")
+    }
+    let partAgent = AppModel(recoveryURL: nil)
+    partAgent.restore(VideoProject(clips: [ProjectClip(parts)], settings: ExportSettings(), selection: parts.id))
+    let partClips = agentResult(await agentCall(partAgent, ["method": "state"]))["clips"] as? [[String: Any]]
+    let partOver = (partClips?.first?["screen"] as? [String: Any])?["overBubble"] as? [[String: Any]] ?? []
+    check(partOver.count == 1 && partOver.first?["graphicID"] as? String == across2.id.uuidString && partOver.first?["at"] as? Double == 30
+              && partOver.first?["why"] as? String == "otherBubble" && (partOver.first?["bubble"] as? [String: Double])?["y"] == 40,
+          "state lists a card that meets the part's bubble but not the base one, from the part's start", "\(partOver)")
 
     // The manual tells agents to read the list.
     let manual = AgentsManual.text ?? ""

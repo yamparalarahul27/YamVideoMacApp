@@ -142,13 +142,17 @@ edit, and each edit becomes one undo step with your name on it.
    is no room. A graphic with its own `transform` stays where the transform puts it. Do
    not set `props.clear`: the app writes it.
 7. Check the bubble each time you move the bubble, change the layouts, or add or move
-   graphics. Read `state.clips[].screen.overBubble`. Each item is a graphic that covers
-   the bubble, with `graphicID`, `kind`, `at` (the first time it covers the bubble),
+   graphics. Read `state.clips[].screen.overBubble`. Each item is a graphic and a place
+   of the bubble that it covers (a layout part can move the bubble), with `graphicID`,
+   `kind`, `at` (the first time the bubble shows at that place with the graphic),
    `rect` and `bubble` (design pixels of the 1920×1080 frame) and `why`. The list must be
    empty before you show frames to the owner. For each item:
    - `transform`: give the graphic a `transform` that keeps `rect` clear of `bubble`, or
      set the transform to x 0, y 0, scale 1, so the app places it.
    - `noRoom`: make the card smaller (`transform` scale) or give it less text.
+   - `otherBubble`: a layout part moves the bubble while the card shows. The app keeps
+     the card clear of the bubble that shows when the card is fully in. Move the card so
+     it starts and ends in one part, or give it a `transform` clear of both bubbles.
    - `panel`: the app does not move panels. Move the panel to a time with a different
      layout, or set the bubble to a different corner.
    - `badge`: remove the logo badge's `transform`.
