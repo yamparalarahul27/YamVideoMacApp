@@ -425,7 +425,7 @@ func makeRequest(_ arguments: Arguments) throws -> [String: Any] {
     default:
         throw Failure.usage("Unknown command \"\(arguments.command)\". Run yamvideoctl --help.")
     }
-    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo",
+    let edits: Set<String> = ["apply", "undo", "redo", "save", "export", "analyze", "cancel", "transcribe", "autoEdit", "setLogo", "removeLogo", "setSound", "removeSound",
                               "libraryApply", "libraryUndo", "libraryRedo"]
     if edits.contains(request["method"] as? String ?? ""), request["requestID"] == nil {
         request["requestID"] = arguments.values["request-id"] ?? UUID().uuidString
