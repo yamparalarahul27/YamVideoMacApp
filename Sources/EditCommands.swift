@@ -140,6 +140,8 @@ enum EditCommand: Equatable {
     /// Replaces the piece with the same ID.
     case updateMusic(clip: UUID, piece: MusicPiece)
     case removeMusic(clip: UUID, piece: UUID)
+    /// The duck of all the recording's music: down under speech, up in pauses. Nil is off.
+    case setMusicDuck(clip: UUID, duck: MusicDuck?)
 
     /// Undo-menu wording when a caller does not name the transaction itself.
     var defaultLabel: String {
@@ -207,6 +209,7 @@ enum EditCommand: Equatable {
         case .addMusic: return "Add Music"
         case .updateMusic: return "Edit Music"
         case .removeMusic: return "Remove Music"
+        case .setMusicDuck: return "Music Duck"
         }
     }
 }
@@ -805,6 +808,14 @@ enum ProjectReducer {
                 pieces.removeAll { $0.id == id }
             }
 
+        case .setMusicDuck(let clip, let duck):
+            try editClip(clip, in: &outcome) { record, _ in
+                guard var bed = record.music else { throw EditError.invalid("This recording has no music to duck. Add music first.") }
+                if let problem = duck?.problem { throw EditError.invalid(problem) }
+                bed.duck = duck
+                record.music = bed
+            }
+
         case .copyColor(let source, let targets, let includeInterpretation):
             let from = outcome.project.clips[try clipIndex(source, in: outcome.project)].color ?? ClipColorSettings()
             guard !targets.isEmpty else { throw EditError.invalid("Choose at least one recording to copy the colour to.") }
@@ -1078,7 +1089,8 @@ enum ProjectReducer {
             }.sorted { ($0.start, $0.id.uuidString) < ($1.start, $1.id.uuidString) }
             guard !pieces.isEmpty else { record.music = nil; return }
             guard let level = record.music?.voice ?? voice else { throw EditError.invalid("Add the first piece of music with the voice's loudness.") }
-            let bed = MusicBed(voice: level, pieces: pieces)
+            // A new bed ducks under speech; a bed keeps its own duck, also one that is off.
+            let bed = MusicBed(voice: level, pieces: pieces, duck: record.music == nil ? MusicDuck() : record.music?.duck)
             if let problem = bed.problem(duration: record.timeline.duration) { throw EditError.invalid(problem) }
             record.music = bed
         }

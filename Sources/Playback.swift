@@ -253,6 +253,7 @@ final class PlaybackController: ObservableObject {
         }
         // The music under the voice, as the export mixes it. A Short has none.
         var music: MusicPreviewTracks?
+        if short == nil, audio != nil { await MusicSpeech.prepare(clip) }
         if short == nil, audio != nil, let mix = clip.exportMusic(settings) {
             music = MusicPreviewTracks(composition)
             try await music?.insert(mix)

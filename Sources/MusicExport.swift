@@ -1,9 +1,10 @@
 import AVFoundation
 import Foundation
 
-// The music in an export (docs/plans/background-music.md, part 1): each file is one more
-// ffmpeg input, each play is cut, faded, set to its gain and put in its place, and `amix`
-// adds the plays to the voice. Loudness then normalises the mix.
+// The music in an export (docs/plans/background-music.md, parts 1 and 2): each file is one
+// more ffmpeg input, each play is cut, faded, set to its gain and put in its place, and
+// `amix` adds the plays to the voice. With the duck, the plays first become one bed, and a
+// `volume` expression moves the bed between the gain points. Loudness then normalises the mix.
 
 extension FFmpeg {
     /// Each music file as an ffmpeg input, in the order of `mix.files`.
@@ -33,6 +34,14 @@ extension FFmpeg {
             outputs.append("[\(prefix)\(index)]")
         }
         parts.append("[\(voice)]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[\(prefix)voice]")
+        if let duck = mix.duck, !outputs.isEmpty {
+            // Short frames (256 samples, 5 ms) so the gain moves in small steps on a ramp.
+            let gain = "asetnsamples=n=256:p=0,volume='\(duck.expression)':eval=frame[\(prefix)bed]"
+            parts.append(outputs.count == 1 ? outputs[0] + gain
+                         : outputs.joined() + "amix=inputs=\(outputs.count):normalize=0:duration=longest:dropout_transition=0," + gain)
+            parts.append("[\(prefix)voice][\(prefix)bed]amix=inputs=2:normalize=0:duration=first:dropout_transition=0[\(output)]")
+            return parts
+        }
         parts.append("[\(prefix)voice]" + outputs.joined()
                      + "amix=inputs=\(outputs.count + 1):normalize=0:duration=first:dropout_transition=0[\(output)]")
         return parts
@@ -93,8 +102,9 @@ extension FFmpeg {
 /// them, so a crossfade has a track for each side.
 struct MusicPreviewTracks {
     var tracks: [AVMutableCompositionTrack]
-    /// Each track's plays, at composition times, with their linear volume.
-    var plays: [CMPersistentTrackID: [(play: MusicPlay, offset: Double, volume: Float)]] = [:]
+    /// Each track's plays, `offset` seconds into the composition, with their gain (dB) and
+    /// the duck of their recording.
+    var plays: [CMPersistentTrackID: [(play: MusicPlay, offset: Double, gain: Double, duck: DuckEnvelope?)]] = [:]
 
     init?(_ composition: AVMutableComposition) {
         let tracks = (0..<2).compactMap { _ in composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) }
@@ -131,29 +141,101 @@ struct MusicPreviewTracks {
             let end = track.segments.isEmpty ? .zero : track.timeRange.end
             if at > end { track.insertEmptyTimeRange(CMTimeRange(start: end, duration: at - end)) }
             try track.insertTimeRange(available, of: source.track, at: at)
-            plays[track.trackID, default: []].append((entry.play, offset, Self.volume(entry.gain)))
+            plays[track.trackID, default: []].append((entry.play, offset, entry.gain, mix.duck))
         }
     }
 
-    /// The volume ramps of one track: up over the fade in, the gain, and down over the fade out.
+    /// The volume of a play at `time` (edited seconds): its gain, its fades (straight
+    /// lines, as ffmpeg's `afade`) and the duck.
+    static func volume(_ play: MusicPlay, gain: Double, duck: DuckEnvelope?, at time: Double) -> Float {
+        var fade = 1.0
+        if play.fadeIn > 0, time < play.at + play.fadeIn { fade = min(fade, max(0, (time - play.at) / play.fadeIn)) }
+        if play.fadeOut > 0, time > play.end - play.fadeOut { fade = min(fade, max(0, (play.end - time) / play.fadeOut)) }
+        return Float(min(1, pow(10, gain / 20) * fade * (duck?.factor(at: time) ?? 1)))
+    }
+
+    /// The points of a play's volume, at edited seconds: where a fade or the duck starts or
+    /// stops a change. Where a fade and a duck ramp change together, the volume is not a
+    /// straight line, so the points are 0.05 s apart there.
+    static func volumePoints(_ play: MusicPlay, gain: Double, duck: DuckEnvelope?) -> [(time: Double, volume: Float)] {
+        let range = play.at...play.end
+        let fadeInEnd = play.at + play.fadeIn, fadeOutStart = play.end - play.fadeOut
+        var times = [play.at, fadeInEnd, fadeOutStart, play.end] + (duck?.times(in: range) ?? [])
+        times = times.map { min(max($0, range.lowerBound), range.upperBound) }.sorted()
+        var points: [Double] = []
+        for time in times where points.last.map({ time - $0 > 0.000001 }) ?? true {
+            if let previous = points.last, let duck, abs(duck.factor(at: previous) - duck.factor(at: time)) > 0.000001,
+               previous < fadeInEnd - 0.000001 || time > fadeOutStart + 0.000001 {
+                let steps = Int(((time - previous) / 0.05).rounded(.up))
+                for step in 1..<max(1, steps) { points.append(previous + (time - previous) * Double(step) / Double(steps)) }
+            }
+            points.append(time)
+        }
+        return points.map { ($0, volume(play, gain: gain, duck: duck, at: $0)) }
+    }
+
+    /// The volume ramps of one track: one ramp between each two points of each play.
     func ramp(_ parameters: AVMutableAudioMixInputParameters) {
         guard let entries = plays[parameters.trackID] else { return }
         func time(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 600_000) }
         // Silent until the first play: a ramp may not start where a set volume does.
         if let first = entries.first, first.offset + first.play.at > 0.0005 { parameters.setVolume(0, at: .zero) }
-        for (play, offset, volume) in entries {
-            let start = offset + play.at, end = offset + play.end
-            if play.fadeIn > 0 {
-                parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: volume, timeRange: CMTimeRange(start: time(start), duration: time(play.fadeIn)))
-            } else {
-                parameters.setVolume(volume, at: time(start))
-            }
-            if play.fadeOut > 0 {
-                parameters.setVolumeRamp(fromStartVolume: volume, toEndVolume: 0,
-                                         timeRange: CMTimeRange(start: time(end - play.fadeOut), duration: time(play.fadeOut)))
-            } else {
-                parameters.setVolume(0, at: time(end))
+        // After a play, the track is empty until its next play, so it is silent there.
+        for entry in entries {
+            let points = Self.volumePoints(entry.play, gain: entry.gain, duck: entry.duck)
+            for (a, b) in zip(points, points.dropFirst()) {
+                parameters.setVolumeRamp(fromStartVolume: a.volume, toEndVolume: b.volume,
+                                         timeRange: CMTimeRange(start: time(entry.offset + a.time), end: time(entry.offset + b.time)))
             }
         }
+    }
+}
+
+// MARK: - The duck for agents
+
+/// The music's duck and loudness, so an agent can check the mix without ears (analyze
+/// kind music). Times are edited seconds.
+struct MusicAnalysis: Encodable {
+    struct Run: Encodable { var start: Double; var end: Double }
+    struct Piece: Encodable { var id: UUID; var name: String; var loudness: Double; var level: Double; var gain: Double }
+    /// The voice with the music under it, as the export mixes it, before Loudness.
+    struct Mix: Encodable { var integrated: Double; var truePeak: Double }
+    var kind = "music"
+    var speech: MusicSpeech.Source
+    /// Nil when the duck is off.
+    var lift: Double?
+    var runs: [Run]
+    var points: [DuckPoint]
+    /// LUFS, as measured when the first piece went on.
+    var voice: Double
+    var pieces: [Piece]
+    var mix: Mix?
+
+    static func analyze(_ item: VideoItem, info: MediaInfo) async throws -> MusicAnalysis {
+        await MusicSpeech.prepare(item)
+        guard let music = item.music else { throw FFmpegError(message: "This recording has no music.") }
+        let duration = item.editedDuration
+        let speech = MusicSpeech.spans(of: item)
+        let envelope = item.musicDuck
+        let mix = music.mix(duration: duration, duck: envelope)
+        var measured: Mix?
+        if !mix.isEmpty, info.hasAudio, let ffmpeg = FFmpeg.ffmpegPath {
+            let args = try FFmpeg.spilledGraph(FFmpeg.loudnessArguments(input: item.url, segments: item.timeline.segments,
+                                                                        fpsExpression: info.fpsExpression, music: mix))
+            let result = try await Shell.run(ffmpeg, args)
+            try Task.checkCancellation()
+            if result.status == 0, let loudness = FFmpeg.parseLoudness(result.stderrText),
+               let integrated = Double(loudness.inputI), let peak = Double(loudness.inputTP) {
+                measured = Mix(integrated: integrated, truePeak: peak)
+            }
+        }
+        func round(_ value: Double) -> Double { (value * 1000).rounded() / 1000 }
+        return MusicAnalysis(
+            speech: speech.source, lift: music.duck?.lift,
+            runs: MusicDuck.runs(speech.spans).filter { $0.lowerBound < duration }.map { Run(start: round($0.lowerBound), end: round(min($0.upperBound, duration))) },
+            points: (envelope?.points ?? []).map { DuckPoint(time: round($0.time), lift: round($0.lift)) },
+            voice: music.voice,
+            pieces: music.pieces.map { Piece(id: $0.id, name: $0.name, loudness: $0.loudness, level: $0.level, gain: round($0.gain(voice: music.voice))) },
+            mix: measured)
     }
 }

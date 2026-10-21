@@ -910,6 +910,7 @@ final class AppModel: ObservableObject {
                 items[index].status = .converting(0)
 
                 do {
+                    await MusicSpeech.prepare(item)
                     try await FFmpeg.export(
                         input: item.url,
                         output: output,

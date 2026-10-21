@@ -1,4 +1,4 @@
-// Checks for background music (docs/plans/background-music.md, part 1). Run with ./test.sh music
+// Checks for background music (docs/plans/background-music.md, parts 1 and 2). Run with ./test.sh music
 import AppKit
 import AVFoundation
 import Foundation
@@ -20,6 +20,25 @@ private func piece(_ url: URL, start: Double, end: Double?, duration: Double = 6
 }
 
 private func close(_ a: Double, _ b: Double, _ tolerance: Double = 0.0005) -> Bool { abs(a - b) <= tolerance }
+
+/// A voice of 10 s that speaks (a tone) from 0 to 2 s and from 6 to 10 s, and is silent between.
+private func makeTalk(_ name: String) async throws -> URL {
+    let url = scratch.appendingPathComponent(name)
+    let result = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y",
+                                              "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30",
+                                              "-f", "lavfi", "-i", "aevalsrc=0.3*sin(2*PI*440*t)*(lt(t\\,2)+gte(t\\,6)):s=48000:d=10",
+                                              "-t", "10", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", url.path])
+    guard result.status == 0 else { throw FFmpegError(message: "talk fixture failed: \(result.stderrText)") }
+    return url
+}
+
+/// The RMS level (dB) of a file's sound from `start` for `length` seconds.
+private func soundLevel(_ url: URL, start: Double, length: Double) async throws -> Double {
+    let result = try await Shell.run(ffmpeg, ["-hide_banner", "-nostdin", "-ss", String(start), "-t", String(length), "-i", url.path,
+                                              "-af", "astats=measure_perchannel=none:measure_overall=RMS_level", "-vn", "-f", "null", "-"])
+    let line = result.stderrText.split(separator: "\n").last { $0.contains("RMS level dB") } ?? ""
+    return Double(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? .nan
+}
 
 @MainActor func musicTests() async throws {
     let song = URL(fileURLWithPath: "/tmp/song.m4a")
@@ -241,6 +260,90 @@ private func close(_ a: Double, _ b: Double, _ tolerance: Double = 0.0005) -> Bo
     let json = try JSONSerialization.jsonObject(with: try YouTubeExport.json(withCredits, files: files, music: credited)) as? [String: Any]
     check(((json?["music"] as? [[String: Any]])?.first?["licence"] as? String) == "ccBy", "the JSON for YouTube has the music")
 
+    print("\nMusic: the duck")
+    let joined = MusicDuck.runs([0...1, 2.2...3, 4.7...6, 8...9])
+    check(joined == [0...3, 4.7...6, 8...9], "words less than 1.6 s apart (1.5 s, or too close for the two ramps) are one run", "\(joined)")
+    let duck = MusicDuck(lift: 8)
+    let envelope = duck.envelope(runs: [2...5, 8...10], duration: 15)
+    let duckPoints = [(0.0, 8.0), (1.6, 8), (1.9, 0), (5.4, 0), (6.2, 8), (7.6, 8), (7.9, 0), (10.4, 0), (11.2, 8)]
+    check(envelope.points.count == duckPoints.count && zip(envelope.points, duckPoints).allSatisfy { close($0.time, $1.0) && close($0.lift, $1.1) },
+          "up before the first word, down over 0.3 s to 0.1 s before a run, up over 0.8 s from 0.4 s after it, up at the end", "\(envelope.points)")
+    check(close(envelope.factor(at: 1.75), (DuckEnvelope.factor(8) + 1) / 2) && close(envelope.lift(at: 3), 0) && close(envelope.lift(at: 13), 8),
+          "between two points the volume moves in a straight line")
+    let early = duck.envelope(runs: [0.2...4], duration: 4.2)
+    check(early.points == [DuckPoint(time: 0, lift: 0)], "speech at the start and to the end: the music stays at its level", "\(early.points)")
+    check(duck.envelope(runs: [], duration: 10).points == [DuckPoint(time: 0, lift: 8)] && MusicDuck(lift: 0).envelope(runs: [2...3], duration: 10).isFlat,
+          "no speech lifts all of it; a lift of 0 changes nothing")
+    let expression = envelope.expression
+    check(expression.contains("gte(t,1.600000)*lt(t,1.900000)*(") && expression.contains("*gte(t,11.200000)") && !expression.contains("if("),
+          "the export's volume expression has one flat term for each part, with no nesting", expression)
+    let words = Transcript(model: "test", language: "en", words: [
+        TranscriptWord(text: "One", start: 1, end: 1.5), TranscriptWord(text: "two", start: 4.5, end: 5.5), TranscriptWord(text: "three", start: 12, end: 12.4)])
+    let spoken = MusicSpeech.spans(words, timeline: ClipTimeline(segments: [TimelineSegment(start: 0, end: 5), TimelineSegment(start: 10, end: 20)]))
+    check(spoken.count == 3 && close(spoken[0].lowerBound, 1) && close(spoken[0].upperBound, 1.5) && close(spoken[1].lowerBound, 4.5)
+              && close(spoken[1].upperBound, 5) && close(spoken[2].lowerBound, 7) && close(spoken[2].upperBound, 7.4),
+          "speech is the words still in the edit, in edited time; a word cut part way stops at the cut", "\(spoken)")
+    let levels = AudioOverview(levels: (0..<120).map { index in
+        let time = Double(index) * AudioOverview.interval
+        return AudioLevel(time: time, decibels: time < 2 || (time >= 5 && time < 5.1) || time >= 4.0 && time < 4.05 ? -20 : -60)
+    })
+    let heard = MusicSpeech.spans(levels, timeline: ClipTimeline(segments: [TimelineSegment(start: 0, end: 6)]))
+    check(heard.count == 1 && close(heard[0].lowerBound, 0) && close(heard[0].upperBound, 2),
+          "with no transcript, speech is the sound above -40 dB; a click shorter than 0.15 s is not speech", "\(heard)")
+    check(MusicBed(voice: -23, pieces: [piece(song, start: 0, end: 10)], duck: MusicDuck(lift: 13)).problem(duration: 30)?.contains("lift") == true,
+          "a lift over 12 dB is refused")
+
+    print("\nMusic: the duck in the project")
+    check(added.clips[0].music?.duck == MusicDuck(), "the first piece of music turns the duck on, with a lift of 8 dB")
+    let ducked = try ProjectReducer.apply([.setMusicDuck(clip: item.id, duck: MusicDuck(lift: 5))], to: both).project
+    let undocked = try ProjectReducer.apply([.setMusicDuck(clip: item.id, duck: nil)], to: added).project
+    let stillOff = try ProjectReducer.apply([.addMusic(clip: item.id, piece: second, voice: -99)], to: undocked).project
+    check(ducked.clips[0].music?.duck?.lift == 5 && undocked.clips[0].music?.duck == nil && stillOff.clips[0].music?.duck == nil,
+          "setMusicDuck changes the lift or turns the duck off, and a new piece keeps it off")
+    check(reducerRefusal([.setMusicDuck(clip: item.id, duck: MusicDuck(lift: 20))], both) == .invalidCommand
+              && reducerRefusal([.setMusicDuck(clip: item.id, duck: MusicDuck())], project) == .invalidCommand,
+          "a lift out of range, and a duck with no music, are refused")
+    let reopenedDuck = try VideoProject.decodeMigrating(from: try JSONEncoder().encode(ducked))
+    check(reopenedDuck.clips[0].music?.duck?.lift == 5, "a project saves and opens with its duck")
+    var olderDuck = ducked; olderDuck.version = 21
+    do { try olderDuck.validate(); check(false, "a version 21 file with a duck is refused") }
+    catch { check(error.localizedDescription.contains("duck"), "a version 21 file with a duck is refused", error.localizedDescription) }
+
+    print("\nMusic: the duck in the export and the preview")
+    let talk = try await makeTalk("music-talk.mov")
+    let talkInfo = try await FFmpeg.probe(url: talk)
+    let talkVoice = try await FFmpeg.integratedLoudness(of: talk)
+    var talker = VideoItem(url: talk)
+    talker.info = talkInfo; talker.crop = talkInfo.fullFrame; talker.status = .ready
+    talker.transcript = Transcript(model: "test", language: "en", words: [
+        TranscriptWord(text: "Hello", start: 0.2, end: 1.8), TranscriptWord(text: "again", start: 6.2, end: 9.8)])
+    let bedPiece = piece(musicFile, start: 0, end: nil, duration: measured.duration, loudness: measured.loudness, level: -20, fadeIn: 0, fadeOut: 0)
+    talker.music = MusicBed(voice: talkVoice, pieces: [bedPiece], duck: MusicDuck(lift: 8))
+    let talkMix = talker.exportMusic(ExportSettings())
+    check(talkMix?.duck.map { $0.points.count == 5 && zip($0.points.map(\.time), [0, 2.2, 3.0, 5.8, 6.1]).allSatisfy { close($0, $1) } } == true,
+          "the export's mix carries the duck from the words", "\(String(describing: talkMix?.duck))")
+    let duckGraph = FFmpeg.musicGraph(talkMix!, firstInput: 1, voice: "timelinea", output: "mixa").joined(separator: ";")
+    check(duckGraph.contains("amix=inputs=\(talkMix!.plays.count):normalize=0:duration=longest") && duckGraph.contains("eval=frame[mubed]")
+              && duckGraph.contains("[muvoice][mubed]amix=inputs=2:normalize=0:duration=first"),
+          "with the duck, the plays become one bed, the expression moves it, and amix puts it under the voice", duckGraph)
+    let points = MusicPreviewTracks.volumePoints(talkMix!.plays[0].play, gain: talkMix!.plays[0].gain, duck: talkMix!.duck)
+    let under = points.first { close($0.time, 1) || $0.time < 2.2 }!.volume, over = points.first { close($0.time, 3.0) }!.volume
+    check(abs(20 * log10(Double(over / under)) - 8) < 0.01, "the preview's volume is 8 dB higher in the pause than under speech", "\(points)")
+    var flatTalker = talker; flatTalker.music?.duck = nil
+    let duckedOut = scratch.appendingPathComponent("music-ducked.mp4"), flatOut = scratch.appendingPathComponent("music-flat.mp4")
+    let talkSegments = [TimelineSegment(start: 0, end: talkInfo.duration)]
+    try await FFmpeg.export(input: talk, output: duckedOut, info: talkInfo, crop: talkInfo.fullFrame, segments: talkSegments, settings: ExportSettings(),
+                            music: talker.exportMusic(ExportSettings())) { _ in }
+    try await FFmpeg.export(input: talk, output: flatOut, info: talkInfo, crop: talkInfo.fullFrame, segments: talkSegments, settings: ExportSettings(),
+                            music: flatTalker.exportMusic(ExportSettings())) { _ in }
+    let pauseLift = try await soundLevel(duckedOut, start: 3.5, length: 2) - soundLevel(flatOut, start: 3.5, length: 2)
+    let speechLift = try await soundLevel(duckedOut, start: 0.5, length: 1) - soundLevel(flatOut, start: 0.5, length: 1)
+    check(abs(pauseLift - 8) < 0.6 && abs(speechLift) < 0.3, "the export lifts the music 8 dB in the pause and leaves it under speech",
+          "pause \(pauseLift) speech \(speechLift)")
+    let analysis = try await MusicAnalysis.analyze(talker, info: talkInfo)
+    check(analysis.speech == .transcript && analysis.runs.count == 2 && analysis.points.count == 5 && analysis.mix.map { $0.integrated < 0 } == true,
+          "analyze kind music gives the runs, the points and the loudness of the mix", "\(analysis.runs) \(String(describing: analysis.mix))")
+
     print("\nMusic: agents")
     let agent = AppModel(recoveryURL: nil)
     agent.restore(project)
@@ -275,14 +378,32 @@ private func close(_ a: Double, _ b: Double, _ tolerance: Double = 0.0005) -> Bo
     let refusedLicence = await agentCall(agent, wrong)
     check(agentError(refusedKey) == "invalid_command" && agentError(refusedLicence) == "invalid_command",
           "an unknown key or licence is refused, with the ones allowed")
+    var duckAgent = address(agent)
+    duckAgent["method"] = "apply"; duckAgent["requestID"] = "music-duck"; duckAgent["client"] = "Claude"
+    duckAgent["commands"] = [["type": "setMusicDuck", "clipID": item.id.uuidString, "music": ["lift": 6]]]
+    let liftedByAgent = await agentCall(agent, duckAgent)
+    let duckState = (agentResult(await agentCall(agent, ["method": "state"]))["clips"] as? [[String: Any]])?.first?["music"] as? [String: Any]
+    duckAgent = address(agent)
+    duckAgent["method"] = "apply"; duckAgent["requestID"] = "music-duck-off"; duckAgent["client"] = "Claude"
+    duckAgent["commands"] = [["type": "setMusicDuck", "clipID": item.id.uuidString, "music": ["duck": false]]]
+    let offByAgent = await agentCall(agent, duckAgent)
+    let offDuck = agent.items[0].music?.duck
+    duckAgent = address(agent)
+    duckAgent["method"] = "apply"; duckAgent["requestID"] = "music-duck-bad"; duckAgent["client"] = "Claude"
+    duckAgent["commands"] = [["type": "setMusicDuck", "clipID": item.id.uuidString, "music": ["depth": 3]]]
+    let refusedDuck = await agentCall(agent, duckAgent)
+    check(liftedByAgent["ok"] as? Bool == true && (duckState?["duck"] as? [String: Any])?["lift"] as? Double == 6
+              && offByAgent["ok"] as? Bool == true && offDuck == nil && agentError(refusedDuck) == "invalid_command",
+          "setMusicDuck sets the lift and turns the duck off; state shows it; an unknown key is refused", "\(liftedByAgent) \(String(describing: duckState))")
     var remove = address(agent)
     remove["method"] = "apply"; remove["requestID"] = "music-remove"; remove["client"] = "Claude"
     remove["commands"] = [["type": "removeMusic", "clipID": item.id.uuidString, "musicID": agentPiece!.id.uuidString]]
     let removedByAgent = await agentCall(agent, remove)
     check(removedByAgent["ok"] as? Bool == true && agent.items[0].music == nil, "removeMusic removes the piece")
     let catalog = AgentCatalog.current
-    check(["addMusic", "updateMusic", "removeMusic"].allSatisfy { type in catalog.commands.contains { $0.type == type && $0.group == "music" } },
+    check(["addMusic", "updateMusic", "removeMusic", "setMusicDuck"].allSatisfy { type in catalog.commands.contains { $0.type == type && $0.group == "music" } },
           "the catalog has the music commands")
     let manual = (try? String(contentsOf: URL(fileURLWithPath: repository).appendingPathComponent("Resources/AgentsManual.md"), encoding: .utf8)) ?? ""
-    check(manual.contains("### 4.15 Background music") && manual.contains("addMusic"), "the Agents Manual has the music recipe")
+    check(manual.contains("### 4.15 Background music") && manual.contains("addMusic") && manual.contains("setMusicDuck"),
+          "the Agents Manual has the music recipe, with the duck")
 }
