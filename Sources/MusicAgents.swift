@@ -1,7 +1,7 @@
 import Foundation
 
-// Background music for local agents (docs/plans/background-music.md, part 1): the wire
-// commands as `EditCommand`s, and the music as `state` shows it.
+// Background music for local agents (docs/plans/background-music.md, parts 1 and 2): the
+// wire commands as `EditCommand`s, and the music as `state` shows it.
 
 extension AgentState {
     /// A recording's music as an agent needs it. Times are edited-recording seconds; `gain`
@@ -27,8 +27,11 @@ extension AgentState {
             var plays: [Play]
             var missing: Bool
         }
+        /// The duck: the music goes `lift` dB up in pauses. Nil is off.
+        struct Duck: Encodable { var lift: Double; var speech: MusicSpeech.Source }
         /// The voice's loudness (LUFS), as measured.
         var voice: Double
+        var duck: Duck?
         var pieces: [Piece]
     }
 }
@@ -37,7 +40,8 @@ extension AppModel {
     static func musicState(_ clip: ProjectClip) -> AgentState.MusicState? {
         guard let music = clip.music else { return nil }
         let duration = clip.timeline.duration
-        return AgentState.MusicState(voice: music.voice, pieces: music.pieces.map { piece in
+        let duck = music.duck.map { AgentState.MusicState.Duck(lift: $0.lift, speech: MusicSpeech.source(of: clip.item())) }
+        return AgentState.MusicState(voice: music.voice, duck: duck, pieces: music.pieces.map { piece in
             AgentState.MusicState.Piece(
                 id: piece.id, path: piece.url.path, name: piece.name, start: piece.start, end: piece.end(in: duration),
                 toEnd: piece.end == nil, from: piece.from, level: piece.level, gain: (piece.gain(voice: music.voice) * 100).rounded() / 100,
@@ -140,6 +144,22 @@ extension AppModel {
             return .updateMusic(clip: id, piece: piece)
         case "removeMusic":
             return .removeMusic(clip: id, piece: try current().id)
+        case "setMusicDuck":
+            guard let patch = wire.music else { throw EditError.invalid("setMusicDuck needs music: {duck, lift}.") }
+            if let unknown = patch.keys.first(where: { !["duck", "lift"].contains($0) }) {
+                throw EditError.invalid("Unknown setMusicDuck key \"\(unknown)\". Keys: duck, lift.")
+            }
+            var duck = clip.music?.duck
+            if let value = patch["duck"] {
+                guard case .bool(let on) = value else { throw EditError.invalid("music.duck must be true or false.") }
+                duck = on ? (duck ?? MusicDuck()) : nil
+            }
+            if let value = patch["lift"] {
+                guard let lift = value.number, lift.isFinite else { throw EditError.invalid("music.lift must be a number of dB.") }
+                guard duck != nil else { throw EditError.invalid("The duck is off. Send duck: true with lift.") }
+                duck?.lift = lift
+            }
+            return .setMusicDuck(clip: id, duck: duck)
         default:
             throw EditError(code: .unsupportedCapability, message: "Unknown music command \(wire.type).")
         }

@@ -146,7 +146,7 @@ import Foundation
     let gapFile = scratch.appendingPathComponent("gaps.yamvideo")
     try editor.writeProject(editor.project, to: gapFile)
     let saved = try VideoProject.decodeMigrating(from: Data(contentsOf: gapFile))
-    equal(saved.version, 21, "a project with gaps is version 21")
+    equal(saved.version, VideoProject.currentVersion, "a project with gaps is saved as the current version (21 or later)")
     check(saved.clips[0].gaps?.count == 1 && saved.clips[0].gaps?.first?.section == gapC.id && close(saved.clips[0].gaps?.first?.length, 0.6),
           "the gaps are saved, in section order")
     editor.openProject(at: gapFile)

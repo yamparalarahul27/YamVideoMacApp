@@ -441,7 +441,15 @@ a track the owner gave or named.
    the file again with a 2 s crossfade). `missing: true` means the file moved.
 5. Change a piece with `updateMusic {clipID, musicID, music: {…}}`; only the keys given
    change. `removeMusic` removes one. `setChange` with `music` switches all of it off.
-6. Exports mix the music under the voice. With Loudness on, the export normalises the mix
+6. The duck: new music goes down under speech and up in pauses. Under speech it is at its
+   level. Before the first word, in gaps of 1.5 s or more and after the last word, it is
+   `lift` dB higher (default 8). Speech comes from the transcript, so transcribe first; with
+   no transcript the app uses the sound levels. Change it for all the recording's music with
+   `setMusicDuck {clipID, music: {duck?, lift?}}`. Keep level + lift at -10 LU or lower.
+7. Check the mix without ears: `analyze --kind music` gives the runs of speech, the gain
+   points (`lift` in dB at each time) and the loudness of the voice with the music. The
+   preview and the export play the same points.
+8. Exports mix the music under the voice. With Loudness on, the export normalises the mix
    to -14 LUFS. Export for YouTube writes each credit line at the end of the description.
 
 ### 4.16 Study new footage and plan the edit

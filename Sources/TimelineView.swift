@@ -848,11 +848,13 @@ struct TimelineView: View {
         .clipped()
     }
 
-    /// The music under the voice: a bar for each piece, with the waveform of what plays.
+    /// The music under the voice: a bar for each piece, with the waveform of what plays and,
+    /// with the duck on, a line of its gain: low under speech, high in pauses.
     private func musicLane(width: Double, pixels: Double) -> some View {
         let viewport = model.viewport
         let duration = item.editedDuration
         let pieces = item.music?.pieces ?? []
+        let duck = item.musicDuck
         return ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.5))
             ForEach(pieces.filter { viewport.intersects($0.start, $0.end(in: duration)) }) { piece in
@@ -885,6 +887,15 @@ struct TimelineView: View {
                             .frame(width: max(1, viewport.width(from: run.from, to: run.to, across: width)), height: max(4, musicHeight - 14))
                             .opacity(0.55)
                             .offset(x: viewport.x(of: run.from, across: width), y: 11)
+                            .allowsHitTesting(false)
+                    }
+                }
+                if let duck {
+                    ForEach(Self.runs(from: max(piece.start, viewport.editedStart), to: min(end, viewport.editedEnd), in: viewport),
+                            id: \.from) { run in
+                        DuckLine(duck: duck, from: run.from, to: run.to)
+                            .frame(width: max(1, viewport.width(from: run.from, to: run.to, across: width)), height: max(4, musicHeight - 8))
+                            .offset(x: viewport.x(of: run.from, across: width), y: 4)
                             .allowsHitTesting(false)
                     }
                 }
@@ -1410,6 +1421,28 @@ private struct ZoomBlock: View {
 
     private func movedStart(_ translation: Double) -> Double { snapStart(shot.start + translation / pixels) }
     private func resizedEnd(_ translation: Double) -> Double { snapEnd(shot.end + translation / pixels) }
+}
+
+/// The duck's gain over a part of a piece of music: low under speech, high in pauses.
+private struct DuckLine: View {
+    let duck: DuckEnvelope
+    let from: Double
+    let to: Double
+
+    var body: some View {
+        Canvas { context, size in
+            let highest = max(0.001, duck.points.map(\.lift).max() ?? 0)
+            let columns = max(2, Int(size.width / 2))
+            var line = Path()
+            for column in 0...columns {
+                let x = size.width * Double(column) / Double(columns)
+                let share = max(0, min(1, duck.lift(at: from + (to - from) * Double(column) / Double(columns)) / highest))
+                let point = CGPoint(x: x, y: size.height * (0.85 - 0.7 * share))
+                if column == 0 { line.move(to: point) } else { line.addLine(to: point) }
+            }
+            context.stroke(line, with: .color(.white.opacity(0.8)), lineWidth: 1.5)
+        }
+    }
 }
 
 /// One piece of music on the timeline: drag to move it, drag an edge to trim it.

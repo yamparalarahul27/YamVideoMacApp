@@ -196,13 +196,15 @@ extension FFmpeg {
             }
         }
         if settings.format == .webp, await !supportsWebP() { throw FFmpegError(message: "This ffmpeg build cannot export WebP.") }
+        for clip in plan.clips { await MusicSpeech.prepare(clip) }
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         defer { if let palette { try? FileManager.default.removeItem(at: palette) } }
         if let palette {
             try await runPass(executable, movieArguments(plan: plan, settings: settings, output: palette, palettePass: true),
                               writing: palette, duration: plan.duration, from: 0, to: 0.3, onProgress: onProgress)
         }
-        try await runPass(executable, movieArguments(plan: plan, settings: settings, output: output, palette: palette),
+        // A long graph (many changes of layout, or the music's duck) goes to a file.
+        try await runPass(executable, try spilledGraph(movieArguments(plan: plan, settings: settings, output: output, palette: palette)),
                           writing: output, duration: plan.duration, from: palette == nil ? 0 : 0.3, to: 1, onProgress: onProgress)
         onProgress(1)
     }

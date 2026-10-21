@@ -31,6 +31,21 @@ struct MusicSection: View {
                 .buttonStyle(.plain)
                 .help("Select it to set its level, fades and licence")
             }
+            if let bed = item.music {
+                Toggle("Duck", isOn: Binding(get: { bed.duck != nil }, set: { on in model.setMusicDuck(on ? (bed.duck ?? MusicDuck()) : nil) }))
+                    .help("The music goes down under speech and up in pauses of \(String(format: "%.1f", MusicDuck.gap)) s or more")
+                if let duck = bed.duck {
+                    HStack(spacing: 6) {
+                        Text("Lift").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
+                        Slider(value: Binding(get: { duck.lift }, set: { lift in model.setMusicDuck(MusicDuck(lift: lift.rounded()), live: true) }),
+                               in: MusicDuck.lifts, onEditingChanged: { editing in if !editing { model.endGesture() } })
+                            .accessibilityLabel("How far the music goes up in a pause")
+                        Text("\(Int(duck.lift.rounded())) dB").font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                    .help("How far the music goes up in a pause")
+                }
+            }
             Button { model.chooseMusicFile() } label: { Label("Add Music…", systemImage: "plus") }
                 .disabled(item.info?.hasAudio != true)
                 .help("Add a sound file under the voice, at the playhead. It plays to the end of the video or to the next piece.")

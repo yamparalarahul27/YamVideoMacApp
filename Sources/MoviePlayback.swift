@@ -138,6 +138,7 @@ extension PlaybackController {
                 }
                 position = position + CMTime(seconds: segment.duration, preferredTimescale: 600000)
             }
+            if audio != nil { await MusicSpeech.prepare(clip) }
             if audio != nil, let mix = clip.exportMusic(settings) {
                 if music == nil { music = MusicPreviewTracks(composition) }
                 try await music?.insert(mix, offset: beginning.seconds)
