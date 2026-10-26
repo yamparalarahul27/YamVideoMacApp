@@ -9,6 +9,10 @@ not lose it.
   and export: the edit, the Shorts, the reasons for each choice and the history.
 - `series/`: a recipe for each series, with the exact settings to use again.
 - `assets/`: pictures made for the thumbnails.
+- `references/`: notes on videos the owner likes: the story, rhythm, colours, type,
+  motion and sound, and what to take for our videos. The videos and their frames stay in
+  `Shared Assets/References/` on the Mac that saved them. A reference is studied, never
+  reused, and its notes become Style.md rules only after the owner says yes.
 - `macs/`: the list of video folders on each Mac, written by YamVideo. The Library uses
   them to say which Mac has a video. See [docs/footage-layout.md](../footage-layout.md).
 
