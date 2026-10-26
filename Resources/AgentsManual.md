@@ -502,6 +502,10 @@ When the owner adds recordings, study them before any edit, write a plan for eac
 and ask the owner the questions that block it. Do not edit until the owner approves the
 plan. Sort the files first (4.14).
 
+When the owner names a video they like as a reference, read its notes in the YamVideo
+source, `docs/channel/references/`, before you plan, and say in the plan which parts you
+follow. A reference is studied, never reused: no frame, logo, music or words from it.
+
 1. **Read** `Files/Recordings.md` and `Files/Blur notes.md` of each video folder.
 2. **Transcribe each headshot**: `yamvideoctl transcribe`, or local whisper with a prompt
    of the video's names, written with punctuation. Check the names after: a prompt can
