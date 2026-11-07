@@ -18,6 +18,7 @@ xcrun swiftc \
 	-sdk "$(xcrun --show-sdk-path --sdk macosx)" \
 	-o "$BIN" \
 	"$ROOT/Sources/Models.swift" \
+	"$ROOT/Sources/VoiceTreatment.swift" \
 	"$ROOT/Sources/Timeline.swift" \
 	"$ROOT/Sources/TimelineGaps.swift" \
 	"$ROOT/Sources/TimelineTracks.swift" \

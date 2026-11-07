@@ -92,12 +92,13 @@ struct SpeakerBubble: Codable, Equatable {
     }
 
     enum Corner: String, Codable, CaseIterable, Identifiable {
-        case topLeft, topRight, bottomLeft, bottomRight
+        case topLeft, topRight, middleLeft, bottomLeft, bottomRight
         var id: String { rawValue }
         var label: String {
             switch self {
             case .topLeft: return "Top left"
             case .topRight: return "Top right"
+            case .middleLeft: return "Middle left"
             case .bottomLeft: return "Bottom left"
             case .bottomRight: return "Bottom right"
             }
@@ -106,6 +107,7 @@ struct SpeakerBubble: Codable, Equatable {
             switch self {
             case .topLeft: return "rectangle.inset.topleft.filled"
             case .topRight: return "rectangle.inset.topright.filled"
+            case .middleLeft: return "rectangle.leadinghalf.inset.filled"
             case .bottomLeft: return "rectangle.inset.bottomleft.filled"
             case .bottomRight: return "rectangle.inset.bottomright.filled"
             }
@@ -193,6 +195,8 @@ struct ScreenTrack: Codable, Equatable {
     var crop: CGRect?
     /// The layout wherever no span says otherwise.
     var layout = ScreenLayout.screen
+    /// Remove the inset frame when the screen itself is a background canvas.
+    var fullBleed = false
     /// Sorted by start; they may touch but not overlap.
     var spans: [LayoutSpan] = []
     var bubble = SpeakerBubble()
@@ -208,13 +212,14 @@ struct ScreenTrack: Codable, Equatable {
         self.url = url; self.info = info; self.offset = offset
     }
 
-    enum CodingKeys: String, CodingKey { case url, info, offset, crop, layout, spans, bubble, zooms }
+    enum CodingKeys: String, CodingKey { case url, info, offset, crop, layout, fullBleed, spans, bubble, zooms }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         url = try values.decode(URL.self, forKey: .url)
         info = try values.decode(MediaInfo.self, forKey: .info)
         offset = try values.decodeIfPresent(Double.self, forKey: .offset) ?? 0
         crop = try values.decodeIfPresent(CGRect.self, forKey: .crop)
+        fullBleed = try values.decodeIfPresent(Bool.self, forKey: .fullBleed) ?? false
         layout = try values.decodeIfPresent(ScreenLayout.self, forKey: .layout) ?? .screen
         spans = try values.decodeIfPresent([LayoutSpan].self, forKey: .spans) ?? []
         bubble = try values.decodeIfPresent(SpeakerBubble.self, forKey: .bubble) ?? SpeakerBubble()
@@ -481,6 +486,7 @@ struct LayoutGeometry: Equatable {
     /// the screen and split layouts stack the screen above the speaker, and the speaker
     /// layout shows this window on the whole canvas.
     let stack: CGRect?
+    let fullBleed: Bool
 
     static let screenMargin = 48.0
     static let bubbleMargin = 40.0
@@ -536,9 +542,9 @@ struct LayoutGeometry: Equatable {
         min(1, max(0, x / (inkFeather * width)))
     }
 
-    init(frame: CGSize, screen: CGSize, face: CGPoint, bubble: SpeakerBubble, picture: CGSize? = nil, stack: CGRect? = nil) {
+    init(frame: CGSize, screen: CGSize, face: CGPoint, bubble: SpeakerBubble, picture: CGSize? = nil, stack: CGRect? = nil, fullBleed: Bool = false) {
         self.frame = frame; self.screen = screen; self.face = face; self.bubble = bubble
-        self.picture = picture ?? frame; self.stack = stack
+        self.picture = picture ?? frame; self.stack = stack; self.fullBleed = fullBleed
     }
 
     /// A Short with the screen, on the 1080×1920 canvas, for a recording whose picture is
@@ -604,7 +610,7 @@ struct LayoutGeometry: Equatable {
     init(track: ScreenTrack, crop: CGRect) {
         let size = crop.size
         let face = track.bubble.face.map { CGPoint(x: min(max(0, $0.x - crop.minX), size.width), y: min(max(0, $0.y - crop.minY), size.height)) }
-        self.init(frame: size, screen: track.picture.size, face: face ?? CGPoint(x: size.width / 2, y: size.height * 0.42), bubble: track.bubble)
+        self.init(frame: size, screen: track.picture.size, face: face ?? CGPoint(x: size.width / 2, y: size.height * 0.42), bubble: track.bubble, fullBleed: track.fullBleed)
     }
 
     var unit: Double { min(Double(frame.width) / 1920, Double(frame.height) / 1080) }
@@ -619,11 +625,11 @@ struct LayoutGeometry: Equatable {
         case .speaker:
             return nil
         case .screen:
-            let margin = Self.screenMargin * unit
+            let margin = fullBleed ? 0 : Self.screenMargin * unit
             let scale = min((w - 2 * margin) / Double(screen.width), (h - 2 * margin) / Double(screen.height))
             let width = Self.even(Double(screen.width) * scale), height = Self.even(Double(screen.height) * scale)
             return LayoutPlace(rect: CGRect(x: ((w - width) / 2).rounded(), y: ((h - height) / 2).rounded(), width: width, height: height),
-                               radius: Self.cornerRadius * unit)
+                               radius: fullBleed ? 0 : Self.cornerRadius * unit)
         case .split:
             return split.screen
         case .ink:
@@ -659,9 +665,9 @@ struct LayoutGeometry: Equatable {
         case .screen:
             let bubble = bubble ?? self.bubble
             let side = Self.even(bubble.size * h), margin = (Self.bubbleMargin * unit).rounded()
-            let left = bubble.corner == .topLeft || bubble.corner == .bottomLeft
+            let left = bubble.corner == .topLeft || bubble.corner == .middleLeft || bubble.corner == .bottomLeft
             let top = bubble.corner == .topLeft || bubble.corner == .topRight
-            return LayoutPlace(rect: CGRect(x: left ? margin : w - margin - side, y: top ? margin : h - margin - side, width: side, height: side),
+            return LayoutPlace(rect: CGRect(x: left ? margin : w - margin - side, y: bubble.corner == .middleLeft ? Self.even((h - side) / 2) : (top ? margin : h - margin - side), width: side, height: side),
                                radius: bubble.radius(side: side))
         case .split:
             return split.speaker

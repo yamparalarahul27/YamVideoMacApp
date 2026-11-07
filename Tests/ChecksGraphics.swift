@@ -290,6 +290,18 @@ import Foundation
             + ":b='255*between(X,1300,1499)*between(Y,100,199)':a='255*between(X,1300,1499)*between(Y,100,199)'",
         "-frames:v", "1", standIn.path])
     check(standInMade.status == 0, "made a stand-in graphic frame", standInMade.stderrText)
+    let formatFolder = scratch.appendingPathComponent("mixed-png-formats")
+    try FileManager.default.createDirectory(at: formatFolder, withIntermediateDirectories: true)
+    let rgbFrame = formatFolder.appendingPathComponent("frame_000001.png")
+    let rgbaFrame = formatFolder.appendingPathComponent("frame_000002.png")
+    _ = try await Shell.run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-i", standIn.path,
+                                   "-vf", "format=rgb24", "-frames:v", "1", rgbFrame.path])
+    try FileManager.default.copyItem(at: standIn, to: rgbaFrame)
+    let originalAlphaFrame = try Data(contentsOf: rgbaFrame)
+    check(try Data(contentsOf: rgbFrame)[25] == 2, "fixture includes an opaque RGB browser frame")
+    try GraphicsRender.normalizeFrames(in: formatFolder)
+    check(try Data(contentsOf: rgbFrame)[25] == 6 && Data(contentsOf: rgbaFrame) == originalAlphaFrame,
+          "rendered sequences normalize opaque PNGs to RGBA without rewriting existing alpha frames")
     let draws = DrawCount()
     let standInDraw: (GraphicsRender.Job, URL, URL) async throws -> Void = { job, page, frames in
         draws.add()
@@ -329,6 +341,23 @@ import Foundation
     try await FFmpeg.export(input: landscape, output: overlayOut, info: info, crop: info.fullFrame, settings: ExportSettings(),
                             graphics: overlayTrack, drawGraphics: standInDraw) { _ in }
     check(draws.count == 1, "an unchanged graphic is not drawn again")
+
+    // A second recording's graphic must use its own clock, and its external
+    // frame input must not be renamed into an internal filter pad.
+    var moviePlain = VideoItem(url: landscape)
+    moviePlain.info = info; moviePlain.crop = info.fullFrame
+    var movieDrawn = moviePlain; movieDrawn.id = UUID(); movieDrawn.graphics = overlayTrack
+    let overlayMovie = try MoviePlan(items: [moviePlain, movieDrawn], movieSettings: MovieSettings(), settings: ExportSettings())
+    let movieOverlayArgs = FFmpeg.movieArguments(plan: overlayMovie, settings: ExportSettings(), output: overlayOut)
+    let movieOverlayGraph = movieOverlayArgs[movieOverlayArgs.firstIndex(of: "-filter_complex")! + 1]
+    check(movieOverlayArgs.filter { $0 == "-i" }.count == 3 && movieOverlayGraph.contains("[2:v]")
+              && !movieOverlayGraph.contains("[c1_2:v]"), "movie graphics retain the global rendered-frame input")
+    let movieOverlayFile = scratch.appendingPathComponent("movie-with-native-graphics.mp4")
+    try await FFmpeg.exportMovie(plan: overlayMovie, settings: ExportSettings(), output: movieOverlayFile) { _ in }
+    check(isMagenta(try await pixel(movieOverlayFile, x: 930, y: 100, at: info.duration + 1)),
+          "assembled movie includes the second recording's native graphics at its local time")
+    check(try await unchanged(movieOverlayFile, plainOut, x: 930, y: 100, at: 1),
+          "the second recording's graphics do not leak onto the first recording")
 
     // Cut and scaled: the graphic keeps its edited time and fits the smaller frame.
     var smaller = ExportSettings(); smaller.sizeLimit = .vga

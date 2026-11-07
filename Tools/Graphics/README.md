@@ -53,7 +53,7 @@ page folder under a content-hash name, so the page has no paths outside its fold
 - `style.moveVideo` slides the video to the left half while a panel shows. In `full` mode a
   blurred copy of the video fills the space it leaves.
 - `style.look` is `glass` (cards), `ink` (handwriting over a soft haze), `mix` (panel
-  graphics in ink, the rest as cards) or `paper` (name plates, title cards, section cards
+  graphics in ink, the rest as cards) or `weekly` (warm light cards, a compact progress checklist and demo placeholders, using the recording's accent), or `paper` (name plates, title cards, section cards
   and panel titles on an off-white card with tape, in Fraunces; the rest as cards). One
   graphic can override it with its own `look`. A paper card takes an optional `label` prop:
   a tilted sticker in Virgil under the card.
@@ -87,3 +87,57 @@ page folder under a content-hash name, so the page has no paths outside its fold
   item's own `transform` wins. `YamGraphics.bounds()` gives the move as `cx`, `cy`.
 
 The kinds and their props are in section 3 of the plan.
+
+## Weekly look
+
+Set `style.look` to `weekly`. The Look menus and gallery keep it alongside Glass, Ink and Paper.
+Column cards and section cards share warm cream surfaces, readable dark text and the video's
+accent. Ink diagrams, logos and end screens keep their original templates. A graphic may
+choose `look: "weekly"` on its own. Projects using Weekly require format 27 or later.
+
+A title card with `props.variant: "weeklyProgress"` takes `title`, `completed`, `total`
+and `items: [{text, state}]`, where `state` is `done`, `current` or `next`. In Weekly it
+looks like a bound paper notepad: ruled lines, a red margin, layered paper edges and a
+handwritten heading, while the rows keep clear sans-serif lettering. The saved
+Weekly look applies the selected accent to the checks and current row. Use the graphic's
+transform to place it beside the speaker. A title card with
+`props.variant: "demoPlaceholder"` takes `title` and `detail` and fills the picture with
+a clearly labelled stand-in for a later screen recording.
+
+A progress card may set `fullPage: true` to show the current point as a full notebook
+page. Set `pip: true` when paired with the native Screen layout: the graphics leave the
+background transparent and clear space on the right for the live speaker. The Screen
+track supplies the canvas, rounded speaker window and 0.4 s layout transitions.
+`titleCard` variant `referenceCredit` takes `author`, `title`, `source`, `kicker` and an
+`image` path to show a credited reference; it also supports `pip: true`.
+
+Detail pages keep a fixed 620 px width and wrap their text. `pageTurn: true` turns the
+page once from its top binding (0.62 s, after the camera starts shrinking). The GSAP
+timeline owns the turn, so seeking and export show the same frame. Keep app interface
+views on the native Screen track behind the notepad; use genuine footage or screenshots
+for each app, and preserve the live speaker's clear corner.
+
+Weekly detail cards can set `presentation: "notebookToScreen"` with `visuals: [{image, label, url, at, portrait?}]`. The fixed-width notebook introduces the topic, folds away at `screenAt` (default 2.1 seconds), and the real screen expands from the right into the main area. The middle-left native speaker stays clear. Later visuals enter at the expanded size. Optional `beats: [{text, at, end}]` put short spoken phrases below the screen. All times are seconds after the graphic starts; motion is on the shared deterministic timeline.
+
+For a flat video backdrop behind Weekly cards, set the native screen track `fullBleed: true` through `updateScreen`. This removes its inset margin and rounded frame in both native playback and export; keep false for ordinary framed screen recordings.
+
+### Mosaic templates
+
+The native gallery offers Mosaic caption and Mosaic image alongside Ink, Paper and Weekly. Glass stays supported for reading old projects but is no longer a visible choice. `MediaAsset.mosaicCaption` and `.mosaicImage` share their defaults with `MosaicTemplates`, including drag insertion. A Mosaic caption uses the native namePlate kind with `variant: asideCaption`, `motion: mosaic`. A Mosaic image uses logoBadge with `variant: mosaicScreens`; each logos entry accepts image, x, y, width, height, imageHeight and label. Images reveal in 24 tiles and settle into one seamless image; labels use individually fitted ink-and-paper words. Named Mosaic variants dispatch independently of the underlying Paper look, preserving saved custom compositions.
+
+
+### Mosaic screenshot entrances and thumbnail
+
+A `logoBadge` with `variant: screenshotCorners` uses `logos` entries with `image`,
+`x`, `y`, `width`, `height` and `imageHeight`. Four squares open from the centre along
+curved paths while a clip mask reveals the image. `squareSize` defaults to 26;
+`revealDuration` is adjustable up to 1.1 seconds; `settled: true` keeps an already
+visible image from replaying its entrance after a cut. `cream` (legacy primary-colour
+key) and `green` set the two corner colours; the Mosaic pair is `#d7ef63` / `#203329`.
+Place over clean footage for the entire entrance, not over a previously baked image.
+
+A native thumbnail design with `place: mosaic` uses the real video portrait, a dense
+word field, cream/lime title tiles, the `tag` and an optional product `image`. It is
+available in the thumbnail maker's Place menu and saved in the project like the other
+layouts. The assembled-movie exporter renders recording graphics before fitting and
+joining the clips, using the same local timing and graphics cache as recording export.

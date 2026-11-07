@@ -64,6 +64,7 @@ enum EditCommand: Equatable {
     case removeMedia(clip: UUID)
     /// Points a recording at a moved copy of the same video, keeping every edit.
     case relinkMedia(clip: UUID, url: URL, info: MediaInfo)
+    case setVoice(clip: UUID, treatment: VoiceTreatment?)
     /// How the recording's colour was recorded. A profile the conversion table does not
     /// belong to removes the table and turns Natural colour off with it.
     case setInputProfile(clip: UUID, profile: ColorInputProfile)
@@ -173,6 +174,7 @@ enum EditCommand: Equatable {
         case .addMedia: return "Add Videos"
         case .removeMedia: return "Remove Video"
         case .relinkMedia: return "Locate Source"
+        case .setVoice: return "Adjust Voice"
         case .setInputProfile: return "Recorded Colour"
         case .setTechnicalLUT(_, let lut): return lut == nil ? "Remove Conversion" : "Add Conversion"
         case .setColorCorrection(_, let enabled): return enabled ? "Natural Colour" : "Remove Correction"
@@ -565,6 +567,21 @@ enum ProjectReducer {
             let index = try clipIndex(clip, in: outcome.project)
             outcome.project.clips.remove(at: index)
 
+        case .setVoice(let clip, let treatment):
+            let index = try clipIndex(clip, in: outcome.project)
+            if let treatment {
+                try treatment.settings.validate()
+                guard outcome.project.clips[index].info?.hasAudio == true,
+                      treatment.source == outcome.project.clips[index].url,
+                      !treatment.settings.enabled || treatment.rendered != nil else { throw EditError.invalid("Voice treatment needs matching source audio and a prepared render.") }
+            }
+            outcome.project.clips[index].voice = treatment
+            if let treatment {
+                var sections = outcome.project.clips[index].timeline.segments
+                for i in sections.indices { sections[i].audioFade = treatment.settings.cutFadeMS / 1000 }
+                outcome.project.clips[index].segments = sections
+            }
+
         case .relinkMedia(let clip, let url, let info):
             let index = try clipIndex(clip, in: outcome.project)
             guard url.isFileURL else { throw EditError.invalid("Recordings must be local files.") }
@@ -574,6 +591,7 @@ enum ProjectReducer {
                     throw EditError.invalid("Choose the original video with matching dimensions and duration.")
                 }
             }
+            outcome.project.clips[index].voice = nil
             outcome.project.clips[index].url = url
             outcome.project.clips[index].info = info
             if outcome.project.clips[index].crop == nil { outcome.project.clips[index].crop = info.fullFrame }

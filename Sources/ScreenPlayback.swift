@@ -218,7 +218,12 @@ func composeLayout(speaker: CIImage, screen: CIImage?, track: ScreenTrack, state
         .transformed(by: CGAffineTransform(scaleX: cover, y: cover))
         .transformed(by: CGAffineTransform(translationX: -(crop.width * cover - frame.width) / 2, y: -(crop.height * cover - frame.height) / 2))
         .cropped(to: bounds)
-    let fill = movedPictureFill(covered, frame: bounds, amount: 1)
+    // A background canvas already supplies its own colour. Repeating its upper-left
+    // pixel keeps text and icons from appearing a second time as a blurred backdrop.
+    let fill = track.fullBleed
+        ? picture.cropped(to: CGRect(x: 0, y: crop.height - 1, width: 1, height: 1))
+            .clampedToExtent().cropped(to: bounds)
+        : movedPictureFill(covered, frame: bounds, amount: 1)
     let speakerPicture = placed(cut, size: window.size, in: state.speaker, frame: frame)
     var result = fill
     if state.ink < 1 {

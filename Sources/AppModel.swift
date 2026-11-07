@@ -95,6 +95,8 @@ final class AppModel: ObservableObject {
     /// Transcripts by recording, model and language, so undoing one, or an edit refused
     /// mid-export, never means waiting for whisper again.
     var transcriptCache: [String: Transcript] = [:]
+    @Published var voicePreparing: UUID?
+    @Published var voiceError: String?
     @Published var movieTime = 0.0
     @Published var movieProgress: Double?
     @Published var movieOutput: URL?
@@ -208,7 +210,7 @@ final class AppModel: ObservableObject {
     /// The gallery's sample the Preview shows, not in the project; nil shows none.
     @Published var galleryDraft: GalleryDraft? { didSet { if galleryDraft != oldValue { showGalleryDraft() } } }
     /// The look the gallery's pictures and drafts use.
-    @Published var galleryLook = GalleryLook.glass { didSet { if galleryLook != oldValue { showGalleryDraft() } } }
+    @Published var galleryLook = GalleryLook.mosaic { didSet { if galleryLook != oldValue { showGalleryDraft() } } }
     /// The recording the gallery's look was set for (see `openGallery`).
     var galleryLookClip: UUID?
     /// Style.md as last read or written, and the file's date then, to notice the owner

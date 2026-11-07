@@ -623,6 +623,7 @@ private struct RecordingInspector: View {
                 ShortsSection(item: item)
                 EffectsAndMarkersSection(item: item)
             case .audio:
+                if info.hasAudio { VoiceSection(item: item).id(item.id) }
                 subtitles
                 loudness
                 MusicSection(item: item)

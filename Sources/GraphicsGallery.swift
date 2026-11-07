@@ -5,6 +5,23 @@ import CoreGraphics
 // add, as a tile with a picture the engine draws in the recording's style, and a look at
 // one on the Preview before it is added.
 
+enum MosaicTemplates {
+    static var imageProps: [String: JSONValue] {
+        let image = GraphicsEngine.resources?.appendingPathComponent("mosaic-preview.png").path ?? ""
+        return ["variant": .string("mosaicScreens"), "logos": .array([.object([
+            "image": .string(image), "x": .number(1320), "y": .number(70),
+            "width": .number(550), "height": .number(380), "imageHeight": .number(380),
+            "label": .string("Your project"), "at": .number(0)
+        ])])]
+    }
+    static let captionProps: [String: JSONValue] = [
+        "variant": .string("asideCaption"), "motion": .string("mosaic"), "noShadow": .bool(true),
+        "balanced": .bool(true), "title": .string("Built this week"), "right": .string("Ready to share"),
+        "fontSize": .number(74), "fontWeight": .number(500), "width": .number(570),
+        "rightWidth": .number(570), "leftX": .number(30), "rightX": .number(1320), "y": .number(610)
+    ]
+}
+
 /// One kind in the gallery, with sample words to show it.
 struct GallerySample: Identifiable, Equatable {
     enum Group: String, CaseIterable, Identifiable {
@@ -25,8 +42,16 @@ struct GallerySample: Identifiable, Equatable {
     let length: Double
     let beat: Double
     var id: String { asset.id }
+    var isMosaic: Bool { asset == .mosaicCaption || asset == .mosaicImage }
 
     static let all: [GallerySample] = [
+        GallerySample(asset: .mosaicCaption, kind: .namePlate, title: "Mosaic caption", detail: "Words in ink and paper tiles",
+                      help: "Large single-line captions beside the speaker, revealed as Mosaic tiles", group: .cards,
+                      props: MosaicTemplates.captionProps, length: 5, beat: 2),
+        GallerySample(asset: .mosaicImage, kind: .logoBadge, title: "Mosaic image", detail: "Your image, with an ink label",
+                      help: "A square-edged image with a Mosaic reveal and separate word labels. Replace Image in the inspector.", group: .cards,
+                      props: MosaicTemplates.imageProps, length: 5, beat: 2),
+
         GallerySample(asset: .namePlate, kind: .namePlate, title: "Name plate", detail: "Your name, beside you",
                       help: "Your name and what you do, beside you", group: .cards,
                       props: ["title": .string("Yamparala Rahul"), "detail": .string("UX Design Engineer")], length: 4, beat: 1.6),
@@ -98,14 +123,17 @@ struct GallerySample: Identifiable, Equatable {
 /// The looks the gallery shows. Ink draws the panel kinds by hand and Paper puts the card
 /// kinds on taped paper; the other kinds stay glass.
 enum GalleryLook: String, CaseIterable, Identifiable {
-    case glass, ink, paper
+    case glass, ink, paper, weekly, mosaic
+    static var allCases: [GalleryLook] { [.ink, .paper, .weekly, .mosaic] }
 
     var id: String { rawValue }
     var label: String {
         switch self {
         case .glass: return "Glass"
+        case .mosaic: return "Mosaic"
         case .ink: return "Ink"
         case .paper: return "Paper"
+        case .weekly: return "Weekly"
         }
     }
 
@@ -113,9 +141,10 @@ enum GalleryLook: String, CaseIterable, Identifiable {
     /// kinds in ink, as ink does).
     init(style: GraphicsStyle) {
         switch style.look {
-        case .glass: self = .glass
+        case .glass: self = .mosaic
         case .ink, .mix: self = .ink
         case .paper: self = .paper
+        case .weekly: self = .weekly
         }
     }
 
@@ -123,20 +152,24 @@ enum GalleryLook: String, CaseIterable, Identifiable {
     /// for each kind that has more than one look, so the recording's style never changes it;
     /// nil for a kind that has glass only.
     func graphicLook(for kind: GraphicKind) -> GraphicsLook? {
-        guard kind.hasInk || kind.hasPaper else { return nil }
+        guard kind.hasInk || kind.hasPaper || kind.hasWeekly else { return nil }
         switch self {
         case .glass: return .glass
+        case .mosaic: return kind.hasPaper ? .paper : nil
         case .ink: return kind.hasInk ? .ink : .glass
         case .paper: return kind.hasPaper ? .paper : .glass
+        case .weekly: return kind.hasWeekly ? .weekly : .glass
         }
     }
 
     /// The name of the look a graphic of `kind` shows in, for the Preview's bar: a feature
     /// list in the Paper gallery is still glass.
     func name(for kind: GraphicKind) -> String {
+        if self == .mosaic { return "Mosaic" }
         switch graphicLook(for: kind) {
         case .ink?: return GalleryLook.ink.label
         case .paper?: return GalleryLook.paper.label
+        case .weekly?: return GalleryLook.weekly.label
         default: return GalleryLook.glass.label
         }
     }
@@ -266,7 +299,7 @@ extension AppModel {
     func openGallery() {
         guard galleryLookClip != selectedItem?.id else { return }
         galleryLookClip = selectedItem?.id
-        galleryLook = GalleryLook(style: galleryStyle)
+        galleryLook = selectedItem?.graphics?.items.contains(where: { $0.props["motion"] == .string("mosaic") || $0.props["variant"] == .string("mosaicScreens") }) == true ? .mosaic : GalleryLook(style: galleryStyle)
     }
 
     /// The graphic the Preview shows for the gallery, if one is chosen for this recording.

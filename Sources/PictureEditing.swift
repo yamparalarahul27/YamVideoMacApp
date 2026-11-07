@@ -45,6 +45,7 @@ extension VideoItem {
         copy.blurRegions = []
         copy.blurEffects = []
         copy.graphics = nil
+        copy.voice = nil
         copy.screen = nil
         copy.music = nil
         return copy

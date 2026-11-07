@@ -933,10 +933,10 @@ enum FFmpeg {
         let duration = cut.outputDuration
         var fades = ""
         if ClipTimeline.cut(before: i, in: segments) {
-            fades += ",afade=t=in:d=\(num(min(ClipTimeline.jointFade, duration / 4, segments[i - 1].duration / 4)))"
+            fades += ",afade=t=in:d=\(num(min(segments[i].audioFade ?? ClipTimeline.jointFade, duration / 4, segments[i - 1].duration / 4)))"
         }
         if ClipTimeline.cut(before: i + 1, in: segments) {
-            let fade = min(ClipTimeline.jointFade, duration / 4, segments[i + 1].duration / 4)
+            let fade = min(segments[i + 1].audioFade ?? ClipTimeline.jointFade, duration / 4, segments[i + 1].duration / 4)
             fades += ",afade=t=out:st=\(num(max(0, duration - fade))):d=\(num(fade))"
         }
         let segment = segments[i]
@@ -1533,6 +1533,7 @@ enum FFmpeg {
                 }
                 try await GraphicsRender.render(jobs, progress: { onProgress($0 * 0.4) }, draw: draw)
             }
+            for job in jobs { try GraphicsRender.normalizeFrames(in: job.folder) }
             GraphicsRender.touchAndPrune(jobs)
             // Written now, so a failure to stage the move's commands is an error rather than
             // an export that quietly leaves the picture in place under its panels.

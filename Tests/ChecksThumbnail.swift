@@ -7,6 +7,10 @@ import Foundation
     // MARK: - Thumbnails
 
     print("\nThumbnail design")
+    let mosaicDesign = try JSONDecoder().decode(ThumbnailDesign.self, from: Data(#"{"place":"mosaic","title":"MY APP\nIS LIVE"}"#.utf8))
+    check(mosaicDesign.place == .mosaic && mosaicDesign.problem == nil,
+          "Mosaic thumbnail designs decode and validate as an editable native layout")
+
     var thumbDesign = ThumbnailDesign(time: 1, title: "Edit for the *viewer*")
     check(thumbDesign.problem == nil, "a plain design is fine")
     var longTitle = thumbDesign; longTitle.title = String(repeating: "x", count: 91)
@@ -25,6 +29,13 @@ import Foundation
               && partialDesign.outlineWidth == 9 && !partialDesign.highlight && partialDesign.imageSize == 1
               && partialDesign.image?.path.hasPrefix("/") == true,
           "a partial design keeps the defaults, and an image path is a plain path")
+
+    let centered = try JSONDecoder().decode(ThumbnailDesign.self, from: Data(#"{"title":"THIS WEEK","place":"center","icons":["/tmp/app.png"],"portrait":"/tmp/portrait.png"}"#.utf8))
+    let centeredRoundTrip = try JSONDecoder().decode(ThumbnailDesign.self, from: JSONEncoder().encode(centered))
+    check(centered.place == .center && centeredRoundTrip == centered && centered.icons.count == 1 && centered.portrait?.path == "/tmp/portrait.png",
+          "centred composition and surrounding icons survive saving")
+    var crowded = centered; crowded.icons = Array(repeating: URL(fileURLWithPath: "/tmp/app.png"), count: 7)
+    check(crowded.problem != nil, "surrounding icons are limited to six")
 
     // A frame with a clear subject on the left: a head and a body on grey.
     let subject = try await subjectFixture()
@@ -694,5 +705,11 @@ import Foundation
     check(AgentsManual.brief(ctl: "/x/yamvideoctl").contains("/x/yamvideoctl manual") && AgentsManual.brief(ctl: nil).contains("yamvideo_manual"),
           "the brief for an agent names how to read the manual")
 
+
+    let mosaicMeasured = try await ThumbnailMaker.measure(mosaicDesign, sources: subjectSources, accent: "#D7EF63")
+    check(mosaicMeasured.image.width == 1280 && mosaicMeasured.image.height == 720
+              && mosaicMeasured.layout.runs.contains { $0.text == "APP" }
+              && mosaicMeasured.layout.runs.contains { $0.text == "LIVE" },
+          "Mosaic thumbnail renders and reports its actual title tiles for phone checks")
 
 }

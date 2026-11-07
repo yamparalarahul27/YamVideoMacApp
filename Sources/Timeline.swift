@@ -6,12 +6,13 @@ struct TimelineSegment: Identifiable, Equatable, Codable {
     var start: Double
     var end: Double
     var speed: Double = 1
+    var audioFade: Double?
     var sourceDuration: Double { max(0, end - start) }
     var duration: Double { sourceDuration / speed }
 
-    enum CodingKeys: String, CodingKey { case id, start, end, speed }
-    init(id: UUID = UUID(), start: Double, end: Double, speed: Double = 1) {
-        self.id = id; self.start = start; self.end = end; self.speed = speed
+    enum CodingKeys: String, CodingKey { case id, start, end, speed, audioFade }
+    init(id: UUID = UUID(), start: Double, end: Double, speed: Double = 1, audioFade: Double? = nil) {
+        self.id = id; self.start = start; self.end = end; self.speed = speed; self.audioFade = audioFade
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -19,6 +20,7 @@ struct TimelineSegment: Identifiable, Equatable, Codable {
         start = try values.decode(Double.self, forKey: .start)
         end = try values.decode(Double.self, forKey: .end)
         speed = try values.decodeIfPresent(Double.self, forKey: .speed) ?? 1
+        audioFade = try values.decodeIfPresent(Double.self, forKey: .audioFade)
     }
 }
 
@@ -45,7 +47,7 @@ struct ClipTimeline: Equatable {
         var time = 0.0
         for index in segments.indices {
             if Self.cut(before: index, in: segments) {
-                joints.append((time, min(Self.jointFade, segments[index - 1].duration / 4, segments[index].duration / 4)))
+                joints.append((time, min(segments[index].audioFade ?? Self.jointFade, segments[index - 1].duration / 4, segments[index].duration / 4)))
             }
             time += segments[index].duration
         }
@@ -156,6 +158,7 @@ struct ProjectClip: Codable, Equatable {
     var music: MusicBed?
     /// Version 23 onwards. Nil while the recording has no sound effects.
     var sounds: SoundSettings?
+    var voice: VoiceTreatment?
     /// Version 21 onwards. Space the timeline leaves in front of sections, in section
     /// order; nil while there is none.
     var gaps: [SectionGap]?
@@ -176,6 +179,7 @@ struct ProjectClip: Codable, Equatable {
         switchedOff = item.switchedOff.isEmpty ? nil : item.switchedOff.sorted()
         music = item.music
         sounds = item.sounds
+        voice = item.voice
         let gaps = item.gaps.sectionGaps(in: item.timeline)
         self.gaps = gaps.isEmpty ? nil : gaps
     }
@@ -197,6 +201,7 @@ struct ProjectClip: Codable, Equatable {
         item.switchedOff = Set(switchedOff ?? [])
         item.music = music
         item.sounds = sounds
+        item.voice = voice
         item.gaps = gaps?.lengths ?? [:]
         item.previewFraction = 0
         item.status = info == nil ? .probing : .ready
@@ -235,9 +240,9 @@ struct VideoProject: Codable, Equatable {
     /// music's duck, down under speech and up in pauses. 23: adds the sound effects on the
     /// graphics. 24: adds a layout part's own bubble. 25: adds the thumbnail maker's dark
     /// frost background, vivid colours and the serif accent. 26: adds the graphics' Paper
-    /// look. Every edited project is written as the current version; older builds reject it
+    /// look. 27: adds the reusable Weekly graphics look. 28: adds editable voice treatment and per-cut audio smoothing. Every edited project is written as the current version; older builds reject it
     /// rather than silently dropping edits.
-    static let currentVersion = 26
+    static let currentVersion = 28
     static let supportedVersions = 1...currentVersion
 
     var version = VideoProject.currentVersion
@@ -361,6 +366,9 @@ struct VideoProject: Codable, Equatable {
         if version < 26, clips.contains(where: { $0.graphics?.usesPaper == true }) {
             try reject("The project claims an older format but contains graphics in the Paper look."); return
         }
+        if version < 27, clips.contains(where: { $0.graphics?.usesWeekly == true }) {
+            try reject("The project claims an older format but contains graphics in the Weekly look."); return
+        }
         if let notes, notes.count > ChangeLogEntry.notesLimit { try reject("The project's notes are longer than \(ChangeLogEntry.notesLimit) characters."); return }
         if let log, log.count > ChangeLogEntry.limit { try reject("The project's history has more than \(ChangeLogEntry.limit) steps."); return }
         if let problem = autoEdit?.problem { try reject("The project's auto edit options are invalid: \(problem)"); return }
@@ -377,6 +385,15 @@ struct VideoProject: Codable, Equatable {
         }
         for clip in clips {
             guard clip.url.isFileURL else { try reject("Projects must reference local media."); return }
+            guard (clip.segments ?? []).allSatisfy({ $0.audioFade.map { $0.isFinite && (0...0.08).contains($0) } ?? true }) else {
+                try reject("Cut audio smoothing must be between 0 and 80 ms."); return
+            }
+            if let voice = clip.voice {
+                try voice.settings.validate()
+                guard voice.source == clip.url, voice.rendered?.isFileURL ?? true else {
+                    try reject("Voice treatment must reference its original local source."); return
+                }
+            }
             if let color = clip.color {
                 try color.validate()
                 if let info = clip.info { try color.validate(against: info) }

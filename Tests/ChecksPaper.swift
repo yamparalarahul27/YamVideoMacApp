@@ -83,6 +83,34 @@ private func inkSpan(_ image: CGImage, _ bytes: [UInt8], box: CGRect) -> (left: 
     check((try? paperAs25.validate()) == nil && (try? oneAs25.validate()) == nil && (try? plainAs25.validate()) != nil,
           "a version 25 file in the Paper look, for the style or one graphic, is refused; without it the file opens")
 
+    print("\nWeekly: reusable look and project format")
+    var weeklyStyle = GraphicsStyle(); weeklyStyle.look = .weekly; weeklyStyle.accent = "#456B51"
+    let weeklyCard = gfx(.titleCard, 0.2, 2.8, ["variant": .string("weeklyProgress"), "title": .string("This week"),
+        "completed": .number(1), "total": .number(3), "items": .array([
+            .object(["text": .string("YamVideo"), "state": .string("done")]),
+            .object(["text": .string("YamDraw"), "state": .string("current")]),
+            .object(["text": .string("Next week"), "state": .string("next")])])])
+    let weeklyTrack = GraphicsTrack(style: weeklyStyle, items: [weeklyCard])
+    check(weeklyTrack.problem(duration: 3) == nil && weeklyTrack.look(of: weeklyCard) == .weekly
+              && weeklyTrack.look(of: gfx(.rule, 0, 1)) == .glass,
+          "Weekly draws supported cards while keeping panel diagrams in their original look")
+    var weeklyProject = paperProject; weeklyProject.clips[0].graphics = weeklyTrack
+    let savedWeekly = try JSONDecoder().decode(VideoProject.self, from: JSONEncoder().encode(weeklyProject))
+    check(savedWeekly == weeklyProject && savedWeekly.clips[0].graphics?.style.accent == "#456B51"
+              && savedWeekly.clips[0].graphics?.items[0].props["variant"]?.string == "weeklyProgress",
+          "Weekly, its recording accent and progress rows survive saving and reopening")
+    var weeklyAs26 = savedWeekly; weeklyAs26.version = 26
+    var weeklyOwnAs26 = weeklyAs26; weeklyOwnAs26.clips[0].graphics?.style.look = .glass
+    weeklyOwnAs26.clips[0].graphics?.items[0].look = .weekly
+    check((try? weeklyAs26.validate()) == nil && (try? weeklyOwnAs26.validate()) == nil,
+          "a Weekly style or individual Weekly card requires project format 27")
+    check(GalleryLook(style: weeklyStyle) == .weekly
+              && GalleryLook.weekly.graphicLook(for: .titleCard) == .weekly
+              && GalleryLook.weekly.graphicLook(for: .rule) == .glass
+              && GalleryLook.weekly.addedLook(for: .titleCard, style: weeklyStyle) == nil
+              && GalleryLook.weekly.addedLook(for: .titleCard, style: GraphicsStyle()) == .weekly,
+          "Weekly appears in the gallery and carries its look when a card is added")
+
     print("\nPaper: the engine and the app agree")
     if let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
         var cases: [JSONValue] = [], expected: [String] = []
@@ -236,10 +264,10 @@ private func inkSpan(_ image: CGImage, _ bytes: [UInt8], box: CGRect) -> (left: 
     check(manual.contains("`look: \"paper\"`") && manual.contains("`label`"), "the Agents Manual has the Paper look")
 
     print("\nPaper: the gallery")
-    check(GalleryLook(style: paperStyle) == .paper && GalleryLook.allCases.map(\.label) == ["Glass", "Ink", "Paper"],
+    check(GalleryLook(style: paperStyle) == .paper && GalleryLook.allCases.map(\.label) == ["Glass", "Ink", "Paper", "Weekly", "Mosaic"],
           "the gallery's Look switch has Paper, and opens in it for a Paper style")
     check(GalleryLook.paper.graphicLook(for: .titleCard) == .paper && GalleryLook.paper.graphicLook(for: .checklist) == .glass
-              && GalleryLook.paper.graphicLook(for: .featureList) == nil && GalleryLook.glass.graphicLook(for: .titleCard) == .glass
+              && GalleryLook.paper.graphicLook(for: .featureList) == .glass && GalleryLook.glass.graphicLook(for: .titleCard) == .glass
               && GalleryLook.ink.graphicLook(for: .namePlate) == .glass && GalleryLook.ink.graphicLook(for: .panelTitle) == .ink,
           "each look names the look of every kind that has more than one, so the recording's style never changes a tile")
     check(GalleryLook.paper.addedLook(for: .titleCard, style: GraphicsStyle()) == .paper && GalleryLook.paper.addedLook(for: .titleCard, style: paperStyle) == nil

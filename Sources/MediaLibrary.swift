@@ -5,7 +5,7 @@ import Foundation
 /// Something the Media panel adds to the recording, by its + button or by a drag onto the
 /// timeline. Its `id` is what a drag carries.
 enum MediaAsset: Equatable {
-    case namePlate, titleCard, featureList, checklist, kineticText, sectionCard, endScreen
+    case namePlate, titleCard, featureList, checklist, kineticText, sectionCard, endScreen, mosaicCaption, mosaicImage
     case logo(String)
     case blurArea, fullFrameBlur, zoom, screenZoom, marker
 
@@ -13,6 +13,8 @@ enum MediaAsset: Equatable {
 
     var id: String {
         switch self {
+        case .mosaicCaption: return "mosaicCaption"
+        case .mosaicImage: return "mosaicImage"
         case .namePlate: return "namePlate"
         case .titleCard: return "titleCard"
         case .featureList: return "featureList"
@@ -36,7 +38,7 @@ enum MediaAsset: Equatable {
         guard dragText.hasPrefix(Self.dragPrefix) else { return nil }
         let id = String(dragText.dropFirst(Self.dragPrefix.count))
         if id.hasPrefix("logo:") { self = .logo(String(id.dropFirst(5))); return }
-        let all: [MediaAsset] = [.namePlate, .titleCard, .featureList, .checklist, .kineticText, .sectionCard, .endScreen,
+        let all: [MediaAsset] = [.mosaicCaption, .mosaicImage, .namePlate, .titleCard, .featureList, .checklist, .kineticText, .sectionCard, .endScreen,
                                  .blurArea, .fullFrameBlur, .zoom, .screenZoom, .marker]
         guard let match = all.first(where: { $0.id == id }) else { return nil }
         self = match
@@ -49,6 +51,8 @@ extension AppModel {
         guard let item = selectedItem, item.info != nil, !isMovieMode else { statusMessage = "Select a recording first."; return }
         if let time { playback.pause(); setPreviewFraction(min(max(time, 0), item.editedDuration) / max(0.001, item.editedDuration)) }
         switch asset {
+        case .mosaicCaption: addStarter(.namePlate, props: MosaicTemplates.captionProps, label: "Add Mosaic Caption")
+        case .mosaicImage: addStarter(.logoBadge, props: MosaicTemplates.imageProps, label: "Add Mosaic Image")
         case .namePlate:
             addStarter(.namePlate, props: ["title": .string("Your name"), "detail": .string("What you do")], label: "Add Name Plate")
         case .titleCard:

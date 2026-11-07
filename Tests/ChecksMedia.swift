@@ -45,12 +45,25 @@ import Foundation
               && list.pictureKey(style: pink, look: .glass) != list.pictureKey(style: pink, look: .ink),
           "a gallery picture is kept by its style and look, and drawn again when either changes")
     var inkStyle = GraphicsStyle(); inkStyle.look = .mix
-    check(GalleryLook(style: GraphicsStyle()) == .glass && GalleryLook(style: inkStyle) == .ink
+    check(GalleryLook(style: GraphicsStyle()) == .mosaic && GalleryLook(style: inkStyle) == .ink
               && GalleryLook.ink.addedLook(for: .checklist, style: GraphicsStyle()) == .ink
               && GalleryLook.ink.addedLook(for: .checklist, style: inkStyle) == nil
               && GalleryLook.glass.addedLook(for: .checklist, style: inkStyle) == .glass
               && GalleryLook.ink.addedLook(for: .titleCard, style: GraphicsStyle()) == nil,
           "the gallery opens in the recording's look, and a graphic gets its own look only where the style draws it otherwise")
+    check(!GalleryLook.allCases.contains(.glass) && GalleryLook.allCases.contains(.mosaic),
+          "the gallery offers Mosaic instead of Glass")
+    let mosaicModel = AppModel(recoveryURL: nil)
+    mosaicModel.restore(VideoProject(clips: [clip], settings: ExportSettings(), selection: clip.id))
+    mosaicModel.setPreviewFraction(0.2)
+    mosaicModel.add(.mosaicCaption)
+    mosaicModel.setPreviewFraction(0.7)
+    mosaicModel.add(.mosaicImage)
+    let mosaicItems = mosaicModel.selectedItem?.graphics?.items ?? []
+    check(mosaicItems.contains { $0.kind == .namePlate && $0.props["motion"] == .string("mosaic") }
+              && mosaicItems.contains { $0.kind == .logoBadge && $0.props["variant"] == .string("mosaicScreens") }
+              && MediaAsset(dragText: MediaAsset.mosaicImage.dragText) == .mosaicImage,
+          "Mosaic gallery additions and image drags create reusable Mosaic templates")
     let frame = GalleryPictures.size, wholeFrame = CGRect(origin: .zero, size: frame)
     let corner = GalleryPictures.framing(CGRect(x: 1000, y: 40, width: 240, height: 90), in: frame)
     let full = GalleryPictures.framing(wholeFrame, in: frame)

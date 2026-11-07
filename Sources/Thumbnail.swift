@@ -18,9 +18,9 @@ struct ThumbnailDesign: Codable, Equatable {
     /// Where the cut-out speaker goes: where the frame has them, or moved (and made smaller
     /// when it must) to the far side, clear of the title, the tag and the picture.
     enum Place: String, Codable, CaseIterable, Identifiable {
-        case frame, clear
+        case frame, clear, center, mosaic
         var id: String { rawValue }
-        var label: String { self == .frame ? "As recorded" : "Clear" }
+        var label: String { self == .frame ? "As recorded" : self == .center ? "Centre + icons" : self == .mosaic ? "Mosaic" : "Clear" }
     }
     enum Background: String, Codable, CaseIterable, Identifiable {
         /// frost: the frame as recorded, moved with the speaker, under a white blurred shade
@@ -53,6 +53,10 @@ struct ThumbnailDesign: Codable, Equatable {
     var accent: String?
     /// A product photo or icon beside the title; a transparent PNG looks best.
     var image: URL?
+    /// App icons arranged around a centred speaker.
+    var icons: [URL] = []
+    /// Optional transparent portrait, independent of the selected video frame.
+    var portrait: URL?
     /// Cut the speaker out with Apple Vision, so the background can change behind them.
     var cutout = true
     /// A white outline round the cut-out, and its width in pixels of a 1920×1080 frame.
@@ -89,7 +93,7 @@ struct ThumbnailDesign: Codable, Equatable {
     init(time: Double = 0, title: String = "") { self.time = time; self.title = title }
 
     private enum CodingKeys: String, CodingKey {
-        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight, imageSize, vivid, accentFont
+        case time, title, tag, accent, image, cutout, outline, side, background, zoom, place, outlineWidth, highlight, imageSize, vivid, accentFont, icons, portrait
     }
 
     /// Missing keys keep their defaults; `image` is a plain path, as for the thumbnail.
@@ -104,6 +108,8 @@ struct ThumbnailDesign: Codable, Equatable {
             text.hasPrefix("file:") ? (URL(string: text) ?? URL(fileURLWithPath: text))
                 : URL(fileURLWithPath: (text as NSString).expandingTildeInPath)
         }
+        portrait = try c.decodeIfPresent(String.self, forKey: .portrait).map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        icons = try c.decodeIfPresent([String].self, forKey: .icons)?.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? []
         cutout = try c.decodeIfPresent(Bool.self, forKey: .cutout) ?? defaults.cutout
         outline = try c.decodeIfPresent(Bool.self, forKey: .outline) ?? defaults.outline
         side = try c.decodeIfPresent(Side.self, forKey: .side) ?? defaults.side
@@ -124,6 +130,8 @@ struct ThumbnailDesign: Codable, Equatable {
         try c.encode(tag, forKey: .tag)
         try c.encodeIfPresent(accent, forKey: .accent)
         try c.encodeIfPresent(image?.path, forKey: .image)
+        try c.encodeIfPresent(portrait?.path, forKey: .portrait)
+        if !icons.isEmpty { try c.encode(icons.map(\.path), forKey: .icons) }
         try c.encode(cutout, forKey: .cutout)
         try c.encode(outline, forKey: .outline)
         try c.encode(side, forKey: .side)
@@ -157,6 +165,8 @@ struct ThumbnailDesign: Codable, Equatable {
         guard zoom.isFinite, Self.zooms.contains(zoom) else { return "The speaker's size is from 1 to 1.6." }
         guard outlineWidth.isFinite, Self.outlineWidths.contains(outlineWidth) else { return "The outline's width is from 2 to 16 pixels." }
         guard imageSize.isFinite, Self.imageSizes.contains(imageSize) else { return "The picture's size is from 1 to 1.6." }
+        if let portrait, !portrait.isFileURL { return "The portrait must be a local image." }
+        guard icons.count <= 6, icons.allSatisfy({ $0.isFileURL }) else { return "Choose up to six local app icons." }
         if let image, !image.isFileURL { return "The thumbnail's image must be a local file." }
         return nil
     }
@@ -266,7 +276,30 @@ enum ThumbnailMaker {
     /// The engine's data for a design. The side is decided here: away from the speaker
     /// unless the design says otherwise.
     static func pageData(_ design: ThumbnailDesign, media: Media, accent: String, folder: URL) throws -> Data {
-        let scale = 1920 / media.width
+        var resolved = media
+        if design.cutout, let url = design.portrait {
+            guard let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil),
+                  let context = CGContext(data: nil, width: Int(media.width), height: Int(media.width * 9 / 16), bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw FFmpegError(message: "The portrait could not be read. Choose a transparent PNG.")
+            }
+            let factor = min(media.width / Double(image.width), media.width * 9 / 16 / Double(image.height))
+            let size = CGSize(width: Double(image.width) * factor, height: Double(image.height) * factor)
+            context.draw(image, in: CGRect(x: (media.width - size.width) / 2, y: 0, width: size.width, height: size.height))
+            guard let normalized = context.makeImage(), let box = SpeakerCutout.opaqueBox(normalized),
+                  let png = NSBitmapImageRep(cgImage: normalized).representation(using: .png, properties: [:]) else {
+                throw FFmpegError(message: "The portrait has no visible subject.")
+            }
+            let name = "\(ColorCube.sha256(png).prefix(12))-portrait.png"
+            let target = folder.appendingPathComponent("media/" + name)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: target.path) { try png.write(to: target) }
+            resolved.cutout = "media/" + name
+            resolved.box = box
+            resolved.head = SpeakerCutout.headBox(normalized, box: box)
+            resolved.bands = SpeakerCutout.bands(normalized, box: box)
+        }
+        let scale = 1920 / resolved.width
         var speaker: JSONValue = .null
         var head: JSONValue = .null
         var bands: JSONValue = .array([])
@@ -275,15 +308,15 @@ enum ThumbnailMaker {
             .object(["x": .number(box.minX * scale), "y": .number(box.minY * scale),
                      "w": .number(box.width * scale), "h": .number(box.height * scale)])
         }
-        if design.cutout, let file = media.cutout, let box = media.box {
+        if design.cutout, let file = resolved.cutout, let box = resolved.box {
             cutout = .string(file)
             speaker = rect(box)
-            if let box = media.head { head = rect(box) }
-            bands = .array(media.bands.map(rect))
+            if let box = resolved.head { head = rect(box) }
+            bands = .array(resolved.bands.map(rect))
         }
         var side = design.side
         if side == .auto {
-            let centre = media.box.map { $0.midX / media.width } ?? 0.4
+            let centre = resolved.box.map { $0.midX / resolved.width } ?? 0.4
             side = centre < 0.5 ? .right : .left
         }
         var image: JSONValue = .null
@@ -295,10 +328,18 @@ enum ThumbnailMaker {
             if !FileManager.default.fileExists(atPath: target.path) { try bytes.write(to: target) }
             image = .string("media/" + name)
         }
+        let iconFiles: [JSONValue] = try design.icons.map { url in
+            let bytes = try Data(contentsOf: url)
+            let name = "\(ColorCube.sha256(bytes).prefix(12)).\(url.pathExtension.lowercased())"
+            let target = folder.appendingPathComponent("media/" + name)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: target.path) { try bytes.write(to: target) }
+            return .string("media/" + name)
+        }
         let root: JSONValue = .object([
-            "frame": .string(media.frame), "cutout": cutout, "speaker": speaker, "head": head, "bands": bands, "place": .string(design.place.rawValue),
+            "frame": .string(resolved.frame), "cutout": cutout, "speaker": speaker, "head": head, "bands": bands, "place": .string(design.place.rawValue),
             "title": .string(design.title), "tag": .string(design.tag), "accent": .string(design.accent ?? accent),
-            "image": image, "outline": .bool(design.outline), "outlineWidth": .number(design.outlineWidth),
+            "icons": .array(iconFiles), "image": image, "outline": .bool(design.outline), "outlineWidth": .number(design.outlineWidth),
             "highlight": .bool(design.highlight), "side": .string(side.rawValue),
             "background": .string(design.background.rawValue), "zoom": .number(design.zoom),
             "imageSize": .number(design.imageSize),
@@ -344,7 +385,7 @@ enum ThumbnailMaker {
         let data = String(decoding: try pageData(design, media: media, accent: accent, folder: folder), as: UTF8.self)
         let shots = try await GraphicsSnapshot.capture(page: index, folder: folder, size: size, steps: [
             "await YamGraphics.thumbnail(\(data));\nreturn JSON.stringify(YamGraphics.thumbnailLayout());",
-            "document.querySelectorAll('.yg-thumb-title, .yg-thumb-title em').forEach((node) => { node.style.color = '#FF00FF'; node.style.textShadow = 'none'; });\nreturn null;",
+            "document.querySelectorAll('.yg-thumb-title, .yg-thumb-title em, .yg-mosaic-word').forEach((node) => { node.style.color = '#FF00FF'; node.style.textShadow = 'none'; });\nreturn null;",
         ])
         guard shots.count == 2, let json = shots[0].result,
               let layout = try? JSONDecoder().decode(ThumbnailLayout.self, from: Data(json.utf8)) else {

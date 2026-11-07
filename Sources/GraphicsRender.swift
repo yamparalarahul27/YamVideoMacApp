@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 
 // Export with graphics (graphics track G1 part 2, docs/plans/graphics-track.md):
 // the move aside drawn by ffmpeg, each graphic rendered on its own by HyperFrames to a
@@ -619,6 +620,7 @@ enum GraphicsRender {
             _ = try GraphicsEngine.writePage(job.unit.track, duration: job.unit.duration, fps: job.fps, mode: "unit",
                                              unit: job.unit.id, origin: 0, pageDuration: job.unit.duration, to: page)
             try await draw(job, page, frames)
+            try normalizeFrames(in: frames)
             try Task.checkCancellation()
             guard manager.fileExists(atPath: frames.appendingPathComponent(Job.firstFrame).path) else {
                 throw FFmpegError(message: "No frames were drawn for the \(job.unit.name.lowercased()).")
@@ -629,6 +631,38 @@ enum GraphicsRender {
             progress(min(1, drawn / total))
         }
         return missing.count
+    }
+
+    /// Opaque browser frames may be RGB while their entrance frames are RGBA.
+    /// Keep one pixel format throughout every PNG sequence so ffmpeg does not
+    /// reinitialise the entire movie graph midway through a cover animation.
+    static func normalizeFrames(in folder: URL) throws {
+        let manager = FileManager.default
+        let files = try manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        for file in files where file.pathExtension.lowercased() == "png" {
+            try Task.checkCancellation()
+            let handle = try FileHandle(forReadingFrom: file)
+            let header = try handle.read(upToCount: 26) ?? Data()
+            try handle.close()
+            guard header.count == 26, header[25] != 6 else { continue }
+            guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                  let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw FFmpegError(message: "Could not normalize a rendered graphic frame.")
+            }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            let temporary = folder.appendingPathComponent(".rgba-\(UUID().uuidString).png")
+            defer { try? manager.removeItem(at: temporary) }
+            guard let normalized = context.makeImage(),
+                  let destination = CGImageDestinationCreateWithURL(temporary as CFURL, "public.png" as CFString, 1, nil) else {
+                throw FFmpegError(message: "Could not write a rendered graphic frame.")
+            }
+            CGImageDestinationAddImage(destination, normalized, nil)
+            guard CGImageDestinationFinalize(destination) else { throw FFmpegError(message: "Could not finish a rendered graphic frame.") }
+            _ = try manager.replaceItemAt(file, withItemAt: temporary)
+        }
     }
 
     /// Marks the jobs' frames as used now, then removes frames no export has used for
