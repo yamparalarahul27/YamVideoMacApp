@@ -80,6 +80,10 @@ struct ScreenSection: View {
         }
         .pickerStyle(.segmented)
         .help("The layout wherever no layout on the Layout lane says otherwise")
+        Toggle("Fill background", isOn: Binding(get: { screen.fullBleed }, set: { enabled in
+            model.updateScreen(label: "Fill Background") { $0.fullBleed = enabled }
+        }))
+        .help("Show the screen without the inset margin or rounded frame")
         Picker("Bubble", selection: Binding(get: { screen.bubble.corner }, set: { corner in model.updateScreen(label: "Bubble Corner") { $0.bubble.corner = corner } })) {
             ForEach(SpeakerBubble.Corner.allCases) { corner in Text(corner.label).tag(corner) }
         }

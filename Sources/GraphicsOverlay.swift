@@ -138,7 +138,15 @@ struct GraphicsOverlay: NSViewRepresentable {
                       var fit = function () {
                         var stage = document.getElementById('stage');
                         stage.style.transformOrigin = '0 0';
-                        stage.style.transform = 'scale(' + (window.innerWidth / YamGraphics.stageSize().width) + ')';
+                        // CSS viewport units retain the fractional size that innerWidth/Height round.
+                        var viewport = document.getElementById('yg-viewport-measure');
+                        if (!viewport) {
+                          viewport = document.createElement('div'); viewport.id = 'yg-viewport-measure';
+                          viewport.style.cssText = 'position:fixed;inset:0;pointer-events:none;visibility:hidden';
+                          document.body.appendChild(viewport);
+                        }
+                        var rect = viewport.getBoundingClientRect(), size = YamGraphics.stageSize();
+                        stage.style.transform = 'scale(' + (rect.width / size.width) + ',' + (rect.height / size.height) + ')';
                       };
                       window.addEventListener('resize', fit);
                       fit();
@@ -196,6 +204,9 @@ final class GraphicsSnapshot: NSObject, WKNavigationDelegate {
             stage.style.transform = 'scale(' + (window.innerWidth / YamGraphics.stageSize().width) + ')';
             YamGraphics.captions(\(captions?.json ?? "null"));
             await document.fonts.ready;
+            // Tiled assets insert images after navigation completes. Decode every tile
+            // before capture so a fast seek cannot produce an empty or partial asset.
+            await Promise.all(Array.from(document.images, image => image.decode ? image.decode().catch(() => null) : Promise.resolve()));
             YamGraphics.seek(time);
             return JSON.stringify(YamGraphics.boxes());
             """

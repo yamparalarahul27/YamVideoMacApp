@@ -37,6 +37,16 @@ private func near(_ a: Double, _ b: Double, _ tolerance: Double = 0.0005) -> Boo
 
 @MainActor func soundsTests() async throws {
     print("\nSounds: the engine's cues")
+    let counterProps: [String: JSONValue] = ["variant": .string("walkbyCounter"), "label": .string("People passing by"),
+        "events": .array([.object(["at": .number(1.2), "value": .number(2)])])]
+    check(LogoBadge.problem(props: counterProps, length: 4) == nil, "an editable interruption counter needs no image asset")
+    check(LogoBadge.problem(props: counterProps, length: 1.3) != nil, "counter events must leave time to read the count")
+    let counterCues = SoundCues.engineCues(kind: .logoBadge, props: counterProps, length: 4)
+    check(counterCues.count == 1 && near(counterCues[0].at, 1.2) && counterCues[0].cue == "tally",
+          "a simultaneous pair of passers makes one sound at the count update")
+    check(SoundCues.engineCues(kind: .logoBadge, props: [:], length: 4).isEmpty,
+          "ordinary logo badges remain silent")
+
     let link = SoundCues.engineCues(kind: .link, props: ["url": .string("tradl.ai"), "image": .string("/tmp/x.jpg")], length: 7)
     check(link.count == 10 && near(link[0].at, 1.05) && link[0].cue == "click" && near(link[1].at, 1.3) && near(link[8].at, 1.93)
               && link[1...8].allSatisfy { $0.cue == "key" } && near(link[9].at, 2.22) && link[9].cue == "open",

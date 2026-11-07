@@ -473,6 +473,13 @@ struct ThumbnailMakerSheet: View {
                     set: { design.accent = NSColor($0).hexString }), supportsOpacity: false)
             }
             InspectorSection("Speaker") {
+                HStack {
+                    Text(design.portrait?.lastPathComponent ?? "Video frame").font(.caption).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("Portrait…") { choosePortrait() }.controlSize(.small)
+                    if design.portrait != nil { Button("Use frame") { design.portrait = nil }.controlSize(.small) }
+                }
+
                 Toggle("Cut-out", isOn: $design.cutout)
                     .help("Apple Vision cuts the speaker out, so the background can change behind them")
                 Toggle("Outline", isOn: $design.outline).disabled(!design.cutout)
@@ -513,6 +520,18 @@ struct ThumbnailMakerSheet: View {
                     ForEach(ThumbnailDesign.Side.allCases) { Text($0.label).tag($0) }
                 }
                 .help("Auto: the side away from the speaker")
+            }
+            if design.place == .center {
+                InspectorSection("Surrounding icons") {
+                    HStack {
+                        Text("\(design.icons.count) of 6 icons").font(.caption)
+                        Spacer()
+                        Button("Choose…") { chooseIcons() }.controlSize(.small)
+                        if !design.icons.isEmpty { Button("Clear") { design.icons = [] }.controlSize(.small) }
+                    }
+                    Text("Large text behind you, app icons around you. Keep the face clear and use depth, soft shadows and a blurred background.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
             InspectorSection("Picture") {
                 HStack {
@@ -589,6 +608,21 @@ struct ThumbnailMakerSheet: View {
             } catch is CancellationError {
             } catch { problem = error.localizedDescription }
         }
+    }
+
+    private func choosePortrait() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png]
+        panel.message = "Choose a transparent head-and-shoulders portrait PNG."
+        if panel.runModal() == .OK, let url = panel.url { design.portrait = url }
+    }
+
+    private func chooseIcons() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .heic, .tiff]
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose up to six app icons to place around the speaker."
+        if panel.runModal() == .OK { design.icons = Array(panel.urls.prefix(6)) }
     }
 
     private func chooseImage() {

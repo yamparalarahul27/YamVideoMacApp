@@ -19,7 +19,7 @@ struct MovieView: View {
             }.padding(14)
             Divider()
             if let plan = try? model.moviePlan() {
-                PlaybackCanvas(playback: playback).frame(maxHeight: .infinity)
+                PlaybackCanvas(playback: playback, graphics: movieGraphics(plan)).frame(maxHeight: .infinity)
                 HStack(spacing: 10) {
                     Button { model.stepFrame(-1) } label: { Image(systemName: "backward.frame") }
                         .accessibilityLabel("Previous movie frame")
@@ -108,5 +108,22 @@ struct MovieView: View {
             model.movieOutput = nil
             model.prepareMovie(play: false)
         }
+    }
+
+    /// Movie time includes the preceding recordings; graphics use local edited time.
+    private func movieGraphics(_ plan: MoviePlan) -> GraphicsOverlayInput? {
+        var offset = 0.0
+        for clip in plan.clips {
+            defer { offset += clip.editedDuration }
+            guard model.movieTime >= offset, model.movieTime < offset + clip.editedDuration else { continue }
+            guard let info = clip.info, clip.isOn(.graphics), let track = clip.placedGraphics,
+                  !track.items.isEmpty else { return nil }
+            let frame = (clip.crop ?? info.fullFrame).size
+            guard frame.height > 0, abs(frame.width / frame.height - 16.0 / 9.0) < 0.02 else { return nil }
+            return GraphicsOverlayInput(clip: clip.id, track: track.labellingEndScreen(clip.publish?.endScreen),
+                                        duration: clip.editedDuration, fps: info.fpsExpression,
+                                        frame: frame, time: model.movieTime - offset)
+        }
+        return nil
     }
 }

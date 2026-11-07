@@ -102,6 +102,7 @@ struct WireSection: Codable, Equatable {
     var id: UUID?
     var start: Double
     var end: Double
+    var audioFade: Double?
     var speed: Double?
 }
 
@@ -129,7 +130,7 @@ struct WireGraphic: Codable, Equatable {
     var start: Double?
     var end: Double?
     var props: [String: JSONValue]?
-    /// "glass", "ink" or "paper"; "" clears it back to the style's choice.
+    /// "glass", "ink", "paper" or "weekly"; "" clears it back to the style's choice.
     var look: String?
     /// Moved and scaled on the picture; in `updateGraphic` only the keys given change.
     var transform: WireTransform?
@@ -251,6 +252,7 @@ struct WireCommand: Codable, Equatable {
     var music: [String: JSONValue]?
     /// setSounds: {on, level, cues}.
     var sounds: [String: JSONValue]?
+    var voice: VoiceSettings?
 
     static let types = [
         "splitSection", "trimSection", "deleteSection", "moveSection", "setSectionSpeed", "replaceSections",
@@ -258,7 +260,7 @@ struct WireCommand: Codable, Equatable {
         "setCrop", "setAspect", "addBlurArea", "updateBlurArea", "removeBlurArea", "replaceBlurAreas",
         "addZoom", "updateZoom", "removeZoom", "replaceZooms", "setMovieOrder", "setIncludedInMovie",
         "setMovieCanvas", "setExportSettings", "setSubtitles", "clearSubtitles", "addMedia", "removeMedia",
-        "relinkMedia", "setInputProfile", "importTechnicalLUT", "clearTechnicalLUT", "setColorCorrection",
+        "relinkMedia", "setVoice", "setInputProfile", "importTechnicalLUT", "clearTechnicalLUT", "setColorCorrection",
         "setColorAdjustments", "resetColorAdjustments", "copyColorAdjustments",
         "addBlurEffect", "updateBlurEffect", "removeBlurEffect", "addMarker", "updateMarker", "removeMarker",
         "addGraphic", "updateGraphic", "removeGraphic", "replaceGraphics", "setGraphicsStyle", "importGraphics",
@@ -347,6 +349,7 @@ struct AgentState: Encodable {
         /// Space the timeline shows in front of it, in seconds; absent when there is none.
         /// Only the timeline has it: playback and exports join the sections.
         var gapBefore: Double? = nil
+        var audioFade: Double? = nil
     }
     struct Area: Encodable { var id: UUID; var rect: WireRect; var start: Double?; var end: Double? }
     struct Zoom: Encodable {
@@ -359,6 +362,7 @@ struct AgentState: Encodable {
         var path: String
         var status: String
         var statusDetail: String?
+        var voice: VoiceTreatment? = nil
         var media: Media?
         var editedDuration: Double
         var includedInMovie: Bool
@@ -853,7 +857,7 @@ extension AppModel {
             let gaps = clip.gaps?.lengths ?? [:]
             for segment in clip.timeline.segments {
                 sections.append(.init(id: segment.id, start: segment.start, end: segment.end, speed: segment.speed,
-                                      editedStart: offset, editedDuration: segment.duration, gapBefore: gaps[segment.id]))
+                                      editedStart: offset, editedDuration: segment.duration, gapBefore: gaps[segment.id], audioFade: segment.audioFade))
                 offset += segment.duration
             }
             let (status, detail): (String, String?) = {
@@ -867,7 +871,7 @@ extension AppModel {
             }()
             return AgentState.Clip(
                 id: clip.id, name: clip.url.lastPathComponent, path: clip.url.path, status: status, statusDetail: detail,
-                media: clip.info.map { .init(width: $0.width, height: $0.height, duration: $0.duration, fps: $0.fps,
+                voice: clip.voice, media: clip.info.map { .init(width: $0.width, height: $0.height, duration: $0.duration, fps: $0.fps,
                                              fpsExpression: $0.fpsExpression, hasAudio: $0.hasAudio, hdr: $0.hdrLabel) },
                 editedDuration: clip.timeline.duration, includedInMovie: clip.includedInMovie ?? true,
                 crop: clip.crop.map(WireRect.init), aspect: clip.aspectLabel, subtitles: clip.subtitles?.path,
@@ -1061,9 +1065,19 @@ extension AppModel {
                 if let face = try await speakerFace(for: command, in: document) { faces[index] = face }
                 if let border = try await screenBorder(for: command, in: document) { borders[index] = border }
             }
+            var processedVoices: [UUID: VoiceTreatment] = [:]
+            let preparingVoice = wire.contains { $0.type == "setVoice" }
+            if preparingVoice, voicePreparing != nil { throw EditError.invalid("Voice preparation is already running. Wait for it to finish.") }
+            defer { if preparingVoice { voicePreparing = nil } }
+            for command in wire where command.type == "setVoice" {
+                guard let id = command.clipID, let clip = document.clips.first(where: { $0.id == id }), clip.info?.hasAudio == true,
+                      let settings = command.voice else { throw EditError.invalid("setVoice needs clipID with audio and a voice object.") }
+                voicePreparing = id; voiceError = nil
+                processedVoices[id] = try await VoiceProcessor.prepare(source: clip.url, settings: settings)
+            }
             let commands = try wire.enumerated().map { index, command in
                 try resolve(command, in: document, probed: probed, tables: tables, speaker: speakers[index], face: faces[index],
-                            border: borders[index], music: music, voices: voices, origin: agentOrigin(request))
+                            border: borders[index], music: music, voices: voices, processedVoices: processedVoices, origin: agentOrigin(request))
             }
             let label = request.label.map { String($0.prefix(80)) }
             let result = perform(commands, label: label, origin: agentOrigin(request), expectedRevision: expected,
@@ -1082,7 +1096,7 @@ extension AppModel {
     private func resolve(_ wire: WireCommand, in document: VideoProject, probed: [String: MediaInfo],
                          tables: [String: LUTAssetRef] = [:], speaker: CGRect? = nil, face: CGPoint? = nil,
                          border: CGRect? = nil, music: [String: (duration: Double, loudness: Double)] = [:],
-                         voices: [UUID: Double] = [:], origin: EditOrigin = .human) throws -> EditCommand {
+                         voices: [UUID: Double] = [:], processedVoices: [UUID: VoiceTreatment] = [:], origin: EditOrigin = .human) throws -> EditCommand {
         func field<T>(_ value: T?, _ name: String) throws -> T {
             guard let value else { throw EditError.invalid("\(wire.type) needs \(name).") }
             return value
@@ -1147,8 +1161,8 @@ extension AppModel {
             if let look = value.look {
                 switch look {
                 case "": result.look = nil
-                case "glass", "ink", "paper": result.look = GraphicsLook(rawValue: look)
-                default: throw EditError.invalid("A graphic's look is \"glass\", \"ink\" or \"paper\" (or \"\" for the style's).")
+                case "glass", "ink", "paper", "weekly": result.look = GraphicsLook(rawValue: look)
+                default: throw EditError.invalid("A graphic's look is \"glass\", \"ink\", \"paper\" or \"weekly\" (or \"\" for the style's).")
                 }
             }
             if let place = value.transform {
@@ -1199,7 +1213,7 @@ extension AppModel {
                 if let size = decoded.size, abs(size - 1) < 0.0005 { decoded.size = nil }
                 return decoded
             } catch {
-                throw EditError.invalid("graphicsStyle: panel is shade or solid, look is glass, ink, mix or paper, "
+                throw EditError.invalid("graphicsStyle: panel is shade or solid, look is glass, ink, mix, paper or weekly, "
                     + "moveVideo is true or false, edge and size are numbers (size 1 to 1.5, or null) and accent is a colour like #F5C42C.")
             }
         }
@@ -1268,7 +1282,7 @@ extension AppModel {
                                     speed: try field(wire.speed, "speed"))
         case "replaceSections":
             return .replaceSections(clip: try field(wire.clipID, "clipID"), sections: try field(wire.sections, "sections").map {
-                TimelineSegment(id: $0.id ?? UUID(), start: $0.start, end: $0.end, speed: $0.speed ?? 1)
+                TimelineSegment(id: $0.id ?? UUID(), start: $0.start, end: $0.end, speed: $0.speed ?? 1, audioFade: $0.audioFade)
             })
         case "closeGaps":
             let clip = try field(wire.clipID, "clipID")
@@ -1365,6 +1379,10 @@ extension AppModel {
             })
         case "removeMedia":
             return .removeMedia(clip: try field(wire.clipID, "clipID"))
+        case "setVoice":
+            let id = try field(wire.clipID, "clipID")
+            guard let prepared = processedVoices[id] else { throw EditError.invalid("Voice audio was not prepared.") }
+            return .setVoice(clip: id, treatment: prepared)
         case "relinkMedia":
             let path = try field(wire.path, "path")
             guard let info = probed[path] else { throw EditError(code: .missingMedia, message: "Could not read \(path).") }

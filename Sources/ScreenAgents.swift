@@ -25,6 +25,7 @@ extension AgentState {
         var crop: WireRect?
         var picture: WireRect
         var layout: String
+        var fullBleed: Bool
         var bubble: Bubble
         var layouts: [Span]
         /// Zooms on the screen; targets are in the screen recording's pixels.
@@ -51,7 +52,7 @@ extension AppModel {
             media: .init(width: info.width, height: info.height, duration: info.duration, fps: info.fps,
                          fpsExpression: info.fpsExpression, hasAudio: info.hasAudio, hdr: info.hdrLabel),
             offset: screen.offset, crop: screen.crop.map(WireRect.init), picture: WireRect(screen.picture),
-            layout: screen.layout.rawValue,
+            layout: screen.layout.rawValue, fullBleed: screen.fullBleed,
             bubble: .init(corner: screen.bubble.corner.rawValue, size: screen.bubble.size, face: screen.bubble.face.map(WirePoint.init),
                           shape: screen.bubble.shape.rawValue, corners: screen.bubble.corners),
             layouts: screen.spans.map { span in
@@ -211,11 +212,15 @@ extension AppModel {
 
     /// The screen keys named in `patch` replace the current ones; the rest are kept.
     static func mergedScreen(_ patch: [String: JSONValue], onto screen: ScreenTrack, face: CGPoint?, border: CGRect? = nil) throws -> ScreenTrack {
-        let known: Set<String> = ["offset", "crop", "layout", "bubble"]
+        let known: Set<String> = ["offset", "crop", "layout", "bubble", "fullBleed"]
         if let unknown = patch.keys.sorted().first(where: { !known.contains($0) }) {
             throw EditError.invalid("Unknown screen key \"\(unknown)\". Keys: \(known.sorted().joined(separator: ", ")).")
         }
         var result = screen
+        if let value = patch["fullBleed"] {
+            guard case .bool(let enabled) = value else { throw EditError.invalid("fullBleed is true or false.") }
+            result.fullBleed = enabled
+        }
         if let value = patch["offset"] {
             guard let offset = value.number else { throw EditError.invalid("offset is a number of seconds.") }
             result.offset = offset

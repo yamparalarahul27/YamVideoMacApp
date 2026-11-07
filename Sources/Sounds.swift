@@ -206,6 +206,7 @@ enum SoundCues {
     /// Part 1: section cards, title cards and link cards. The defaults are the owner's
     /// kit, from the Tradl mock-up of 21 Oct 2026.
     static let all: [Cue] = [
+        Cue(kind: .logoBadge, cue: "tally", label: "Passer-by counter", sound: "button-1", level: -18),
         Cue(kind: .sectionCard, cue: "in", label: "Section card", sound: "whoosh-1", level: -8),
         Cue(kind: .titleCard, cue: "in", label: "Title card", sound: "whoosh-1", level: -11),
         Cue(kind: .link, cue: "click", label: "Link click", sound: "button-4", level: -12),

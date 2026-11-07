@@ -260,7 +260,7 @@ private struct GraphicsGalleryTab: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Picker("Look", selection: $model.galleryLook) {
-                        ForEach(GalleryLook.allCases) { Text($0.label).tag($0) }
+                        ForEach(GalleryLook.allCases.filter { $0 != .glass }) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                     .help("How the pictures draw. Ink writes the panel kinds by hand. Paper puts name plates, title cards and section cards on taped paper. The other kinds stay glass.")
@@ -269,7 +269,7 @@ private struct GraphicsGalleryTab: View {
                         .help("The accent of this recording's graphics: \(style.accent)")
                 }
                 ForEach(GallerySample.Group.allCases) { group in
-                    let samples = GallerySample.all.filter { $0.group == group }
+                    let samples = GallerySample.all.filter { $0.group == group && $0.isMosaic == (model.galleryLook == .mosaic) }
                     if !samples.isEmpty {
                         Text(group.rawValue.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {

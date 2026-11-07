@@ -636,3 +636,17 @@ The graphics engine gives each cue's time, so a sound moves with its graphic.
 - `yamvideoctl catalog` (`yamvideo_describe`): every command and request, with each
   field's type, unit, range, default and an example.
 - `Tools/YamVideoCLI/README.md` and `Tools/AgentBridge/README.md` in the YamVideo source.
+
+### Weekly graphics look
+
+Use `look: "weekly"` on the graphics style or one column/section card for calm cream
+cards in the video's accent. It is a reusable Look in the gallery and inspector.
+For a compact progress card use a titleCard with `variant: "weeklyProgress"`, `title`,
+`completed`, `total`, and `items: [{text, state: "done"|"current"|"next"}]` in props.
+For footage the owner will add later use titleCard `variant: "demoPlaceholder"` with
+`title` and `detail`. Keep each placeholder on its own interval so it does not cover
+another graphic. The Weekly look needs project format 27 or later.
+
+### Editable voice treatment
+
+Use `setVoice` with `clipID` and `voice: {enabled, noiseReduction, harshness, sibilance, warmth, compression, gain, cutFadeMS}`. See catalog for bounds. The Audio inspector has the same controls and Original/Treated comparison. Applying prepares a lossless audio render with copied video; the project keeps original media and controls, and Undo restores the previous treatment. Preparation may take time; the revision is rechecked before committing. Both preview modes and exports use the same treatment. The separate export Loudness setting still controls final delivery level. Pitch is unchanged. `cutFadeMS` sets audio smoothing at cuts without changing timing. A missing render can be rebuilt by applying the saved settings. Never relink the recording to the prepared voice media: that would lose the original/treatment distinction.

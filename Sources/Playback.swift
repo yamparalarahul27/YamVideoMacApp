@@ -589,8 +589,15 @@ struct PlaybackCanvas: View {
                     // The player fits the picture inside its bounds; the overlay matches it.
                     let scale = min(geo.size.width / graphics.frame.width, geo.size.height / graphics.frame.height)
                     let size = CGSize(width: graphics.frame.width * scale, height: graphics.frame.height * scale)
+                    // A full-frame cover fills the player, including the tiny letterbox
+                    // caused by the canvas and AVPlayer rounding to different pixels.
+                    // Normal floating graphics still use the fitted picture's coordinates.
+                    let covering = graphics.track.items.contains {
+                        $0.kind.zone == .cover && $0.start <= graphics.time && graphics.time < $0.end
+                    }
+                    let overlaySize = covering ? geo.size : size
                     GraphicsOverlay(input: graphics, onBounds: onGraphicBounds)
-                        .frame(width: size.width, height: size.height)
+                        .frame(width: overlaySize.width, height: overlaySize.height)
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
                         .allowsHitTesting(false)
                     if furniture {

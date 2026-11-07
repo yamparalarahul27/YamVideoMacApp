@@ -180,6 +180,65 @@
   const KINDS = {};
 
   KINDS.namePlate = function (inner, p, c) {
+    // A quiet, scene-placed caption. Coordinates are on the 1920 x 1080 picture.
+    // Keep this opt-in so existing name plates retain their layout and motion.
+    if (p.variant === "asideCaption") {
+      const parts = [];
+      if (p.softEdges) {
+        const veil = h("div", { class: "yg-aside-edges", style: "left:" + (-COLUMN.left) + "px;top:" + (-COLUMN.top) + "px;" });
+        append(inner, veil);
+        c.tl.fromTo(veil, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "sine.out" }, c.at(0));
+        c.tl.to(veil, { opacity: 0, duration: 0.3, ease: "sine.in" }, c.at(c.length - 0.3));
+      }
+      const add = (text, x, width, delay, until, wordAt) => {
+        if (!text) return;
+        const node = h("div", { class: "yg-aside-caption", text,
+          style: "left:" + (num(x, 80) - COLUMN.left) + "px;top:" + (num(p.y, 570) - COLUMN.top - (p.balanced ? 75 : 0)) +
+            "px;width:" + num(width, 480) + "px;font-size:" + num(p.fontSize, 46) + "px;" });
+        node.style.fontWeight = String(num(p.fontWeight, 400));
+        if (p.balanced) node.classList.add("yg-aside-balanced");
+        if (p.noShadow) node.style.textShadow = "none";
+        if (p.motion === "mosaic") {
+          node.classList.add("yg-mosaic-caption");
+          node.textContent = "";
+          const words = text.trim().split(/\s+/);
+          const row = h("div", { class: "yg-mosaic-row" });
+          const measure = document.createElement("canvas").getContext("2d");
+          let font = num(p.fontSize, 50);
+          const fits = () => {
+            measure.font = "500 " + font + "px 'Helvetica Neue', Arial";
+            return words.reduce((sum, word) => sum + measure.measureText(word).width + 20, 0) + (words.length - 1) * 4;
+          };
+          while (font > 36 && fits() > num(width, 480)) font -= 1;
+          row.style.fontSize = font + "px";
+          words.forEach((word, i) => {
+            const dark = words.length > 1 && i === words.length - 1;
+            const chip = h("span", { class: "yg-mosaic-word" + (dark ? " yg-mosaic-dark" : "") });
+            const glyph = h("span", { class: "yg-mosaic-glyph", text: word });
+            const time = num(delay, 0) + (Array.isArray(wordAt) ? num(wordAt[i], i * 0.065) : i * 0.065);
+            for (let k = 0; k < 8; k++) {
+              const tile = h("i", { class: "yg-mosaic-tile", style: "left:" + (k % 4 * 25) + "%;top:" + (Math.floor(k / 4) * 50) + "%;" });
+              append(chip, tile);
+              c.tl.fromTo(tile, { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 0.09, ease: "steps(2)" }, c.at(time + (k * 5 % 8) * 0.018));
+            }
+            append(chip, glyph); append(row, chip);
+            c.tl.fromTo(glyph, { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "none" }, c.at(time + 0.14));
+            c.tl.fromTo(chip, { y: i % 2 ? -3 : 3 }, { y: 0, duration: 0.24, ease: "steps(3)" }, c.at(time));
+          });
+          append(node, row);
+        }
+        append(inner, node); parts.push(node);
+        c.tl.fromTo(node, { opacity: 0, y: p.motion === "mosaic" ? 0 : 5 }, { opacity: 1, y: 0, duration: p.motion === "mosaic" ? 0.01 : 0.18, ease: "power1.out" }, c.at(num(delay, 0)));
+        c.tl.to(node, { opacity: 0, duration: 0.16, ease: "power1.in" }, c.at(Math.min(c.length, num(until, c.length)) - 0.16));
+      };
+      add(p.title, p.leftX, p.width, p.leftAt, null, p.leftWordAt);
+      if (Array.isArray(p.rightPhrases) && p.rightPhrases.length) {
+        for (const phrase of p.rightPhrases) add(phrase.text, num(p.rightX, 1370), num(p.rightWidth, 470), phrase.at, phrase.end, phrase.wordAt);
+      } else add(p.right, num(p.rightX, 1370), num(p.rightWidth, 470), p.rightAt, null, p.rightWordAt);
+      c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.01 }, c.at(0));
+      c.tl.to(c.host, { opacity: 0, duration: 0.01 }, c.at(c.length));
+      return;
+    }
     const k = kicker(p.kicker);
     const name = h("div", { class: "yg-np-name", text: p.title });
     const role = h("div", { class: "yg-np-role yg-muted", text: p.detail });
@@ -220,6 +279,140 @@
   };
 
   KINDS.titleCard = function (inner, p, c) {
+    // Optional compact progress card for a walking weekly update.
+    if (p.variant === "weeklyProgress") {
+      const count = h("span", { class: "yg-week-count", text: (p.completed || 0) + " of " + (p.total || 1) });
+      const rows = (p.items || []).map((item) => h("div", { class: "yg-week-row " + (item.state || "next") },
+        h("span", { class: "yg-week-check", text: item.state === "done" ? "✓" : "" }),
+        h("span", { class: "yg-week-text", text: item.text })));
+      const binding = h("div", { class: "yg-week-binding", "aria-hidden": "true" },
+        Array.from({ length: 8 }, () => h("span", { class: "yg-week-ring" })));
+      const page = h("div", { class: "yg-week-page" },
+        h("div", { class: "yg-week-head" }, h("span", { class: "yg-week-dot" }),
+          h("span", { class: "yg-week-title", text: p.title || "This week" }), count),
+        h("div", { class: "yg-week-list" }, rows));
+      const card = h("div", { class: "yg-week-card" }, binding, page);
+      const scene = p.fullPage ? h("div", { class: "yg-week-full-page" + (p.pip ? " yg-with-speaker" : "") }, card) : card;
+      append(inner, scene);
+      // Real screenshots share the timed note, so preview and export use one clock.
+      const visuals = p.fullPage && Array.isArray(p.visuals) ? p.visuals : [];
+      const screenFirst = visuals.length > 0 && p.presentation === "notebookToScreen";
+      const unfoldAt = Math.max(1, Math.min(num(p.screenAt, 2.1), c.length - 1.1));
+      if (screenFirst) {
+        scene.classList.add("yg-notebook-to-screen");
+        if (p.sidebarLabels) scene.classList.add("yg-sidebar-labels");
+        const topic = h("div", { class: "yg-week-topic", text: p.title || "This week" });
+        append(scene, topic);
+        c.tl.fromTo(topic, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3 }, c.at(unfoldAt + 0.3));
+        c.tl.fromTo(card, { rotationX: 0, opacity: 1, scale: 1, transformPerspective: 1200, transformOrigin: "50% 0%" },
+          { rotationX: -82, opacity: 0, scale: 0.96, duration: 0.55, ease: "power2.inOut" }, c.at(unfoldAt));
+      }
+      visuals.forEach((v, i) => {
+        const at = Math.max(0, num(v.at, 0.35));
+        const until = i + 1 < visuals.length ? num(visuals[i + 1].at, c.length) : c.length - 0.25;
+        const picture = h("img", { class: "yg-week-visual-image", src: v.image, alt: v.label || "Product screen" });
+        const visual = h("div", { class: "yg-week-visual" + (v.portrait ? " yg-portrait" : "") },
+          h("div", { class: "yg-week-visual-label" },
+            v.brand && v.brand.image ? h("img", { class: "yg-week-brand-icon", src: v.brand.image, alt: v.brand.name || "" }) : null,
+            h("span", { text: v.label || p.title })),
+          h("div", { class: "yg-week-visual-frame" }, picture),
+          h("div", { class: "yg-week-visual-url", text: v.url || "" }));
+        append(scene, visual);
+        if (screenFirst && p.sidebarLabels) {
+          const name = v.shortLabel || String(v.label || p.title).replace(/ on GitHub$/, "").split(" · ")[0];
+          const identity = h("div", { class: "yg-week-side-identity" },
+            v.brand && v.brand.image ? h("img", { class: "yg-week-brand-icon", src: v.brand.image, alt: v.brand.name || "" }) : null,
+            h("span", { text: name }));
+          append(scene, identity);
+          const identityAt = Math.max(at, unfoldAt + 0.4);
+          c.tl.fromTo(identity, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.25 }, c.at(identityAt));
+          c.tl.to(identity, { opacity: 0, duration: 0.15 }, c.at(Math.max(identityAt + 0.3, until - 0.18)));
+          const heading = visual.querySelector(".yg-week-visual-label");
+          if (at >= unfoldAt + 0.55) heading.style.opacity = "0";
+          else c.tl.to(heading, { opacity: 0, duration: 0.25 }, c.at(unfoldAt));
+        }
+        const frame = visual.querySelector(".yg-week-visual-frame");
+        const ratio = Math.max(0.2, num(v.aspect, v.portrait ? 0.75 : 16 / 9));
+        const fitted = (maxWidth, maxHeight) => {
+          const width = Math.min(maxWidth, maxHeight * ratio);
+          return { width, height: width / ratio };
+        };
+        const introFrame = fitted(1090, 730);
+        const expandedFrame = fitted(1505, 846);
+        frame.style.width = introFrame.width + "px";
+        frame.style.height = introFrame.height + "px";
+        c.tl.fromTo(visual, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, c.at(at));
+        if (screenFirst) {
+          const url = visual.querySelector(".yg-week-visual-url");
+          if (at >= unfoldAt + 0.55) url.style.opacity = "0";
+          else c.tl.fromTo(url, { opacity: 1 }, { opacity: 0, duration: 0.25 }, c.at(unfoldAt));
+          // Later reference screens enter directly at the expanded size.
+          if (at >= unfoldAt + 0.55) {
+            visual.style.left = "375px";
+            visual.style.width = "1505px";
+            visual.style.top = "50px";
+            visual.style.height = "auto";
+            frame.style.width = expandedFrame.width + "px";
+            frame.style.height = expandedFrame.height + "px";
+          } else {
+            c.tl.fromTo(visual, { left: 770, width: 1090, top: 50 },
+              { left: 375, width: 1505, top: 50, duration: 0.65, ease: "power2.inOut" }, c.at(unfoldAt));
+            c.tl.fromTo(frame, introFrame,
+              Object.assign({}, expandedFrame, { duration: 0.65, ease: "power2.inOut" }), c.at(unfoldAt));
+          }
+        }
+        // A real demo plays in the native screen track after the notebook reveal.
+        // The matching first frame covers the intro, then clears for smooth native video.
+        if (screenFirst && v.nativeVideo) {
+          c.tl.to(picture, { opacity: 0, duration: 0.1, ease: "none" }, c.at(unfoldAt + 0.65));
+        }
+        c.tl.fromTo(picture, { scale: 1 }, { scale: 1.025, duration: Math.max(0.3, until - at), ease: "none" }, c.at(at));
+        c.tl.to(visual, { opacity: 0, duration: 0.18, ease: "sine.inOut" }, c.at(Math.max(at + 0.3, until - 0.18)));
+      });
+      if (p.fullPage && Array.isArray(p.beats)) {
+        p.beats.forEach((b, i) => {
+          const at = Math.max(0.35, num(b.at, 0.35));
+          const until = Math.min(c.length - 0.25, num(b.end, i + 1 < p.beats.length ? p.beats[i + 1].at : c.length - 0.25));
+          const words = String(b.text || "").split(/\s+/).filter(Boolean).map(text => h("span", { text }));
+          const line = h("div", { class: "yg-week-spoken" }, words);
+          append(scene, line);
+          c.tl.fromTo(line, { opacity: 0 }, { opacity: 1, duration: 0.12 }, c.at(at));
+          c.tl.fromTo(words, { opacity: 0, y: 20, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, stagger: 0.07, duration: 0.28, ease: "power2.out" }, c.at(at));
+          c.tl.to(line, { opacity: 0, y: -6, duration: 0.18 }, c.at(Math.max(at + 0.35, until - 0.18)));
+        });
+      }
+      c.tl.fromTo(c.host, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" }, c.at(0));
+      if (p.pageTurn) {
+        const beat = p.pip ? 0.32 : 0;
+        c.tl.fromTo(page, { rotationX: -86, opacity: 0.2, transformPerspective: 1200, transformOrigin: "50% 0%" },
+          { rotationX: 0, opacity: 1, duration: 0.62, ease: "power2.out" }, c.at(beat));
+        c.tl.fromTo(page, { boxShadow: "0 22px 22px rgba(37,34,25,0.24)" },
+          { boxShadow: "0 0px 0px rgba(37,34,25,0)", duration: 0.62, ease: "power2.out" }, c.at(beat));
+      }
+      c.tl.to(c.host, { opacity: 0, duration: 0.25, ease: "sine.inOut" }, c.at(c.length - 0.25));
+      return;
+    }
+    if (p.variant === "referenceCredit") {
+      const image = p.image ? h("img", { class: "yg-reference-image", src: p.image, alt: p.title || "Video reference" }) : null;
+      append(inner, h("div", { class: "yg-reference-page" + (p.pip ? " yg-with-speaker" : "") },
+        h("div", { class: "yg-reference-kicker", text: p.kicker || "INSPIRED BY" }),
+        h("div", { class: "yg-reference-author", text: p.author }), image,
+        h("div", { class: "yg-reference-title", text: p.title }),
+        h("div", { class: "yg-reference-source", text: p.source })));
+      c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "sine.inOut" }, c.at(0));
+      c.tl.to(c.host, { opacity: 0, duration: 0.3, ease: "sine.inOut" }, c.at(c.length - 0.3));
+      return;
+    }
+    // Clearly marked stand-ins for product footage the owner will add later.
+    if (p.variant === "demoPlaceholder") {
+      append(inner, h("div", { class: "yg-demo-placeholder" },
+        h("div", { class: "yg-demo-tag", text: "DEMO PLACEHOLDER" }),
+        h("div", { class: "yg-demo-title", text: p.title }),
+        h("div", { class: "yg-demo-detail", text: p.detail || "Replace with a screen recording" })));
+      c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "sine.inOut" }, c.at(0));
+      c.tl.to(c.host, { opacity: 0, duration: 0.25, ease: "sine.inOut" }, c.at(c.length - 0.25));
+      return;
+    }
     const k = kicker(p.kicker);
     const words = String(p.title || "").split(/\s+/).filter(Boolean).map((w) => h("span", { class: "yg-tc-w", text: w }));
     const detail = h("span", { class: "yg-muted", text: p.detail });
@@ -551,6 +744,104 @@
   // lowWidth: an overlay card's bar ends before the speaker's bubble in the lower right corner.
   const SECTION_BAR = { width: 1400, lowWidth: 1200, shortWidth: 860, gap: 10 };
   KINDS.sectionCard = function (inner, p, c) {
+    if(p.variant === "mosaicBreak") {
+      const bg=h("div",{"aria-hidden":"true",style:"position:absolute;inset:-4px;background:#101412;overflow:hidden;"});append(inner,bg);
+      const vocab=String(p.vocabulary||"DESIGN BUILD SHIP LEARN PRODUCT MOBILE FINTECH CODE").split(/\s+/);
+      for(let row=0;row<25;row++){
+        const line=h("div",{text:Array.from({length:22},(_,i)=>vocab[(i+row*3)%vocab.length]).join("  "),style:"position:absolute;left:"+(-80-(row%3)*85)+"px;top:"+(row*47-25)+"px;color:#334139;font:24px Menlo,monospace;white-space:nowrap;"});append(bg,line);
+      }
+      const title=h("div",{style:"position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;"});append(inner,title);
+      String(p.title||"Back to it").split(/\s+/).forEach((word,index)=>{
+        const tile=h("span",{text:word,style:"display:block;padding:18px 22px;background:"+(index%2?"#d7ef63":"#f2eddf")+";color:#101412;font:500 100px/1.1 Menlo,monospace;white-space:nowrap;"});append(title,tile);
+        c.tl.fromTo(tile,{opacity:0,scaleX:.05},{opacity:1,scaleX:1,duration:.12,ease:"steps(3)"},c.at(.03+index*.035));
+      });
+      c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.04},c.at(0));
+      c.tl.to(c.host,{opacity:0,duration:.12},c.at(c.length-.12));return;
+    }
+
+    if (p.variant === "wordMosaicIntro" || p.variant === "wordMosaicOutro") {
+      const outro=p.variant === "wordMosaicOutro";
+      c.tl.fromTo(c.host,{opacity:outro?1:0},{opacity:1,duration:.01},c.at(0));
+      // The opaque backing belongs to the frame, not the moving camera world.
+      // Overscan the edges so subpixel preview scaling cannot expose the footage.
+      const frameBacking=h("div",{style:"position:absolute;inset:-4px;background:#101412;"});append(inner,frameBacking);
+      if(!outro)c.tl.fromTo(frameBacking,{opacity:0},{opacity:1,duration:.06},c.at(2.02));
+      const world=h("div",{style:"position:absolute;inset:0;overflow:visible;transform-origin:960px 540px;"});append(inner,world);
+      const ground=h("div",{style:"position:absolute;inset:-500px;background:#101412;"});append(world,ground);
+      if(!outro)c.tl.fromTo(ground,{opacity:0},{opacity:1,duration:.06},c.at(2.02));
+      const vocabulary=["DESIGN","FINTECH","SAAS","BUILD","SHIP","YAMDRIVE","PRODUCT","REACT NATIVE","AI","PORTFOLIO","CODE","LEARN","MOBILE","SYSTEMS","HYPERFRAMES","CREATE","APP STORE","INDIASTOCKX","TEAM","BACKEND"];
+      const subjects=[{row:5,x:430,text:"YAMDRIVE",color:"#d7ef63"},{row:7,x:1450,text:"APP STORE",color:"#b2d4f0"},{row:14,x:650,text:"PORTFOLIO",color:"#eba27f"},{row:18,x:1250,text:"HYPERFRAMES",color:"#b9a4f0"}];
+      const titles=[{row:9,x:900,text:"WEEK",color:"#f2eddf"},{row:10,x:1030,text:"3",color:"#d7ef63"},{row:11,x:930,text:"UPDATE",color:"#f2eddf"}];
+      const farewells=[{row:14,x:1500,text:"SEE",color:"#f2eddf"},{row:15,x:1660,text:"YOU",color:"#d7ef63"},{row:16,x:1530,text:"NEXT",color:"#f2eddf"},{row:17,x:1690,text:"WEEK",color:"#d7ef63"}];
+      const measure=document.createElement("canvas").getContext("2d");measure.font="24px Menlo,monospace";
+      for(let row=-6;row<33;row++){
+        const pending=[...subjects,...titles,...farewells].filter(v=>v.row===row).sort((a,b)=>a.x-b.x);
+        let x=-500-(((row*73)%173+173)%173),col=0;
+        while(x<3000){
+          const key=pending.length&&x>=pending[0].x?pending.shift():null;
+          const title=key&&titles.includes(key),bye=key&&farewells.includes(key);
+          const text=key?key.text:vocabulary[((row*13+col*7+row*col)%20+20)%20];
+          const width=Math.ceil(measure.measureText(text).width)+14,y=row*50-12;
+          // Rows pack by actual word width; staggered starts prevent column alignment.
+          const cell=h("div",{style:"position:absolute;left:"+x+"px;top:"+y+"px;width:"+width+"px;height:46px;overflow:hidden;background:#101412;"});
+          const glyph=h("span",{text:text,style:"display:block;width:max-content;box-sizing:border-box;padding:8px 7px;border:0;outline:0;background:#101412;color:#68736b;font:24px/30px Menlo,monospace;white-space:nowrap;"});append(cell,glyph);append(world,cell);
+          if(key)key.bounds={x:x,y:y,w:width,h:46};
+          const seed=(((row*43+col*97)%271+271)%271)/271;
+          if(!outro)c.tl.fromTo(cell,{opacity:0,scaleX:.08},{opacity:1,scaleX:1,duration:.12,ease:"steps(3)"},c.at(1.22+seed*.72));
+          if(key){
+            const at=outro?(bye?1.18+farewells.indexOf(key)*.05:0):(title?2.08+titles.indexOf(key)*.1:bye?2.42:2.08+subjects.indexOf(key)*.1);
+            c.tl.to(glyph,{backgroundColor:key.color,color:"#101412",duration:.12},c.at(at));
+          }
+          x+=width+7;col++;
+        }
+      }
+      function frameWords(words,maxScale){
+        const boxes=words.map(v=>v.bounds),left=Math.min(...boxes.map(v=>v.x)),right=Math.max(...boxes.map(v=>v.x+v.w)),top=Math.min(...boxes.map(v=>v.y)),bottom=Math.max(...boxes.map(v=>v.y+v.h));
+        const scale=Math.min(maxScale,1500/(right-left+110),780/(bottom-top+70));
+        return {scale:scale,x:(960-(left+right)/2)*scale,y:(540-(top+bottom)/2)*scale};
+      }
+      const titleCamera=frameWords(titles,3.7),outroCamera=frameWords(farewells,3.1);
+      if(!outro){
+        c.tl.fromTo(world,{scale:1,x:0,y:0},{scale:1.13,duration:.48,ease:"power2.inOut"},c.at(2.63));
+        c.tl.to(world,{...titleCamera,duration:.9,ease:"power3.inOut"},c.at(3.18));
+      }else{
+        c.tl.fromTo(world,titleCamera,{scale:1,x:0,y:0,duration:.88,ease:"power3.inOut"},c.at(.16));
+        c.tl.to(world,{...outroCamera,duration:1.08,ease:"power3.inOut"},c.at(1.38));
+      }
+      if(outro&&p.image){
+        // Pre-blurred last footage frame carries across the cut as the mosaic resolves.
+        const bridge=h("img",{src:p.image,style:"position:absolute;inset:0;width:1920px;height:1080px;object-fit:cover;"});append(inner,bridge);
+        c.tl.fromTo(bridge,{opacity:1},{opacity:0,duration:.34,ease:"power1.inOut"},c.at(0));
+        c.tl.fromTo(world,{filter:"blur(16px)"},{filter:"blur(0px)",duration:.34,ease:"power2.out"},c.at(0));
+      }
+      // Hold full-frame coverage through the cut; do not fade back to source footage.
+      return;
+    }
+    if (p.variant === "mosaicBookend") {
+      const plate = h("div", { class: "yg-mosaic-bookend" });
+      const brand = h("div", { class: "yg-mb-brand", text: "Yamparala Rahul" });
+      const issue = h("div", { class: "yg-mb-issue", text: p.kicker || "Weekly updates" });
+      const title = h("div", { class: "yg-mb-title", style: "font-size:" + num(p.fontSize, 128) + "px;" });
+      const detail = h("div", { class: "yg-mb-detail", text: p.detail || "Build. Learn. Ship." });
+      append(plate, [brand, issue, title, detail]); append(inner, plate);
+      const words = String(p.title || "Weekly updates").split(/\s+/);
+      words.forEach((word, index) => {
+        const chip = h("div", { class: "yg-mb-word" + (index % 2 ? " yg-mb-word-dark" : "") });
+        const text = h("span", { class: "yg-mb-glyph", text: word });
+        for (let k = 0; k < 16; k++) {
+          const tile = h("i", { class: "yg-mb-tile", style: "left:" + (k % 8 * 12.5) + "%;top:" + (Math.floor(k / 8) * 50) + "%;" });
+          append(chip, tile);
+          c.tl.fromTo(tile, { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: .11, ease: "steps(3)" }, c.at(.08 + index * .09 + (k * 7 % 16) * .013));
+        }
+        append(chip, text); append(title, chip);
+        c.tl.fromTo(text, { opacity: 0 }, { opacity: 1, duration: .08, ease: "none" }, c.at(.28 + index * .09));
+      });
+      c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: .01 }, c.at(0));
+      c.tl.fromTo([brand, issue], { opacity: 0 }, { opacity: 1, duration: .16 }, c.at(.06));
+      c.tl.fromTo(detail, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: .2, ease: "power1.out" }, c.at(.5));
+      c.tl.to(c.host, { opacity: 0, duration: .16, ease: "power1.in" }, c.at(c.length - .16));
+      return;
+    }
     const cover = coverBackground(inner, p);
     const low = cover.bg === "overlay";
     const width = c.short ? SECTION_BAR.shortWidth : low ? SECTION_BAR.lowWidth : SECTION_BAR.width;
@@ -631,6 +922,101 @@
    * popping in at its own `at`; one above the other when `spot.vertical`. A wide logo (a
    * wordmark) makes its chip wider. A Short's compact chips show the logo alone. */
   KINDS.logoBadge = function (inner, p, c) {
+    if(p.variant === "screenshotCorners") {
+      const bx=parseFloat(c.host.style.left)||0,by=parseFloat(c.host.style.top)||0;
+      const size=num(p.squareSize,26),cream=p.cream||"#d7ef63",green=p.green||"#203329";
+      const duration=Math.max(.4,Math.min(1.1,num(p.revealDuration,1.1))),moving=p.settled!==true;
+      (p.logos||[]).forEach(asset=>{
+        const x=num(asset.x,820)-bx,y=num(asset.y,60)-by,w=num(asset.width,1060),height=num(asset.height,815);
+        const image=h("div",{style:"position:absolute;left:"+x+"px;top:"+y+"px;width:"+w+"px;height:"+height+"px;overflow:hidden;"},h("img",{src:asset.image,alt:asset.label||"",style:"display:block;width:"+w+"px;height:"+num(asset.imageHeight,height)+"px;max-width:none;"}));append(inner,image);
+        if(moving)c.tl.fromTo(image,{clipPath:"inset(50% 50% 50% 50%)"},{clipPath:"inset(0% 0% 0% 0%)",duration:duration-.18,ease:"sine.inOut"},c.at(.18));
+        [[0,0,cream],[w,0,green],[0,height,green],[w,height,cream]].forEach(([dx,dy,color])=>{
+          const square=h("div",{"aria-hidden":"true",style:"position:absolute;left:"+(x+dx-size/2)+"px;top:"+(y+dy-size/2)+"px;width:"+size+"px;height:"+size+"px;background:"+color+";"});append(inner,square);
+          if(moving){
+            const sx=w/2-dx+(dx===0?-size/2:size/2),sy=height/2-dy+(dy===0?-size/2:size/2);
+            const side=dx===0?-1:1,vertical=dy===0?-1:1,bend=Math.min(95,w*.09);
+            const progress={value:0};
+            const draw=()=>{
+              const t=progress.value,u=1-t;
+              // A curved path bows away from the straight diagonal, then eases into
+              // the corner. Its tangent straightens near the end for a calm landing.
+              const xx=u*u*u*sx+3*u*u*t*(sx*.82+vertical*bend)+3*u*t*t*(-side*12);
+              const yy=u*u*u*sy+3*u*u*t*(sy*.45-side*bend*.45)+3*u*t*t*(-vertical*8);
+              const rotation=side*vertical*28*u*u,scale=1+.22*u;
+              square.style.transform="translate("+xx+"px,"+yy+"px) rotate("+rotation+"deg) scale("+scale+")";
+            };
+            draw();
+            c.tl.fromTo(progress,{value:0},{value:1,duration:duration-.12,ease:"sine.inOut",onUpdate:draw},c.at(.12));
+          }
+        });
+      });
+      c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.01},c.at(0));
+      c.tl.to(c.host,{opacity:0,duration:.01},c.at(c.length-.01));return;
+    }
+    if (p.variant === "walkbyCounter") {
+      const bx=parseFloat(c.host.style.left)||0, by=parseFloat(c.host.style.top)||0;
+      const box=h("div",{style:"position:absolute;left:"+(num(p.x,80)-bx)+"px;top:"+(num(p.y,80)-by)+"px;width:500px;"});
+      append(box,h("div",{text:p.label||"People passing by",style:"display:table;padding:10px 16px;background:#203329;color:#f4efdf;font:500 "+num(p.fontSize,42)+"px Inter,sans-serif;white-space:nowrap;"}));
+      const shell=h("div",{style:"position:relative;margin:18px 0 0 30px;width:220px;height:164px;border-radius:34px;background:linear-gradient(125deg,#f7f8f6 0%,#9babae 23%,#edf0eb 42%,#6e8085 75%,#d8e0df 100%);border:3px solid #e5ecea;box-shadow:inset 0 0 0 6px #7b8c8e;"});
+      append(shell,h("div",{style:"position:absolute;left:85px;top:-17px;width:50px;height:20px;border-radius:5px;background:linear-gradient(#f7faf8,#738489);border:2px solid #cbd4d0;"}));
+      const window=h("div",{style:"position:absolute;left:24px;top:29px;width:166px;height:100px;overflow:hidden;border-radius:9px;background:#14201d;border:3px solid #5c6b69;"});
+      const values=[{at:0,value:num(p.initial,0)},...(p.events||[])];
+      values.forEach((event,index)=>{
+        const number=h("div",{text:String(event.value).padStart(2,"0"),style:"position:absolute;inset:0;color:#fffbed;text-align:center;font:600 88px/100px Menlo,monospace;letter-spacing:5px;"});append(window,number);
+        const at=num(event.at,0);
+        c.tl.fromTo(number,{y:index?100:0,opacity:0},{y:0,opacity:1,duration:index?.22:.01,ease:"power3.out"},c.at(at));
+        if(index<values.length-1)c.tl.to(number,{y:-100,opacity:0,duration:.22,ease:"power2.in"},c.at(num(values[index+1].at,0)));
+      });
+      append(shell,window);append(box,shell);append(inner,box);
+      c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.12},c.at(0));
+      c.tl.fromTo(box,{y:12},{y:0,duration:.25,ease:"power2.out"},c.at(0));
+      c.tl.to(c.host,{opacity:0,duration:.18},c.at(c.length-.18));return;
+    }
+
+    if(p.variant === "mosaicScreens"){
+      const bx=parseFloat(c.host.style.left)||0,by=parseFloat(c.host.style.top)||0;
+      for(const asset of p.logos||[]){
+        const w=num(asset.width,550),height=num(asset.height,420),x=num(asset.x,35)-bx,y=num(asset.y,80)-by,at=num(asset.at,0);
+        const plate=h("div",{style:"position:absolute;left:"+x+"px;top:"+y+"px;width:"+w+"px;height:"+(height+58)+"px;background:transparent;border:0;border-radius:0;overflow:visible;"});
+        const paper=h("div",{style:"position:absolute;left:0;top:0;width:"+w+"px;height:"+height+"px;background:#f2eddf;outline:2px solid #f2eddf;"});append(plate,paper);
+        const imgHeight=num(asset.imageHeight,height);
+        for(let i=0;i<24;i++){
+          const xx=i%6*w/6,yy=Math.floor(i/6)*height/4;
+          const tile=h("div",{style:"position:absolute;left:"+xx+"px;top:"+yy+"px;width:"+(w/6+.3)+"px;height:"+(height/4+.3)+"px;overflow:hidden;border:0;"});
+          const image=h("img",{src:asset.image,alt:asset.label||"",style:"position:absolute;left:"+(-xx)+"px;top:"+(-yy)+"px;width:"+w+"px;height:"+imgHeight+"px;object-fit:cover;object-position:top;max-width:none;"});append(tile,image);append(plate,tile);
+          c.tl.fromTo(tile,{opacity:0,scaleX:.06},{opacity:1,scaleX:1,duration:.1,ease:"steps(3)"},c.at(at+(i*7%24)*.009));
+        }
+        const settled=h("div",{style:"position:absolute;left:0;top:0;width:"+w+"px;height:"+height+"px;overflow:hidden;"},h("img",{src:asset.image,alt:asset.label||"",style:"display:block;width:"+w+"px;height:"+imgHeight+"px;object-fit:cover;object-position:top;max-width:none;"}));append(plate,settled);
+        c.tl.fromTo(settled,{opacity:0},{opacity:1,duration:.01},c.at(at+.34));
+        const label=h("div",{style:"position:absolute;top:"+(height+12)+"px;left:0;display:flex;align-items:center;gap:3px;font:28px Menlo,monospace;white-space:nowrap;"});
+        const words=String(asset.label||"").split(/\s+/).filter(Boolean);
+        words.forEach((word,index)=>{const chip=h("span",{text:word,style:"display:block;padding:5px 8px;background:"+(index===words.length-1?"#203329":"#f2eddf")+";color:"+(index===words.length-1?"#f2eddf":"#203329")+";"});append(label,chip);c.tl.fromTo(chip,{opacity:0,scaleX:.2},{opacity:1,scaleX:1,duration:.12,ease:"steps(3)"},c.at(at+.18+index*.035));});
+        append(plate,label);append(inner,plate);
+        c.tl.fromTo(plate,{opacity:0},{opacity:1,duration:.1},c.at(at));
+      }
+      c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.01},c.at(0));
+      c.tl.to(c.host,{opacity:0,duration:.18},c.at(c.length-.18));return;
+    }
+
+    if (p.variant === "mosaicAssets") {
+      const baseX = parseFloat(c.host.style.left) || 0;
+      const baseY = parseFloat(c.host.style.top) || 0;
+      for (const logo of p.logos || []) {
+        const size = num(logo.size, 180);
+        const box = h("div", { class: "yg-mosaic-asset", style: "left:" + (num(logo.x, 225) - baseX) + "px;top:" + (num(logo.y, 350) - baseY) + "px;width:" + size + "px;height:" + size + "px;" });
+        for (let i = 0; i < 12; i++) {
+          const col = i % 4, row = Math.floor(i / 4);
+          const tile = h("div", { class: "yg-mosaic-asset-tile", style: "left:" + (col * size / 4) + "px;top:" + (row * size / 3) + "px;width:" + (size / 4 + .2) + "px;height:" + (size / 3 + .2) + "px;" },
+            h("img", { src: logo.image, alt: "", style: "width:" + size + "px;height:" + size + "px;left:" + (-col * size / 4) + "px;top:" + (-row * size / 3) + "px;" }));
+          append(box, tile);
+          c.tl.fromTo(tile, { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: .12, ease: "steps(3)" }, c.at(num(logo.at, 0) + (i * 5 % 12) * .016));
+        }
+        append(inner, box);
+      }
+      c.tl.fromTo(c.host, { opacity: 0 }, { opacity: 1, duration: .01 }, c.at(0));
+      c.tl.to(c.host, { opacity: 0, duration: .18 }, c.at(c.length - .18));
+      return;
+    }
     const spot = logoSpot(p, c.short);
     const row = h("div", { class: "yg-lb-row" + (spot.compact ? " yg-lb-compact" : "") + (p.tone === "dark" ? " yg-lb-dark" : "")
         + (spot.vertical ? " yg-lb-column yg-lb-x-" + spot.alignX : ""),
@@ -1146,6 +1532,16 @@
    * cream. tape: the accent made a little lighter, see-through. sticker: the accent, with
    * the ink or white on it, whichever reads better.
    */
+  /** Weekly keeps its quiet cream surfaces; the recording supplies its accent. */
+  function weeklyColours(accent) {
+    const card = "#FBF8F1", ink = "#24342B", muted = "#626E62";
+    const base = hexOf(rgbOf(accent));
+    let strong = base;
+    for (let t = 0.05; contrast(strong, card) < 4.5 && t <= 1.0001; t += 0.05) strong = mixed(base, ink, t);
+    return { card, ink, muted, accent: strong, active: mixed(strong, card, 0.90), line: mixed(strong, card, 0.84),
+      checkInk: contrast(strong, "#FFFFFF") >= 4.5 ? "#FFFFFF" : ink };
+  }
+
   function paperColours(accent) {
     const base = hexOf(rgbOf(accent));
     let kicker = base;
@@ -1301,6 +1697,7 @@
   function lookOf(graphic, style) {
     const want = graphic.look || (style.look === "mix" ? (zoneOf(graphic.kind) === "panel" ? "ink" : "glass") : style.look);
     if (want === "ink" && INK[graphic.kind]) return "ink";
+    if (want === "weekly" && (zoneOf(graphic.kind) === "column" || graphic.kind === "sectionCard")) return "weekly";
     return want === "paper" && PAPER[graphic.kind] ? "paper" : "glass";
   }
 
@@ -1432,9 +1829,18 @@
         rect = { left: z.x, top: z.y, width: size.width * z.scale, height: size.height * z.scale };
         scaled = { width: size.width, height: size.height, scale: z.scale };
       }
-      const host = h("div", { class: "yg-host yg-kind-" + graphic.kind, "data-graphic-id": graphic.id,
-        style: "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" });
       const look = lookOf(graphic, style);
+      const host = h("div", { class: "yg-host yg-kind-" + graphic.kind + (look === "weekly" ? " yg-weekly" : ""), "data-graphic-id": graphic.id,
+        style: "left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" });
+      if (look === "weekly") {
+        const colours = weeklyColours(style.accent);
+        for (const key of Object.keys(colours)) host.style.setProperty("--weekly-" + key, colours[key]);
+        host.style.setProperty("--yg-accent", colours.accent);
+        host.style.setProperty("--yg-text", colours.ink);
+        host.style.setProperty("--yg-muted", colours.muted);
+        host.style.setProperty("--yg-panel", colours.card);
+        host.style.setProperty("--yg-line", colours.line);
+      }
       const inner = h("div", { class: "yg-inner" + (zone === "panel" && !style.moveVideo && !short ? " yg-scaled" : "") });
       if (scaled) {
         inner.style.width = scaled.width + "px"; inner.style.height = scaled.height + "px";
@@ -1461,7 +1867,8 @@
       append(container, place);
       places[graphic.id] = { place, host, rect, graphic, own, clear: null };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
-      (look === "ink" ? INK : look === "paper" ? PAPER : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
+      const mosaicVariant=["screenshotCorners","mosaicBreak","asideCaption","walkbyCounter","mosaicScreens","mosaicAssets","wordMosaicIntro","wordMosaicOutro","mosaicBookend"].includes((graphic.props||{}).variant);
+      (mosaicVariant ? KINDS : look === "ink" ? INK : look === "paper" ? PAPER : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
     }
 
     current = { tl, node: container, plan: p, places, shift, stage, short };
@@ -1832,9 +2239,34 @@
     const old = document.getElementById("yg-thumb");
     if (old) old.remove();
     const d = data || {};
+    if(d.place === "mosaic") {
+      const root=h("div",{id:"yg-thumb","data-mosaic":"true",style:"position:absolute;inset:0;background:#101412;overflow:hidden;"});
+      const vocab=["DESIGN","BUILD","SHIP","YAMDRIVE","APP STORE","PRODUCT","MOBILE","FINTECH","LEARN","PORTFOLIO","HYPERFRAMES","TEAM"];
+      for(let row=0;row<26;row++){
+        const line=h("div",{"aria-hidden":"true",text:Array.from({length:24},(_,i)=>vocab[(i*5+row*7)%vocab.length]).join("  "),style:"position:absolute;left:"+(-100-(row%4)*73)+"px;top:"+(row*45-20)+"px;font:24px Menlo,monospace;white-space:nowrap;color:#344238;"});append(root,line);
+      }
+      append(root,h("div",{style:"position:absolute;inset:0;background:radial-gradient(ellipse at 23% 66%,rgba(113,148,66,.38),transparent 53%);"}));
+      const portrait=h("img",{src:d.cutout||d.frame,alt:"Yamparala Rahul",style:"position:absolute;left:0;top:0;width:1920px;height:1080px;max-width:none;transform-origin:0 0;"});append(root,portrait);
+      const text=h("div",{style:"position:absolute;left:920px;top:170px;width:930px;"});
+      append(text,h("div",{class:"yg-mosaic-tag",text:d.tag||"WEEK 3 UPDATE",style:"display:table;background:#203329;color:#d7ef63;padding:12px 18px;font:500 44px Menlo,monospace;margin-bottom:48px;"}));
+      String(d.title||"MY APP\nIS LIVE").split("\n").forEach((line,row)=>{
+        const strip=h("div",{style:"display:flex;gap:8px;margin-bottom:9px;"});
+        line.split(/\s+/).filter(Boolean).forEach((word,i)=>append(strip,h("span",{class:"yg-mosaic-word",text:word,style:"display:block;padding:12px 18px;background:"+(row?"#d7ef63":"#f2eddf")+";color:#101412;font:700 156px/1.06 Menlo,monospace;white-space:nowrap;"})));append(text,strip);
+      });
+      const proof=h("div",{style:"display:flex;gap:22px;align-items:center;margin-top:56px;background:#101412;padding:12px 16px;width:max-content;"});
+      if(d.image)append(proof,h("img",{src:d.image,alt:"YamDrive",style:"width:138px;height:138px;object-fit:contain;"}));
+      append(proof,h("div",{text:"ON THE APP STORE",style:"max-width:550px;font:500 43px/1.4 Menlo,monospace;color:#f2eddf;"}));append(text,proof);append(root,text);
+      [[874,151,"#d7ef63"],[1830,151,"#203329"],[874,905,"#203329"],[1830,905,"#d7ef63"]].forEach(([x,y,color])=>append(root,h("div",{style:"position:absolute;left:"+x+"px;top:"+y+"px;width:32px;height:32px;background:"+color+";"})));
+      append(document.getElementById("stage")||document.body,root);
+      const box=d.head||d.speaker||{x:600,y:100,w:600,h:600};
+      const scale=Math.min(2.4,430/Math.max(1,box.h));
+      portrait.style.transform="translate("+(440-(box.x+box.w/2)*scale)+"px,"+(130-box.y*scale)+"px) scale("+scale+")";
+      return Promise.all(Array.from(root.querySelectorAll("img")).map(img=>img.decode?img.decode().catch(()=>null):Promise.resolve())).then(()=>document.fonts.ready).then(()=>156);
+    }
     document.documentElement.style.setProperty("--yg-accent", d.accent || DEFAULT_STYLE.accent);
     const root = h("div", { id: "yg-thumb", class: "yg-thumb bg-" + (d.background || "dim") + " side-" + (d.side === "left" ? "left" : "right")
       + (d.highlight ? " highlight" : "") + (d.accentFont === "serif" ? " accent-serif" : "") });
+    if (d.place === "center") root.classList.add("yg-thumb-center");
     const pictures = [];
     const picture = (src, cls) => { const img = h("img", { class: cls, src, alt: "" }); pictures.push(img); return img; };
     append(root, outlineFilter(d.outlineWidth));
@@ -1875,16 +2307,41 @@
     const column = h("div", { class: "yg-thumb-text" });
     if (d.tag) append(column, h("div", { class: "yg-thumb-tag", text: d.tag }));
     const title = h("div", { class: "yg-thumb-title" });
-    accented(title, d.title || "");
+    if (d.place === "center") {
+      String(d.title || "").replace(/\*/g, "").split(/\s+/).filter(Boolean).forEach((word, i) => {
+        const span = h("span", {class: "yg-thumb-depth-word " + (i % 2 ? "depth-right" : "depth-left"), text: word});
+        append(title, span);
+      });
+    } else accented(title, d.title || "");
     append(column, title);
     if (d.image) append(column, picture(d.image, "yg-thumb-image"));
     append(root, column);
+    if (d.place === "center" && Array.isArray(d.icons)) {
+      const spots = [[180, 390, -12, 210], [1480, 380, 12, 230], [90, 760, -8, 170], [1620, 790, 9, 180], [430, 850, 7, 140], [1370, 850, -7, 145]];
+      d.icons.slice(0, 6).forEach((src, i) => {
+        const icon = picture(src, "yg-thumb-orbit-icon");
+        if (/\.svg(?:$|[?#])/i.test(src)) { icon.style.background = "#f8f8f4"; icon.style.padding = "22px"; }
+        const spot = spots[i];
+        Object.assign(icon.style, { left: spot[0] + "px", top: spot[1] + "px", width: spot[3] + "px", height: spot[3] + "px", transform: "perspective(900px) rotateY(" + (i % 2 ? -12 : 12) + "deg) rotateX(8deg) rotate(" + spot[2] + "deg)" });
+        append(root, icon);
+      });
+    }
     append(document.getElementById("stage") || document.body, root);
     const loaded = pictures.map((img) => (img.decode ? img.decode().catch(() => null) : Promise.resolve()));
     return Promise.all(loaded).then(() => document.fonts.ready).then(() => {
       sizePicture(root.querySelector(".yg-thumb-image"), d.imageSize);
-      const size = fitTitle(title, column);
+      const size = d.place === "center" ? 270 : fitTitle(title, column);
+      if (d.place === "center") title.style.fontSize = size + "px";
       const cut = root.querySelector(".yg-thumb-cut");
+      if (d.place === "center" && cut) {
+        const box = d.head || d.speaker || {x: 610, y: 100, w: 700, h: 600};
+        const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
+        const scale = Math.min(1.7, 300 / Math.max(1, box.h)) * zoom;
+        const x = 960 - (box.x + box.w / 2) * scale;
+        const y = 260 - box.y * scale;
+        cut.style.transformOrigin = "0 0";
+        cut.style.transform = "translate(" + x + "px," + y + "px) scale(" + scale + ")";
+      }
       if (d.place === "clear" && cut) {
         const zoom = Math.max(1, Math.min(1.6, num(d.zoom, 1)));
         // Under the frost the frame moves with the speaker, so it may not get smaller than the picture.
@@ -1933,6 +2390,14 @@
     const box = (r) => ({ x: (r.left - stage.left) * k, y: (r.top - stage.top) * k, w: r.width * k, h: r.height * k });
     const boxes = (list) => Array.from(list).filter((r) => r.width > 0 && r.height > 0).map(box);
     const runs = [];
+    if(root.dataset.mosaic){
+      root.querySelectorAll(".yg-mosaic-word,.yg-mosaic-tag").forEach(node=>{
+        const style=getComputedStyle(node);
+        runs.push({kind:node.classList.contains("yg-mosaic-tag")?"tag":"title",text:node.textContent,
+          boxes:boxes([node.getBoundingClientRect()]),size:parseFloat(style.fontSize),color:hexColour(style.color),background:bandColour(style)});
+      });
+      return {titleSize:156,runs,picture:null,speaker:null,frame:false};
+    }
     const tag = root.querySelector(".yg-thumb-tag");
     if (tag) {
       const style = getComputedStyle(tag);
@@ -1981,6 +2446,7 @@
     const cues = [];
     const add = (at, cue) => { if (at >= 0 && at < end) cues.push({ at: Math.round(at * 1000) / 1000, cue }); };
     if (kind === "sectionCard" || kind === "titleCard") add(0, "in");
+    if(kind === "logoBadge" && p.variant === "walkbyCounter") (p.events||[]).forEach(event=>add(num(event.at,0),"tally"));
     if (kind === "link") {
       const typing = linkTyping(p);
       add(LINK_MOTION.click, "click");
@@ -2005,7 +2471,7 @@
   }
 
   const api = { VERSION, plan, load, boot, seek, place, bounds, boxes, thumbnail, thumbnailLayout, endLayout, shortLayout, stageSize, captions,
-    smooth, zoneOf, lookOf, soundCues, clearMove, paperColours, contrast, PAPER_KINDS: Object.keys(PAPER), PANEL_SLIDE, VIDEO_SHIFT, CLEAR_GAP };
+    smooth, zoneOf, lookOf, soundCues, clearMove, paperColours, weeklyColours, contrast, PAPER_KINDS: Object.keys(PAPER), PANEL_SLIDE, VIDEO_SHIFT, CLEAR_GAP };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.YamGraphics = api;
 })(typeof window !== "undefined" ? window : globalThis);

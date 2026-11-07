@@ -20,6 +20,24 @@ enum LogoBadge {
 
     /// The first thing wrong with a logo badge's props, or nil.
     static func problem(props: [String: JSONValue], length: Double) -> String? {
+        if props["variant"]?.string == "walkbyCounter" {
+            guard let label = props["label"]?.string, !label.isEmpty, label.count <= 32, !label.contains("\n") else {
+                return "A counter needs a one-line label of 1 to 32 characters."
+            }
+            guard let events = props["events"]?.array, !events.isEmpty, events.count <= 20 else {
+                return "A counter needs 1 to 20 timed events."
+            }
+            var previous = -1.0
+            for event in events {
+                guard let item = event.object, let at = item["at"]?.number,
+                      at >= 0, at > previous, at <= length - 0.4,
+                      let value = item["value"]?.number, value >= 0, value <= 99, value.rounded() == value else {
+                    return "Counter events need increasing times inside the graphic and whole counts from 0 to 99."
+                }
+                previous = at
+            }
+            return nil
+        }
         guard let logos = props["logos"]?.array, !logos.isEmpty else {
             return "A logo badge needs logos: one to \(maximumLogos) {image, label, at}."
         }

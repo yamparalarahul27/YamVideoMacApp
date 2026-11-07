@@ -25,8 +25,22 @@ import Foundation
     check(ssBubble.rect.width == ssBubble.rect.height && ssBubble.radius == ssBubble.rect.width / 2 && ssBubble.rect.width == 324
               && ssBubble.rect.maxX == 1880 && ssBubble.rect.maxY == 1040,
           "the Screen layout's speaker is a circle 30 % of the frame high, 40 px from the bottom-right corner", "\(ssBubble)")
+    var middleBubble = ssTrack.bubble
+    middleBubble.corner = .middleLeft
+    let middlePlace = ssGeometry.speakerPlace(.screen, bubble: middleBubble).rect
+    check(middlePlace.minX == 40 && middlePlace.midY == 540 && ssWhole(middlePlace),
+          "middle-left speaker is vertically centred with an even frame and the left margin")
+    let middleRoundTrip = try JSONDecoder().decode(SpeakerBubble.self, from: JSONEncoder().encode(middleBubble))
+    check(middleRoundTrip.corner == .middleLeft, "middle-left placement survives saving and reopening")
     check(ssGeometry.screenPlace(.screen).map { $0.rect == CGRect(x: 164, y: 48, width: 1592, height: 984) } == true,
           "the screen fits the frame with a 48 px margin", "\(String(describing: ssGeometry.screenPlace(.screen)))")
+    var canvasTrack = ssTrack
+    canvasTrack.fullBleed = true
+    canvasTrack.info = ssSpeakerInfo
+    let canvasPlace = LayoutGeometry(track: canvasTrack, crop: ssSpeakerInfo.fullFrame).screenPlace(.screen)!
+    check(canvasPlace.rect == ssFrame && canvasPlace.radius == 0, "full-bleed background fills the frame without a rounded panel")
+    let savedCanvas = try JSONDecoder().decode(ScreenTrack.self, from: JSONEncoder().encode(canvasTrack))
+    check(savedCanvas.fullBleed, "full-bleed background survives saving and reopening")
     let ssSplitSpeaker = ssGeometry.speakerPlace(.split).rect, ssSplitScreen = ssGeometry.screenPlace(.split)!.rect
     check(ssSplitSpeaker.height == ssSplitScreen.height && ssSplitSpeaker.minY == ssSplitScreen.minY && ssSplitSpeaker.maxX + 32 == ssSplitScreen.minX
               && ssSplitSpeaker.minX >= 40 && ssSplitScreen.maxX <= 1880,
@@ -125,6 +139,21 @@ import Foundation
     ssItem.screen = ssLive
     let ssExport = scratch.appendingPathComponent("ss-layout.mp4")
     var ssSettings = ExportSettings(); ssSettings.quality = 100; ssSettings.preset = "ultrafast"
+    // Canvas backgrounds must not repeat the demo's bright content behind the panels.
+    let flatURL = try await ssClip("flat-canvas.mov", "color=c=0x111216:s=1280x720:r=30,drawbox=x=120:y=50:w=850:h=120:c=white:t=fill,format=yuv420p", seconds: 1, audio: false)
+    let flatInfo = try await FFmpeg.probe(url: flatURL)
+    var flatTrack = ScreenTrack(url: flatURL, info: flatInfo)
+    flatTrack.fullBleed = true
+    flatTrack.layout = .split
+    var flatItem = ssItem; flatItem.screen = flatTrack
+    let flatOutput = scratch.appendingPathComponent("flat-canvas.mp4")
+    try await FFmpeg.export(input: ssSpeakerURL, output: flatOutput, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: flatTrack) { _ in }
+    let flatPreview = try await nativePicture(flatItem, frame: 10)
+    let flatExport = try await ffmpegPicture(flatOutput, graph: nil, frame: 10, width: 1280, height: 720)
+    check((0..<3).allSatisfy { abs(flatPreview.at(300, 20, $0) - flatPreview.at(1100, 700, $0)) < 2 },
+          "a background canvas has a flat fill without blurred duplicate demo content")
+    check(meanDifference(flatPreview, flatExport, xs: 4..<1276) < 3,
+          "the flat canvas background matches between preview and export")
     try await FFmpeg.export(input: ssSpeakerURL, output: ssExport, info: ssSpeakerMedia, crop: ssSpeakerMedia.fullFrame, settings: ssSettings, screen: ssLive) { _ in }
     equal(try await frameCount(ssExport), try await frameCount(ssSpeakerURL), "the export with a screen keeps every frame of the speaker")
     let ssStage = FFmpeg.layoutStage(ssLive, geometry: LayoutGeometry(track: ssLive, crop: ssSpeakerMedia.fullFrame), duration: 9, rate: 30,

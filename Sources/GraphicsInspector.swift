@@ -12,13 +12,13 @@ struct GraphicInspector: View {
 
     var body: some View {
         InspectorSection("\(graphic.kind.label) at \(timelineTime(graphic.start))") {
-            if graphic.kind.hasInk || graphic.kind.hasPaper {
+            if graphic.kind.hasInk || graphic.kind.hasPaper || graphic.kind.hasWeekly {
                 Picker("Look", selection: Binding(get: { graphic.look }, set: { model.setGraphicLook(graphic.id, $0) })) {
                     Text("Style (\(item.graphics?.look(of: Graphic(kind: graphic.kind, start: 0, end: 1)).label ?? "Glass cards"))")
                         .tag(GraphicsLook?.none)
-                    Text("Glass").tag(GraphicsLook?.some(.glass))
                     if graphic.kind.hasInk { Text("Ink").tag(GraphicsLook?.some(.ink)) }
                     if graphic.kind.hasPaper { Text("Paper").tag(GraphicsLook?.some(.paper)) }
+                    if graphic.kind.hasWeekly { Text("Weekly").tag(GraphicsLook?.some(.weekly)) }
                 }
                 .accessibilityLabel("Look of this graphic")
             }
@@ -173,7 +173,7 @@ struct GraphicsSection: View {
             BrandFinderView(item: item)
             if count > 0 {
                 Picker("Look", selection: styleBinding(\.look)) {
-                    ForEach(GraphicsLook.allCases) { Text($0.label).tag($0) }
+                    ForEach(GraphicsLook.allCases.filter { $0 != .glass && $0 != .mix }) { Text($0.label).tag($0) }
                 }
                 HStack {
                     Text("Size").font(.caption).foregroundStyle(.secondary)

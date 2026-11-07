@@ -56,8 +56,8 @@ extension VideoItem {
     /// The recording as it plays and exports: switched-off changes left out. The colour
     /// stage reads `switchedOff` itself, so the copy keeps it.
     var effective: VideoItem {
-        guard !switchedOff.isEmpty else { return self }
         var copy = self
+        if let voice, voice.settings.enabled, let rendered = voice.rendered { copy.url = rendered }
         if !isOn(.crop), let info { copy.crop = info.fullFrame }
         if !isOn(.blurAreas) { copy.blurRegions = [] }
         if !isOn(.zooms) { copy.zoomShots = [] }

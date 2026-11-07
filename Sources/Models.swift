@@ -310,6 +310,7 @@ struct VideoItem: Identifiable {
     var music: MusicBed?
     /// Short sounds on the graphics' motion (a whoosh on a section card). Nil: none.
     var sounds: SoundSettings?
+    var voice: VoiceTreatment?
     /// Nil means the entire source; edits store ordered, non-destructive source ranges.
     var includedInMovie = true
     var segments: [TimelineSegment]?

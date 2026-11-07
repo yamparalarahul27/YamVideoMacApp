@@ -60,7 +60,7 @@ extension FFmpeg {
     /// silence fills recordings without sound. One graph avoids lossy intermediate files.
     static func movieArguments(plan: MoviePlan, settings: ExportSettings, output: URL, palette: URL? = nil,
                                palettePass: Bool = false) -> [String] {
-        var arguments = ["-hide_banner", "-nostdin", "-y"]
+        var arguments = ["-hide_banner", "-nostdin", "-y", "-filter_complex_threads", "2"]
         for clip in plan.clips { arguments += ["-i", clip.url.path] }
         if let palette { arguments += ["-i", palette.path] }
         let withAudio = settings.audio != .none && settings.format == .mp4 && !palettePass
@@ -72,6 +72,20 @@ extension FFmpeg {
                 music[i] = (mix, arguments.filter { $0 == "-i" }.count)
                 arguments += musicInputs(mix)
             }
+        }
+        // Graphics use each recording's local clock, then join the fitted movie.
+        // External PNG inputs must keep their global input numbers when local pads
+        // are namespaced below.
+        var graphics: [Int: (plan: GraphicsPlan, input: Int)] = [:]
+        for (i, clip) in plan.clips.enumerated() {
+            guard let info = clip.info else { continue }
+            let crop = (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame)
+            let drawn = graphicsPlan(clip.placedGraphics, info: info, crop: crop, segments: clip.segments,
+                                     settings: settings, converted: !videoHead(info: info, settings: settings, color: clip.colorFilters(settings)).isEmpty
+                                        || clip.blurEffects.contains(where: \.isVisible))
+            guard !drawn.jobs.isEmpty else { continue }
+            graphics[i] = (drawn, arguments.filter { $0 == "-i" }.count)
+            arguments += graphicsInputs(drawn.jobs)
         }
         var graphs: [String] = []
         for (i, clip) in plan.clips.enumerated() {
@@ -101,7 +115,12 @@ extension FFmpeg {
                                           segments: clip.segments, audio: withAudio && info.hasAudio,
                                           regions: clip.blurBoxes.map { $0.clamped(in: info.fullFrame) },
                                           style: settings.blurStyle, strength: settings.blurStrength, tail: filters,
-                                          fpsExpression: info.fpsExpression, effects: effects, delivery: delivery)!
+                                          fpsExpression: info.fpsExpression, effects: effects,
+                                          delivery: graphics[i].map { drawn in
+                                              ["scale=\(Int(drawn.plan.overlayFrame.width)):\(Int(drawn.plan.overlayFrame.height)):flags=lanczos", "setsar=1"]
+                                          } ?? delivery,
+                                          move: graphics[i]?.plan.move,
+                                          overlays: graphics[i].flatMap { $0.plan.overlays(firstInput: $0.input) })!
             // Namespace every internal pad so independent per-recording graphs coexist.
             let expression = try! NSRegularExpression(pattern: "\\[([^\\]]+)\\]")
             var spec = graph.isComplex ? graph.spec : "[0:v]\(graph.spec)[vout]"
@@ -110,12 +129,13 @@ extension FFmpeg {
                 let replacement: String
                 if name == "0:v" { replacement = "[\(i):v:0]" }
                 else if name == "0:a:0" { replacement = "[\(i):a:0]" }
+                else if name.first?.isNumber == true, name.contains(":") { replacement = "[\(name)]" }
                 else { replacement = "[c\(i)_\(name)]" }
                 spec = (spec as NSString).replacingCharacters(in: match.range, with: replacement)
             }
             graphs.append(spec)
             let videoLabel = "c\(i)_" + (graph.outputLabel ?? "vout")
-            graphs.append("[\(videoLabel)]null[mv\(i)]")
+            graphs.append("[\(videoLabel)]" + (graphics[i] == nil ? "null" : delivery.joined(separator: ",")) + "[mv\(i)]")
             if withAudio {
                 let duration = String(format: "%.6f", clip.editedDuration)
                 if info.hasAudio {
@@ -190,6 +210,9 @@ extension FFmpeg {
                             onProgress: @escaping @Sendable (Double) -> Void) async throws {
         guard let executable = ffmpegPath else { throw FFmpegError(message: "ffmpeg was not found.") }
         for clip in plan.clips {
+            if let info = clip.info, let problem = graphicsProblem(clip.placedGraphics, info: info, settings: settings) {
+                throw FFmpegError(message: "\(clip.name): \(problem)")
+            }
             if let problem = clip.colorStage(settings).problem { throw FFmpegError(message: "\(clip.name): \(problem)") }
             if let info = clip.info, let problem = effectProblem(clip.blurEffects, info: info, settings: settings) {
                 throw FFmpegError(message: "\(clip.name): \(problem)")
@@ -197,15 +220,32 @@ extension FFmpeg {
         }
         if settings.format == .webp, await !supportsWebP() { throw FFmpegError(message: "This ffmpeg build cannot export WebP.") }
         for clip in plan.clips { await MusicSpeech.prepare(clip) }
+        var drawingShare = 0.0
+        let jobs = plan.clips.flatMap { clip -> [GraphicsRender.Job] in
+            guard let info = clip.info else { return [] }
+            return graphicsPlan(clip.placedGraphics, info: info,
+                                crop: (clip.crop ?? info.fullFrame).evenClamped(in: info.fullFrame),
+                                segments: clip.segments, settings: settings, converted: true).jobs
+        }
+        if jobs.contains(where: { !$0.isRendered }) {
+            drawingShare = 0.4
+            guard await HyperFrames.status() == .ready else { throw FFmpegError(message: HyperFrames.missingMessage) }
+            let node = try await HyperFrames.findNode().get()
+            try await GraphicsRender.render(jobs, progress: { onProgress($0 * 0.4) }) { job, page, frames in
+                try await HyperFrames.render(page: page, to: frames, fps: job.fps, scale: job.scale, node: node)
+            }
+        }
+        for job in jobs { try GraphicsRender.normalizeFrames(in: job.folder) }
+        GraphicsRender.touchAndPrune(jobs)
         let palette = settings.format == .gif ? paletteURL(for: output) : nil
         defer { if let palette { try? FileManager.default.removeItem(at: palette) } }
         if let palette {
             try await runPass(executable, movieArguments(plan: plan, settings: settings, output: palette, palettePass: true),
-                              writing: palette, duration: plan.duration, from: 0, to: 0.3, onProgress: onProgress)
+                              writing: palette, duration: plan.duration, from: drawingShare, to: drawingShare + (1 - drawingShare) * 0.3, onProgress: onProgress)
         }
         // A long graph (many changes of layout, or the music's duck) goes to a file.
         try await runPass(executable, try spilledGraph(movieArguments(plan: plan, settings: settings, output: output, palette: palette)),
-                          writing: output, duration: plan.duration, from: palette == nil ? 0 : 0.3, to: 1, onProgress: onProgress)
+                          writing: output, duration: plan.duration, from: palette == nil ? drawingShare : drawingShare + (1 - drawingShare) * 0.3, to: 1, onProgress: onProgress)
         onProgress(1)
     }
 }

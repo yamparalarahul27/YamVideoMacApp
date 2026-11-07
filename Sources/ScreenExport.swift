@@ -197,8 +197,12 @@ extension FFmpeg {
             let screenCopies = (plain ? ["[\(p)a]", "[\(p)b]"] : []) + (inked ? ["[\(p)i]"] : [])
             parts.append("[\(name)c\(index)]\(trim)" + (screenCopies.count > 1 ? ",split=\(screenCopies.count)" : "") + screenCopies.joined())
             if plain {
-                parts.append("[\(p)b]scale=\(coverWidth):\(coverHeight):flags=bilinear,crop=\(w):\(h),"
-                             + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim, tags: .rec709) + "[\(p)f]")
+                if screen.fullBleed {
+                    parts.append("[\(p)b]crop=2:2:0:0,scale=\(w):\(h):flags=neighbor,setsar=1[\(p)f]")
+                } else {
+                    parts.append("[\(p)b]scale=\(coverWidth):\(coverHeight):flags=bilinear,crop=\(w):\(h),"
+                                 + fillChain(width: w, height: h, gain: GraphicsMotion.fillDim, tags: .rec709) + "[\(p)f]")
+                }
             }
             let window = run.state.window, speaker = run.state.speaker
             var speakerChain = "[\(name)s\(index)]\(trim)"
