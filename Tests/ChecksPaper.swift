@@ -264,7 +264,7 @@ private func inkSpan(_ image: CGImage, _ bytes: [UInt8], box: CGRect) -> (left: 
     check(manual.contains("`look: \"paper\"`") && manual.contains("`label`"), "the Agents Manual has the Paper look")
 
     print("\nPaper: the gallery")
-    check(GalleryLook(style: paperStyle) == .paper && GalleryLook.allCases.map(\.label) == ["Glass", "Ink", "Paper", "Weekly", "Mosaic"],
+    check(GalleryLook(style: paperStyle) == .paper && GalleryLook.allCases.map(\.label) == ["Ink", "Paper", "Weekly", "Mosaic"],
           "the gallery's Look switch has Paper, and opens in it for a Paper style")
     check(GalleryLook.paper.graphicLook(for: .titleCard) == .paper && GalleryLook.paper.graphicLook(for: .checklist) == .glass
               && GalleryLook.paper.graphicLook(for: .featureList) == .glass && GalleryLook.glass.graphicLook(for: .titleCard) == .glass
