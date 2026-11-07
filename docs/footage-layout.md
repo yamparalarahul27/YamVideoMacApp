@@ -19,6 +19,7 @@ Yamparala Media/
 ├─ 2026-10-19 Sahi/
 │  └─ Recorded/ · Edited/ · Files/
 ├─ Shared Assets/                         images for more than one video (gear, logos, app screens)
+│  └─ References/                         videos the owner likes, to study (never reused)
 └─ Other/                                 recordings that are not for a video
 ```
 
@@ -50,6 +51,7 @@ Yamparala Media/
 | `Plan.md`: the edit plan an agent writes before the first edit (Agents Manual 4.16) | `Files/` |
 | Transcripts of the recordings (`.txt` timed sentences, `.srt`, `.words.json`) | `Files/Transcripts/` |
 | Image for more than one video | `Shared Assets/` |
+| A video the owner likes, kept to study its style: the video, `Contact sheet.png`, `Frames/` and its notes. Git keeps a copy of the notes in `docs/channel/references/` | `Shared Assets/References/<name>/` |
 | DJI `.LRF` file (a low-resolution preview from the camera) | the Trash; YamVideo does not use it |
 
 YamVideo uses this layout when no output folder is set:
