@@ -84,6 +84,7 @@ struct DownloadsView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.padding(32).frame(maxWidth: 1080).frame(maxWidth: .infinity)
         }.background(Color(nsColor: .windowBackgroundColor))
+        .onDisappear { downloads.clearInspection() }
     }
     private func inspect() { downloads.inspect(link, browser: browser) }
     private func chooseFolder() {
