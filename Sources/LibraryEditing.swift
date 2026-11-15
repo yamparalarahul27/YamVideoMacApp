@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 /// published videos; the Calendar shows when each goes out, and where; Studio is the
 /// editor. Later phases add Results and Platforms.
 enum AppModule: String, CaseIterable, Identifiable {
-    case library, calendar, studio
+    case library, calendar, studio, downloads
 
     var id: String { rawValue }
     var label: String {
@@ -18,6 +18,7 @@ enum AppModule: String, CaseIterable, Identifiable {
         case .library: return "Library"
         case .calendar: return "Calendar"
         case .studio: return "Studio"
+        case .downloads: return "Downloads"
         }
     }
     var systemImage: String {
@@ -25,10 +26,11 @@ enum AppModule: String, CaseIterable, Identifiable {
         case .library: return "books.vertical"
         case .calendar: return "calendar"
         case .studio: return "film"
+        case .downloads: return "arrow.down.circle"
         }
     }
     /// The Library and the Calendar edit the Library, with its own undo.
-    var editsLibrary: Bool { self != .studio }
+    var editsLibrary: Bool { self == .library || self == .calendar }
 }
 
 /// One Library undo step: the ideas as they were before it, and who made it.

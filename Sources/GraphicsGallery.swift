@@ -6,6 +6,18 @@ import CoreGraphics
 // one on the Preview before it is added.
 
 enum MosaicTemplates {
+    static var paperStoryProps: [String: JSONValue] {
+        let directory = GraphicsEngine.resources
+        return ["variant": .string("paperStory"), "title": .string("Two tools, different roles"),
+                "x": .number(40), "y": .number(105), "width": .number(650),
+                "rows": .array([
+                    .object(["label": .string("Codex"), "detail": .string("Iteration"), "at": .number(0),
+                             "image": .string(directory?.appendingPathComponent("story-codex.png").path ?? "")]),
+                    .object(["label": .string("Claude"), "detail": .string("Building"), "at": .number(1.5),
+                             "image": .string(directory?.appendingPathComponent("story-claude.png").path ?? "")])
+                ])]
+    }
+
     static var imageProps: [String: JSONValue] {
         let image = GraphicsEngine.resources?.appendingPathComponent("mosaic-preview.png").path ?? ""
         return ["variant": .string("mosaicScreens"), "logos": .array([.object([
@@ -42,9 +54,13 @@ struct GallerySample: Identifiable, Equatable {
     let length: Double
     let beat: Double
     var id: String { asset.id }
-    var isMosaic: Bool { asset == .mosaicCaption || asset == .mosaicImage }
+    var isMosaic: Bool { asset == .mosaicCaption || asset == .mosaicImage || asset == .mosaicPaperStory }
 
     static let all: [GallerySample] = [
+        GallerySample(asset: .mosaicPaperStory, kind: .namePlate, title: "Mosaic + Paper Assets",
+                      detail: "Mosaic captions, cut-out assets, ink arrows",
+                      help: "Individual paper assets land on the footage. Mosaic text and ink arrows explain their connection. Edit each row’s image, text and reveal time.", group: .cards,
+                      props: MosaicTemplates.paperStoryProps, length: 6, beat: 3),
         GallerySample(asset: .mosaicCaption, kind: .namePlate, title: "Mosaic caption", detail: "Words in ink and paper tiles",
                       help: "Large single-line captions beside the speaker, revealed as Mosaic tiles", group: .cards,
                       props: MosaicTemplates.captionProps, length: 5, beat: 2),

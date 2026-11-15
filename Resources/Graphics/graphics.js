@@ -131,7 +131,7 @@
 
   // ───────────────────────── DOM helpers ─────────────────────────
 
-  const SVG_TAGS = new Set(["svg", "path", "circle", "rect", "text", "g", "line"]);
+  const SVG_TAGS = new Set(["svg", "path", "circle", "rect", "text", "g", "line", "image", "defs", "filter", "feMorphology", "feFlood", "feComposite", "feMerge", "feMergeNode"]);
   function h(tag, attrs) {
     const node = SVG_TAGS.has(tag)
       ? document.createElementNS("http://www.w3.org/2000/svg", tag)
@@ -180,8 +180,72 @@
   const KINDS = {};
 
   KINDS.namePlate = function (inner, p, c) {
+    // Reusable Mosaic wording + independently drawn ink symbols. No panel surface.
+    if (p.variant === "inkStory" || p.variant === "paperStory") {
+      const bx=parseFloat(c.host.style.left)||0, by=parseFloat(c.host.style.top)||0;
+      const x=num(p.x,40)-bx,y=num(p.y,105)-by,w=num(p.width,650),ink=p.ink||"#fffbed";
+      const root=h("div",{style:`position:absolute;left:${x}px;top:${y}px;width:${w}px;transform:scale(${num(p.contentScale,1)});transform-origin:0 0;`});append(inner,root);
+      function chips(text,left,top,width,at,size){
+        const row=h("div",{class:"yg-mosaic-row",style:`position:absolute;left:${left}px;top:${top}px;gap:3px;font:500 ${size}px/1.05 'Helvetica Neue',Arial;white-space:nowrap;`});
+        const words=String(text||"").split(/\s+/).filter(Boolean),ctx=document.createElement("canvas").getContext("2d");
+        let fs=size;const measure=()=>{ctx.font=`500 ${fs}px 'Helvetica Neue',Arial`;return words.reduce((n,t)=>n+ctx.measureText(t).width+16,0)+3*words.length;};while(fs>24&&measure()>width)fs--;row.style.fontSize=fs+"px";
+        words.forEach((word,i)=>{const chip=h("span",{class:"yg-mosaic-word"+(i===words.length-1?" yg-mosaic-dark":""),style:"padding:7px 8px;"});
+          for(let k=0;k<8;k++){const tile=h("i",{class:"yg-mosaic-tile",style:`left:${k%4*25}%;top:${Math.floor(k/4)*50}%;`});append(chip,tile);c.tl.fromTo(tile,{opacity:0,scaleX:0},{opacity:1,scaleX:1,duration:.09,ease:"steps(2)"},c.at(at+i*.045+(k*5%8)*.018));}
+          const glyph=h("span",{class:"yg-mosaic-glyph",text:word});append(chip,glyph);append(row,chip);c.tl.fromTo(glyph,{opacity:0},{opacity:1,duration:.06},c.at(at+i*.045+.16));});append(root,row);
+      }
+      function paperAsset(image,px,py,size,at,rotation){
+          const sticker=h("div",{style:`position:absolute;left:${px}px;top:${py}px;width:${size}px;height:${size}px;filter:drop-shadow(2px 4px 3px #10181266);`});
+          const art=h("svg",{viewBox:"-9 -9 114 114",style:"width:100%;height:100%;overflow:visible;"});
+          const filter=h("filter",{id:"paperStoryEdge",x:"-25%",y:"-25%",width:"150%",height:"150%"},
+            h("feMorphology",{in:"SourceAlpha",operator:"dilate",radius:5,result:"edge"}),
+            h("feFlood",{"flood-color":"#fffdf6",result:"paper"}),
+            h("feComposite",{in:"paper",in2:"edge",operator:"in",result:"cutout"}),
+            h("feMerge",{},h("feMergeNode",{in:"cutout"}),h("feMergeNode",{in:"SourceGraphic"})));
+          append(art,h("defs",{},filter));append(art,h("image",{href:image,x:0,y:0,width:96,height:96,preserveAspectRatio:"xMidYMid meet",filter:"url(#paperStoryEdge)"}));append(sticker,art);append(root,sticker);
+          const angle=rotation;
+          c.tl.fromTo(sticker,{opacity:0,scale:1.16,rotation:angle-7,y:-10},{opacity:1,scale:1,rotation:angle,y:0,duration:.32,ease:"power2.out"},c.at(at));
+      }
+      chips(p.title,0,0,w,0,num(p.headingSize,36));
+      const symbols={code:["M12 25 Q3 35 13 44 L25 53 M56 25 Q68 35 57 44 L46 53 M39 19 L30 59"],spark:["M35 6 L34 65 M7 35 L65 34 M14 13 L56 57 M13 57 L57 13 M23 8 L47 62 M8 22 L62 47 M8 48 L62 22"],database:["M8 18 C8 4 62 4 62 18 C62 32 8 32 8 18 M8 18 L8 53 C8 68 62 68 62 53 L62 18 M8 36 C8 49 62 49 62 36"],phone:["M20 5 Q13 5 13 13 L14 58 Q14 66 22 65 L50 65 Q57 65 57 57 L56 12 Q56 5 49 5 Z M29 13 L42 13 M30 57 L41 57"],canvas:["M8 10 L62 9 L61 60 L9 61 Z M9 23 L61 22 M16 16 L18 16 M24 16 L26 16 M21 40 L30 48 L49 31"]};
+      if (Array.isArray(p.nodes)) {
+        (p.nodes||[]).forEach((node,i)=>{
+          const nx=num(node.x,0),ny=num(node.y,90),nw=num(node.width,280),at=num(node.at,0),size=num(node.imageSize,100);
+          if(node.image)paperAsset(node.image,nx+(nw-size)/2,ny,size,at,num(node.rotation,i%2?4:-5));
+          const textY=ny+(node.image?size+12:0);
+          chips(node.label,nx,textY,nw,at+.12,num(node.fontSize,p.fontSize||42));
+          if(node.detail)chips(node.detail,nx,textY+62,nw,at+.3,num(node.detailSize,32));
+        });
+        (p.links||[]).forEach(link=>{
+          const svg=h("svg",{viewBox:"0 0 650 480",style:"position:absolute;left:0;top:0;width:650px;height:480px;overflow:visible;filter:drop-shadow(0 1px 2px #101812);"});
+          const path=h("path",{d:link.d,fill:"none",stroke:link.color||ink,"stroke-width":num(link.strokeWidth,3),"stroke-linecap":"round","stroke-linejoin":"round"});append(svg,h("g",{transform:`scale(${num(p.linkScaleX,1)} 1)`},path));append(root,svg);c.draw(path,num(link.at,0),num(link.duration,.7));
+        });
+        c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.01},c.at(0));c.tl.to(c.host,{opacity:0,duration:.18},c.at(c.length-.18));return;
+      }
+      (p.rows||[]).slice(0,3).forEach((r,i)=>{
+        const at=num(r.at,0),top=90+i*125,key=r.icon||"canvas";
+        if(p.variant === "paperStory" && r.image){
+          // A die-cut edge follows the asset alpha; there is no rectangular paper panel.
+          paperAsset(r.image,0,top-5,96,at,num(r.rotation,i%2?4:-5));
+        } else if(p.variant !== "paperStory") {
+        const svg=h("svg",{viewBox:"0 0 72 72",style:`position:absolute;left:4px;top:${top}px;width:82px;height:82px;overflow:visible;filter:drop-shadow(0 1px 2px #101812);`});
+        (symbols[key]||symbols.canvas).forEach(d=>{const path=h("path",{d,fill:"none",stroke:ink,"stroke-width":2.5,"stroke-linecap":"round","stroke-linejoin":"round"});append(svg,path);c.draw(path,at,.6);});append(root,svg);
+        }
+        chips(r.label,98,top+13,200,at+.12,num(p.fontSize,40));
+        const arrow=h("svg",{viewBox:"0 0 72 80",style:`position:absolute;left:304px;top:${top}px;width:66px;height:80px;overflow:visible;filter:drop-shadow(0 1px 2px #101812);`});
+        const line=h("path",{d:"M3 43 Q25 36 59 41 M47 29 Q55 37 61 41 Q54 47 47 52",fill:"none",stroke:ink,"stroke-width":3,"stroke-linecap":"round","stroke-linejoin":"round"});append(arrow,line);append(root,arrow);c.draw(line,at+.35,.55);
+        chips(r.detail,380,top+13,w-380,at+.65,num(p.fontSize,40));
+      });
+      c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.01},c.at(0));c.tl.to(c.host,{opacity:0,duration:.18},c.at(c.length-.18));return;
+    }
     // A quiet, scene-placed caption. Coordinates are on the 1920 x 1080 picture.
     // Keep this opt-in so existing name plates retain their layout and motion.
+    if(p.variant === "frameHeading") {
+      const bx=parseFloat(c.host.style.left)||0,by=parseFloat(c.host.style.top)||0;
+      const heading=h("div",{class:"yg-frame-heading",style:"position:absolute;left:"+(num(p.x,960)-bx)+"px;top:"+(num(p.y,28)-by)+"px;transform:translateX(-50%);text-align:center;color:"+(p.color||"#203329")+";font:600 "+num(p.fontSize,34)+"px/1.15 Inter,sans-serif;white-space:nowrap;"});
+      append(heading,h("span",{text:p.title||"Before"}));
+      if(p.detail)append(heading,h("span",{text:" · "+p.detail,style:"font-weight:400;font-size:.72em;opacity:.8;"}));
+      append(inner,heading);c.tl.fromTo(c.host,{opacity:0},{opacity:1,duration:.01},c.at(0));c.tl.to(c.host,{opacity:0,duration:.01},c.at(c.length-.01));c.tl.fromTo(heading,{opacity:0},{opacity:1,duration:.08},c.at(0));return;
+    }
     if (p.variant === "asideCaption") {
       const parts = [];
       if (p.softEdges) {
@@ -1867,7 +1931,7 @@
       append(container, place);
       places[graphic.id] = { place, host, rect, graphic, own, clear: null };
       const delayIn = zone === "panel" && firstInSpan.has(graphic.id) ? 0.3 : 0;
-      const mosaicVariant=["screenshotCorners","mosaicBreak","asideCaption","walkbyCounter","mosaicScreens","mosaicAssets","wordMosaicIntro","wordMosaicOutro","mosaicBookend"].includes((graphic.props||{}).variant);
+      const mosaicVariant=["paperStory","inkStory","screenshotCorners","mosaicBreak","asideCaption","walkbyCounter","mosaicScreens","mosaicAssets","wordMosaicIntro","wordMosaicOutro","mosaicBookend"].includes((graphic.props||{}).variant);
       (mosaicVariant ? KINDS : look === "ink" ? INK : look === "paper" ? PAPER : KINDS)[graphic.kind](inner, graphic.props || {}, context(tl, toTime, graphic, host, delayIn, mode, short));
     }
 

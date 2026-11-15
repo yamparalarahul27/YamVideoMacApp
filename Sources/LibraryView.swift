@@ -42,7 +42,8 @@ struct ModuleSidebar: View {
         }
         .buttonStyle(.plain)
         .help(module == .library ? "Your ideas, projects and published videos"
-              : module == .calendar ? "When each video goes out, and where" : "The editor")
+              : module == .calendar ? "When each video goes out, and where"
+              : module == .downloads ? "Download video and audio links to your Mac" : "The editor")
         .accessibilityLabel(module.label)
         .accessibilityAddTraits(model.module == module ? [.isSelected, .isButton] : .isButton)
     }

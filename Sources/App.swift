@@ -167,6 +167,7 @@ struct YamVideoApp: App {
                     .keyboardShortcut("t", modifiers: [.command, .shift])
                     .disabled(!model.canMakeThumbnail)
                 Button("Calendar") { model.showModule(.calendar) }.keyboardShortcut("4")
+                Button("Downloads") { model.showModule(.downloads) }.keyboardShortcut("5")
                 Divider()
                 Button("Style…") { model.showingStyle = true }.keyboardShortcut("3")
             }
