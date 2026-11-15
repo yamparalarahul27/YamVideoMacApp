@@ -18,17 +18,19 @@ struct ContentView: View {
                 case .library: LibraryPage()
                 case .calendar: CalendarView()
                 case .studio: studio
+                case .downloads: DownloadsView()
                 }
             }
 
             Divider()
-            statusBar
+            if model.module != .downloads { statusBar }
         }
         .frame(minWidth: 1140, minHeight: 800)
         .toolbar {
             switch model.module {
             case .library, .calendar: libraryToolbar
             case .studio: studioToolbar
+            case .downloads: ToolbarItem { Text("Downloads").font(.headline) }
             }
         }
         .sheet(item: $exporting) { scope in ExportSheet(scope: scope).environmentObject(model) }

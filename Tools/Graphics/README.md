@@ -141,3 +141,7 @@ word field, cream/lime title tiles, the `tag` and an optional product `image`. I
 available in the thumbnail maker's Place menu and saved in the project like the other
 layouts. The assembled-movie exporter renders recording graphics before fitting and
 joining the clips, using the same local timing and graphics cache as recording export.
+
+### Mosaic story graphics
+
+[Mosaic + Paper Assets](PAPER-STORY.md) combines cut-out image assets, Mosaic wording and ink connections, and is available in the Media gallery. [inkStory](INK-STORY.md) uses drawn symbols instead of image assets.
